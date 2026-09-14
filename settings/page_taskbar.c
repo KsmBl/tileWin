@@ -158,15 +158,13 @@ struct taskbar_page {
 	bool updating;
 	GtkWidget *layout_dd, *position_dd, *height_spin;
 	GtkWidget *sections[SECTION_COUNT];
-	GtkWidget *widget_dd;
-	GPtrArray *widget_names;
-	GtkWidget *options;
+	GtkWidget *scripts;
 	GtkWidget *custom_entry, *custom_popover;
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
 	struct app_list *quick;
 	GHashTable *quick_icons;
 	guint rebuild_id;
-	char *select_name;
+	char *open_dialog; // widget whose settings open after the next rebuild
 };
 
 static struct confdoc *doc(struct taskbar_page *p) {
@@ -307,11 +305,6 @@ static void schedule_rebuild(struct taskbar_page *p) {
 
 /* ---------- widget options ---------- */
 
-static const char *selected_widget(struct taskbar_page *p) {
-	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->widget_dd));
-	return p->widget_names && i < p->widget_names->len ? p->widget_names->pdata[i] : NULL;
-}
-
 struct opt_binding {
 	struct taskbar_page *p;
 	char *widget;
@@ -360,7 +353,8 @@ static void on_option_choice(GObject *dropdown, GParamSpec *pspec, gpointer data
 	write_option(b->p, b->widget, b->opt->key, i == 0 ? NULL : b->opt->choices[i - 1]);
 }
 
-static void add_option_row(struct taskbar_page *p, const char *widget, const struct opt *opt) {
+static void add_option_row(struct taskbar_page *p, GtkWidget *list, const char *widget,
+		const struct opt *opt) {
 	struct cstmt *block = confdoc_block(doc(p), "widget", widget, false);
 	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
 	struct opt_binding *b = g_new0(struct opt_binding, 1);
@@ -392,17 +386,12 @@ static void add_option_row(struct taskbar_page *p, const char *widget, const str
 		g_signal_connect_data(control, "changed", G_CALLBACK(on_option_text), b,
 			opt_binding_free, 0);
 	}
-	ui_row(p->options, opt->title, opt->hint, control);
+	ui_row(list, opt->title, opt->hint, control);
 	g_free(value);
 }
 
-static void on_delete_custom(GtkButton *button, gpointer data) {
-	struct taskbar_page *p = data;
-	const char *selected = selected_widget(p);
-	if (!selected) {
-		return;
-	}
-	char *name = g_strdup(selected);
+static void delete_custom(struct taskbar_page *p, const char *widget) {
+	char *name = g_strdup(widget);
 	struct confdoc *d = doc(p);
 	struct cstmt *block = confdoc_block(d, "widget", name, false);
 	if (block) {
@@ -430,34 +419,127 @@ static void on_delete_custom(GtkButton *button, gpointer data) {
 	schedule_rebuild(p);
 }
 
-static void rebuild_options(struct taskbar_page *p) {
-	gtk_list_box_remove_all(GTK_LIST_BOX(p->options));
-	const char *name = selected_widget(p);
-	if (!name) {
-		return;
+/* ---------- widget settings dialog ---------- */
+
+struct name_action {
+	struct taskbar_page *p;
+	char *name;
+	GtkWidget *window; // dialog to close afterwards, may be NULL
+};
+
+static struct name_action *name_action_new(struct taskbar_page *p, const char *name,
+		GtkWidget *window) {
+	struct name_action *a = g_new0(struct name_action, 1);
+	a->p = p;
+	a->name = g_strdup(name);
+	a->window = window;
+	return a;
+}
+
+static void name_action_free(gpointer data, GClosure *closure) {
+	struct name_action *a = data;
+	g_free(a->name);
+	g_free(a);
+}
+
+static void on_dialog_delete(GtkButton *button, gpointer data) {
+	struct name_action *a = data;
+	struct taskbar_page *p = a->p;
+	char *name = g_strdup(a->name);
+	GtkWidget *window = a->window;
+	delete_custom(p, name);
+	g_free(name);
+	if (window) {
+		gtk_window_destroy(GTK_WINDOW(window)); // frees a
 	}
+}
+
+static void on_dialog_close(GtkButton *button, gpointer data) {
+	gtk_window_destroy(GTK_WINDOW(data));
+}
+
+static void open_widget_dialog(struct taskbar_page *p, const char *name) {
+	const char *description;
+	char *title = widget_title(name, &description);
 	char *type = widget_type_of(name);
+
+	GtkWidget *window = gtk_window_new();
+	gtk_window_set_transient_for(GTK_WINDOW(window), p->s->window);
+	gtk_window_set_modal(GTK_WINDOW(window), TRUE);
+	gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
+	char *window_title = g_strdup_printf("%s settings", title);
+	gtk_window_set_title(GTK_WINDOW(window), window_title);
+	g_free(window_title);
+	gtk_window_set_default_size(GTK_WINDOW(window), 640, 660);
+
+	char *subtitle = description ? g_strdup_printf("%s (%s)", description, name) : g_strdup(name);
+	GtkWidget *content;
+	GtkWidget *page = ui_page(title, subtitle, &content);
+	g_free(subtitle);
+	gtk_widget_set_vexpand(page, TRUE);
+
+	GtkWidget *list = ui_group(content, "Settings", "Leave a field empty to use the default.");
+	int count = 0;
 	for (size_t i = 0; i < G_N_ELEMENTS(type_opts); i++) {
 		if (strcmp(type_opts[i].type, type) == 0) {
 			for (const struct opt *opt = type_opts[i].opts; opt->key; opt++) {
-				add_option_row(p, name, opt);
+				add_option_row(p, list, name, opt);
+				count++;
 			}
 		}
 	}
 	if (strcmp(type, "quicklaunch") == 0) {
-		ui_row(p->options, "Apps", "Edit the apps under Quick launch below.", NULL);
+		ui_row(list, "Apps", "Edit the apps under Quick launch on the Taskbar page.", NULL);
+		count++;
 	}
+	if (count == 0) {
+		ui_row(list, NULL, "This widget has no settings of its own.", NULL);
+	}
+
+	GtkWidget *events = ui_group(content, "Mouse actions",
+		"Commands run when the widget is clicked or scrolled, e.g. exec pavucontrol. "
+		"On right click replaces the widget's menu.");
 	for (const struct opt *opt = opts_events; opt->key; opt++) {
-		add_option_row(p, name, opt);
+		add_option_row(p, events, name, opt);
 	}
+
 	if (strcmp(type, "custom") == 0) {
+		GtkWidget *danger = ui_group(content, "Script widget", NULL);
 		GtkWidget *button = gtk_button_new_with_label("Delete widget");
 		gtk_widget_add_css_class(button, "destructive-action");
-		g_signal_connect(button, "clicked", G_CALLBACK(on_delete_custom), p);
-		ui_row(p->options, "Delete this script widget", "Also removes it from both layouts.",
+		g_signal_connect_data(button, "clicked", G_CALLBACK(on_dialog_delete),
+			name_action_new(p, name, window), name_action_free, 0);
+		ui_row(danger, "Delete this script widget", "It is also removed from both layouts.",
 			button);
 	}
+
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(box), page);
+	gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+	GtkWidget *close = gtk_button_new_with_label("Close");
+	gtk_widget_add_css_class(close, "suggested-action");
+	gtk_widget_set_halign(close, GTK_ALIGN_END);
+	gtk_widget_set_margin_top(close, 10);
+	gtk_widget_set_margin_bottom(close, 10);
+	gtk_widget_set_margin_end(close, 16);
+	g_signal_connect(close, "clicked", G_CALLBACK(on_dialog_close), window);
+	gtk_box_append(GTK_BOX(box), close);
+	gtk_window_set_child(GTK_WINDOW(window), box);
+	gtk_window_set_default_widget(GTK_WINDOW(window), close);
+	gtk_window_present(GTK_WINDOW(window));
+
 	g_free(type);
+	g_free(title);
+}
+
+static void on_open_dialog(GtkButton *button, gpointer data) {
+	struct name_action *a = data;
+	open_widget_dialog(a->p, a->name);
+}
+
+static void on_delete_script(GtkButton *button, gpointer data) {
+	struct name_action *a = data;
+	delete_custom(a->p, a->name);
 }
 
 static GPtrArray *known_widgets(struct taskbar_page *p) {
@@ -490,51 +572,6 @@ static GPtrArray *known_widgets(struct taskbar_page *p) {
 	return names;
 }
 
-static void on_widget_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
-	struct taskbar_page *p = data;
-	if (!p->updating) {
-		rebuild_options(p);
-	}
-}
-
-static void rebuild_widget_dd(struct taskbar_page *p) {
-	char *selected = p->select_name ? p->select_name : g_strdup(selected_widget(p));
-	p->select_name = NULL;
-	if (p->widget_names) {
-		g_ptr_array_unref(p->widget_names);
-	}
-	p->widget_names = known_widgets(p);
-	GtkStringList *model = gtk_string_list_new(NULL);
-	guint sel = 0;
-	for (guint i = 0; i < p->widget_names->len; i++) {
-		const char *name = p->widget_names->pdata[i];
-		char *title = widget_title(name, NULL);
-		gtk_string_list_append(model, title);
-		g_free(title);
-		if (selected && strcmp(selected, name) == 0) {
-			sel = i;
-		}
-	}
-	bool updating = p->updating;
-	p->updating = true;
-	gtk_drop_down_set_model(GTK_DROP_DOWN(p->widget_dd), G_LIST_MODEL(model));
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->widget_dd), sel);
-	p->updating = updating;
-	g_object_unref(model);
-	g_free(selected);
-	rebuild_options(p);
-}
-
-static void select_widget(struct taskbar_page *p, const char *name) {
-	for (guint i = 0; p->widget_names && i < p->widget_names->len; i++) {
-		if (strcmp(p->widget_names->pdata[i], name) == 0) {
-			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->widget_dd), i);
-			gtk_widget_grab_focus(p->widget_dd);
-			return;
-		}
-	}
-}
-
 static void on_create_custom(GtkWidget *widget, gpointer data) {
 	struct taskbar_page *p = data;
 	const char *text = gtk_editable_get_text(GTK_EDITABLE(p->custom_entry));
@@ -560,8 +597,8 @@ static void on_create_custom(GtkWidget *widget, gpointer data) {
 	}
 	gtk_popover_popdown(GTK_POPOVER(p->custom_popover));
 	gtk_editable_set_text(GTK_EDITABLE(p->custom_entry), "");
-	g_free(p->select_name);
-	p->select_name = name;
+	g_free(p->open_dialog);
+	p->open_dialog = name;
 	schedule_rebuild(p);
 }
 
@@ -631,7 +668,7 @@ static void on_widget_action(GtkButton *button, gpointer data) {
 		g_ptr_array_unref(other);
 		break;
 	case OP_CONFIGURE:
-		select_widget(p, name);
+		open_widget_dialog(p, name);
 		break;
 	}
 	g_free(name);
@@ -757,6 +794,9 @@ static void rebuild_sections(struct taskbar_page *p) {
 			const char *name = names->pdata[i];
 			char *title = widget_title(name, NULL);
 			GtkWidget *row = ui_row(list, title, name, NULL);
+			gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+			gtk_widget_set_tooltip_text(row, "Click to change the settings of this widget");
+			g_object_set_data_full(G_OBJECT(row), "widget", g_strdup(name), g_free);
 			GtkWidget *box = ui_row_box(row);
 			add_action_button(p, box, "go-up-symbolic", "Move up", i > 0, s, i, OP_UP);
 			add_action_button(p, box, "go-down-symbolic", "Move down", i + 1 < names->len, s, i,
@@ -772,6 +812,49 @@ static void rebuild_sections(struct taskbar_page *p) {
 		}
 		ui_row(list, NULL, names->len ? NULL : "Empty", add_widget_button(p, s));
 		g_ptr_array_unref(names);
+	}
+}
+
+static void rebuild_scripts(struct taskbar_page *p) {
+	gtk_list_box_remove_all(GTK_LIST_BOX(p->scripts));
+	struct cstmt *root = doc(p)->root;
+	int count = 0;
+	for (guint i = 0; i < root->children->len; i++) {
+		struct cstmt *c = root->children->pdata[i];
+		const char *name = cstmt_arg(c, 0);
+		if (strcmp(c->name, "widget") != 0 || !name || !g_str_has_prefix(name, "custom:")) {
+			continue;
+		}
+		struct cstmt *exec = confdoc_child(c, "exec", NULL);
+		if (!exec) {
+			exec = confdoc_child(c, "exec_listen", NULL);
+		}
+		char *command = cstmt_join(exec, 0);
+		char *title = widget_title(name, NULL);
+		GtkWidget *row = ui_row(p->scripts, title, command ? command : "No command yet", NULL);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+		g_object_set_data_full(G_OBJECT(row), "widget", g_strdup(name), g_free);
+		GtkWidget *box = ui_row_box(row);
+		GtkWidget *settings = gtk_button_new_from_icon_name("emblem-system-symbolic");
+		gtk_widget_set_tooltip_text(settings, "Settings");
+		gtk_widget_add_css_class(settings, "flat");
+		gtk_widget_set_valign(settings, GTK_ALIGN_CENTER);
+		g_signal_connect_data(settings, "clicked", G_CALLBACK(on_open_dialog),
+			name_action_new(p, name, NULL), name_action_free, 0);
+		gtk_box_append(GTK_BOX(box), settings);
+		GtkWidget *remove = gtk_button_new_from_icon_name("user-trash-symbolic");
+		gtk_widget_set_tooltip_text(remove, "Delete");
+		gtk_widget_add_css_class(remove, "flat");
+		gtk_widget_set_valign(remove, GTK_ALIGN_CENTER);
+		g_signal_connect_data(remove, "clicked", G_CALLBACK(on_delete_script),
+			name_action_new(p, name, NULL), name_action_free, 0);
+		gtk_box_append(GTK_BOX(box), remove);
+		g_free(title);
+		g_free(command);
+		count++;
+	}
+	if (count == 0) {
+		ui_row(p->scripts, NULL, "No script widgets yet.", NULL);
 	}
 }
 
@@ -826,7 +909,13 @@ static void rebuild_all(struct taskbar_page *p) {
 	refresh_general(p);
 	p->updating = false;
 	rebuild_sections(p);
-	rebuild_widget_dd(p);
+	rebuild_scripts(p);
+	if (p->open_dialog) {
+		char *name = p->open_dialog;
+		p->open_dialog = NULL;
+		open_widget_dialog(p, name);
+		g_free(name);
+	}
 }
 
 void taskbar_page_refresh(struct settings *s) {
@@ -836,6 +925,13 @@ void taskbar_page_refresh(struct settings *s) {
 }
 
 /* ---------- signal handlers for the static controls ---------- */
+
+static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
+	const char *name = g_object_get_data(G_OBJECT(row), "widget");
+	if (name) {
+		open_widget_dialog(data, name);
+	}
+}
 
 static void on_layout_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	schedule_rebuild(data);
@@ -954,19 +1050,18 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	for (int i = 0; i < SECTION_COUNT; i++) {
 		char *title = g_strdup_printf("%s section", section_titles[i]);
 		p->sections[i] = ui_group(content, title, i == SECTION_LEFT ?
-			"The Windows 11 theme centers the left section." : NULL);
+			"The Windows 11 theme centers the left section. Click a widget to change its settings." :
+			NULL);
+		g_signal_connect(p->sections[i], "row-activated", G_CALLBACK(on_row_activated), p);
 		g_free(title);
 	}
 
-	GtkWidget *options_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-	GtkWidget *options_title = gtk_label_new("Widget settings");
-	gtk_widget_add_css_class(options_title, "tw-heading");
-	gtk_widget_set_hexpand(options_title, TRUE);
-	gtk_label_set_xalign(GTK_LABEL(options_title), 0);
-	gtk_box_append(GTK_BOX(options_header), options_title);
-	p->widget_dd = gtk_drop_down_new(NULL, NULL);
-	g_signal_connect(p->widget_dd, "notify::selected", G_CALLBACK(on_widget_selected), p);
-	gtk_box_append(GTK_BOX(options_header), p->widget_dd);
+	GtkWidget *scripts_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	GtkWidget *scripts_title = gtk_label_new("Script widgets");
+	gtk_widget_add_css_class(scripts_title, "tw-heading");
+	gtk_widget_set_hexpand(scripts_title, TRUE);
+	gtk_label_set_xalign(GTK_LABEL(scripts_title), 0);
+	gtk_box_append(GTK_BOX(scripts_header), scripts_title);
 
 	p->custom_popover = gtk_popover_new();
 	GtkWidget *custom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -982,10 +1077,17 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	GtkWidget *custom_button = gtk_menu_button_new();
 	gtk_menu_button_set_label(GTK_MENU_BUTTON(custom_button), "New script widget…");
 	gtk_menu_button_set_popover(GTK_MENU_BUTTON(custom_button), p->custom_popover);
-	gtk_box_append(GTK_BOX(options_header), custom_button);
-	gtk_widget_set_margin_top(options_header, 14);
-	gtk_box_append(GTK_BOX(content), options_header);
-	p->options = ui_group(content, NULL, NULL);
+	gtk_box_append(GTK_BOX(scripts_header), custom_button);
+	gtk_widget_set_margin_top(scripts_header, 14);
+	gtk_box_append(GTK_BOX(content), scripts_header);
+	GtkWidget *scripts_hint = gtk_label_new(
+		"Script widgets show the output of a command. Add them to a section above with Add widget.");
+	gtk_label_set_xalign(GTK_LABEL(scripts_hint), 0);
+	gtk_label_set_wrap(GTK_LABEL(scripts_hint), TRUE);
+	gtk_widget_add_css_class(scripts_hint, "dim-label");
+	gtk_box_append(GTK_BOX(content), scripts_hint);
+	p->scripts = ui_group(content, NULL, NULL);
+	g_signal_connect(p->scripts, "row-activated", G_CALLBACK(on_row_activated), p);
 
 	p->quick = ui_app_list_new(content, "Quick launch",
 		"Apps shown by the quick launch widget.", on_quick_changed, p);
