@@ -120,6 +120,7 @@ static const struct cmd_handler command_handlers[] = {
 	{ "alttab", cmd_alttab },
 	{ "arrange", cmd_arrange },
 	{ "border", cmd_border },
+	{ "color_scheme", cmd_color_scheme },
 	{ "create_output", cmd_create_output },
 	{ "exit", cmd_exit },
 	{ "floating", cmd_floating },

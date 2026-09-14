@@ -223,7 +223,7 @@ install_subdir('config', install_dir: tilewin_datadir)
 scripts_conf = configuration_data()
 scripts_conf.set('datadir', tilewin_datadir)
 scripts_conf.set('bindir', join_paths(prefix, get_option('bindir')))
-foreach script : ['tilewin-session', 'tilewin-theme']
+foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme']
 	configure_file(
 		input: 'scripts' / script + '.in',
 		output: script,

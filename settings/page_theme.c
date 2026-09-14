@@ -10,7 +10,29 @@ struct theme_page {
 	bool updating;
 	GtkWidget *flow;
 	GtkWidget *mode_dd;
+	GtkWidget *dark_switch;
 };
+
+static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct theme_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	const char *scheme = active ? "dark" : "light";
+	if (tw_ipc_available()) {
+		if (settings_command(p->s, "color_scheme %s", scheme)) {
+			settings_status(p->s, "Switched to the %s color scheme", scheme);
+		}
+	} else {
+		tw_color_scheme_save(active);
+		const char *argv[] = { "tilewin-color-scheme", scheme, NULL };
+		g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL);
+		settings_status(p->s, "Apps use the %s color scheme; tileWin follows when it starts",
+			scheme);
+	}
+	settings_apply_color_scheme(active);
+	return FALSE;
+}
 
 static void on_theme_activated(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointer data) {
 	struct theme_page *p = data;
@@ -62,6 +84,10 @@ void theme_page_refresh(struct settings *s) {
 	char *mode = settings_current_mode();
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mode_dd), strcmp(mode, "tile") == 0);
 	g_free(mode);
+	char *scheme = tw_ipc_state("color_scheme");
+	gtk_switch_set_active(GTK_SWITCH(p->dark_switch),
+		scheme ? strcmp(scheme, "dark") == 0 : tw_color_scheme_is_dark());
+	g_free(scheme);
 
 	gtk_flow_box_remove_all(GTK_FLOW_BOX(p->flow));
 	char *current = settings_current_theme();
@@ -126,6 +152,11 @@ GtkWidget *theme_page_new(struct settings *s) {
 		"Window mode works like Windows, tile mode like sway. Super+Shift+W also switches.",
 		p->mode_dd);
 	g_signal_connect(p->mode_dd, "notify::selected", G_CALLBACK(on_mode_changed), p);
+	p->dark_switch = gtk_switch_new();
+	g_signal_connect(p->dark_switch, "state-set", G_CALLBACK(on_dark_switch), p);
+	ui_row(group, "Dark mode",
+		"Dark title bars, taskbar menus and flyouts. GTK, GNOME and KDE apps switch too.",
+		p->dark_switch);
 
 	GtkWidget *heading = gtk_label_new("Themes");
 	gtk_label_set_xalign(GTK_LABEL(heading), 0);

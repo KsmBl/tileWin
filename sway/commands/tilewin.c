@@ -240,6 +240,28 @@ struct cmd_results *cmd_launcher_command(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_color_scheme(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "color_scheme", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	bool dark;
+	if (strcasecmp(argv[0], "toggle") == 0) {
+		dark = !tw_color_scheme_is_dark();
+	} else if (strcasecmp(argv[0], "dark") == 0) {
+		dark = true;
+	} else if (strcasecmp(argv[0], "light") == 0) {
+		dark = false;
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'color_scheme light|dark|toggle'");
+	}
+	char *err = NULL;
+	if (!tw_set_color_scheme(dark, &err)) {
+		return result_from_error(err);
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_session_restore(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "session_restore", EXPECTED_EQUAL_TO, 1))) {

@@ -71,15 +71,17 @@ static void launcher_render(struct popup *p, cairo_t *cr) {
 		style == PS_CLASSIC || style == PS_LUNA ? 0xffffffff : 0x000000ff);
 	const char *font = tw_theme_str(t, "menu.font", bar_font(panel));
 	double radius = popup_radius(panel, "menu");
+	uint32_t field_bg = tw_theme_color(t, "menu.field_bg", 0xffffffff);
+	uint32_t field_fg = tw_theme_color(t, "menu.field_fg", 0x000000ff);
 
 	// search field
 	double sx = M + 10, sy = M + 10, sw = W - 2 * M - 20, sh = SEARCH_HEIGHT - 12;
 	if (style == PS_CLASSIC) {
-		pd_rect(cr, sx, sy, sw, sh, 0xffffffff);
+		pd_rect(cr, sx, sy, sw, sh, field_bg);
 		pd_bevel(cr, sx, sy, sw, sh, true);
 	} else {
 		pd_rounded(cr, sx + 0.5, sy + 0.5, sw - 1, sh - 1, radius > 0 ? 6 : 2);
-		pd_color(cr, 0xffffffff);
+		pd_color(cr, field_bg);
 		cairo_fill_preserve(cr);
 		pd_color(cr, 0x00000030);
 		cairo_set_line_width(cr, 1);
@@ -87,16 +89,16 @@ static void launcher_render(struct popup *p, cairo_t *cr) {
 		pd_rect(cr, sx + 1, sy + sh - 2, sw - 2, 2,
 			tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
 	}
-	pd_glyph_search(cr, sx + 12, sy + (sh - 18) / 2, 18, 0x404040ff);
+	pd_glyph_search(cr, sx + 12, sy + (sh - 18) / 2, 18, field_fg);
 	int tw = 0;
 	pd_text_size(cr, font, l->query, &tw, NULL);
 	if (l->query[0]) {
-		pd_text(cr, font, l->query, sx + 42, sy, sw - 52, sh, 0x000000ff, PD_LEFT);
+		pd_text(cr, font, l->query, sx + 42, sy, sw - 52, sh, field_fg, PD_LEFT);
 	} else {
 		pd_text(cr, font, "Type to search apps, or enter a command", sx + 42, sy, sw - 52, sh,
-			0x808080ff, PD_LEFT);
+			dim, PD_LEFT);
 	}
-	pd_rect(cr, sx + 42 + tw + 1, sy + sh * 0.25, 1, sh * 0.5, 0x000000ff);
+	pd_rect(cr, sx + 42 + tw + 1, sy + sh * 0.25, 1, sh * 0.5, field_fg);
 
 	// results
 	double ly = M + SEARCH_HEIGHT;

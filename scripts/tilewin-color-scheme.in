@@ -1,0 +1,95 @@
+#!/bin/sh
+# tilewin-color-scheme: switches other apps between a light and a dark look.
+# tileWin runs it when the color scheme changes (color_scheme command).
+#
+#  - GNOME settings: GTK 4 / libadwaita apps, Firefox, Chromium and Qt 6 read
+#    color-scheme directly or through the desktop portal; GTK 3 apps such as
+#    Thunar need a dark GTK theme.
+#  - GTK settings.ini files, used by GTK apps without a settings daemon.
+#  - KDE apps such as Dolphin read their colors from kdeglobals.
+
+scheme="$1"
+case "$scheme" in
+light|dark) ;;
+*)
+	echo "Usage: tilewin-color-scheme light|dark" >&2
+	exit 2
+	;;
+esac
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}"
+data="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+theme_exists() {
+	case "$1" in
+	Adwaita|Adwaita-dark|HighContrast|HighContrastInverse) return 0 ;;
+	esac
+	for dir in "$HOME/.themes" "$data/themes" /usr/local/share/themes /usr/share/themes; do
+		[ -d "$dir/$1/gtk-3.0" ] && return 0
+	done
+	return 1
+}
+
+if command -v gsettings >/dev/null 2>&1 &&
+		gsettings list-keys org.gnome.desktop.interface >/dev/null 2>&1; then
+	current=$(gsettings get org.gnome.desktop.interface gtk-theme | tr -d "'")
+	base=${current%-dark}
+	base=${base%-Dark}
+	if [ "$scheme" = dark ]; then
+		gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+		if theme_exists "$base-dark"; then
+			gtk="$base-dark"
+		elif theme_exists "$base-Dark"; then
+			gtk="$base-Dark"
+		else
+			gtk=Adwaita-dark
+		fi
+	else
+		gsettings set org.gnome.desktop.interface color-scheme default
+		if theme_exists "$base"; then
+			gtk="$base"
+		else
+			gtk=Adwaita
+		fi
+	fi
+	[ "$gtk" = "$current" ] || gsettings set org.gnome.desktop.interface gtk-theme "$gtk"
+fi
+
+prefer=false
+[ "$scheme" = dark ] && prefer=true
+for ini in "$config/gtk-3.0/settings.ini" "$config/gtk-4.0/settings.ini"; do
+	[ -f "$ini" ] || continue
+	if grep -q '^gtk-application-prefer-dark-theme' "$ini"; then
+		sed -i "s/^gtk-application-prefer-dark-theme=.*/gtk-application-prefer-dark-theme=$prefer/" "$ini"
+	elif grep -q '^\[Settings\]' "$ini"; then
+		sed -i "/^\[Settings\]/a gtk-application-prefer-dark-theme=$prefer" "$ini"
+	fi
+done
+
+kwrite=$(command -v kwriteconfig6 || command -v kwriteconfig5)
+if [ -n "$kwrite" ]; then
+	name=BreezeLight
+	[ "$scheme" = dark ] && name=BreezeDark
+	file=
+	for dir in "$data/color-schemes" /usr/local/share/color-schemes /usr/share/color-schemes; do
+		if [ -f "$dir/$name.colors" ]; then
+			file="$dir/$name.colors"
+			break
+		fi
+	done
+	if [ -n "$file" ]; then
+		# copy the color groups into kdeglobals, as plasma-apply-colorscheme does
+		awk '
+			/^\[/ { group = substr($0, 2, length($0) - 2); next }
+			group ~ /^(Colors:|ColorEffects:|WM$)/ && index($0, "=") > 0 {
+				key = substr($0, 1, index($0, "=") - 1)
+				value = substr($0, index($0, "=") + 1)
+				printf "%s\t%s\t%s\n", group, key, value
+			}' "$file" |
+		while IFS='	' read -r group key value; do
+			"$kwrite" --file kdeglobals --group "$group" --key "$key" "$value"
+		done
+		"$kwrite" --file kdeglobals --group General --key ColorScheme "$name"
+	fi
+fi
+exit 0

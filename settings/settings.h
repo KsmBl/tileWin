@@ -53,6 +53,8 @@ void settings_mode_changed(struct settings *s, struct confdoc *doc);
 void settings_refresh(struct settings *s);
 char *settings_current_theme(void);
 char *settings_current_mode(void);
+/* Makes the settings window itself light or dark. */
+void settings_apply_color_scheme(bool dark);
 
 /* ui.c */
 GtkWidget *ui_page(const char *title, const char *description, GtkWidget **content);

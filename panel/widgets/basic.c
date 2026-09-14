@@ -456,10 +456,12 @@ static void search_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	const struct tw_theme *t = ctx->panel->theme;
 	if (ctx->style == PSV_FLAT && b.width > 80) {
 		bool hover = render_hover(ctx, b);
-		pd_rect(cr, b.x, b.y, b.width, b.height,
-			hover ? 0xffffffff : tw_theme_color(t, "search.bg", 0xf2f2f2ff));
+		pd_rect(cr, b.x, b.y, b.width, b.height, hover ?
+			tw_theme_color(t, "search.hover_bg", 0xffffffff) :
+			tw_theme_color(t, "search.bg", 0xf2f2f2ff));
 		uint32_t fg = tw_theme_color(t, "search.fg", 0x6b6b6bff);
-		pd_glyph_search(cr, b.x + 12, b.y + (b.height - 16) / 2.0, 16, 0x000000ff);
+		pd_glyph_search(cr, b.x + 12, b.y + (b.height - 16) / 2.0, 16,
+			tw_theme_color(t, "search.glyph", 0x000000ff));
 		const char *label = widget_conf(w, "label",
 			tw_theme_str(t, "search.label", "Type here to search"));
 		pd_text(cr, bar_font(ctx->panel), label, b.x + 40, b.y, b.width - 48, b.height, fg, PD_LEFT);

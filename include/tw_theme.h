@@ -20,6 +20,7 @@ struct tw_theme {
 	char *dir;   // absolute directory path
 	char *title; // human readable name
 	char *style; // renderer: win95, winxp, win7, win10, win11
+	bool dark;   // loaded with the dark color scheme
 	list_t *kv;  // struct tw_theme_kv *, sorted by key
 };
 
@@ -50,6 +51,15 @@ list_t *tw_theme_list(void);
 /* Name stored in ~/.config/tileWin/current-theme, or TW_DEFAULT_THEME. */
 char *tw_theme_current_name(void);
 bool tw_theme_save_current(const char *name);
+/*
+ * Light or dark color scheme, stored in ~/.config/tileWin/color-scheme. With
+ * the dark scheme, the keys of a theme's "dark { ... }" block replace the
+ * normal ones.
+ */
+bool tw_color_scheme_is_dark(void);
+/* True once a scheme was chosen, so tileWin does not touch app settings before. */
+bool tw_color_scheme_is_set(void);
+bool tw_color_scheme_save(bool dark);
 /* Path of a file inside the theme directory. Newly allocated. */
 char *tw_theme_file(const struct tw_theme *theme, const char *file);
 

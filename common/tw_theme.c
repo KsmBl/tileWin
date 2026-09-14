@@ -116,6 +116,21 @@ struct tw_theme *tw_theme_load(const char *name, char **error) {
 		return NULL;
 	}
 
+	theme->dark = tw_color_scheme_is_dark();
+	if (theme->dark) {
+		// "dark.menu.bg" overrides "menu.bg"; appended last, so it wins below
+		int count = theme->kv->length;
+		for (int i = 0; i < count; i++) {
+			struct tw_theme_kv *kv = theme->kv->items[i];
+			if (strncmp(kv->key, "dark.", 5) == 0 && kv->key[5]) {
+				struct tw_theme_kv *entry = calloc(1, sizeof(*entry));
+				entry->key = strdup(kv->key + 5);
+				entry->value = strdup(kv->value);
+				list_add(theme->kv, entry);
+			}
+		}
+	}
+
 	// stable sort keeps definition order for equal keys: keep the last one
 	list_stable_sort(theme->kv, kv_cmp);
 	for (int i = theme->kv->length - 2; i >= 0; i--) {
@@ -312,4 +327,37 @@ bool tw_theme_save_current(const char *name) {
 
 char *tw_theme_file(const struct tw_theme *theme, const char *file) {
 	return format_str("%s/%s", theme->dir, file);
+}
+
+static char *color_scheme_path(void) {
+	char *dir = tw_config_dir();
+	if (!dir) {
+		return NULL;
+	}
+	char *path = format_str("%s/color-scheme", dir);
+	free(dir);
+	return path;
+}
+
+bool tw_color_scheme_is_set(void) {
+	char *path = color_scheme_path();
+	bool set = path && access(path, R_OK) == 0;
+	free(path);
+	return set;
+}
+
+bool tw_color_scheme_is_dark(void) {
+	char *path = color_scheme_path();
+	char *value = path ? tw_read_first_line(path) : NULL;
+	bool dark = value && strcasecmp(value, "dark") == 0;
+	free(value);
+	free(path);
+	return dark;
+}
+
+bool tw_color_scheme_save(bool dark) {
+	char *path = color_scheme_path();
+	bool ok = path && tw_write_string(path, dark ? "dark\n" : "light\n");
+	free(path);
+	return ok;
 }

@@ -1,6 +1,7 @@
 #include <malloc.h>
 #include <math.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -93,6 +94,8 @@ static struct tw_theme *load_theme_or_fallback(const char *name) {
 	return theme;
 }
 
+static void apply_app_color_scheme(bool dark);
+
 void tw_init(const char *mode_override) {
 	enum tw_mode mode = TW_MODE_WINDOW;
 	if (mode_override) {
@@ -113,6 +116,10 @@ void tw_init(const char *mode_override) {
 	char *name = tw_theme_current_name();
 	tw_theme = load_theme_or_fallback(name);
 	free(name);
+	if (tw_color_scheme_is_set()) {
+		// apps may have been changed by another desktop since the last session
+		apply_app_color_scheme(tw_color_scheme_is_dark());
+	}
 	sway_log(SWAY_INFO, "tileWin starting in %s mode with theme %s",
 		tw_mode_name(tw_mode), tw_theme->name);
 }
@@ -141,6 +148,8 @@ json_object *tw_describe_state(void) {
 		json_object_new_string(tw_theme ? tw_theme->name : ""));
 	json_object_object_add(obj, "theme_title",
 		json_object_new_string(tw_theme && tw_theme->title ? tw_theme->title : ""));
+	json_object_object_add(obj, "color_scheme",
+		json_object_new_string(tw_theme && tw_theme->dark ? "dark" : "light"));
 	json_object_object_add(obj, "theme_style",
 		json_object_new_string(tw_theme && tw_theme->style ? tw_theme->style : ""));
 	json_object_object_add(obj, "theme_dir",
@@ -208,6 +217,31 @@ static void do_theme_switch(void *data) {
 	arrange_root();
 	transaction_commit_dirty();
 	emit_state_event("theme");
+}
+
+/* Runs tilewin-color-scheme so GTK, GNOME and KDE apps follow the scheme. */
+static void apply_app_color_scheme(bool dark) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execlp("tilewin-color-scheme", "tilewin-color-scheme", dark ? "dark" : "light",
+				(char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
+}
+
+bool tw_set_color_scheme(bool dark, char **error) {
+	if (!tw_color_scheme_save(dark)) {
+		*error = strdup("Cannot save the color scheme");
+		return false;
+	}
+	apply_app_color_scheme(dark);
+	return tw_request_theme(tw_theme ? tw_theme->name : TW_DEFAULT_THEME, error);
 }
 
 bool tw_request_theme(const char *name, char **error) {

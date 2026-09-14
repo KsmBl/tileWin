@@ -67,6 +67,7 @@ complete -c tilewinmsg -n __tilewinmsg_no_command -a wallpaper -d 'Set the wallp
 complete -c tilewinmsg -n __tilewinmsg_no_command -a panel_command -d 'Taskbar program'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a launcher_command -d 'Launcher program or builtin'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a session_restore -d 'Reopen apps at login'
+complete -c tilewinmsg -n __tilewinmsg_no_command -a color_scheme -d 'Light or dark mode'
 # common sway commands
 complete -c tilewinmsg -n __tilewinmsg_no_command -a reload -d 'Reload the config'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a exit -d 'Exit tileWin'
@@ -104,3 +105,4 @@ complete -c tilewinmsg -n '__tilewinmsg_command_is layout' -a 'default splith sp
 complete -c tilewinmsg -n '__tilewinmsg_command_is exec' -a '(__fish_complete_command)'
 complete -c tilewinmsg -n '__tilewinmsg_command_is launcher_command' -a 'builtin'
 complete -c tilewinmsg -n '__tilewinmsg_command_is session_restore' -a 'yes no'
+complete -c tilewinmsg -n '__tilewinmsg_command_is color_scheme' -a 'light dark toggle'

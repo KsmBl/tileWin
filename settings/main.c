@@ -75,6 +75,18 @@ char *settings_current_mode(void) {
 	return mode;
 }
 
+void settings_apply_color_scheme(bool dark) {
+	GtkSettings *gtk = gtk_settings_get_default();
+	if (!gtk) {
+		return;
+	}
+#if GTK_CHECK_VERSION(4, 20, 0)
+	g_object_set(gtk, "gtk-interface-color-scheme",
+		dark ? GTK_INTERFACE_COLOR_SCHEME_DARK : GTK_INTERFACE_COLOR_SCHEME_LIGHT, NULL);
+#endif
+	g_object_set(gtk, "gtk-application-prefer-dark-theme", dark, NULL);
+}
+
 static void copy_default_if_missing(const char *filename) {
 	char *dir = tw_config_dir();
 	char *path = g_build_filename(dir, filename, NULL);
@@ -311,6 +323,7 @@ static void on_startup(GApplication *app, gpointer data) {
 	gtk_style_context_add_provider_for_display(gdk_display_get_default(),
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	g_object_unref(provider);
+	settings_apply_color_scheme(tw_color_scheme_is_dark());
 }
 
 static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, gpointer data) {

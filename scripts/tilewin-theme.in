@@ -16,6 +16,8 @@ Commands:
   set <theme>     Switch to a theme (applied live if tileWin is running)
   info <theme>    Show where a theme is installed and its title
   path <theme>    Print the theme directory (to copy and customize it)
+  scheme [light|dark|toggle]
+                  Show or change the color scheme (dark mode)
 
 Built-in themes: win95 winxp win7 win10 win11
 User themes live in $CONFIG_DIR/themes/<name>/theme.conf
@@ -114,6 +116,39 @@ info)
 path)
 	[ -n "$2" ] || { usage >&2; exit 2; }
 	theme_dir "$2" || { echo "tilewin-theme: unknown theme '$2'" >&2; exit 1; }
+	;;
+scheme)
+	scheme_file="$CONFIG_DIR/color-scheme"
+	current=light
+	[ -s "$scheme_file" ] && [ "$(head -n 1 "$scheme_file")" = dark ] && current=dark
+	case "$2" in
+	"")
+		echo "$current"
+		exit 0
+		;;
+	toggle)
+		new=dark
+		[ "$current" = dark ] && new=light
+		;;
+	light|dark)
+		new="$2"
+		;;
+	*)
+		usage >&2
+		exit 2
+		;;
+	esac
+	if running; then
+		if ! out=$(tilewinmsg color_scheme "$new" 2>&1); then
+			echo "tilewin-theme: $out" >&2
+			exit 1
+		fi
+	else
+		mkdir -p "$CONFIG_DIR"
+		echo "$new" > "$scheme_file"
+		tilewin-color-scheme "$new" 2>/dev/null
+	fi
+	echo "Color scheme set to $new"
 	;;
 -h|--help|help)
 	usage

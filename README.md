@@ -42,6 +42,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
 - **Run dialog**, tooltips, calendar flyout.
 - **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
+- **Dark mode:** `tilewin-theme scheme dark` (or the switch in tileWin Settings) gives every theme dark title bars, menus, flyouts and start menu, and switches GTK, GNOME (and Qt apps through the desktop portal) and KDE apps to dark as well.
 - **Session restore:** the apps open at shutdown or logout start again at the next login, on the same workspace and position and in the same working directory. Apps that save their own state (browsers, editors) bring back their content. Turn it off with `session_restore no`.
 - **Reload without logging out:**
   - `reload`: config.
@@ -145,6 +146,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 |---|---|
 | `wm_mode tile\|window\|toggle` | Switch mode (`tilewinmsg mode ...` is a shortcut) |
 | `theme <name>` | Switch theme |
+| `color_scheme light\|dark\|toggle` | Light or dark variant of the theme; also runs `tilewin-color-scheme` for GTK, GNOME and KDE apps |
 | `session_restore yes\|no` | Reopen the apps of the last session at login (default yes, set in `common.conf`) |
 | `maximize [enable\|disable\|toggle]` | Maximize a floating window |
 | `minimize [enable\|disable\|toggle]` | Minimize to the taskbar (tile mode: scratchpad) |

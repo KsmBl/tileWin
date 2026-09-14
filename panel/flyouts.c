@@ -25,7 +25,9 @@
 
 struct fly_style {
 	enum pstyle style;
+	bool dark; // dark menu background: overlays are light instead of dark
 	uint32_t fg, dim, accent, hover, track, line, error;
+	uint32_t field_bg, field_fg, button_bg, button_hover, button_border;
 	const char *font, *bold;
 	char big[128];
 };
@@ -37,9 +39,18 @@ static void fly_style_init(struct fly_style *st, struct panel *panel) {
 	st->dim = tw_theme_color(t, "menu.disabled_fg", 0x6d6d6dff);
 	st->accent = st->style == PS_CLASSIC ? 0x000080ff :
 		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff);
-	st->hover = st->style == PS_CLASSIC ? 0x00008024 : 0x00000014;
-	st->track = st->style == PS_CLASSIC ? 0x808080ff : 0x0000003d;
-	st->line = st->style == PS_CLASSIC ? 0x808080ff : 0x0000001f;
+	uint32_t bg = tw_theme_color(t, "menu.bg", 0xf2f2f2ff);
+	int luma = (int)((bg >> 24 & 0xff) * 299 + (bg >> 16 & 0xff) * 587 + (bg >> 8 & 0xff) * 114) / 1000;
+	st->dark = luma < 128;
+	uint32_t overlay = st->dark ? 0xffffff00 : 0x00000000;
+	st->hover = st->style == PS_CLASSIC ? 0x00008024 : overlay | 0x14;
+	st->track = st->style == PS_CLASSIC ? 0x808080ff : overlay | (st->dark ? 0x50 : 0x3d);
+	st->line = st->style == PS_CLASSIC ? 0x808080ff : overlay | (st->dark ? 0x2a : 0x1f);
+	st->button_bg = overlay | (st->dark ? 0x18 : 0x10);
+	st->button_hover = overlay | (st->dark ? 0x30 : 0x24);
+	st->button_border = overlay | (st->dark ? 0x30 : 0x26);
+	st->field_bg = tw_theme_color(t, "menu.field_bg", st->dark ? 0x1f1f1fff : 0xffffffff);
+	st->field_fg = tw_theme_color(t, "menu.field_fg", st->dark ? 0xffffffff : 0x000000ff);
 	st->error = 0xc42b1cff;
 	st->font = tw_theme_str(t, "menu.font", bar_font(panel));
 	st->bold = bar_bold_font(panel);
@@ -234,9 +245,9 @@ static void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 	}
 	cairo_new_path(cr);
 	pd_rounded(cr, b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1, 4);
-	pd_color(cr, primary ? st->accent : hover ? 0x00000024 : 0x00000010);
+	pd_color(cr, primary ? st->accent : hover ? st->button_hover : st->button_bg);
 	cairo_fill_preserve(cr);
-	pd_color(cr, 0x00000026);
+	pd_color(cr, st->button_border);
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
 	if (primary && hover) {
@@ -252,14 +263,14 @@ static void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 static void draw_field(cairo_t *cr, const struct fly_style *st, struct pbox b,
 		const char *text, const char *placeholder) {
 	if (st->style == PS_CLASSIC) {
-		pd_rect(cr, b.x, b.y, b.width, b.height, 0xffffffff);
+		pd_rect(cr, b.x, b.y, b.width, b.height, st->field_bg);
 		pd_bevel(cr, b.x, b.y, b.width, b.height, true);
 	} else {
 		cairo_new_path(cr);
 		pd_rounded(cr, b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1, 4);
-		pd_color(cr, 0xffffffff);
+		pd_color(cr, st->field_bg);
 		cairo_fill_preserve(cr);
-		pd_color(cr, 0x00000045);
+		pd_color(cr, st->button_border | 0x20);
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 		pd_rect(cr, b.x + 1, b.y + b.height - 2, b.width - 2, 2, st->accent);
@@ -267,12 +278,12 @@ static void draw_field(cairo_t *cr, const struct fly_style *st, struct pbox b,
 	int tw = 0;
 	if (*text) {
 		pd_text_size(cr, st->font, text, &tw, NULL);
-		pd_text(cr, st->font, text, b.x + 8, b.y, b.width - 16, b.height, 0x000000ff, PD_LEFT);
+		pd_text(cr, st->font, text, b.x + 8, b.y, b.width - 16, b.height, st->field_fg, PD_LEFT);
 	} else {
-		pd_text(cr, st->font, placeholder, b.x + 8, b.y, b.width - 16, b.height, 0x808080ff,
+		pd_text(cr, st->font, placeholder, b.x + 8, b.y, b.width - 16, b.height, st->dim,
 			PD_LEFT);
 	}
-	pd_rect(cr, b.x + 8 + tw + 1, b.y + b.height * 0.25, 1, b.height * 0.5, 0x000000ff);
+	pd_rect(cr, b.x + 8 + tw + 1, b.y + b.height * 0.25, 1, b.height * 0.5, st->field_fg);
 }
 
 static void draw_link(cairo_t *cr, const struct fly_style *st, struct flyout *f, struct pbox b,
