@@ -27,6 +27,8 @@ static void finalize_move(struct sway_seat *seat) {
 	}
 	transaction_commit_dirty();
 
+	tw_session_changed();
+
 	seatop_begin_default(seat);
 }
 
@@ -75,6 +77,7 @@ static void handle_unref(struct sway_seat *seat, struct sway_container *con) {
 	struct seatop_move_floating_event *e = seat->seatop_data;
 	if (e->con == con) {
 		tw_snap_preview_finish();
+		tw_session_changed();
 		seatop_begin_default(seat);
 	}
 }

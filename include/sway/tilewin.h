@@ -207,5 +207,11 @@ pid_t tw_panel_pid(void);
 bool tw_restart(bool relaunch_apps, char **error);
 void tw_session_restore(void);
 void tw_session_apply_placement(struct sway_container *con);
+/* Windows changed; the session is saved shortly afterwards. */
+void tw_session_changed(void);
+/* Saves the session now, e.g. when logging out with apps still running. */
+void tw_session_save_now(void);
+/* Stops saving: a shutdown is terminating the apps together with tileWin. */
+void tw_session_freeze(void);
 
 #endif

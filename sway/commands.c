@@ -84,6 +84,7 @@ static const struct cmd_handler handlers[] = {
 	{ "panel_command", cmd_panel_command },
 	{ "popup_during_fullscreen", cmd_popup_during_fullscreen },
 	{ "seat", cmd_seat },
+	{ "session_restore", cmd_session_restore },
 	{ "set", cmd_set },
 	{ "show_marks", cmd_show_marks },
 	{ "smart_borders", cmd_smart_borders },

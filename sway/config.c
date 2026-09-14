@@ -301,6 +301,7 @@ static void config_defaults(struct sway_config *config) {
 	if (!(config->swaybg_command = strdup("swaybg"))) goto cleanup;
 	if (!(config->tw_panel_command = strdup("tilewin-panel"))) goto cleanup;
 	if (!(config->tw_launcher_command = strdup("builtin"))) goto cleanup;
+	config->tw_session_restore = true;
 
 	if (!(config->config_chain = create_list())) goto cleanup;
 	config->current_config_path = NULL;

@@ -66,6 +66,7 @@ complete -c tilewinmsg -n __tilewinmsg_no_command -a launcher -d 'Open the appli
 complete -c tilewinmsg -n __tilewinmsg_no_command -a wallpaper -d 'Set the wallpaper'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a panel_command -d 'Taskbar program'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a launcher_command -d 'Launcher program or builtin'
+complete -c tilewinmsg -n __tilewinmsg_no_command -a session_restore -d 'Reopen apps at login'
 # common sway commands
 complete -c tilewinmsg -n __tilewinmsg_no_command -a reload -d 'Reload the config'
 complete -c tilewinmsg -n __tilewinmsg_no_command -a exit -d 'Exit tileWin'
@@ -102,3 +103,4 @@ complete -c tilewinmsg -n '__tilewinmsg_command_is focus' -a 'left right up down
 complete -c tilewinmsg -n '__tilewinmsg_command_is layout' -a 'default splith splitv stacking tabbed toggle'
 complete -c tilewinmsg -n '__tilewinmsg_command_is exec' -a '(__fish_complete_command)'
 complete -c tilewinmsg -n '__tilewinmsg_command_is launcher_command' -a 'builtin'
+complete -c tilewinmsg -n '__tilewinmsg_command_is session_restore' -a 'yes no'

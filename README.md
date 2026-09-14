@@ -42,6 +42,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
 - **Run dialog**, tooltips, calendar flyout.
 - **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
+- **Session restore:** the apps open at shutdown or logout start again at the next login, on the same workspace and position and in the same working directory. Apps that save their own state (browsers, editors) bring back their content. Turn it off with `session_restore no`.
 - **Reload without logging out:**
   - `reload`: config.
   - `restart panel`: taskbar only.
@@ -144,6 +145,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 |---|---|
 | `wm_mode tile\|window\|toggle` | Switch mode (`tilewinmsg mode ...` is a shortcut) |
 | `theme <name>` | Switch theme |
+| `session_restore yes\|no` | Reopen the apps of the last session at login (default yes, set in `common.conf`) |
 | `maximize [enable\|disable\|toggle]` | Maximize a floating window |
 | `minimize [enable\|disable\|toggle]` | Minimize to the taskbar (tile mode: scratchpad) |
 | `snap left\|right\|up\|down\|topleft\|topright\|bottomleft\|bottomright\|restore` | Snap a window |
@@ -282,6 +284,7 @@ Wallpapers are rendered once per screen size and cached in `~/.cache/tileWin/wal
 
 ## Limitations
 
+- Session restore starts each app again from its command line: open documents, tabs and terminal contents come back only if the app restores them itself. Apps that show several windows from one process are started once, and tile mode restores workspaces but not the split layout.
 - Microsoft fonts, icons and logos are not included; themes use font fallback lists and drawn glyphs.
 - There is no background blur, so the Windows 7 glass is translucent only.
 - Windows 11 rounds only the frame and title bar; window contents keep square corners.

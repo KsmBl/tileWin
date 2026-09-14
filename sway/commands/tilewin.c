@@ -240,6 +240,15 @@ struct cmd_results *cmd_launcher_command(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_session_restore(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "session_restore", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_session_restore = parse_boolean(argv[0], config->tw_session_restore);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_launcher(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "launcher", EXPECTED_EQUAL_TO, 0))) {

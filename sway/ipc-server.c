@@ -322,6 +322,10 @@ void ipc_event_workspace(struct sway_workspace *old,
 }
 
 void ipc_event_window(struct sway_container *window, const char *change) {
+	if (strcmp(change, "new") == 0 || strcmp(change, "close") == 0 ||
+			strcmp(change, "move") == 0 || strcmp(change, "floating") == 0) {
+		tw_session_changed();
+	}
 	if (!ipc_has_event_listeners(IPC_EVENT_WINDOW)) {
 		return;
 	}

@@ -75,6 +75,7 @@ static void view_notify_minimized(struct sway_view *view, bool minimized) {
 }
 
 void tw_set_box(struct sway_container *con, const struct wlr_box *box) {
+	tw_session_changed();
 	con->pending.x = box->x;
 	con->pending.y = box->y;
 	con->pending.width = box->width;

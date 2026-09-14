@@ -30,8 +30,22 @@ struct launcher_page {
 	GtkWidget *radios[G_N_ELEMENTS(launchers) + 1];
 	GtkWidget *custom_entry;
 	GtkWidget *program_entries[G_N_ELEMENTS(programs)];
+	GtkWidget *session_switch;
 	guint custom_timer, programs_timer;
 };
+
+static gboolean on_session_switch(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct launcher_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	struct confdoc *common = p->s->common;
+	const char *value = active ? "yes" : "no";
+	confdoc_set(common, common->root, "session_restore", NULL, value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "session_restore %s", value);
+	return FALSE;
+}
 
 static void apply_launcher(struct launcher_page *p, const char *command) {
 	struct confdoc *common = p->s->common;
@@ -176,6 +190,10 @@ void launcher_page_refresh(struct settings *s) {
 		}
 		g_free(value);
 	}
+
+	const char *restore = cstmt_arg(confdoc_child(s->common->root, "session_restore", NULL), 0);
+	gtk_switch_set_active(GTK_SWITCH(p->session_switch),
+		!restore || g_ascii_strcasecmp(restore, "no") != 0);
 	p->updating = false;
 }
 
@@ -237,6 +255,13 @@ GtkWidget *launcher_page_new(struct settings *s) {
 		p->program_entries[i] = entry;
 		ui_row(apps, programs[i].title, programs[i].hint, entry);
 	}
+
+	GtkWidget *session = ui_group(content, "Session", NULL);
+	p->session_switch = gtk_switch_new();
+	g_signal_connect(p->session_switch, "state-set", G_CALLBACK(on_session_switch), p);
+	ui_row(session, "Reopen apps after login",
+		"Apps that were open at shutdown or logout start again on the same workspace and position.",
+		p->session_switch);
 
 	s->launcher_page = p;
 	launcher_page_refresh(s);

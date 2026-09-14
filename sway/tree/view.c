@@ -966,6 +966,8 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 			container_set_geometry_from_content(view->container);
 			container_floating_move_to_center(view->container);
 		}
+	}
+	if (!fullscreen) {
 		tw_session_apply_placement(view->container);
 	}
 

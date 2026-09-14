@@ -538,6 +538,7 @@ struct sway_config {
 	char *tw_panel_command;
 	char *tw_wallpaper;
 	char *tw_launcher_command;
+	bool tw_session_restore;
 
 	// Flags
 	enum focus_follows_mouse_mode focus_follows_mouse;
