@@ -238,6 +238,12 @@ install_data(
 	install_dir: join_paths(datadir, 'wayland-sessions'),
 )
 
+# xdg-desktop-portal looks for <lowercase desktop name>-portals.conf
+install_data(
+	'data/tilewin-portals.conf',
+	install_dir: join_paths(datadir, 'xdg-desktop-portal'),
+)
+
 if get_option('fish-completions')
 	fish = dependency('fish', required: false)
 	if fish.found()

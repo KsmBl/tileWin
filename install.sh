@@ -89,7 +89,7 @@ install_deps() {
 			pixman libdrm cairo pango gdk-pixbuf2 librsvg gtk4 json-c pcre2 \
 			xcb-util-wm xorg-xwayland systemd-libs \
 			grim xdg-utils
-		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal thunar || \
+		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal thunar xdg-desktop-portal-gtk || \
 			warn "optional packages could not be installed"
 	elif command -v apt-get >/dev/null 2>&1; then
 		msg "Installing dependencies with apt (best effort)"

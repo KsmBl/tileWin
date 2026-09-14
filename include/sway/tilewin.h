@@ -227,5 +227,7 @@ void tw_session_save_now(void);
 void tw_session_freeze(void);
 /* SIGTERM: saves once more if no windows are gone yet, then stops saving. */
 void tw_session_shutdown(void);
+/* Gives D-Bus and systemd services (portals, Thunar) the session environment. */
+void tw_session_export_environment(void);
 
 #endif

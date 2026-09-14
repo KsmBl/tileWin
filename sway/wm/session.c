@@ -773,6 +773,22 @@ static void spawn_shell(const char *script) {
 	}
 }
 
+void tw_session_export_environment(void) {
+	if (getenv("TILEWIN_NO_APP_TWEAKS")) {
+		return; // nested or test instances must not take over the user session
+	}
+	// D-Bus and systemd start portals and apps such as Thunar as services;
+	// without the display in their environment they cannot open windows and
+	// the settings portal cannot tell apps about the color scheme
+	spawn_shell("command -v dbus-update-activation-environment >/dev/null || exit 0; "
+		"dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY "
+		"XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE TILEWINSOCK SWAYSOCK I3SOCK; "
+		"command -v systemctl >/dev/null || exit 0; "
+		"systemctl --user reset-failed xdg-desktop-portal-gtk.service xdg-desktop-portal.service "
+		"thunar.service 2>/dev/null; "
+		"systemctl --user try-restart xdg-desktop-portal.service thunar.service 2>/dev/null");
+}
+
 /* Starts an app detached from tileWin and returns its pid (0 on failure). */
 static pid_t spawn_app(const char *cwd, char *cmdline) {
 	int argc = 0;

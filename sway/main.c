@@ -384,6 +384,7 @@ int main(int argc, char **argv) {
 	config->active = true;
 	force_modeset();
 	load_swaybars();
+	tw_session_export_environment();
 	tw_panel_start();
 	tw_session_restore();
 	run_deferred_commands();

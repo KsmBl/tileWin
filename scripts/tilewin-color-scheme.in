@@ -20,9 +20,12 @@ esac
 config="${XDG_CONFIG_HOME:-$HOME/.config}"
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 
+# GTK 3 only has "Adwaita" built in; its dark look comes from the dark
+# preference, not from a theme called "Adwaita-dark" (that name falls back to
+# the light Adwaita unless gnome-themes-extra installed such a folder).
 theme_exists() {
 	case "$1" in
-	Adwaita|Adwaita-dark|HighContrast|HighContrastInverse) return 0 ;;
+	Adwaita|HighContrast|HighContrastInverse) return 0 ;;
 	esac
 	for dir in "$HOME/.themes" "$data/themes" /usr/local/share/themes /usr/share/themes; do
 		[ -d "$dir/$1/gtk-3.0" ] && return 0
@@ -41,8 +44,10 @@ if command -v gsettings >/dev/null 2>&1 &&
 			gtk="$base-dark"
 		elif theme_exists "$base-Dark"; then
 			gtk="$base-Dark"
+		elif theme_exists "$base"; then
+			gtk="$base" # e.g. Adwaita: dark through the dark preference
 		else
-			gtk=Adwaita-dark
+			gtk=Adwaita
 		fi
 	else
 		gsettings set org.gnome.desktop.interface color-scheme default
