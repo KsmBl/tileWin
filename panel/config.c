@@ -128,6 +128,11 @@ list_t *menu_items_parse(struct twconf_node *node) {
 			item->children = child->children ? menu_items_parse(child) : create_list();
 		} else if (arg < child->argc) {
 			item->command = twconf_join(child, arg);
+			// configs copied from older defaults opened the file in an editor
+			if (strcmp(item->command, "exec xdg-open ~/.config/tileWin/taskbar.conf") == 0) {
+				free(item->command);
+				item->command = strdup("exec tilewin-settings --page taskbar");
+			}
 		}
 		list_add(items, item);
 	}

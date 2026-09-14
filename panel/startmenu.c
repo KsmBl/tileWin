@@ -117,6 +117,10 @@ static void load_config(struct panel *panel, struct startmenu *sm) {
 			pl->label = strdup(child->argv[0]);
 			pl->icon = strdup(child->argv[1]);
 			pl->command = twconf_join(child, 2);
+			if (strcmp(pl->command, "exec xdg-open ~/.config/tileWin") == 0) {
+				free(pl->command); // older default, before the settings app
+				pl->command = strdup("exec tilewin-settings");
+			}
 			list_add(sm->places, pl);
 		} else if (strcmp(child->name, "user_name") == 0 && child->argc >= 1) {
 			snprintf(sm->user, sizeof(sm->user), "%s", child->argv[0]);
