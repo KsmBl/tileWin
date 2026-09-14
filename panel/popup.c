@@ -332,6 +332,7 @@ struct menu {
 	bool above;
 	struct loop_timer *submenu_timer;
 	int pending_submenu;
+	struct loop_timer *close_timer; // grace period before closing the open submenu
 	char *run_command; // executed after closing
 };
 
@@ -343,6 +344,9 @@ static void menu_destroy(struct popup *p) {
 	struct menu *m = p->data;
 	if (m->submenu_timer) {
 		loop_remove_timer(p->panel->loop, m->submenu_timer);
+	}
+	if (m->close_timer) {
+		loop_remove_timer(p->panel->loop, m->close_timer);
 	}
 	if (m->owns) {
 		menu_items_free(m->items);
@@ -518,33 +522,96 @@ static void submenu_timer_fired(void *data) {
 	}
 }
 
+static bool child_shows_item(struct popup *p, int index) {
+	struct menu *m = p->data;
+	if (!p->child || index < 0) {
+		return false;
+	}
+	struct menu *cm = p->child->data;
+	return cm->items == ((struct menu_item *)m->items->items[index])->children;
+}
+
+static void schedule_submenu(struct popup *p) {
+	struct menu *m = p->data;
+	if (m->submenu_timer) {
+		loop_remove_timer(p->panel->loop, m->submenu_timer);
+		m->submenu_timer = NULL;
+	}
+	int index = m->selected;
+	if (index >= 0 && ((struct menu_item *)m->items->items[index])->children &&
+			!child_shows_item(p, index)) {
+		m->pending_submenu = index;
+		m->submenu_timer = loop_add_timer(p->panel->loop, 250, submenu_timer_fired, p);
+	}
+}
+
+static void submenu_close_fired(void *data) {
+	struct popup *p = data;
+	struct menu *m = p->data;
+	m->close_timer = NULL;
+	if (p->child && !child_shows_item(p, m->selected)) {
+		popup_destroy(p->child);
+	}
+	schedule_submenu(p);
+	popup_set_dirty(p);
+}
+
 static void menu_select(struct popup *p, int index) {
 	struct menu *m = p->data;
 	if (m->selected == index) {
 		return;
 	}
 	m->selected = index;
-	if (p->child) {
-		struct menu *cm = p->child->data;
-		struct menu_item *item = index >= 0 ? m->items->items[index] : NULL;
-		if (!item || cm->items != item->children) {
-			popup_destroy(p->child);
+	if (p->child && !child_shows_item(p, index)) {
+		// Moving diagonally towards the open submenu crosses other items:
+		// keep the submenu for a moment so the pointer can reach it.
+		if (m->submenu_timer) {
+			loop_remove_timer(p->panel->loop, m->submenu_timer);
+			m->submenu_timer = NULL;
 		}
-	}
-	if (m->submenu_timer) {
-		loop_remove_timer(p->panel->loop, m->submenu_timer);
-		m->submenu_timer = NULL;
-	}
-	if (index >= 0 && ((struct menu_item *)m->items->items[index])->children) {
-		m->pending_submenu = index;
-		m->submenu_timer = loop_add_timer(p->panel->loop, 250, submenu_timer_fired, p);
+		if (!m->close_timer) {
+			m->close_timer = loop_add_timer(p->panel->loop, 400, submenu_close_fired, p);
+		}
+	} else {
+		if (m->close_timer) {
+			loop_remove_timer(p->panel->loop, m->close_timer);
+			m->close_timer = NULL;
+		}
+		schedule_submenu(p);
 	}
 	popup_set_dirty(p);
+}
+
+static const struct popup_vtable menu_vtable;
+
+/* The pointer reached a submenu: keep it open and its parent item selected. */
+static void submenu_entered(struct popup *p) {
+	struct popup *parent = p->parent;
+	if (!parent || parent->vtable != &menu_vtable) {
+		return;
+	}
+	struct menu *pm = parent->data, *m = p->data;
+	if (pm->close_timer) {
+		loop_remove_timer(parent->panel->loop, pm->close_timer);
+		pm->close_timer = NULL;
+	}
+	for (int i = 0; i < pm->items->length; i++) {
+		if (((struct menu_item *)pm->items->items[i])->children == m->items &&
+				pm->selected != i) {
+			pm->selected = i;
+			if (pm->submenu_timer) {
+				loop_remove_timer(parent->panel->loop, pm->submenu_timer);
+				pm->submenu_timer = NULL;
+			}
+			popup_set_dirty(parent);
+		}
+	}
 }
 
 static void menu_motion(struct popup *p, double x, double y) {
 	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
 	struct menu *m = p->data;
+	submenu_entered(p);
 	int index = hs ? (int)hs->id : -1;
 	if (index < 0 && p->child) {
 		return; // keep the open submenu while crossing the gap
