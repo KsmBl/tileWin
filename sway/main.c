@@ -140,8 +140,8 @@ static void increase_nofile_limit(void) {
 }
 
 static int term_signal(int signal, void *data) {
-	// apps are being terminated too: keep the session saved before that
-	tw_session_freeze();
+	// apps are being terminated too: only save if none of them is gone yet
+	tw_session_shutdown();
 	sway_terminate(EXIT_SUCCESS);
 	return 0;
 }

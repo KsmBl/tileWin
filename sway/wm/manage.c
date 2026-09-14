@@ -297,9 +297,17 @@ void tw_update_content_fill(struct sway_container *con) {
 	if (!gap) {
 		return;
 	}
-	// the view tree sits below the title bar inside the content tree
-	wlr_scene_node_set_position(&bg->node, view->scene_tree->node.x, view->scene_tree->node.y);
-	wlr_scene_node_place_below(&bg->node, &view->scene_tree->node);
+	// the view tree sits below the title bar inside the content tree; while a
+	// window is still being mapped (e.g. snapped by session restore) it is not
+	// attached there yet, and the fill follows on the next update
+	struct wlr_scene_node *view_node = &view->scene_tree->node;
+	if (view_node->parent != bg->node.parent) {
+		wlr_scene_node_set_enabled(&bg->node, false);
+		con->tw.content_bg_width = con->tw.content_bg_height = 0;
+		return;
+	}
+	wlr_scene_node_set_position(&bg->node, view_node->x, view_node->y);
+	wlr_scene_node_place_below(&bg->node, view_node);
 	wlr_scene_rect_set_size(bg, width, height);
 	if (con->tw.content_bg_width != view->geometry.width ||
 			con->tw.content_bg_height != view->geometry.height) {

@@ -225,5 +225,7 @@ void tw_session_changed(void);
 void tw_session_save_now(void);
 /* Stops saving: a shutdown is terminating the apps together with tileWin. */
 void tw_session_freeze(void);
+/* SIGTERM: saves once more if no windows are gone yet, then stops saving. */
+void tw_session_shutdown(void);
 
 #endif

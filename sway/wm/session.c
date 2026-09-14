@@ -188,6 +188,8 @@ pid_t tw_panel_pid(void) {
  */
 
 #define SESSION_SAVE_DELAY_MS 2000
+// terminals change directories without window events, so look again now and then
+#define SESSION_REFRESH_MS 60000
 #define RESTORE_GUARD_SEC 30
 #define PLACEMENT_TIMEOUT_SEC 90
 
@@ -195,6 +197,8 @@ static struct {
 	struct wl_event_source *timer;
 	bool frozen;
 	struct timespec guard_until; // restored apps are still starting
+	char *saved_text;            // content of last-session as written
+	int saved_windows, saved_launches;
 } session;
 
 struct placement {
@@ -547,12 +551,18 @@ static char *content_command(struct save_ctx *ctx, struct sway_container *con,
 		char *base = strip_dir_option(rule->launcher ? rule->launcher : cmdline,
 			rule->dir_option);
 		size_t len = rule->dir_option ? strlen(rule->dir_option) : 0;
+		// the option goes right after the program: options such as -x or -e
+		// take the rest of the command line as the command to run
+		size_t program_len = strcspn(base, "\x1f");
+		const char *rest = base + program_len;
 		if (!rule->dir_option) {
 			command = strdup(base);
 		} else if (rule->dir_option[len - 1] == '=') {
-			command = format_str("%s\x1f%s%s", base, rule->dir_option, dir);
+			command = format_str("%.*s\x1f%s%s%s", (int)program_len, base, rule->dir_option,
+				dir, rest);
 		} else {
-			command = format_str("%s\x1f%s\x1f%s", base, rule->dir_option, dir);
+			command = format_str("%.*s\x1f%s\x1f%s%s", (int)program_len, base,
+				rule->dir_option, dir, rest);
 		}
 		free(base);
 	}
@@ -619,28 +629,57 @@ static void save_container(struct sway_container *con, void *data) {
 	ctx->windows++;
 }
 
-static bool session_write(void) {
-	char *path = state_file("last-session");
-	if (!path) {
+static char *session_text(int *windows, int *launches) {
+	char *text = NULL;
+	size_t size = 0;
+	FILE *f = open_memstream(&text, &size);
+	if (!f) {
+		return NULL;
+	}
+	fprintf(f, "# tileWin session\n");
+	struct save_ctx ctx = { .file = f, .pids = create_list(), .seen = create_list() };
+	root_for_each_container(save_container, &ctx);
+	*windows = ctx.windows;
+	*launches = ctx.pids->length;
+	list_free_items_and_destroy(ctx.pids);
+	list_free_items_and_destroy(ctx.seen);
+	fclose(f);
+	return text;
+}
+
+/*
+ * Writes last-session if its content changed. With keep_complete, nothing is
+ * written when windows or apps are missing compared to the saved session,
+ * because they are probably being terminated by a shutdown.
+ */
+static bool session_write(bool keep_complete) {
+	int windows = 0, launches = 0;
+	char *text = session_text(&windows, &launches);
+	if (!text) {
 		return false;
 	}
-	char *tmp = format_str("%s.tmp", path);
-	FILE *f = fopen(tmp, "w");
-	bool ok = false;
-	if (f) {
-		fprintf(f, "# tileWin session\n");
-		struct save_ctx ctx = { .file = f, .pids = create_list(), .seen = create_list() };
-		root_for_each_container(save_container, &ctx);
-		list_free_items_and_destroy(ctx.pids);
-		list_free_items_and_destroy(ctx.seen);
-		ok = fclose(f) == 0 && rename(tmp, path) == 0;
-		sway_log(SWAY_DEBUG, "Saved session with %d windows", ctx.windows);
+	if (keep_complete && (windows < session.saved_windows || launches < session.saved_launches)) {
+		sway_log(SWAY_DEBUG, "Not saving an incomplete session (%d of %d windows)", windows,
+			session.saved_windows);
+		free(text);
+		return false;
 	}
-	if (!ok) {
-		sway_log_errno(SWAY_ERROR, "Could not save the session to %s", path);
-		unlink(tmp);
+	if (session.saved_text && strcmp(text, session.saved_text) == 0) {
+		free(text);
+		return true;
 	}
-	free(tmp);
+	char *path = state_file("last-session");
+	bool ok = path && tw_write_string(path, text);
+	if (ok) {
+		free(session.saved_text);
+		session.saved_text = text;
+		session.saved_windows = windows;
+		session.saved_launches = launches;
+		sway_log(SWAY_DEBUG, "Saved session with %d windows", windows);
+	} else {
+		sway_log(SWAY_ERROR, "Could not save the session to %s", path ? path : "(no state dir)");
+		free(text);
+	}
 	free(path);
 	return ok;
 }
@@ -657,7 +696,8 @@ static int handle_save_timer(void *data) {
 			(session.guard_until.tv_sec - now.tv_sec) * 1000);
 		return 0;
 	}
-	session_write();
+	session_write(false);
+	wl_event_source_timer_update(session.timer, SESSION_REFRESH_MS);
 	return 0;
 }
 
@@ -687,9 +727,20 @@ void tw_session_save_now(void) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	if (now.tv_sec >= session.guard_until.tv_sec) {
-		session_write();
+		session_write(false);
 	}
 	// the apps are about to exit together with tileWin
+	tw_session_freeze();
+}
+
+void tw_session_shutdown(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (!session.frozen && now.tv_sec >= session.guard_until.tv_sec) {
+		// catch directory changes since the last save, unless the shutdown has
+		// already taken windows away
+		session_write(true);
+	}
 	tw_session_freeze();
 }
 
