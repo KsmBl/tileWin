@@ -181,6 +181,7 @@ void settings_refresh(struct settings *s) {
 	menus_page_refresh(s);
 	launcher_page_refresh(s);
 	keyboard_page_refresh(s);
+	mouse_page_refresh(s);
 }
 
 static void flush_saves(struct settings *s) {
@@ -280,6 +281,7 @@ static void build_window(struct settings *s) {
 	gtk_stack_add_titled(s->stack, menus_page_new(s), "menus", "Menus");
 	gtk_stack_add_titled(s->stack, launcher_page_new(s), "launcher", "Launcher & apps");
 	gtk_stack_add_titled(s->stack, keyboard_page_new(s), "keyboard", "Keyboard");
+	gtk_stack_add_titled(s->stack, mouse_page_new(s), "mouse", "Mouse & touchpad");
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);
@@ -323,7 +325,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, taskbar, menus, launcher, keyboard)\n", page);
+				"Unknown page '%s' (theme, wallpaper, taskbar, menus, launcher, keyboard, mouse)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -339,7 +341,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, taskbar, menus, launcher or keyboard", "PAGE");
+		"Page to open: theme, wallpaper, taskbar, menus, launcher, keyboard or mouse", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

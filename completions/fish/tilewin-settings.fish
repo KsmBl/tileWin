@@ -7,5 +7,6 @@ wallpaper\t"Wallpaper per theme or for all themes"
 taskbar\t"Taskbar layout and widgets"
 menus\t"Right-click menus and start menu"
 launcher\t"Application launcher and default programs"
-keyboard\t"Keyboard layouts, keys and shortcuts"'
+keyboard\t"Keyboard layouts, keys and shortcuts"
+mouse\t"Mouse, touchpad and cursor"'
 complete -c tilewin-settings -s h -l help -d 'Show help'
