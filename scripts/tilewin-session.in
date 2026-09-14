@@ -1,0 +1,43 @@
+#!/bin/sh
+# tilewin-session: starts a tileWin session (used by display managers and
+# from a TTY). When tileWin exits with code 42 ("restart" command) it is
+# started again, so updates can be applied without logging out.
+
+TILEWIN_BIN="${TILEWIN_BIN:-@bindir@/tilewin}"
+[ -x "$TILEWIN_BIN" ] || TILEWIN_BIN=tilewin
+
+# Start a D-Bus session bus if the display manager did not provide one.
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -z "$TILEWIN_SESSION_DBUS" ] &&
+		command -v dbus-run-session >/dev/null 2>&1; then
+	export TILEWIN_SESSION_DBUS=1
+	exec dbus-run-session -- "$0" "$@"
+fi
+
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-tileWin}"
+export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-tileWin}"
+export XDG_SESSION_TYPE=wayland
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
+export _JAVA_AWT_WM_NONREPARENTING=1
+export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/tileWin"
+mkdir -p "$state_dir"
+log="$state_dir/tilewin.log"
+
+restarts=0
+while :; do
+	# keep the previous log for debugging crashes
+	[ -f "$log" ] && mv -f "$log" "$log.old"
+	"$TILEWIN_BIN" "$@" 2>"$log"
+	rc=$?
+	if [ "$rc" -ne 42 ]; then
+		exit "$rc"
+	fi
+	restarts=$((restarts + 1))
+	if [ "$restarts" -gt 50 ]; then
+		echo "tilewin-session: too many restarts, giving up" >&2
+		exit 1
+	fi
+done

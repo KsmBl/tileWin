@@ -1,0 +1,125 @@
+#!/bin/sh
+# tilewin-theme: list and switch tileWin themes.
+
+DATADIR="${TILEWIN_DATADIR:-@datadir@}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tileWin"
+CURRENT_FILE="$CONFIG_DIR/current-theme"
+DEFAULT_THEME=win10
+
+usage() {
+	cat <<EOF
+Usage: tilewin-theme <command> [theme]
+
+Commands:
+  list            List available themes (* marks the active one)
+  current         Print the active theme
+  set <theme>     Switch to a theme (applied live if tileWin is running)
+  info <theme>    Show where a theme is installed and its title
+  path <theme>    Print the theme directory (to copy and customize it)
+
+Built-in themes: win95 winxp win7 win10 win11
+User themes live in $CONFIG_DIR/themes/<name>/theme.conf
+(use "inherit <theme>" in theme.conf to base a theme on another one).
+EOF
+}
+
+theme_dir() {
+	for base in "$CONFIG_DIR/themes" "$DATADIR/themes"; do
+		if [ -f "$base/$1/theme.conf" ]; then
+			echo "$base/$1"
+			return 0
+		fi
+	done
+	return 1
+}
+
+theme_title() {
+	sed -n 's/^[[:space:]]*name[[:space:]]\{1,\}"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+		"$1/theme.conf" | head -n 1
+}
+
+current_theme() {
+	if running; then
+		tilewinmsg -t get_tilewin 2>/dev/null |
+			sed -n 's/.*"theme": "\([^"]*\)".*/\1/p' | head -n 1
+		return
+	fi
+	if [ -s "$CURRENT_FILE" ]; then
+		head -n 1 "$CURRENT_FILE"
+	else
+		echo "$DEFAULT_THEME"
+	fi
+}
+
+running() {
+	command -v tilewinmsg >/dev/null 2>&1 &&
+		tilewinmsg -t get_tilewin >/dev/null 2>&1
+}
+
+list_themes() {
+	current=$(current_theme)
+	for base in "$CONFIG_DIR/themes" "$DATADIR/themes"; do
+		[ -d "$base" ] || continue
+		for dir in "$base"/*/; do
+			[ -f "$dir/theme.conf" ] || continue
+			basename "$dir"
+		done
+	done | sort -u | while read -r name; do
+		dir=$(theme_dir "$name")
+		mark=" "
+		[ "$name" = "$current" ] && mark="*"
+		printf '%s %-10s %s\n' "$mark" "$name" "$(theme_title "$dir")"
+	done
+}
+
+case "$1" in
+list|ls|"")
+	list_themes
+	;;
+current)
+	current_theme
+	;;
+set|use)
+	[ -n "$2" ] || { usage >&2; exit 2; }
+	if ! dir=$(theme_dir "$2"); then
+		echo "tilewin-theme: unknown theme '$2'" >&2
+		echo "Available themes:" >&2
+		list_themes >&2
+		exit 1
+	fi
+	if running; then
+		if ! out=$(tilewinmsg theme "$2" 2>&1); then
+			echo "tilewin-theme: $out" >&2
+			exit 1
+		fi
+		case "$out" in
+		*'"success": false'*)
+			echo "tilewin-theme: $out" >&2
+			exit 1
+			;;
+		esac
+	else
+		mkdir -p "$CONFIG_DIR"
+		echo "$2" > "$CURRENT_FILE"
+	fi
+	echo "Theme set to $2 ($(theme_title "$dir"))"
+	;;
+info)
+	[ -n "$2" ] || { usage >&2; exit 2; }
+	dir=$(theme_dir "$2") || { echo "tilewin-theme: unknown theme '$2'" >&2; exit 1; }
+	echo "name:  $2"
+	echo "title: $(theme_title "$dir")"
+	echo "path:  $dir"
+	;;
+path)
+	[ -n "$2" ] || { usage >&2; exit 2; }
+	theme_dir "$2" || { echo "tilewin-theme: unknown theme '$2'" >&2; exit 1; }
+	;;
+-h|--help|help)
+	usage
+	;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac

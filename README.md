@@ -1,0 +1,263 @@
+# tileWin
+
+tileWin is a Wayland compositor with two modes you can switch between at any time:
+
+- **Tile mode:** behaves like [sway](https://swaywm.org) and is configured with the same syntax. Your sway config works here.
+- **Window mode:** behaves like Windows:
+  - floating windows with themed title bars and minimize/maximize/close buttons
+  - drag-to-edge snapping, Alt+Tab and Windows keyboard shortcuts
+
+It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are five built-in themes: **Windows 95, XP, 7, 10 and 11**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live from the command line.
+
+tileWin is built on sway 1.12 and wlroots 0.20. It is written in C, has no GTK/Qt dependency and uses no CPU when idle.
+
+## Features
+
+- **Two live-switchable modes.** `Super+Shift+W` or `tilewinmsg mode toggle`.
+  - Windows keep running.
+  - Tiled windows become floating windows and get their previous window-mode geometry back when you return.
+- **Window mode:**
+  - Themed server-side decorations with hover and pressed states.
+  - Double-click the title bar to maximize; double-click the icon to close.
+  - Resize from the borders (with invisible grab margins on thin-border themes).
+  - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
+  - `Super+Arrow` snapping.
+  - Minimize to the taskbar; show desktop; Alt+Tab switcher.
+  - Arrange windows: cascade, stacked, side by side, optimal grid.
+- **Tile mode:** everything sway does.
+- **Taskbar:**
+  - Separate layouts for window mode and tile mode.
+  - Widgets:
+    - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
+    - Status: system tray (StatusNotifierItem), clock with calendar, volume, network, battery, CPU, memory, brightness, keyboard layout.
+    - Controls: mode switch, show desktop, search box.
+    - Layout and scripts: separator, spacer, **custom script widgets**.
+  - Every widget can run commands on click or scroll and have its own right-click menu.
+- **Start menu** in the style of the active theme:
+  - Windows 95: cascading menu with banner.
+  - XP / 7: two-column menu.
+  - Windows 10: list.
+  - Windows 11: centered grid.
+  - All include app search, pinned apps, places and a power menu.
+- **Run dialog**, tooltips, calendar flyout.
+- **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
+- **Reload without logging out:**
+  - `reload`: config.
+  - `restart panel`: taskbar only.
+  - `restart`: the whole compositor, e.g. after an update. The session stays open, and `relaunch-apps` starts your apps again.
+- **Low resource use:**
+  - Decorations are drawn once and cached.
+  - The panel is event-driven, redraws only on change and polls system information only for widgets that are visible.
+
+## Installation
+
+```sh
+git clone <this repository> tileWin
+cd tileWin
+./install.sh              # installs dependencies (pacman/apt/dnf), builds and installs to /usr/local
+```
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--prefix <dir>` | Installation prefix (default `/usr/local`) |
+| `--no-deps` | Skip installing dependencies |
+| `--debug` | Debug build instead of the optimized LTO release build |
+| `--destdir <dir>` | Stage the install into a directory (packaging) |
+| `--no-user-config` | Don't create `~/.config/tileWin` |
+| `--uninstall` | Remove the installation |
+
+The installer:
+- creates `~/.config/tileWin/` with the default config files if they don't exist yet
+- registers the **tileWin** session for display managers
+
+Start tileWin:
+- choose "tileWin" in your display manager (GDM, SDDM, ly, greetd, ...), or
+- run `tilewin-session` from a text console.
+
+**Dependencies:**
+- **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), meson and ninja.
+- **Optional:** grim (screenshots), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+
+### Updating
+
+```sh
+git pull && ./install.sh --no-deps && tilewinmsg restart
+```
+
+`restart` replaces the running compositor with the newly installed one without ending your session. Wayland apps cannot survive a compositor restart, so use `tilewinmsg restart relaunch-apps` to have your apps started again and placed where they were. If only the taskbar changed, `tilewinmsg restart panel` is enough.
+
+## Configuration
+
+All configuration lives in `~/.config/tileWin/` and is plain text:
+
+| File | Purpose |
+|---|---|
+| `common.conf` | Settings shared by both modes: programs, outputs, inputs, wallpaper, autostart |
+| `tilemode.conf` | Tile mode: a normal sway config (`man 5 sway`) |
+| `windowmode.conf` | Window mode: same syntax, with Windows-style shortcuts |
+| `taskbar.conf` | Taskbar layouts, widgets, menus and start menu |
+| `current-theme` | Name of the active theme (managed by `tilewin-theme`) |
+| `themes/<name>/` | Your own themes |
+
+Both mode configs `include common.conf`. Missing files fall back to the installed defaults in `/usr/local/share/tileWin/config/`. Reload with `Super+Shift+C` or `tilewinmsg reload`. The taskbar reloads its config automatically when you save it.
+
+### Default window mode shortcuts
+
+| Keys | Action |
+|---|---|
+| Super (tap) / Ctrl+Esc | Start menu |
+| Super+R | Run dialog |
+| Super+E | File manager |
+| Super+Return | Terminal |
+| Super+D, Super+M | Show desktop |
+| Super+L | Lock |
+| Super+↑ / ↓ / ← / → | Maximize / restore or minimize / snap left / snap right |
+| Alt+Tab, Alt+Shift+Tab, Super+Tab | Switch windows (release Alt to confirm, Esc to cancel) |
+| Alt+F4 | Close window |
+| Alt+Space | Window menu |
+| Ctrl+Shift+Esc | Task manager |
+| Super+1..9 | Activate the n-th taskbar entry |
+| Super+Ctrl+← / → | Previous / next virtual desktop |
+| Super+Ctrl+Shift+← / → | Move window to previous / next desktop |
+| Super+Shift+← / → | Move window to another monitor |
+| Print | Screenshot to ~/Pictures |
+| Super+Shift+W | Switch to tile mode |
+| Super+Shift+C | Reload config |
+| Super+Shift+Ctrl+R | Restart tileWin |
+| Super+Shift+Ctrl+P | Restart the taskbar |
+| Ctrl+Alt+Del | Log out |
+
+Tile mode uses sway's default bindings (`$mod` = Super) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
+
+### Commands added by tileWin
+
+Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Window commands act on the focused window or on `[criteria]`.
+
+| Command | Description |
+|---|---|
+| `wm_mode tile\|window\|toggle` | Switch mode (`tilewinmsg mode ...` is a shortcut) |
+| `theme <name>` | Switch theme |
+| `maximize [enable\|disable\|toggle]` | Maximize a floating window |
+| `minimize [enable\|disable\|toggle]` | Minimize to the taskbar (tile mode: scratchpad) |
+| `snap left\|right\|up\|down\|topleft\|topright\|bottomleft\|bottomright\|restore` | Snap a window |
+| `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
+| `showdesktop` | Minimize all windows / restore them |
+| `alttab next\|prev\|commit\|cancel` | Window switcher |
+| `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
+| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
+| `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
+| `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
+
+- `tilewinmsg -t get_tilewin` prints the current mode, theme and panel pid.
+- IPC clients can subscribe to `["tilewin"]` events.
+- The `get_tree` output has `minimized` and `maximized` fields.
+
+## Taskbar
+
+`~/.config/tileWin/taskbar.conf` uses sway-style blocks. The installed file is fully commented; the short version:
+
+```
+layout window {
+    position bottom
+    left start search taskbar
+    right tray keyboard volume network battery clock showdesktop
+}
+layout tile {
+    position top
+    height 26
+    left workspaces title
+    right tray cpu memory clock modeswitch
+}
+
+widget clock { format "%H:%M\n%d.%m.%Y"; on_click panel calendar }
+widget custom:weather {
+    exec "curl -sf 'https://wttr.in/?format=%c+%t'"
+    interval 900
+    on_click exec xdg-open https://wttr.in
+}
+
+menu taskbar {
+    item "Cascade windows" arrange cascade
+    item "Show windows stacked" arrange vertical
+    item "Show windows side by side" arrange horizontal
+    item "Arrange windows optimally" arrange optimal
+    separator
+    submenu "Tools" { item "htop" exec xfce4-terminal -e htop }
+}
+```
+
+**Widgets:**
+
+| Widget | Options |
+|---|---|
+| `start` | `label`, `width` |
+| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all`, `middle_click close\|new`, `max_width` |
+| `quicklaunch` | `item <desktop-id or command> [icon]` |
+| `workspaces` | (none) |
+| `title` | `max_width` |
+| `tray` | (none) |
+| `clock` | `format`, `tooltip_format` (strftime) |
+| `volume` | `format "{volume}%"`, `mixer`, `step` |
+| `network` | `interface`, `interval`, `settings` |
+| `battery` | `device`, `format "{capacity}% {status}"`, `interval` |
+| `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval` |
+| `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval` |
+| `brightness` | (none; scroll changes it via brightnessctl) |
+| `keyboard` | (none) |
+| `modeswitch` | (none) |
+| `showdesktop` | `width` |
+| `search` | `label`, `width` |
+| `separator` | `width` |
+| `spacer` | `width <px>\|expand` |
+| `custom:<name>` | `exec` + `interval`, or `exec_listen` for long-running scripts, `format "{}"`, `icon` |
+
+**Custom scripts** print one line per update: plain text, or JSON such as `{"text": "...", "tooltip": "...", "icon": "..."}`.
+
+**Commands and menus:**
+- Every widget accepts `on_click`, `on_middle_click`, `on_right_click`, `on_scroll_up`, `on_scroll_down` and a `menu { ... }` block.
+- Commands are tileWin commands (`exec ...`, `arrange cascade`, ...) or `panel <action>`.
+- `menu taskbar` is the right-click menu of the empty taskbar area.
+- `menu start` is the right-click menu of the start button.
+- `menu window` adds entries to the menu of taskbar buttons. `{id}` is replaced with the window's con_id.
+
+The `startmenu { }` block sets pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
+
+## Themes
+
+```sh
+tilewin-theme list          # * marks the active theme
+tilewin-theme set win95     # applies immediately when tileWin is running
+tilewin-theme info win7
+```
+
+| Theme | Look |
+|---|---|
+| `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
+| `winxp` | Luna blue title bars, green start button, two-column start menu |
+| `win7` | Aero glass title bars, orb start button, icons-only superbar |
+| `win10` | Flat white title bars, dark taskbar with search box, list start menu |
+| `win11` | Rounded light title bars, centered taskbar, grid start menu |
+
+A theme is a directory with:
+- `theme.conf`: decorations, taskbar, menus, start menu, Alt+Tab, wallpaper
+- `tile.conf`: sway `client.*` colors and font for tile mode
+
+To make your own:
+1. Create `~/.config/tileWin/themes/mytheme/theme.conf` starting with `inherit win10`.
+2. Override only the keys you want, e.g. `decoration { active { title_bg #202020; title_fg #ffffff } }`.
+3. Look at the built-in theme files for all available keys.
+
+## Limitations
+
+- Microsoft fonts, icons and logos are not included; themes use font fallback lists and drawn glyphs.
+- There is no background blur, so the Windows 7 glass is translucent only.
+- Windows 11 rounds only the frame and title bar; window contents keep square corners.
+- Apps that draw their own title bars (GTK4/libadwaita) keep them in window mode.
+- The tray does not render DBusMenu menus yet; right-click on a tray icon asks the app to show its own menu.
+- A compositor restart closes running Wayland apps (`restart relaunch-apps` starts them again).
+
+## License
+
+MIT. tileWin is based on [sway](https://github.com/swaywm/sway) (MIT, Copyright © 2016-2024 Drew DeVault and contributors).

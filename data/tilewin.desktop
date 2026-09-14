@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=tileWin
+Comment=Windows-like and tiling Wayland compositor
+Exec=tilewin-session
+Type=Application
+DesktopNames=tileWin
