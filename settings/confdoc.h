@@ -31,6 +31,7 @@ struct confdoc {
 	struct cstmt *root;
 	char *indent; // one indentation level as used by the file
 	char *error;  // first parse error, NULL if the file is valid
+	bool dirty;   // changed since the last save (used by callers)
 };
 
 /* Opens <config dir>/<filename>, seeded from the installed default if missing. */

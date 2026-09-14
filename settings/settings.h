@@ -11,6 +11,7 @@ struct wallpaper_page;
 struct taskbar_page;
 struct menus_page;
 struct launcher_page;
+struct keyboard_page;
 
 struct settings {
 	GtkApplication *app;
@@ -19,7 +20,8 @@ struct settings {
 	GtkLabel *status;
 	struct confdoc *common;  // ~/.config/tileWin/common.conf (sway syntax)
 	struct confdoc *taskbar; // ~/.config/tileWin/taskbar.conf
-	guint common_timer, taskbar_timer;
+	struct confdoc *windowmode, *tilemode; // key bindings
+	guint common_timer, taskbar_timer, modes_timer;
 	bool reload_after_save;
 	GFileMonitor *monitor;
 	struct theme_page *theme_page;
@@ -27,6 +29,7 @@ struct settings {
 	struct taskbar_page *taskbar_page;
 	struct menus_page *menus_page;
 	struct launcher_page *launcher_page;
+	struct keyboard_page *keyboard_page;
 };
 
 /* ipc.c: talks to the running tileWin, if any */
@@ -43,6 +46,8 @@ bool settings_command(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2,
 /* Schedule saving the documents; reload also reloads the compositor config. */
 void settings_common_changed(struct settings *s, bool reload);
 void settings_taskbar_changed(struct settings *s);
+/* A mode config (windowmode.conf or tilemode.conf) changed: save and reload. */
+void settings_mode_changed(struct settings *s, struct confdoc *doc);
 void settings_refresh(struct settings *s);
 char *settings_current_theme(void);
 char *settings_current_mode(void);
@@ -93,5 +98,7 @@ GtkWidget *menus_page_new(struct settings *s);
 void menus_page_refresh(struct settings *s);
 GtkWidget *launcher_page_new(struct settings *s);
 void launcher_page_refresh(struct settings *s);
+GtkWidget *keyboard_page_new(struct settings *s);
+void keyboard_page_refresh(struct settings *s);
 
 #endif

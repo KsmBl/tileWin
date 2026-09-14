@@ -174,6 +174,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps |
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
+| Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 
 Changes apply immediately (the compositor gets the matching command, the taskbar reloads its config) and are written to `common.conf` and `taskbar.conf`. Only the changed lines are rewritten, so your comments and formatting stay. Open a page directly with `tilewin-settings --page taskbar`. The app only runs while its window is open.
 

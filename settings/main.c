@@ -137,6 +137,36 @@ void settings_common_changed(struct settings *s, bool reload) {
 	s->common_timer = g_timeout_add(400, save_common, s);
 }
 
+static gboolean save_modes(gpointer data) {
+	struct settings *s = data;
+	s->modes_timer = 0;
+	char *error = NULL;
+	struct confdoc *docs[] = { s->windowmode, s->tilemode };
+	for (size_t i = 0; i < G_N_ELEMENTS(docs); i++) {
+		if (docs[i]->dirty && !confdoc_save(docs[i], &error)) {
+			settings_status(s, "%s", error);
+			g_free(error);
+			return G_SOURCE_REMOVE;
+		}
+		docs[i]->dirty = false;
+	}
+	copy_default_if_missing("common.conf");
+	if (settings_command(s, "reload")) {
+		settings_status(s, "Saved the shortcuts and reloaded tileWin");
+	} else {
+		settings_status(s, "Saved the shortcuts");
+	}
+	return G_SOURCE_REMOVE;
+}
+
+void settings_mode_changed(struct settings *s, struct confdoc *doc) {
+	doc->dirty = true;
+	if (s->modes_timer) {
+		g_source_remove(s->modes_timer);
+	}
+	s->modes_timer = g_timeout_add(900, save_modes, s);
+}
+
 void settings_taskbar_changed(struct settings *s) {
 	if (s->taskbar_timer) {
 		g_source_remove(s->taskbar_timer);
@@ -150,6 +180,7 @@ void settings_refresh(struct settings *s) {
 	taskbar_page_refresh(s);
 	menus_page_refresh(s);
 	launcher_page_refresh(s);
+	keyboard_page_refresh(s);
 }
 
 static void flush_saves(struct settings *s) {
@@ -160,6 +191,10 @@ static void flush_saves(struct settings *s) {
 	if (s->taskbar_timer) {
 		g_source_remove(s->taskbar_timer);
 		save_taskbar(s);
+	}
+	if (s->modes_timer) {
+		g_source_remove(s->modes_timer);
+		save_modes(s);
 	}
 }
 
@@ -202,6 +237,12 @@ static void on_config_dir_changed(GFileMonitor *monitor, GFile *file, GFile *oth
 	if (same_path(file, s->taskbar->path) || same_path(other, s->taskbar->path)) {
 		check_external_change(s, s->taskbar, s->taskbar_timer);
 	}
+	if (same_path(file, s->windowmode->path) || same_path(other, s->windowmode->path)) {
+		check_external_change(s, s->windowmode, s->modes_timer);
+	}
+	if (same_path(file, s->tilemode->path) || same_path(other, s->tilemode->path)) {
+		check_external_change(s, s->tilemode, s->modes_timer);
+	}
 }
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
@@ -238,6 +279,7 @@ static void build_window(struct settings *s) {
 	gtk_stack_add_titled(s->stack, taskbar_page_new(s), "taskbar", "Taskbar");
 	gtk_stack_add_titled(s->stack, menus_page_new(s), "menus", "Menus");
 	gtk_stack_add_titled(s->stack, launcher_page_new(s), "launcher", "Launcher & apps");
+	gtk_stack_add_titled(s->stack, keyboard_page_new(s), "keyboard", "Keyboard");
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);
@@ -281,7 +323,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, taskbar, menus, launcher)\n", page);
+				"Unknown page '%s' (theme, wallpaper, taskbar, menus, launcher, keyboard)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -292,10 +334,12 @@ int main(int argc, char **argv) {
 	struct settings *s = &settings;
 	s->common = confdoc_open("common.conf");
 	s->taskbar = confdoc_open("taskbar.conf");
+	s->windowmode = confdoc_open("windowmode.conf");
+	s->tilemode = confdoc_open("tilemode.conf");
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, taskbar, menus or launcher", "PAGE");
+		"Page to open: theme, wallpaper, taskbar, menus, launcher or keyboard", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 
@@ -317,5 +361,7 @@ int main(int argc, char **argv) {
 	g_object_unref(s->app);
 	confdoc_free(s->common);
 	confdoc_free(s->taskbar);
+	confdoc_free(s->windowmode);
+	confdoc_free(s->tilemode);
 	return status;
 }
