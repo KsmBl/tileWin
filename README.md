@@ -109,6 +109,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 |---|---|
 | Super (tap) / Ctrl+Esc | Start menu |
 | Super+R | Run dialog |
+| Super+S | Application launcher |
 | Super+E | File manager |
 | Super+Return | Terminal |
 | Super+D, Super+M | Show desktop |
@@ -129,7 +130,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Shift+Ctrl+P | Restart the taskbar |
 | Ctrl+Alt+Del | Log out |
 
-Tile mode uses sway's default bindings (`$mod` = Super) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
+Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
 
 ### Commands added by tileWin
 
@@ -147,6 +148,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
 | `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
+| `launcher` | Open the application launcher |
+| `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
 | `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
 

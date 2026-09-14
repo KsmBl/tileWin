@@ -229,3 +229,32 @@ struct cmd_results *cmd_wallpaper(int argc, char **argv) {
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
+
+struct cmd_results *cmd_launcher_command(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "launcher_command", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	free(config->tw_launcher_command);
+	config->tw_launcher_command = join_args(argv, argc);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_launcher(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "launcher", EXPECTED_EQUAL_TO, 0))) {
+		return error;
+	}
+	const char *cmd = config->tw_launcher_command;
+	if (!cmd || !*cmd || strcasecmp(cmd, "builtin") == 0) {
+		json_object *data = json_object_new_object();
+		json_object_object_add(data, "args", json_object_new_string("launcher"));
+		ipc_event_tilewin("panel", data);
+		return cmd_results_new(CMD_SUCCESS, NULL);
+	}
+	int cmd_argc = 0;
+	char **cmd_argv = split_args(cmd, &cmd_argc);
+	struct cmd_results *res = cmd_exec_process(cmd_argc, cmd_argv);
+	free_argv(cmd_argc, cmd_argv);
+	return res;
+}

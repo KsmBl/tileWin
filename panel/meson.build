@@ -28,6 +28,7 @@ executable(
 		'config.c',
 		'draw.c',
 		'ipc.c',
+		'launcher.c',
 		'main.c',
 		'popup.c',
 		'proc.c',

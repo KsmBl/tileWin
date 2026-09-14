@@ -180,6 +180,7 @@ void free_config(struct sway_config *config) {
 	free(config->swaynag_command);
 	free(config->tw_panel_command);
 	free(config->tw_wallpaper);
+	free(config->tw_launcher_command);
 	free((char *)config->current_config_path);
 	free((char *)config->current_config);
 	keysym_translation_state_destroy(config->keysym_translation_state);
@@ -299,6 +300,7 @@ static void config_defaults(struct sway_config *config) {
 
 	if (!(config->swaybg_command = strdup("swaybg"))) goto cleanup;
 	if (!(config->tw_panel_command = strdup("tilewin-panel"))) goto cleanup;
+	if (!(config->tw_launcher_command = strdup("builtin"))) goto cleanup;
 
 	if (!(config->config_chain = create_list())) goto cleanup;
 	config->current_config_path = NULL;

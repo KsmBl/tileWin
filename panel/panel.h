@@ -382,6 +382,7 @@ enum popup_kind {
 	POPUP_STARTMENU,
 	POPUP_RUN,
 	POPUP_CALENDAR,
+	POPUP_LAUNCHER,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -396,6 +397,7 @@ void menu_open(struct panel *panel, list_t *items, bool owns_items,
 void startmenu_toggle(struct panel *panel, struct panel_output *output, bool search);
 void rundialog_open(struct panel *panel, struct panel_output *output);
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
+void launcher_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
 
 /* tooltip.c */
@@ -418,5 +420,7 @@ struct tw_desktop_entry *apps_find(const char *id_or_app_id);
 cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, int size);
 cairo_surface_t *apps_icon(struct panel *panel, const char *name, int size);
 const char *apps_display_name(const char *app_id);
+/* 0 = no match, higher is better. */
+int apps_match_score(const struct tw_desktop_entry *entry, const char *query);
 
 #endif

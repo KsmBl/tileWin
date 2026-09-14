@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,4 +190,26 @@ cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, 
 	}
 	cache_store(key, size, s);
 	return s;
+}
+
+int apps_match_score(const struct tw_desktop_entry *e, const char *q) {
+	if (!q || !*q) {
+		return 1;
+	}
+	if (strncasecmp(e->name, q, strlen(q)) == 0) {
+		return 5;
+	}
+	if (strcasestr(e->name, q)) {
+		return 4;
+	}
+	if (e->generic_name && strcasestr(e->generic_name, q)) {
+		return 3;
+	}
+	if (e->keywords && strcasestr(e->keywords, q)) {
+		return 2;
+	}
+	if (e->exec && strcasestr(e->exec, q)) {
+		return 1;
+	}
+	return 0;
 }

@@ -107,6 +107,8 @@ sway_cmd cmd_exec_process;
 sway_cmd cmd_allow_tearing;
 sway_cmd cmd_alttab;
 sway_cmd cmd_arrange;
+sway_cmd cmd_launcher;
+sway_cmd cmd_launcher_command;
 sway_cmd cmd_maximize;
 sway_cmd cmd_minimize;
 sway_cmd cmd_panel;
