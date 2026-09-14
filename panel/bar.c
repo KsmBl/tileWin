@@ -192,6 +192,11 @@ static void render_group_background(struct render_ctx *ctx, list_t *placed, int 
 	if (group_start < 0) {
 		return;
 	}
+	if (ctx->style == PSV_LUNA && group_end + 8 >= x - 48) {
+		// the XP notification area runs to the end of the taskbar, including
+		// buttons such as show desktop that follow it
+		group_end = ctx->surface->width - 8;
+	}
 	cairo_t *cr = ctx->cairo;
 	int h = ctx->height;
 	if (ctx->style == PSV_CLASSIC) {
