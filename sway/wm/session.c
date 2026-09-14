@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -6,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -268,9 +271,294 @@ static char *sanitize(const char *str) {
 
 struct save_ctx {
 	FILE *file;
-	list_t *pids;
+	list_t *pids;    // pid_t * per launch line, 0 for launches of a single window
+	list_t *seen;    // pid_t * per saved window, to count windows of a process
 	int windows;
 };
+
+/*
+ * Apps whose content tileWin restores itself: terminals start again in the
+ * working directory of their shell, file managers open the folder shown in
+ * their window title.
+ */
+enum app_kind {
+	APP_TERMINAL,
+	APP_FILE_MANAGER,
+};
+
+struct app_rule {
+	const char *process;    // basename of the running program
+	enum app_kind kind;
+	const char *launcher;   // program to start instead of the saved command line
+	const char *dir_option; // terminal option for the directory; ending in '=' joins it
+};
+
+static const struct app_rule app_rules[] = {
+	{ "xfce4-terminal", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "gnome-terminal-server", APP_TERMINAL, "gnome-terminal", "--working-directory=" },
+	{ "gnome-terminal", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "ptyxis", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "konsole", APP_TERMINAL, NULL, "--workdir" },
+	{ "kitty", APP_TERMINAL, NULL, "--directory" },
+	{ "alacritty", APP_TERMINAL, NULL, "--working-directory" },
+	{ "foot", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "tilix", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "terminator", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "qterminal", APP_TERMINAL, NULL, "--workdir" },
+	{ "lxterminal", APP_TERMINAL, NULL, "--working-directory=" },
+	{ "xterm", APP_TERMINAL, NULL, NULL },
+	{ "urxvt", APP_TERMINAL, NULL, NULL },
+	{ "st", APP_TERMINAL, NULL, NULL },
+	{ "thunar", APP_FILE_MANAGER, NULL, NULL },
+	{ "Thunar", APP_FILE_MANAGER, "thunar", NULL },
+	{ "dolphin", APP_FILE_MANAGER, NULL, NULL },
+	{ "nautilus", APP_FILE_MANAGER, NULL, NULL },
+	{ "nemo", APP_FILE_MANAGER, NULL, NULL },
+	{ "caja", APP_FILE_MANAGER, NULL, NULL },
+	{ "pcmanfm", APP_FILE_MANAGER, NULL, NULL },
+	{ "pcmanfm-qt", APP_FILE_MANAGER, NULL, NULL },
+};
+
+static const struct app_rule *find_app_rule(const char *cmdline) {
+	if (!cmdline) {
+		return NULL;
+	}
+	size_t len = strcspn(cmdline, "\x1f");
+	char *arg0 = strndup(cmdline, len);
+	const char *base = strrchr(arg0, '/') ? strrchr(arg0, '/') + 1 : arg0;
+	const struct app_rule *found = NULL;
+	for (size_t i = 0; !found && i < sizeof(app_rules) / sizeof(app_rules[0]); i++) {
+		if (strcmp(base, app_rules[i].process) == 0) {
+			found = &app_rules[i];
+		}
+	}
+	free(arg0);
+	return found;
+}
+
+static int count_windows(struct save_ctx *ctx, pid_t pid) {
+	int count = 0;
+	for (int i = 0; i < ctx->seen->length; i++) {
+		count += *(pid_t *)ctx->seen->items[i] == pid;
+	}
+	pid_t *entry = malloc(sizeof(pid_t));
+	*entry = pid;
+	list_add(ctx->seen, entry);
+	return count;
+}
+
+struct child_proc {
+	pid_t pid;
+	unsigned long long start;
+	bool tty; // has a controlling terminal: the shell, not a helper process
+};
+
+static int child_cmp(const void *a, const void *b) {
+	const struct child_proc *ca = a, *cb = b;
+	return ca->start < cb->start ? -1 : ca->start > cb->start;
+}
+
+/* Working directory of the index-th child (by start time) of a process. */
+static char *child_cwd(pid_t parent, int index) {
+	DIR *dir = opendir("/proc");
+	if (!dir) {
+		return NULL;
+	}
+	struct child_proc children[64];
+	int count = 0;
+	struct dirent *de;
+	while ((de = readdir(dir)) && count < 64) {
+		if (!isdigit((unsigned char)de->d_name[0])) {
+			continue;
+		}
+		char path[300], buf[1024];
+		snprintf(path, sizeof(path), "/proc/%s/stat", de->d_name);
+		FILE *f = fopen(path, "r");
+		if (!f) {
+			continue;
+		}
+		size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+		fclose(f);
+		buf[n] = '\0';
+		char *p = strrchr(buf, ')');
+		if (!p) {
+			continue;
+		}
+		// fields after the command name: state ppid ... starttime is the 20th
+		int field = 0;
+		pid_t ppid = 0;
+		long tty = 0;
+		unsigned long long start = 0;
+		char *save = NULL;
+		for (char *tok = strtok_r(p + 1, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
+			if (field == 1) {
+				ppid = atoi(tok);
+			} else if (field == 4) {
+				tty = atol(tok);
+			} else if (field == 19) {
+				start = strtoull(tok, NULL, 10);
+				break;
+			}
+			field++;
+		}
+		if (ppid == parent) {
+			children[count].pid = atoi(de->d_name);
+			children[count].start = start;
+			children[count].tty = tty != 0;
+			count++;
+		}
+	}
+	closedir(dir);
+	// shells run on a terminal; helpers such as utempter do not
+	int shells = 0;
+	for (int i = 0; i < count; i++) {
+		if (children[i].tty) {
+			children[shells++] = children[i];
+		}
+	}
+	if (shells > 0) {
+		count = shells;
+	}
+	if (count == 0) {
+		return NULL;
+	}
+	qsort(children, count, sizeof(children[0]), child_cmp);
+	return read_cwd(children[index < count ? index : count - 1].pid);
+}
+
+/* Folder of a file manager window from titles like "/home/me/Music - Thunar". */
+static char *title_directory(const char *title) {
+	if (!title || !*title) {
+		return NULL;
+	}
+	char *copy = strdup(title);
+	static const char *const separators[] = { " - ", " \xe2\x80\x94 ", " \xe2\x80\x93 " };
+	char *cut = NULL;
+	for (size_t i = 0; i < sizeof(separators) / sizeof(separators[0]); i++) {
+		for (char *pos = strstr(copy, separators[i]); pos; pos = strstr(pos + 1, separators[i])) {
+			if (!cut || pos > cut) {
+				cut = pos;
+			}
+		}
+	}
+	if (cut) {
+		*cut = '\0';
+	}
+	char *path = NULL;
+	if (copy[0] == '/' || copy[0] == '~') {
+		path = tw_expand_home(copy);
+	} else if (getenv("HOME") && !strchr(copy, '/')) {
+		path = format_str("%s/%s", getenv("HOME"), copy); // e.g. "Downloads"
+	}
+	struct stat st;
+	if (path && (stat(path, &st) != 0 || !S_ISDIR(st.st_mode) || strpbrk(path, "\t\n\x1f"))) {
+		free(path);
+		path = NULL;
+	}
+	free(copy);
+	return path;
+}
+
+/*
+ * File managers usually show only the folder name; switch them to full paths
+ * in the title (once per session) so every folder can be restored.
+ */
+static void spawn_shell(const char *script);
+
+static void prepare_file_manager(const struct app_rule *rule) {
+	static bool thunar_done, dolphin_done, nemo_done;
+	if (getenv("TILEWIN_NO_APP_TWEAKS")) {
+		return;
+	}
+	const char *name = rule->launcher ? rule->launcher : rule->process;
+	if (strcmp(name, "thunar") == 0 && !thunar_done) {
+		thunar_done = true;
+		spawn_shell("command -v xfconf-query >/dev/null && "
+			"! xfconf-query -c thunar -p /misc-window-title-style >/dev/null 2>&1 && "
+			"xfconf-query -c thunar -p /misc-window-title-style -n -t string "
+			"-s THUNAR_WINDOW_TITLE_STYLE_FULL_PATH_WITH_THUNAR_SUFFIX");
+	} else if (strcmp(name, "dolphin") == 0 && !dolphin_done) {
+		dolphin_done = true;
+		spawn_shell("r=$(command -v kreadconfig6 || command -v kreadconfig5) && "
+			"w=$(command -v kwriteconfig6 || command -v kwriteconfig5) && "
+			"[ -z \"$($r --file dolphinrc --group General --key ShowFullPathInTitlebar)\" ] && "
+			"$w --file dolphinrc --group General --key ShowFullPathInTitlebar true");
+	} else if (strcmp(name, "nemo") == 0 && !nemo_done) {
+		nemo_done = true;
+		spawn_shell("gsettings set org.nemo.preferences show-full-path-titles true 2>/dev/null");
+	}
+}
+
+/* Removes an existing directory option from a saved command line. */
+static char *strip_dir_option(const char *cmdline, const char *option) {
+	if (!option) {
+		return strdup(cmdline);
+	}
+	size_t option_len = strlen(option);
+	bool joined = option[option_len - 1] == '=';
+	char *copy = strdup(cmdline);
+	char *out = calloc(1, strlen(cmdline) + 1);
+	bool skip_next = false;
+	char *save = NULL;
+	for (char *arg = strtok_r(copy, "\x1f", &save); arg; arg = strtok_r(NULL, "\x1f", &save)) {
+		if (skip_next) {
+			skip_next = false;
+			continue;
+		}
+		if (joined ? strncmp(arg, option, option_len) == 0 : strcmp(arg, option) == 0) {
+			skip_next = !joined;
+			continue;
+		}
+		if (*out) {
+			strcat(out, "\x1f");
+		}
+		strcat(out, arg);
+	}
+	free(copy);
+	return out;
+}
+
+/* Command line (fields separated by 0x1f) that restores the content of a window. */
+static char *content_command(struct save_ctx *ctx, struct sway_container *con,
+		const char *cmdline, char **cwd) {
+	const struct app_rule *rule = find_app_rule(cmdline);
+	if (!rule) {
+		return NULL;
+	}
+	pid_t pid = con->view->pid;
+	int nth = count_windows(ctx, pid);
+	char *dir;
+	if (rule->kind == APP_TERMINAL) {
+		dir = child_cwd(pid, nth);
+	} else {
+		const char *title = view_get_title(con->view);
+		dir = title_directory(title);
+		if (!title || title[0] != '/') {
+			prepare_file_manager(rule);
+		}
+	}
+	if (!dir) {
+		return NULL;
+	}
+	char *command;
+	if (rule->kind == APP_FILE_MANAGER) {
+		command = format_str("%s\x1f%s", rule->launcher ? rule->launcher : rule->process, dir);
+	} else {
+		char *base = strip_dir_option(rule->launcher ? rule->launcher : cmdline,
+			rule->dir_option);
+		size_t len = rule->dir_option ? strlen(rule->dir_option) : 0;
+		if (!rule->dir_option) {
+			command = strdup(base);
+		} else if (rule->dir_option[len - 1] == '=') {
+			command = format_str("%s\x1f%s%s", base, rule->dir_option, dir);
+		} else {
+			command = format_str("%s\x1f%s\x1f%s", base, rule->dir_option, dir);
+		}
+		free(base);
+	}
+	*cwd = dir;
+	return command;
+}
 
 static void save_container(struct sway_container *con, void *data) {
 	struct save_ctx *ctx = data;
@@ -289,16 +577,26 @@ static void save_container(struct sway_container *con, void *data) {
 			con->tw.restore_box : (struct wlr_box){ con->pending.x, con->pending.y,
 			con->pending.width, con->pending.height };
 	}
-	// one launch per process: apps with several windows restore them themselves
 	int process = -1;
-	for (int i = 0; i < ctx->pids->length; i++) {
-		if (*(pid_t *)ctx->pids->items[i] == con->view->pid) {
-			process = i;
+	char *cmdline = read_cmdline(con->view->pid);
+	char *content_cwd = NULL;
+	char *content = cmdline ? content_command(ctx, con, cmdline, &content_cwd) : NULL;
+	if (content) {
+		// a launch per window that brings back its folder or directory
+		pid_t *none = calloc(1, sizeof(pid_t));
+		list_add(ctx->pids, none);
+		process = ctx->pids->length - 1;
+		fprintf(ctx->file, "launch\t%s\t%s\n", content_cwd, content);
+		free(content);
+		free(content_cwd);
+	} else {
+		// one launch per process: apps with several windows restore them themselves
+		for (int i = 0; i < ctx->pids->length; i++) {
+			if (*(pid_t *)ctx->pids->items[i] == con->view->pid) {
+				process = i;
+			}
 		}
-	}
-	if (process < 0) {
-		char *cmdline = read_cmdline(con->view->pid);
-		if (cmdline) {
+		if (process < 0 && cmdline) {
 			pid_t *pid = malloc(sizeof(pid_t));
 			*pid = con->view->pid;
 			list_add(ctx->pids, pid);
@@ -306,9 +604,9 @@ static void save_container(struct sway_container *con, void *data) {
 			char *cwd = read_cwd(con->view->pid);
 			fprintf(ctx->file, "launch\t%s\t%s\n", cwd ? cwd : "", cmdline);
 			free(cwd);
-			free(cmdline);
 		}
 	}
+	free(cmdline);
 
 	char *workspace = sanitize(con->pending.workspace ? con->pending.workspace->name : "");
 	char *id = sanitize(app_id);
@@ -331,9 +629,10 @@ static bool session_write(void) {
 	bool ok = false;
 	if (f) {
 		fprintf(f, "# tileWin session\n");
-		struct save_ctx ctx = { .file = f, .pids = create_list() };
+		struct save_ctx ctx = { .file = f, .pids = create_list(), .seen = create_list() };
 		root_for_each_container(save_container, &ctx);
 		list_free_items_and_destroy(ctx.pids);
+		list_free_items_and_destroy(ctx.seen);
 		ok = fclose(f) == 0 && rename(tmp, path) == 0;
 		sway_log(SWAY_DEBUG, "Saved session with %d windows", ctx.windows);
 	}
@@ -407,6 +706,20 @@ bool tw_restart(bool relaunch_apps, char **error) {
 	tw_panel_stop();
 	sway_terminate(TW_RESTART_EXIT_CODE);
 	return true;
+}
+
+static void spawn_shell(const char *script) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execl("/bin/sh", "/bin/sh", "-c", script, (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
 }
 
 /* Starts an app detached from tileWin and returns its pid (0 on failure). */
