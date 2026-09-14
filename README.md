@@ -45,6 +45,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. It is written in C, has no GTK/Q
   - `reload`: config.
   - `restart panel`: taskbar only.
   - `restart`: the whole compositor, e.g. after an update. The session stays open, and `relaunch-apps` starts your apps again.
+- **Fish completions** for `tilewinmsg` (including all tileWin commands and theme names), `tilewin`, `tilewin-theme` and `tilewin-panel`.
 - **Low resource use:**
   - Decorations are drawn once and cached.
   - The panel is event-driven, redraws only on change and polls system information only for widgets that are visible.

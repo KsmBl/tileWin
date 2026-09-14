@@ -232,7 +232,25 @@ install_data(
 	install_dir: join_paths(datadir, 'wayland-sessions'),
 )
 
+if get_option('fish-completions')
+	fish = dependency('fish', required: false)
+	if fish.found()
+		fish_completions_dir = fish.get_variable(pkgconfig: 'completionsdir',
+			pkgconfig_define: ['datadir', join_paths(prefix, datadir)])
+	else
+		fish_completions_dir = join_paths(datadir, 'fish', 'vendor_completions.d')
+	endif
+	install_data(
+		'completions/fish/tilewin.fish',
+		'completions/fish/tilewinmsg.fish',
+		'completions/fish/tilewin-panel.fish',
+		'completions/fish/tilewin-theme.fish',
+		install_dir: fish_completions_dir,
+	)
+endif
+
 summary({
+	'fish-completions': get_option('fish-completions'),
 	'gdk-pixbuf': gdk_pixbuf.found(),
 	'tray': have_tray,
 	'man-pages': scdoc.found(),
