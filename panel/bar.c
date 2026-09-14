@@ -522,6 +522,12 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		if (output) {
 			launcher_toggle(panel, output);
 		}
+	} else if (strcmp(cmd, "network") == 0 && output) {
+		flyout_network_toggle(panel, flyout_anchor(panel, output), NULL);
+	} else if (strcmp(cmd, "volume") == 0 && output) {
+		flyout_volume_toggle(panel, flyout_anchor(panel, output), NULL);
+	} else if (strcmp(cmd, "power") == 0 && output) {
+		flyout_power_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "run") == 0) {
 		if (output) {
 			rundialog_open(panel, output);

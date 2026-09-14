@@ -29,6 +29,8 @@ struct popup *popup_create(struct panel *panel, enum popup_kind kind,
 	struct popup *parent, struct panel_output *output, int x, int y, int width,
 	int height, const struct popup_vtable *vtable, void *data);
 void popup_destroy(struct popup *p);
+/* Moves and resizes an open popup (output-local coordinates). */
+void popup_move_resize(struct popup *p, int x, int y, int width, int height);
 void popup_close_later(struct panel *panel);
 void popup_set_dirty(struct popup *p);
 /* Opens a (sub)menu at output-local coordinates. */

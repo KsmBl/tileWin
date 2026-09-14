@@ -373,6 +373,19 @@ static void battery_render(struct widget *w, struct render_ctx *ctx, struct pbox
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
+
+/* Battery and brightness open the power flyout. */
+static bool power_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	flyout_power_toggle(w->panel, anchor, widget_conf(w, "settings", NULL));
+	return true;
+}
+
 static char *battery_tooltip(struct widget *w, struct hotspot *hs) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("Battery: %d%% (%s)", s->capacity, s->status);
@@ -384,6 +397,7 @@ const struct widget_impl widget_battery = {
 	.destroy = poll_destroy,
 	.measure = battery_measure,
 	.render = battery_render,
+	.click = power_click,
 	.tooltip = battery_tooltip,
 	.set_active = poll_set_active,
 };
@@ -498,8 +512,9 @@ static bool network_click(struct widget *w, struct psurface *s, struct hotspot *
 	if (button != BTN_LEFT) {
 		return false;
 	}
-	ipc_panel_command(w->panel, widget_conf(w, "settings",
-		"exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"));
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	flyout_network_toggle(w->panel, anchor, widget_conf(w, "settings", TW_NETWORK_SETTINGS));
 	return true;
 }
 
@@ -582,6 +597,7 @@ const struct widget_impl widget_brightness = {
 	.destroy = poll_destroy,
 	.measure = brightness_measure,
 	.render = brightness_render,
+	.click = power_click,
 	.scroll = brightness_scroll,
 	.tooltip = brightness_tooltip,
 	.set_active = poll_set_active,
@@ -629,6 +645,7 @@ static void volume_debounced(void *data) {
 	struct volume_data *d = w->data;
 	d->debounce = NULL;
 	volume_query(w);
+	flyout_volume_changed(w->panel);
 }
 
 static void volume_event_line(void *data, const char *line) {
@@ -713,7 +730,9 @@ static bool volume_click(struct widget *w, struct psurface *s, struct hotspot *h
 		uint32_t button, double x, double y) {
 	struct volume_data *d = w->data;
 	if (button == BTN_LEFT) {
-		ipc_panel_command(w->panel, widget_conf(w, "mixer", "exec pavucontrol"));
+		struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+		anchor.right_align = true;
+		flyout_volume_toggle(w->panel, anchor, widget_conf(w, "mixer", "exec pavucontrol"));
 		return true;
 	}
 	if (button == BTN_MIDDLE) {

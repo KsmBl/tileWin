@@ -27,6 +27,7 @@ executable(
 		'bar.c',
 		'config.c',
 		'draw.c',
+		'flyouts.c',
 		'ipc.c',
 		'launcher.c',
 		'main.c',

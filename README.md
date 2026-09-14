@@ -40,6 +40,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - Windows 11: centered grid.
   - All include app search, pinned apps, places and a power menu.
 - **Run dialog**, tooltips, calendar flyout.
+- **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
 - **Reload without logging out:**
   - `reload`: config.
@@ -150,7 +151,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `showdesktop` | Minimize all windows / restore them |
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
-| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
+| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
@@ -219,9 +220,9 @@ menu taskbar {
 | `title` | `max_width` |
 | `tray` | (none) |
 | `clock` | `format`, `tooltip_format` (strftime) |
-| `volume` | `format "{volume}%"`, `mixer`, `step` |
-| `network` | `interface`, `interval`, `settings` |
-| `battery` | `device`, `format "{capacity}% {status}"`, `interval` |
+| `volume` | `format "{volume}%"`, `mixer`, `step`, left click opens the volume flyout (`mixer` is its link) |
+| `network` | `interface`, `interval`, `settings` (command of the flyout's settings link), left click opens the Wi-Fi flyout |
+| `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |
 | `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval` |
 | `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval` |
 | `brightness` | (none; scroll changes it via brightnessctl) |

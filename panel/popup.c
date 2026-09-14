@@ -184,6 +184,22 @@ struct popup *popup_create(struct panel *panel, enum popup_kind kind,
 	return p;
 }
 
+void popup_move_resize(struct popup *p, int x, int y, int width, int height) {
+	struct panel_output *output = p->output;
+	width = width > output->width ? output->width : width;
+	height = height > output->height ? output->height : height;
+	x = x + width > output->width ? output->width - width : x;
+	y = y + height > output->height ? output->height - height : y;
+	p->x = x < 0 ? 0 : x;
+	p->y = y < 0 ? 0 : y;
+	p->width = width;
+	p->height = height;
+	zwlr_layer_surface_v1_set_margin(p->surface->layer_surface, p->y, 0, 0, p->x);
+	psurface_set_size(p->surface, width, height);
+	wl_surface_commit(p->surface->surface);
+	popup_set_dirty(p);
+}
+
 void popup_destroy(struct popup *p) {
 	if (!p) {
 		return;

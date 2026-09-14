@@ -383,6 +383,9 @@ enum popup_kind {
 	POPUP_RUN,
 	POPUP_CALENDAR,
 	POPUP_LAUNCHER,
+	POPUP_NETWORK,
+	POPUP_VOLUME,
+	POPUP_POWER,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -399,6 +402,16 @@ void rundialog_open(struct panel *panel, struct panel_output *output);
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
 void launcher_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
+
+/* flyouts.c */
+#define TW_NETWORK_SETTINGS "exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"
+/* Anchor at the tray end of the taskbar on an output. */
+struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *output);
+void flyout_network_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
+void flyout_volume_toggle(struct panel *panel, struct popup_anchor anchor, const char *mixer);
+void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
+/* Called when PulseAudio reports a change, refreshes an open volume flyout. */
+void flyout_volume_changed(struct panel *panel);
 
 /* tooltip.c */
 void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *hs);

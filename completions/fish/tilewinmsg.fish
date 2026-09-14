@@ -95,7 +95,7 @@ complete -c tilewinmsg -n '__tilewinmsg_command_is snap' -a 'left right up down 
 complete -c tilewinmsg -n '__tilewinmsg_command_is maximize minimize floating fullscreen sticky' -a 'enable disable toggle'
 complete -c tilewinmsg -n '__tilewinmsg_command_is alttab' -a 'next prev commit cancel'
 complete -c tilewinmsg -n '__tilewinmsg_command_is restart' -a 'panel\t"Restart only the taskbar" relaunch-apps\t"Restart and reopen apps"'
-complete -c tilewinmsg -n '__tilewinmsg_command_is panel' -a 'startmenu run launcher calendar activate window_menu menu reload close'
+complete -c tilewinmsg -n '__tilewinmsg_command_is panel' -a 'startmenu run launcher calendar network volume power activate window_menu menu reload close'
 complete -c tilewinmsg -n '__tilewinmsg_command_is wallpaper' -a 'theme none solid gradient image'
 complete -c tilewinmsg -n '__tilewinmsg_command_is workspace' -a 'next prev next_on_output prev_on_output back_and_forth number (__tilewinmsg_workspaces)'
 complete -c tilewinmsg -n '__tilewinmsg_command_is focus' -a 'left right up down parent child mode_toggle floating tiling output'
