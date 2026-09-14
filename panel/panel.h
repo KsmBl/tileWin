@@ -442,6 +442,15 @@ void apps_launch(struct panel *panel, const struct tw_desktop_entry *entry);
 struct tw_desktop_entry *apps_find(const char *id_or_app_id);
 cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, int size);
 cairo_surface_t *apps_icon(struct panel *panel, const char *name, int size);
+/* trayicons.c: the theme's notification area icons, or drawn glyphs */
+void ti_speaker(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	int volume, bool muted, uint32_t color);
+void ti_network(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	int bars, bool wireless, bool connected, uint32_t color);
+void ti_battery(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	int percent, bool charging, uint32_t color);
+void ti_brightness(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	uint32_t color);
 /* Forgets loaded icons, e.g. after a theme switch. */
 void apps_icon_cache_clear(void);
 const char *apps_display_name(const char *app_id);

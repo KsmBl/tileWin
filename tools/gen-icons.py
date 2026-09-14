@@ -60,9 +60,14 @@ NUM = re.compile(r'-?\d+(?:\.\d+)?')
 
 
 class Icon:
-    def __init__(self, theme):
+    def __init__(self, theme, tray=False):
         self.t = theme
-        self.p = STYLES[theme]
+        self.p = dict(STYLES[theme])
+        # Windows 95 tray icons are 16 px pixel art
+        self.size = 48
+        if self.p['crisp']:
+            self.size = 16 if tray else 32
+            self.p['k'] = self.size / 48
         self.defs = []
         self.els = []
         self.ids = 0
@@ -219,7 +224,7 @@ class Icon:
             x + 1, y + 1, w - 2, h * 0.48, round(rr, 2), gid))
 
     def svg(self):
-        size = 32 if self.p['crisp'] else 48
+        size = self.size
         head = ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
                 'viewBox="0 0 %d %d"%s>' % (size, size, size, size,
                                            ' shape-rendering="crispEdges"' if self.p['crisp'] else ''))
@@ -1006,6 +1011,156 @@ def edit_rename(ic):
     emblem_pencil(ic, 34, 26, 22)
 
 
+# ---------------------------------------------------------------- tray icons
+# Shown at 16-24 px in the notification area and larger in the flyouts.
+# Windows 10 and 11 use white shapes that the panel tints with the text color
+# ("tray { icons symbolic }"); the older themes use colored icons.
+
+SYMBOLIC = ('win10', 'win11')
+WHITE = '#ffffff'
+
+
+def outlined_arc(ic, cx, cy, r, a0, a1, width):
+    """A white arc with a dark rim, readable on light and dark backgrounds."""
+    if ic.t == 'win95':
+        ic.arc(cx, cy, r, a0, a1, '#000000', width, steps=10)
+        return
+    ic.arc(cx, cy, r, a0, a1, pick(ic, winxp='#0c3a8c', default='#1c2733'), width + 2.4, steps=12)
+    ic.arc(cx, cy, r, a0, a1, WHITE, width, steps=12)
+
+
+def badge_off(ic, cx=36, cy=36, r=10):
+    if ic.t in SYMBOLIC:
+        ic.line([(cx - r * .6, cy - r * .6), (cx + r * .6, cy + r * .6)], WHITE, 3.6)
+        ic.line([(cx + r * .6, cy - r * .6), (cx - r * .6, cy + r * .6)], WHITE, 3.6)
+        return
+    ic.circle(cx, cy, r, T(ic, RED))
+    w = 3.4 if ic.t != 'win95' else 3
+    ic.line([(cx - r * .45, cy - r * .45), (cx + r * .45, cy + r * .45)], WHITE, w)
+    ic.line([(cx + r * .45, cy - r * .45), (cx - r * .45, cy + r * .45)], WHITE, w)
+
+
+def tray_speaker(ic, waves, muted):
+    t = ic.t
+    if t in SYMBOLIC:
+        shape = [(4, 17), (13, 17), (24, 7), (24, 41), (13, 31), (4, 31)]
+        if t == 'win11':
+            ic.poly(shape, WHITE, outline=False, flat=True)
+        else:
+            ic.line(shape + [shape[0]], WHITE, 3.4)
+        if muted:
+            ic.line([(31, 18), (43, 30)], WHITE, 3.6)
+            ic.line([(43, 18), (31, 30)], WHITE, 3.6)
+        for i in range(waves):
+            ic.arc(24, 24, 8 + 7 * i, -48, 48, WHITE, 3.6, steps=12)
+        return
+    ic.rect(3, 16, 11, 16, pick(ic, win95='#c0c0c0', winxp='#dfe6f1', win7='#e8eef5'))
+    ic.poly([(14, 16), (26, 5), (26, 43), (14, 32)], pick(ic, win95='#ffff00', winxp='#f2c84b',
+                                                        win7='#d4dde8'))
+    for i in range(waves):
+        outlined_arc(ic, 26, 24, 8 + 7 * i, -48, 48, 3.4)
+    if muted:
+        badge_off(ic, 37, 34, 10)
+
+
+def tray_wireless(ic, level, offline=False):
+    t = ic.t
+    if t == 'win10':
+        for i in range(4):
+            on = not offline and i < level
+            if i == 0:
+                ic.circle(24, 40, 3.6, WHITE, outline=False, flat=True, opacity=1 if on else .35)
+                continue
+            pts = []
+            for k in range(13):
+                a = math.radians(-135 + 90 * k / 12)
+                pts.append((24 + 11 * i * math.cos(a), 41 + 11 * i * math.sin(a)))
+            ic.line(pts, WHITE, 4, opacity=1 if on else .35)
+    elif t == 'win11':
+        bands = [(0, 9), (13, 21), (25, 32), (36, 42)]
+        for i, (r0, r1) in enumerate(bands):
+            on = not offline and i < level
+            outer = [(24 + r1 * math.cos(math.radians(a)), 44 + r1 * math.sin(math.radians(a)))
+                     for a in range(-135, -44, 5)]
+            inner = [(24 + r0 * math.cos(math.radians(a)), 44 + r0 * math.sin(math.radians(a)))
+                     for a in range(-45, -136, -5)] if r0 else [(24, 44)]
+            ic.poly(outer + inner, WHITE, outline=False, flat=True, opacity=1 if on else .35)
+    else:
+        for i in range(4):
+            on = not offline and i < level
+            h = 10 + i * 10
+            color = (pick(ic, win95='#00c000', winxp='#56d33c', win7='#ffffff') if on else
+                     pick(ic, win95='#808080', winxp='#a9bfdf', win7='#6f7c8a'))
+            ic.rect(4 + i * 11, 44 - h, 8, h, color, r=1)
+    if offline:
+        badge_off(ic, 37, 36, 10)
+
+
+def tray_wired(ic, offline=False):
+    if ic.t in SYMBOLIC:
+        ic.line([(5, 8), (43, 8), (43, 32), (5, 32), (5, 8)], WHITE, 3.4)
+        ic.line([(24, 33), (24, 40)], WHITE, 3.4)
+        ic.line([(14, 41), (34, 41)], WHITE, 3.4)
+    else:
+        emblem_monitor(ic, 17, 19, 28)
+        emblem_monitor(ic, 31, 31, 28)
+    if offline:
+        badge_off(ic, 37, 36, 10)
+
+
+def tray_battery(ic, level, charging):
+    t = ic.t
+    fill_w = 29 * level / 100
+    if t in SYMBOLIC:
+        right = 30 if charging else 40
+        ic.line([(4, 15), (right, 15), (right, 33), (4, 33), (4, 15)], WHITE, 3.2)
+        ic.rect(right + 2, 20, 4, 8, WHITE, outline=False, flat=True)
+        inner = (right - 11) * level / 100
+        if inner > 0:
+            ic.rect(8, 19, inner, 10, WHITE, outline=False, flat=True)
+        if charging:
+            ic.poly([(42, 8), (35, 25), (40, 25), (37, 40), (46, 21), (41, 21)], WHITE, outline=False,
+                    flat=True)
+        return
+    ic.rect(3, 13, 37, 22, pick(ic, win95='#c0c0c0', winxp='#f1f4f9', win7='#e4e9ef'), r=2)
+    ic.rect(40, 19, 5, 10, pick(ic, win95='#808080', winxp='#9aa6b6', win7='#8792a0'), r=1)
+    color = T(ic, GREEN) if level >= 40 else pick(ic, win95='#ffff00', default='#f2b322') if level >= 20 \
+        else T(ic, RED)
+    if fill_w > 0:
+        ic.rect(7, 17, fill_w, 14, color, r=1, outline=False)
+    if charging:
+        ic.poly([(26, 3), (15, 25), (22, 25), (18, 45), (32, 20), (25, 20)],
+                pick(ic, win95='#ffff00', default='#ffd23f'))
+
+
+def tray_brightness(ic):
+    color = WHITE if ic.t in SYMBOLIC else pick(ic, win95='#ffff00', default='#ffc928')
+    for i in range(8):
+        a = math.radians(i * 45)
+        ic.line([(24 + 13 * math.cos(a), 24 + 13 * math.sin(a)), (24 + 20 * math.cos(a), 24 + 20 * math.sin(a))],
+                color if ic.t in SYMBOLIC else pick(ic, win95='#000000', default='#e8962a'), 3.6)
+    ic.circle(24, 24, 8.5, color, flat=ic.t in SYMBOLIC, outline=ic.t not in SYMBOLIC)
+
+
+TRAY_ICONS = {
+    'tray-volume-muted': lambda ic: tray_speaker(ic, 0, True),
+    'tray-volume-off': lambda ic: tray_speaker(ic, 0, False),
+    'tray-volume-low': lambda ic: tray_speaker(ic, 1, False),
+    'tray-volume-medium': lambda ic: tray_speaker(ic, 2, False),
+    'tray-volume-high': lambda ic: tray_speaker(ic, 3, False),
+    'tray-network-wireless-offline': lambda ic: tray_wireless(ic, 0, True),
+    'tray-network-wired': lambda ic: tray_wired(ic),
+    'tray-network-wired-offline': lambda ic: tray_wired(ic, True),
+    'tray-brightness': tray_brightness,
+}
+for _level in range(5):
+    TRAY_ICONS['tray-network-wireless-%d' % _level] = (lambda lv: lambda ic: tray_wireless(ic, lv))(_level)
+for _level in range(0, 101, 20):
+    for _charging in (False, True):
+        TRAY_ICONS['tray-battery-%d%s' % (_level, '-charging' if _charging else '')] = \
+            (lambda lv, ch: lambda ic: tray_battery(ic, lv, ch))(_level, _charging)
+
+
 # ---------------------------------------------------------------- aliases
 
 # canonical icon: other icon names and desktop entry @Categories that use it
@@ -1056,6 +1211,13 @@ def main():
             fn(ic)
             with open(os.path.join(out, name + '.svg'), 'w') as f:
                 f.write(ic.svg())
+        for name, fn in TRAY_ICONS.items():
+            if only and name not in only:
+                continue
+            ic = Icon(theme, tray=True)
+            fn(ic)
+            with open(os.path.join(out, name + '.svg'), 'w') as f:
+                f.write(ic.svg())
         # names drawn by the same function become aliases of the first one
         for name, fn in ICONS.items():
             if canonical[fn] != name:
@@ -1064,7 +1226,7 @@ def main():
             f.write(aliases_text())
             for target, name in extra:
                 f.write('%s %s\n' % (target, name))
-    print('%d icons x %d themes' % (len(canonical), len(THEMES)))
+    print('%d icons and %d tray icons x %d themes' % (len(canonical), len(TRAY_ICONS), len(THEMES)))
 
 
 if __name__ == '__main__':

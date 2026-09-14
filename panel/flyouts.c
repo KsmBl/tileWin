@@ -666,7 +666,7 @@ static void net_render(struct popup *p, cairo_t *cr) {
 		subtitle = !f->loaded ? "Checking..." : f->have_nmcli ? "No network connection" :
 			"NetworkManager (nmcli) was not found";
 	}
-	pd_glyph_network(cr, x0, y + 18, 28, active ? signal_bars(active->signal) : 4,
+	ti_network(p->panel, cr, x0, y + 18, 28, active ? signal_bars(active->signal) : 4,
 		active || !f->wired, active || f->wired, st.fg);
 	int text_w = cw - 44 - (f->wifi_device ? 100 : 0);
 	pd_text(cr, st.bold, title, x0 + 44, y + 12, text_w, 22, st.fg, PD_LEFT);
@@ -691,7 +691,7 @@ static void net_render(struct popup *p, cairo_t *cr) {
 			if (expanded || hovered(&f->base, row)) {
 				fill_hover(cr, &st, row);
 			}
-			pd_glyph_network(cr, x0, y + 14, 20, signal_bars(n->signal), true, true, st.fg);
+			ti_network(p->panel, cr, x0, y + 14, 20, signal_bars(n->signal), true, true, st.fg);
 			pd_text(cr, n->active ? st.bold : st.font, n->ssid, x0 + 34, y + 6, cw - 34, 20,
 				st.fg, PD_LEFT);
 			bool secured = n->security[0] && strcmp(n->security, "--") != 0;
@@ -1199,7 +1199,7 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 		if (hovered(&f->base, mute)) {
 			fill_hover(cr, &st, mute);
 		}
-		pd_glyph_speaker(cr, x0, y + 20, 24, volume, sink->muted, st.fg);
+		ti_speaker(p->panel, cr, x0, y + 20, 24, volume, sink->muted, st.fg);
 		psurface_add_hotspot(p->surface, mute.x, mute.y, mute.width, mute.height, NULL,
 			VOL_HS_MUTE, -1, NULL);
 		struct pbox slider = { x0 + 38, y + 14, cw - 38 - 46, 36 };
@@ -1257,7 +1257,7 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 				if (icon && !s->muted) {
 					pd_icon(cr, icon, x0, y + 20, 24);
 				} else {
-					pd_glyph_speaker(cr, x0 + 2, y + 22, 20, value, s->muted, st.fg);
+					ti_speaker(p->panel, cr, x0 + 2, y + 22, 20, value, s->muted, st.fg);
 				}
 				psurface_add_hotspot(p->surface, app_mute.x, app_mute.y, app_mute.width,
 					app_mute.height, NULL, VOL_HS_MUTE, s->index, NULL);
@@ -1647,7 +1647,7 @@ static void power_render(struct popup *p, cairo_t *cr) {
 	int y = M;
 
 	if (f->battery) {
-		pd_glyph_battery(cr, x0, y + 20, 44, f->capacity, f->charging, st.fg);
+		ti_battery(p->panel, cr, x0, y + 20, 44, f->capacity, f->charging, st.fg);
 		char percent[16];
 		snprintf(percent, sizeof(percent), "%d%%", f->capacity);
 		pd_text(cr, st.big, percent, x0 + 60, y + 14, cw - 60, 32, st.fg, PD_LEFT);
@@ -1663,7 +1663,7 @@ static void power_render(struct popup *p, cairo_t *cr) {
 	if (f->backlight) {
 		draw_line(cr, &st, p, y);
 		int value = f->dragging ? f->drag_value : f->brightness;
-		pd_glyph_brightness(cr, x0, y + 18, 22, st.fg);
+		ti_brightness(p->panel, cr, x0, y + 18, 22, st.fg);
 		struct pbox slider = { x0 + 38, y + 10, cw - 38 - 46, 36 };
 		draw_slider(cr, &st, slider, value);
 		psurface_add_hotspot(p->surface, slider.x, slider.y, slider.width, slider.height, NULL,

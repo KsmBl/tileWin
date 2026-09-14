@@ -362,7 +362,7 @@ static void battery_render(struct widget *w, struct render_ctx *ctx, struct pbox
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
 	int g = glyph_size(ctx);
-	pd_glyph_battery(ctx->cairo, x, b.y + (b.height - g) / 2.0, g, s->capacity,
+	ti_battery(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, s->capacity,
 		strcmp(s->status, "Charging") == 0, bar_fg(ctx->panel));
 	char *text = battery_text(w);
 	if (text) {
@@ -491,7 +491,7 @@ static void network_render(struct widget *w, struct render_ctx *ctx, struct pbox
 	double x = render_item_start(ctx, b);
 	int g = glyph_size(ctx);
 	int bars = s->quality > 75 ? 4 : s->quality > 50 ? 3 : s->quality > 25 ? 2 : 1;
-	pd_glyph_network(ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bars, s->wireless,
+	ti_network(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bars, s->wireless,
 		s->connected, bar_fg(ctx->panel));
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
@@ -574,7 +574,7 @@ static int brightness_measure(struct widget *w, struct render_ctx *ctx) {
 static void brightness_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	double x = render_item_start(ctx, b);
 	int g = glyph_size(ctx);
-	pd_glyph_brightness(ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bar_fg(ctx->panel));
+	ti_brightness(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bar_fg(ctx->panel));
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
@@ -711,7 +711,7 @@ static void volume_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	struct volume_data *d = w->data;
 	double x = render_item_start(ctx, b);
 	int g = glyph_size(ctx);
-	pd_glyph_speaker(ctx->cairo, x, b.y + (b.height - g) / 2.0, g, d->volume, d->muted,
+	ti_speaker(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, d->volume, d->muted,
 		bar_fg(ctx->panel));
 	const char *format = widget_conf(w, "format", NULL);
 	if (format) {

@@ -38,6 +38,7 @@ executable(
 		'startmenu.c',
 		'surface.c',
 		'tooltip.c',
+		'trayicons.c',
 		'wayland.c',
 		'widgets/basic.c',
 		'widgets/custom.c',
