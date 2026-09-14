@@ -4,6 +4,7 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "stringop.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
@@ -323,6 +324,25 @@ bool tw_theme_save_current(const char *name) {
 	free(path);
 	free(config_dir);
 	return ok;
+}
+
+char *tw_theme_icon_dir(const struct tw_theme *theme) {
+	if (!theme) {
+		return NULL;
+	}
+	const char *set = tw_theme_str(theme, "icons.set", theme->name);
+	char *dir = set ? tw_theme_find_dir(set) : NULL;
+	if (!dir) {
+		return NULL;
+	}
+	char *icons = format_str("%s/icons", dir);
+	free(dir);
+	struct stat st;
+	if (stat(icons, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		free(icons);
+		return NULL;
+	}
+	return icons;
 }
 
 char *tw_theme_file(const struct tw_theme *theme, const char *file) {

@@ -10,6 +10,7 @@
 #include "ipc-client.h"
 #include "log.h"
 #include "panel.h"
+#include "tw_desktop.h"
 #include "stringop.h"
 #include "tw_paths.h"
 
@@ -99,6 +100,10 @@ static void load_theme(struct panel *p) {
 	}
 	tw_theme_free(p->theme);
 	p->theme = theme;
+	char *icons = tw_theme_icon_dir(theme);
+	tw_icon_set_theme_dir(icons);
+	free(icons);
+	apps_icon_cache_clear();
 }
 
 static void watch_files(struct panel *p) {

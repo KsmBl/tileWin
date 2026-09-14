@@ -60,6 +60,11 @@ bool tw_color_scheme_is_dark(void);
 /* True once a scheme was chosen, so tileWin does not touch app settings before. */
 bool tw_color_scheme_is_set(void);
 bool tw_color_scheme_save(bool dark);
+/*
+ * Directory of the theme's own icons: <theme>/icons of the theme named by
+ * "icons.set" (default: the theme itself), or NULL if there is none.
+ */
+char *tw_theme_icon_dir(const struct tw_theme *theme);
 /* Path of a file inside the theme directory. Newly allocated. */
 char *tw_theme_file(const struct tw_theme *theme, const char *file);
 

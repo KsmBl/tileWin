@@ -116,6 +116,9 @@ void tw_init(const char *mode_override) {
 	char *name = tw_theme_current_name();
 	tw_theme = load_theme_or_fallback(name);
 	free(name);
+	char *icons = tw_theme_icon_dir(tw_theme);
+	tw_icon_set_theme_dir(icons);
+	free(icons);
 	if (tw_color_scheme_is_set()) {
 		// apps may have been changed by another desktop since the last session
 		apply_app_color_scheme(tw_color_scheme_is_dark());
@@ -260,6 +263,9 @@ bool tw_request_theme(const char *name, char **error) {
 	}
 	tw_theme_free(old);
 	tw_theme_generation++;
+	char *icons = tw_theme_icon_dir(theme);
+	tw_icon_set_theme_dir(icons);
+	free(icons);
 	tw_icon_cache_clear();
 	tw_theme_save_current(theme->name);
 	wl_event_loop_add_idle(server.wl_event_loop, do_theme_switch, NULL);

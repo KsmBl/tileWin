@@ -182,6 +182,9 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 		tw_desktop_entry_free(e);
 		return NULL;
 	}
+	if (e->icon && e->categories) {
+		tw_icon_note_categories(e->icon, e->categories);
+	}
 	return e;
 }
 

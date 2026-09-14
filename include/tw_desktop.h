@@ -35,6 +35,16 @@ char *tw_desktop_exec_command(const struct tw_desktop_entry *entry);
 
 /* Loads a PNG/SVG (or anything gdk-pixbuf knows) into a size x size surface. */
 cairo_surface_t *tw_icon_load_file(const char *path, int size);
+/*
+ * Icons of the active tileWin theme, <theme>/icons/<name>.svg. They replace
+ * icons of the same name, names listed in <dir>/aliases and the icons of apps
+ * whose desktop entry has a category listed there. NULL turns them off.
+ */
+void tw_icon_set_theme_dir(const char *dir);
+/* True if the active tileWin theme has its own icon for this name. */
+bool tw_icon_theme_has(const char *name);
+/* Remembers an app icon's desktop categories for category aliases. */
+void tw_icon_note_categories(const char *icon, const char *categories);
 /* Loads an icon by theme name or absolute path. */
 cairo_surface_t *tw_icon_load(const char *name, int size, const char *theme);
 /* Resolves the icon for an application id via its desktop entry. */

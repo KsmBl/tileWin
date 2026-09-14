@@ -442,6 +442,8 @@ void apps_launch(struct panel *panel, const struct tw_desktop_entry *entry);
 struct tw_desktop_entry *apps_find(const char *id_or_app_id);
 cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, int size);
 cairo_surface_t *apps_icon(struct panel *panel, const char *name, int size);
+/* Forgets loaded icons, e.g. after a theme switch. */
+void apps_icon_cache_clear(void);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);

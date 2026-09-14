@@ -113,6 +113,19 @@ struct icon_entry {
 
 static list_t *icons = NULL;
 
+void apps_icon_cache_clear(void) {
+	for (int i = 0; icons && i < icons->length; i++) {
+		struct icon_entry *e = icons->items[i];
+		if (e->surface) {
+			cairo_surface_destroy(e->surface);
+		}
+		free(e->key);
+		free(e);
+	}
+	list_free(icons);
+	icons = NULL;
+}
+
 static cairo_surface_t *cache_lookup(const char *key, int size, bool *found) {
 	*found = false;
 	for (int i = 0; icons && i < icons->length; i++) {

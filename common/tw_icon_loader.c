@@ -3,10 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <librsvg/rsvg.h>
 #include "config.h"
 #include "list.h"
 #include "log.h"
+#include "stringop.h"
 #include "swaybar/tray/icon.h"
 #include "tw_desktop.h"
 #if HAVE_GDK_PIXBUF
@@ -15,6 +17,167 @@
 
 static list_t *themes = NULL;
 static list_t *basedirs = NULL;
+
+struct icon_alias {
+	char *name;   // icon name, or "@Category" of a desktop entry
+	char *target; // icon file name without .svg
+};
+
+static char *theme_icon_dir = NULL;
+static list_t *theme_aliases = NULL; // struct icon_alias *, in file order
+static list_t *noted_categories = NULL; // icon name -> categories
+
+static void alias_list_free(list_t *list) {
+	if (!list) {
+		return;
+	}
+	for (int i = 0; i < list->length; i++) {
+		struct icon_alias *alias = list->items[i];
+		free(alias->name);
+		free(alias->target);
+		free(alias);
+	}
+	list_free(list);
+}
+
+static void load_theme_aliases(void) {
+	alias_list_free(theme_aliases);
+	theme_aliases = create_list();
+	char *path = format_str("%s/aliases", theme_icon_dir);
+	FILE *f = fopen(path, "r");
+	free(path);
+	if (!f) {
+		return;
+	}
+	char *line = NULL;
+	size_t cap = 0;
+	while (getline(&line, &cap, f) > 0) {
+		if (line[0] == '#') {
+			continue;
+		}
+		char *save = NULL;
+		char *target = strtok_r(line, " \t\r\n", &save);
+		if (!target) {
+			continue;
+		}
+		char *name;
+		while ((name = strtok_r(NULL, " \t\r\n", &save))) {
+			struct icon_alias *alias = calloc(1, sizeof(*alias));
+			alias->name = strdup(name);
+			alias->target = strdup(target);
+			list_add(theme_aliases, alias);
+		}
+	}
+	free(line);
+	fclose(f);
+}
+
+void tw_icon_set_theme_dir(const char *dir) {
+	if ((!dir && !theme_icon_dir) ||
+			(dir && theme_icon_dir && strcmp(dir, theme_icon_dir) == 0)) {
+		return;
+	}
+	free(theme_icon_dir);
+	theme_icon_dir = dir ? strdup(dir) : NULL;
+	alias_list_free(theme_aliases);
+	theme_aliases = NULL;
+	if (theme_icon_dir) {
+		load_theme_aliases();
+	}
+}
+
+void tw_icon_note_categories(const char *icon, const char *categories) {
+	if (!noted_categories) {
+		noted_categories = create_list();
+	}
+	for (int i = 0; i < noted_categories->length; i++) {
+		struct icon_alias *noted = noted_categories->items[i];
+		if (strcmp(noted->name, icon) == 0) {
+			if (!strstr(noted->target, categories)) {
+				char *joined = format_str("%s;%s", noted->target, categories);
+				free(noted->target);
+				noted->target = joined;
+			}
+			return;
+		}
+	}
+	struct icon_alias *noted = calloc(1, sizeof(*noted));
+	noted->name = strdup(icon);
+	noted->target = strdup(categories);
+	list_add(noted_categories, noted);
+}
+
+static bool has_category(const char *categories, const char *category) {
+	size_t len = strlen(category);
+	for (const char *p = categories; (p = strstr(p, category)); p += len) {
+		if ((p == categories || p[-1] == ';') && (p[len] == ';' || p[len] == '\0')) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static char *theme_file(const char *target) {
+	char *path = format_str("%s/%s.svg", theme_icon_dir, target);
+	if (access(path, R_OK) != 0) {
+		free(path);
+		return NULL;
+	}
+	return path;
+}
+
+static char *theme_alias_path(const char *name) {
+	for (int i = 0; theme_aliases && i < theme_aliases->length; i++) {
+		struct icon_alias *alias = theme_aliases->items[i];
+		if (alias->name[0] != '@' && strcmp(alias->name, name) == 0) {
+			return theme_file(alias->target);
+		}
+	}
+	return NULL;
+}
+
+/* Path of the active tileWin theme's own icon for a name, or NULL. */
+static char *theme_icon_path(const char *name) {
+	if (!theme_icon_dir || !name || !*name) {
+		return NULL;
+	}
+	char *path = NULL;
+	if (!strchr(name, '/')) {
+		path = theme_file(name);
+		if (!path) {
+			path = theme_alias_path(name);
+		}
+	} else {
+		// an absolute icon path: its file name may still be a known app
+		char *base = strdup(strrchr(name, '/') + 1);
+		char *dot = strrchr(base, '.');
+		if (dot) {
+			*dot = '\0';
+		}
+		path = theme_alias_path(base);
+		free(base);
+	}
+	for (int i = 0; !path && noted_categories && i < noted_categories->length; i++) {
+		struct icon_alias *noted = noted_categories->items[i];
+		if (strcmp(noted->name, name) != 0) {
+			continue;
+		}
+		for (int j = 0; !path && theme_aliases && j < theme_aliases->length; j++) {
+			struct icon_alias *alias = theme_aliases->items[j];
+			if (alias->name[0] == '@' && has_category(noted->target, alias->name + 1)) {
+				path = theme_file(alias->target);
+			}
+		}
+		break;
+	}
+	return path;
+}
+
+bool tw_icon_theme_has(const char *name) {
+	char *path = theme_icon_path(name);
+	free(path);
+	return path != NULL;
+}
 
 static bool has_suffix(const char *s, const char *suffix) {
 	size_t ls = strlen(s), lx = strlen(suffix);
@@ -135,6 +298,14 @@ cairo_surface_t *tw_icon_load_file(const char *path, int size) {
 cairo_surface_t *tw_icon_load(const char *name, int size, const char *theme) {
 	if (!name || !*name) {
 		return NULL;
+	}
+	char *themed = theme_icon_path(name);
+	if (themed) {
+		cairo_surface_t *surface = tw_icon_load_file(themed, size);
+		free(themed);
+		if (surface) {
+			return surface;
+		}
 	}
 	if (name[0] == '/') {
 		return tw_icon_load_file(name, size);

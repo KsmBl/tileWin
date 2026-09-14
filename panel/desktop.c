@@ -283,6 +283,11 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 		}
 		cairo_surface_t *icon = NULL;
 		for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
+			if (tw_icon_theme_has(item->icons[k])) {
+				icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
+			}
+		}
+		for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
 			icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
 		}
 		pd_icon(cr, icon, x + (CELL_W - ICON_SIZE) / 2.0, y + 8, ICON_SIZE);
