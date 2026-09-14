@@ -440,6 +440,7 @@ static void add_xdg_output(struct panel *panel, struct panel_output *output) {
 }
 
 static void output_destroy(struct panel_output *output) {
+	desktop_destroy(output);
 	bar_destroy(output);
 	struct psurface *s, *tmp;
 	wl_list_for_each_safe(s, tmp, &output->panel->surfaces, link) {
@@ -590,6 +591,11 @@ void panel_outputs_update_bars(struct panel *panel) {
 			bar_create(output);
 		} else {
 			bar_destroy(output);
+		}
+		if (panel->config->desktop_icons) {
+			desktop_create(output);
+		} else {
+			desktop_destroy(output);
 		}
 	}
 }

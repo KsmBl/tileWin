@@ -113,6 +113,17 @@ static void watch_files(struct panel *p) {
 		inotify_rm_watch(p->inotify_fd, p->theme_watch);
 		p->theme_watch = -1;
 	}
+	if (p->desktop_watch >= 0) {
+		inotify_rm_watch(p->inotify_fd, p->desktop_watch);
+		p->desktop_watch = -1;
+	}
+	if (p->config && p->config->desktop_icons) {
+		char *desktop = desktop_directory();
+		tw_mkdir_p(desktop);
+		p->desktop_watch = inotify_add_watch(p->inotify_fd, desktop, IN_CREATE | IN_DELETE |
+			IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE | IN_ATTRIB);
+		free(desktop);
+	}
 	// watch the directories so editors that replace files are handled
 	char *dir = tw_config_dir();
 	if (dir) {
@@ -170,10 +181,12 @@ static void inotify_in(int fd, short mask, void *data) {
 	struct panel *p = data;
 	char buf[4096];
 	ssize_t len = read(fd, buf, sizeof(buf));
-	bool relevant = false;
+	bool relevant = false, desktop = false;
 	for (char *ptr = buf; len > 0 && ptr < buf + len;) {
 		struct inotify_event *ev = (struct inotify_event *)ptr;
-		if (ev->len > 0 && (strcmp(ev->name, "taskbar.conf") == 0 ||
+		if (p->desktop_watch >= 0 && ev->wd == p->desktop_watch) {
+			desktop = true;
+		} else if (ev->len > 0 && (strcmp(ev->name, "taskbar.conf") == 0 ||
 				strcmp(ev->name, "current-theme") == 0 ||
 				(p->config_path && strstr(p->config_path, ev->name)))) {
 			relevant = true;
@@ -182,6 +195,9 @@ static void inotify_in(int fd, short mask, void *data) {
 	}
 	if (relevant) {
 		panel_request_reload(p);
+	}
+	if (desktop) {
+		desktop_dir_changed(p);
 	}
 }
 
@@ -261,7 +277,7 @@ int main(int argc, char **argv) {
 	sigaction(SIGPIPE, &ign, NULL);
 
 	panel.ipc_cmd_fd = panel.ipc_event_fd = -1;
-	panel.inotify_fd = panel.config_watch = panel.theme_watch = -1;
+	panel.inotify_fd = panel.config_watch = panel.theme_watch = panel.desktop_watch = -1;
 	panel.loop = loop_create();
 	panel.layout = LAYOUT_WINDOW;
 	if (!panel.config_path) {

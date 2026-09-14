@@ -214,6 +214,7 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 	config->font = font ? strdup(font) : NULL;
 	const char *terminal = twconf_value(root, "terminal");
 	config->terminal = strdup(terminal ? terminal : "xfce4-terminal -x");
+	config->desktop_icons = twconf_parse_bool(twconf_value(root, "desktop_icons"), true);
 	const char *delay = twconf_value(root, "tooltip_delay");
 	if (delay) {
 		config->tooltip_delay = atoi(delay);

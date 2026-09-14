@@ -101,6 +101,7 @@ struct panel_output {
 	int x, y, width, height;
 	bool ready;
 	struct psurface *bar;
+	struct psurface *desktop, *desktop_bg; // desktop icons and desktop input surface
 	struct wl_list link; // panel::outputs
 };
 
@@ -192,6 +193,7 @@ struct panel_config {
 	list_t *widgets; // struct widget * (all instances)
 	struct twconf_node *startmenu;
 	int tooltip_delay;
+	bool desktop_icons;
 };
 
 /* ---------- widgets ---------- */
@@ -316,7 +318,7 @@ struct panel {
 	struct tw_theme *theme;
 	enum layout_index layout;
 	int inotify_fd;
-	int config_watch, theme_watch;
+	int config_watch, theme_watch, desktop_watch;
 	struct loop_timer *reload_timer;
 
 	struct popup *popup;
@@ -386,6 +388,7 @@ enum popup_kind {
 	POPUP_NETWORK,
 	POPUP_VOLUME,
 	POPUP_POWER,
+	POPUP_DIALOG,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -402,6 +405,13 @@ void rundialog_open(struct panel *panel, struct panel_output *output);
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
 void launcher_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
+
+/* desktop.c */
+char *desktop_directory(void);
+void desktop_create(struct panel_output *output);
+void desktop_destroy(struct panel_output *output);
+void desktop_dir_changed(struct panel *panel);
+void desktop_handle_command(struct panel *panel, int argc, char **argv);
 
 /* flyouts.c */
 #define TW_NETWORK_SETTINGS "exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"

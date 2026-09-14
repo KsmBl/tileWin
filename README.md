@@ -40,6 +40,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - Windows 11: centered grid.
   - All include app search, pinned apps, places and a power menu.
 - **Run dialog**, tooltips, calendar flyout.
+- **Desktop** like on Windows: icons of the files in `~/Desktop` (double-click opens them) and a right-click menu to create folders, text documents and shortcuts to programs, files or web addresses, rename or delete (to the trash) items, open a terminal there, and change the wallpaper or theme. Turn the icons off with `desktop_icons no` in `taskbar.conf`.
 - **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
 - **Dark mode:** `tilewin-theme scheme dark` (or the switch in tileWin Settings) gives every theme dark title bars, menus, flyouts and start menu, and switches GTK, GNOME (and Qt apps through the desktop portal) and KDE apps to dark as well.
@@ -155,7 +156,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `showdesktop` | Minimize all windows / restore them |
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
-| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
+| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
@@ -248,6 +249,7 @@ menu taskbar {
 - `menu taskbar` is the right-click menu of the empty taskbar area.
 - `menu start` is the right-click menu of the start button.
 - `menu window` adds entries to the menu of taskbar buttons. `{id}` is replaced with the window's con_id.
+- `menu desktop` adds entries to the right-click menu of the empty desktop.
 
 The `startmenu { }` block sets pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
 

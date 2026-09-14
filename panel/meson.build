@@ -6,6 +6,7 @@ panel_tray_files = have_tray ? files(
 
 panel_deps = [
 	cairo,
+	dependency('gio-2.0'),
 	gdk_pixbuf,
 	jsonc,
 	math,
@@ -26,6 +27,7 @@ executable(
 		'apps.c',
 		'bar.c',
 		'config.c',
+		'desktop.c',
 		'draw.c',
 		'flyouts.c',
 		'ipc.c',

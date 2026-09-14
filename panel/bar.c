@@ -527,6 +527,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		if (output) {
 			launcher_toggle(panel, output);
 		}
+	} else if (strcmp(cmd, "desktop") == 0) {
+		desktop_handle_command(panel, argc - 1, argv + 1);
 	} else if (strcmp(cmd, "network") == 0 && output) {
 		flyout_network_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "volume") == 0 && output) {
