@@ -1080,6 +1080,9 @@ void view_unmap(struct sway_view *view) {
 
 void view_update_size(struct sway_view *view) {
 	struct sway_container *con = view->container;
+	if (tw_container_fills_slot(con)) {
+		return; // the slot keeps its size, the rest is filled
+	}
 	con->pending.content_width = view->geometry.width;
 	con->pending.content_height = view->geometry.height;
 	container_set_geometry_from_content(con);
@@ -1087,6 +1090,13 @@ void view_update_size(struct sway_view *view) {
 
 void view_center_and_clip_surface(struct sway_view *view) {
 	struct sway_container *con = view->container;
+	if (tw_container_fills_slot(con)) {
+		tw_update_content_fill(con);
+		return;
+	}
+	if (con->tw.content_bg) {
+		wlr_scene_node_set_enabled(&con->tw.content_bg->node, false);
+	}
 
 	bool clip_to_geometry = true;
 

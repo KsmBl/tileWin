@@ -1,3 +1,6 @@
+#include <wlr/types/wlr_subcompositor.h>
+#include <wlr/render/wlr_texture.h>
+#include <drm_fourcc.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,6 +233,88 @@ static struct wlr_box snap_box(struct wlr_box area, enum tw_snap snap) {
 		break;
 	}
 	return area;
+}
+
+bool tw_container_fills_slot(struct sway_container *con) {
+	return con && con->view && container_is_floating(con) && con->pending.tw_deco &&
+		con->pending.fullscreen_mode == FULLSCREEN_NONE &&
+		(con->pending.tw_maximized || con->tw.snap != TW_SNAP_NONE);
+}
+
+/* Color of the client's bottom right pixel, so the fill looks like its background. */
+static bool sample_edge_color(struct sway_view *view, float color[4]) {
+	struct wlr_texture *texture = view->surface ? wlr_surface_get_texture(view->surface) : NULL;
+	if (!texture) {
+		return false;
+	}
+	int scale = view->surface->current.scale > 0 ? view->surface->current.scale : 1;
+	int x = (view->geometry.x + view->geometry.width) * scale - 2;
+	int y = (view->geometry.y + view->geometry.height) * scale - 2;
+	if (x < 0 || y < 0 || x >= (int)texture->width || y >= (int)texture->height) {
+		return false;
+	}
+	uint8_t pixel[4];
+	struct wlr_texture_read_pixels_options options = {
+		.data = pixel,
+		.format = DRM_FORMAT_ARGB8888,
+		.stride = 4,
+		.src_box = { x, y, 1, 1 },
+	};
+	if (!wlr_texture_read_pixels(texture, &options)) {
+		return false;
+	}
+	float alpha = pixel[3] / 255.0f;
+	if (alpha < 0.5f) {
+		return false; // transparent edge (CSD shadow): use the theme color
+	}
+	// ARGB8888 is stored as B, G, R, A; the values are premultiplied
+	color[0] = pixel[2] / 255.0f / alpha;
+	color[1] = pixel[1] / 255.0f / alpha;
+	color[2] = pixel[0] / 255.0f / alpha;
+	color[3] = 1.0f;
+	return true;
+}
+
+void tw_update_content_fill(struct sway_container *con) {
+	struct sway_view *view = con->view;
+	wlr_scene_node_set_position(&view->content_tree->node, 0, 0);
+	int width = con->current.content_width, height = con->current.content_height;
+	if (!wl_list_empty(&view->content_tree->children)) {
+		struct wlr_box clip = view->using_csd ? (struct wlr_box){0} : (struct wlr_box){
+			.x = view->geometry.x,
+			.y = view->geometry.y,
+			.width = width,
+			.height = height,
+		};
+		wlr_scene_subsurface_tree_set_clip(&view->content_tree->node, &clip);
+	}
+	struct wlr_scene_rect *bg = con->tw.content_bg;
+	if (!bg) {
+		return;
+	}
+	bool gap = view->geometry.width < width || view->geometry.height < height;
+	wlr_scene_node_set_enabled(&bg->node, gap);
+	if (!gap) {
+		return;
+	}
+	// the view tree sits below the title bar inside the content tree
+	wlr_scene_node_set_position(&bg->node, view->scene_tree->node.x, view->scene_tree->node.y);
+	wlr_scene_node_place_below(&bg->node, &view->scene_tree->node);
+	wlr_scene_rect_set_size(bg, width, height);
+	if (con->tw.content_bg_width != view->geometry.width ||
+			con->tw.content_bg_height != view->geometry.height) {
+		float color[4];
+		if (!sample_edge_color(view, color)) {
+			uint32_t c = tw_theme_color(tw_theme, "decoration.active.title_bg", 0xffffffff);
+			color[0] = (c >> 24 & 0xff) / 255.0f;
+			color[1] = (c >> 16 & 0xff) / 255.0f;
+			color[2] = (c >> 8 & 0xff) / 255.0f;
+			color[3] = 1.0f;
+		}
+		wlr_scene_rect_set_color(bg, color);
+		con->tw.content_bg_width = view->geometry.width;
+		con->tw.content_bg_height = view->geometry.height;
+	}
 }
 
 void tw_snap_to(struct sway_container *con, enum tw_snap snap) {

@@ -73,6 +73,9 @@ struct tw_container {
 
 	struct wlr_scene_tree *deco_tree;
 	struct wlr_scene_buffer *strips[TW_STRIP_COUNT];
+	// fills the slot of a snapped or maximized window that is smaller than it
+	struct wlr_scene_rect *content_bg;
+	int content_bg_width, content_bg_height; // client size the color was sampled at
 	enum tw_hit hover, pressed;
 
 	struct {
@@ -177,6 +180,13 @@ void tw_minimize(struct sway_container *con, bool enable);
 void tw_restore(struct sway_container *con);
 bool tw_snap(struct sway_container *con, const char *direction, char **error);
 void tw_snap_to(struct sway_container *con, enum tw_snap snap);
+/*
+ * Snapped and maximized windows keep the size of their slot even when the
+ * client commits a smaller size (terminals resize in character cells).
+ */
+bool tw_container_fills_slot(struct sway_container *con);
+/* Positions the content of such a window and fills the rest of the slot. */
+void tw_update_content_fill(struct sway_container *con);
 void tw_place_new_window(struct sway_container *con);
 bool tw_arrange_workspace(struct sway_workspace *ws, const char *how, char **error);
 bool tw_show_desktop(struct sway_workspace *ws, char **error);

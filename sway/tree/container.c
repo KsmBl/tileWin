@@ -91,6 +91,13 @@ struct sway_container *container_create(struct sway_view *view) {
 
 	c->border.tree = alloc_scene_tree(c->scene_tree, &failed);
 	c->content_tree = alloc_scene_tree(c->border.tree, &failed);
+	if (view) {
+		// below the view, which is added to the content tree when it maps
+		c->tw.content_bg = alloc_rect_node(c->content_tree, &failed);
+		if (c->tw.content_bg) {
+			wlr_scene_node_set_enabled(&c->tw.content_bg->node, false);
+		}
+	}
 
 	if (view) {
 		// only containers with views can have borders

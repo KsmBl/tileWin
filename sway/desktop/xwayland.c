@@ -431,7 +431,8 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 		// containers, we resize the container to match. For tiling containers,
 		// we only recenter the surface.
 		memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
-		if (container_is_floating(view->container)) {
+		if (container_is_floating(view->container) &&
+				!tw_container_fills_slot(view->container)) {
 			view_update_size(view);
 			transaction_commit_dirty_client();
 		}
