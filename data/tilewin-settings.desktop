@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=tileWin Settings
+GenericName=Desktop Settings
+Comment=Theme, wallpaper, taskbar, menus and launcher of tileWin
+Exec=tilewin-settings
+Icon=preferences-desktop
+Categories=Settings;DesktopSettings;GTK;
+Keywords=tilewin;theme;wallpaper;taskbar;panel;launcher;menu;
+StartupNotify=true

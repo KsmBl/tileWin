@@ -147,7 +147,7 @@ static void load_config(struct panel *panel, struct startmenu *sm) {
 			{ "Pictures", "folder-pictures", "exec xdg-open ~/Pictures" },
 			{ "Music", "folder-music", "exec xdg-open ~/Music" },
 			{ "Downloads", "folder-download", "exec xdg-open ~/Downloads" },
-			{ "Settings", "preferences-system", "exec xdg-open ~/.config/tileWin" },
+			{ "Settings", "preferences-system", "exec tilewin-settings" },
 		};
 		for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++) {
 			struct place *pl = calloc(1, sizeof(*pl));
@@ -314,6 +314,7 @@ static void open_classic(struct panel *panel, struct panel_output *output) {
 	struct menu_item *settings = menu_item_new("Settings", NULL);
 	settings->icon = strdup("preferences-system");
 	settings->children = create_list();
+	list_add(settings->children, menu_item_new("tileWin Settings...", "exec tilewin-settings"));
 	list_add(settings->children, menu_item_new("Taskbar...",
 		"exec xdg-open ~/.config/tileWin/taskbar.conf"));
 	list_add(settings->children, menu_item_new("Window mode shortcuts...",

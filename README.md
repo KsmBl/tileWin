@@ -9,7 +9,7 @@ tileWin is a Wayland compositor with two modes you can switch between at any tim
 
 It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are five built-in themes: **Windows 95, XP, 7, 10 and 11**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live from the command line.
 
-tileWin is built on sway 1.12 and wlroots 0.20. It is written in C, has no GTK/Qt dependency and uses no CPU when idle.
+tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are written in C without GTK/Qt and use no CPU when idle; only the optional settings app uses GTK4 and runs only while it is open.
 
 ## Features
 
@@ -45,7 +45,8 @@ tileWin is built on sway 1.12 and wlroots 0.20. It is written in C, has no GTK/Q
   - `reload`: config.
   - `restart panel`: taskbar only.
   - `restart`: the whole compositor, e.g. after an update. The session stays open, and `relaunch-apps` starts your apps again.
-- **Fish completions** for `tilewinmsg` (including all tileWin commands and theme names), `tilewin`, `tilewin-theme` and `tilewin-panel`.
+- **Settings app** (`tilewin-settings`, GTK4, Super+I): theme and mode, wallpaper per theme or for all themes, taskbar layout and widgets, right-click and start menus, application launcher and default programs.
+- **Fish completions** for `tilewinmsg` (including all tileWin commands and theme names), `tilewin`, `tilewin-theme`, `tilewin-panel` and `tilewin-settings`.
 - **Low resource use:**
   - Decorations are drawn once and cached.
   - The panel is event-driven, redraws only on change and polls system information only for widgets that are visible.
@@ -79,7 +80,7 @@ Start tileWin:
 
 **Dependencies:**
 - **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), meson and ninja.
-- **Optional:** grim (screenshots), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+- **Optional:** gtk4 (the settings app is skipped without it), grim (screenshots), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 ### Updating
 
@@ -111,6 +112,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super (tap) / Ctrl+Esc | Start menu |
 | Super+R | Run dialog |
 | Super+S | Application launcher |
+| Super+I | tileWin Settings |
 | Super+E | File manager |
 | Super+Return | Terminal |
 | Super+D, Super+M | Show desktop |
@@ -157,6 +159,20 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 - `tilewinmsg -t get_tilewin` prints the current mode, theme and panel pid.
 - IPC clients can subscribe to `["tilewin"]` events.
 - The `get_tree` output has `minimized` and `maximized` fields.
+
+## Settings app
+
+`tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you:
+
+| Page | What you can change |
+|---|---|
+| Theme | Window/tile mode and the theme, with wallpaper previews |
+| Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
+| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps |
+| Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |
+| Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
+
+Changes apply immediately (the compositor gets the matching command, the taskbar reloads its config) and are written to `common.conf` and `taskbar.conf`. Only the changed lines are rewritten, so your comments and formatting stay. Open a page directly with `tilewin-settings --page taskbar`. The app only runs while its window is open.
 
 ## Taskbar
 

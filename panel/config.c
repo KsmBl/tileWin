@@ -33,7 +33,7 @@ static const char default_config[] =
 	"  separator\n"
 	"  item \"Switch to tile mode\" wm_mode toggle\n"
 	"  item \"Task Manager\" exec xfce4-terminal -e btop\n"
-	"  item \"Taskbar settings\" exec xdg-open ~/.config/tileWin/taskbar.conf\n"
+	"  item \"Taskbar settings\" exec tilewin-settings --page taskbar\n"
 	"}\n";
 
 char *panel_default_config_path(void) {

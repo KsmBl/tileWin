@@ -361,7 +361,7 @@ static list_t *default_taskbar_menu(struct panel *panel) {
 		"Switch to window mode", "wm_mode toggle"));
 	list_add(items, menu_item_separator());
 	list_add(items, menu_item_new("Taskbar settings",
-		"exec xdg-open ~/.config/tileWin/taskbar.conf"));
+		"exec tilewin-settings --page taskbar"));
 	list_add(items, menu_item_new("Restart taskbar", "restart panel"));
 	return items;
 }

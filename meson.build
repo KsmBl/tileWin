@@ -210,6 +210,12 @@ if get_option('swaynag')
 endif
 subdir('panel')
 
+gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
+if gtk4.found()
+	gtk4 = gtk4.as_system()
+	subdir('settings')
+endif
+
 # tileWin data files
 install_subdir('themes', install_dir: tilewin_datadir)
 install_subdir('config', install_dir: tilewin_datadir)
@@ -245,12 +251,14 @@ if get_option('fish-completions')
 		'completions/fish/tilewinmsg.fish',
 		'completions/fish/tilewin-panel.fish',
 		'completions/fish/tilewin-theme.fish',
+		'completions/fish/tilewin-settings.fish',
 		install_dir: fish_completions_dir,
 	)
 endif
 
 summary({
 	'fish-completions': get_option('fish-completions'),
+	'settings': gtk4.found(),
 	'gdk-pixbuf': gdk_pixbuf.found(),
 	'tray': have_tray,
 	'man-pages': scdoc.found(),

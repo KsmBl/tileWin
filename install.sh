@@ -86,7 +86,7 @@ install_deps() {
 		msg "Installing dependencies with pacman"
 		sudo pacman -S --needed --noconfirm base-devel meson ninja pkgconf \
 			wlroots0.20 wayland wayland-protocols libxkbcommon libinput libevdev \
-			pixman libdrm cairo pango gdk-pixbuf2 librsvg json-c pcre2 \
+			pixman libdrm cairo pango gdk-pixbuf2 librsvg gtk4 json-c pcre2 \
 			xcb-util-wm xorg-xwayland systemd-libs \
 			grim xdg-utils
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal thunar || \
@@ -97,7 +97,7 @@ install_deps() {
 		sudo apt-get install -y build-essential meson ninja-build pkg-config \
 			libwlroots-0.20-dev libwayland-dev wayland-protocols libxkbcommon-dev \
 			libinput-dev libevdev-dev libpixman-1-dev libdrm-dev libcairo2-dev \
-			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libjson-c-dev \
+			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libgtk-4-dev libjson-c-dev \
 			libpcre2-dev libxcb-icccm4-dev xwayland libsystemd-dev grim xdg-utils || \
 			warn "some packages are missing; wlroots 0.20 may need to be built manually"
 	elif command -v dnf >/dev/null 2>&1; then
@@ -105,7 +105,7 @@ install_deps() {
 		sudo dnf install -y gcc meson ninja-build pkgconf-pkg-config wlroots-devel \
 			wayland-devel wayland-protocols-devel libxkbcommon-devel libinput-devel \
 			libevdev-devel pixman-devel libdrm-devel cairo-devel pango-devel \
-			gdk-pixbuf2-devel librsvg2-devel json-c-devel pcre2-devel \
+			gdk-pixbuf2-devel librsvg2-devel gtk4-devel json-c-devel pcre2-devel \
 			xcb-util-wm-devel xorg-x11-server-Xwayland systemd-devel grim xdg-utils || \
 			warn "some packages are missing; tileWin needs wlroots 0.20"
 	else
