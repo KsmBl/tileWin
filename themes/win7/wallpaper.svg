@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+  <title>tileWin 7 theme wallpaper: blue glow with light streaks (original artwork)</title>
+  <defs>
+    <radialGradient id="bg" cx="0.5" cy="0.44" r="0.78">
+      <stop offset="0" stop-color="#3fa6ea"/>
+      <stop offset="0.3" stop-color="#1c74c6"/>
+      <stop offset="0.65" stop-color="#0b4a8f"/>
+      <stop offset="1" stop-color="#05264f"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.7"/>
+      <stop offset="0.35" stop-color="#8fdcff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#5fc4ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9fe8ff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#c8f2ff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#9fe8ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a6f06a" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#b8f57e" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#a6f06a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffb84d" stop-opacity="0"/>
+      <stop offset="0.55" stop-color="#ffc766" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#ffb84d" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="blurBig" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="40"/>
+    </filter>
+    <filter id="blurStreak" x="-10%" y="-50%" width="120%" height="200%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="blurSmall" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1200" fill="url(#bg)"/>
+  <ellipse cx="960" cy="530" rx="640" ry="360" fill="url(#glow)" filter="url(#blurBig)"/>
+
+  <g fill="none" stroke-linecap="round" filter="url(#blurStreak)">
+    <path d="M-150 980 C 350 760 760 610 1180 560 C 1500 525 1760 440 2080 250"
+          stroke="url(#cyan)" stroke-width="70" opacity="0.55"/>
+    <path d="M-120 1120 C 420 900 820 720 1200 640 C 1540 575 1780 520 2060 420"
+          stroke="url(#green)" stroke-width="46" opacity="0.5"/>
+    <path d="M-80 820 C 380 700 700 600 1060 520 C 1400 450 1700 340 2040 120"
+          stroke="url(#orange)" stroke-width="34" opacity="0.45"/>
+    <path d="M200 1230 C 600 1000 960 820 1320 740 C 1620 675 1840 650 2080 600"
+          stroke="url(#cyan)" stroke-width="28" opacity="0.4"/>
+    <path d="M-200 640 C 300 560 700 500 1000 470 C 1300 440 1650 360 2000 60"
+          stroke="url(#green)" stroke-width="18" opacity="0.35"/>
+  </g>
+
+  <g fill="#ffffff" filter="url(#blurSmall)">
+    <circle cx="1480" cy="330" r="38" opacity="0.08"/>
+    <circle cx="1620" cy="410" r="22" opacity="0.1"/>
+    <circle cx="420" cy="760" r="46" opacity="0.07"/>
+    <circle cx="560" cy="840" r="18" opacity="0.1"/>
+    <circle cx="1240" cy="880" r="30" opacity="0.07"/>
+    <circle cx="820" cy="300" r="26" opacity="0.08"/>
+    <circle cx="1720" cy="760" r="54" opacity="0.06"/>
+    <circle cx="250" cy="350" r="34" opacity="0.06"/>
+  </g>
+</svg>

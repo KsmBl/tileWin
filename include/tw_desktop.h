@@ -39,6 +39,8 @@ cairo_surface_t *tw_icon_load_file(const char *path, int size);
 cairo_surface_t *tw_icon_load(const char *name, int size, const char *theme);
 /* Resolves the icon for an application id via its desktop entry. */
 cairo_surface_t *tw_icon_load_for_app(const char *app_id, int size, const char *theme);
+/* Renders an image (SVG or raster) scaled to cover width x height, cropping the overflow. */
+cairo_surface_t *tw_image_render_cover(const char *path, int width, int height);
 /* Loads an image at its natural size. */
 cairo_surface_t *tw_image_load(const char *path);
 

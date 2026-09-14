@@ -11,6 +11,9 @@ char *tw_config_dir(void);
 /* $XDG_STATE_HOME/tileWin (default ~/.local/state/tileWin). Newly allocated. */
 char *tw_state_dir(void);
 
+/* $XDG_CACHE_HOME/tileWin (default ~/.cache/tileWin). Newly allocated. */
+char *tw_cache_dir(void);
+
 /* Installed data directory, overridable with $TILEWIN_DATADIR. */
 const char *tw_data_dir(void);
 

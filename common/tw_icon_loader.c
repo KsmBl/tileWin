@@ -190,3 +190,62 @@ cairo_surface_t *tw_icon_load_for_app(const char *app_id, int size, const char *
 	free(lower);
 	return surface;
 }
+
+cairo_surface_t *tw_image_render_cover(const char *path, int width, int height) {
+	if (!path || width <= 0 || height <= 0) {
+		return NULL;
+	}
+	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	if (cairo_surface_status(out) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(out);
+		return NULL;
+	}
+	cairo_t *cr = cairo_create(out);
+	bool ok = false;
+	if (has_suffix(path, ".svg") || has_suffix(path, ".svgz")) {
+		GError *err = NULL;
+		RsvgHandle *handle = rsvg_handle_new_from_file(path, &err);
+		if (handle) {
+			double iw = 0, ih = 0;
+			if (!rsvg_handle_get_intrinsic_size_in_pixels(handle, &iw, &ih) || iw <= 0 || ih <= 0) {
+				iw = width;
+				ih = height;
+			}
+			double scale = (double)width / iw > (double)height / ih ?
+				(double)width / iw : (double)height / ih;
+			RsvgRectangle viewport = {
+				(width - iw * scale) / 2, (height - ih * scale) / 2, iw * scale, ih * scale,
+			};
+			ok = rsvg_handle_render_document(handle, cr, &viewport, &err);
+			g_object_unref(handle);
+		}
+		if (err) {
+			sway_log(SWAY_ERROR, "Failed to render %s: %s", path, err->message);
+			g_error_free(err);
+		}
+	} else {
+		cairo_surface_t *image = tw_image_load(path);
+		if (image) {
+			int iw = cairo_image_surface_get_width(image);
+			int ih = cairo_image_surface_get_height(image);
+			double scale = (double)width / iw > (double)height / ih ?
+				(double)width / iw : (double)height / ih;
+			cairo_translate(cr, (width - iw * scale) / 2, (height - ih * scale) / 2);
+			cairo_scale(cr, scale, scale);
+			cairo_set_source_surface(cr, image, 0, 0);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+			// avoid blending with transparent pixels at the image edges
+			cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD);
+			cairo_paint(cr);
+			cairo_surface_destroy(image);
+			ok = true;
+		}
+	}
+	cairo_destroy(cr);
+	if (!ok) {
+		cairo_surface_destroy(out);
+		return NULL;
+	}
+	cairo_surface_flush(out);
+	return out;
+}

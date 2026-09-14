@@ -249,6 +249,16 @@ To make your own:
 2. Override only the keys you want, e.g. `decoration { active { title_bg #202020; title_fg #ffffff } }`.
 3. Look at the built-in theme files for all available keys.
 
+### Wallpapers
+
+Each theme has its own default wallpaper:
+- **win95:** the classic teal desktop.
+- **The other themes:** original look-alike artwork (`themes/<name>/wallpaper.svg`). Microsoft's own wallpapers are copyrighted and can't be included.
+
+If you have your own copy of an original wallpaper (or any picture you like for a theme), save it as `~/.config/tileWin/wallpapers/<theme>.jpg` (or `.png`, `.webp`, `.svg`), e.g. `~/.config/tileWin/wallpapers/winxp.jpg`. tileWin then uses it whenever that theme is active. `wallpaper ...` in `common.conf` overrides the wallpaper for all themes.
+
+Wallpapers are rendered once per screen size and cached in `~/.cache/tileWin/wallpapers`.
+
 ## Limitations
 
 - Microsoft fonts, icons and logos are not included; themes use font fallback lists and drawn glyphs.

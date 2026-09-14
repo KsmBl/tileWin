@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+  <title>tileWin XP theme wallpaper: rolling hills (original artwork)</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a49b9"/>
+      <stop offset="0.3" stop-color="#2472d8"/>
+      <stop offset="0.55" stop-color="#5fa2ea"/>
+      <stop offset="0.72" stop-color="#a9d0f6"/>
+      <stop offset="1" stop-color="#d7ebfc"/>
+    </linearGradient>
+    <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5aa531"/>
+      <stop offset="0.5" stop-color="#3a8019"/>
+      <stop offset="1" stop-color="#1f5a0b"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a6de55"/>
+      <stop offset="0.18" stop-color="#78c236"/>
+      <stop offset="0.5" stop-color="#4a9d22"/>
+      <stop offset="1" stop-color="#1d650b"/>
+    </linearGradient>
+    <radialGradient id="sunlit" cx="0.45" cy="0.18" r="0.55">
+      <stop offset="0" stop-color="#f0ffb0" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#f0ffb0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0d3d05" stop-opacity="0.25"/>
+      <stop offset="0.4" stop-color="#0d3d05" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#0d3d05" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0d3d05" stop-opacity="0.3"/>
+    </linearGradient>
+    <filter id="cloud" x="-40%" y="-80%" width="180%" height="260%">
+      <feGaussianBlur stdDeviation="13"/>
+    </filter>
+    <filter id="haze" x="-20%" y="-200%" width="140%" height="500%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <filter id="grass" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="2.5"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1200" fill="url(#sky)"/>
+
+  <g filter="url(#cloud)" fill="#ffffff">
+    <ellipse cx="470" cy="300" rx="250" ry="46" opacity="0.92"/>
+    <circle cx="320" cy="262" r="62" opacity="0.9"/>
+    <circle cx="410" cy="222" r="88" opacity="0.95"/>
+    <circle cx="520" cy="238" r="78" opacity="0.93"/>
+    <circle cx="615" cy="272" r="52" opacity="0.88"/>
+    <circle cx="470" cy="190" r="50" opacity="0.85"/>
+    <ellipse cx="1520" cy="238" rx="200" ry="36" opacity="0.86"/>
+    <circle cx="1420" cy="202" r="56" opacity="0.88"/>
+    <circle cx="1505" cy="172" r="76" opacity="0.9"/>
+    <circle cx="1605" cy="202" r="58" opacity="0.86"/>
+    <ellipse cx="1060" cy="385" rx="270" ry="20" opacity="0.55"/>
+    <ellipse cx="1760" cy="470" rx="250" ry="24" opacity="0.5"/>
+    <ellipse cx="170" cy="515" rx="230" ry="18" opacity="0.45"/>
+    <ellipse cx="780" cy="560" rx="190" ry="14" opacity="0.4"/>
+    <ellipse cx="1300" cy="600" rx="220" ry="12" opacity="0.35"/>
+  </g>
+
+  <ellipse cx="960" cy="770" rx="1150" ry="70" fill="#ffffff" opacity="0.45" filter="url(#haze)"/>
+
+  <path d="M0 850 C 400 815 760 770 1110 792 C 1430 812 1700 772 1920 742 L1920 1200 L0 1200 Z"
+        fill="url(#hillBack)"/>
+
+  <path d="M0 895 C 250 805 560 690 870 688 C 1190 686 1480 820 1920 905 L1920 1200 L0 1200 Z"
+        fill="url(#hill)"/>
+  <path d="M0 895 C 250 805 560 690 870 688 C 1190 686 1480 820 1920 905 L1920 1200 L0 1200 Z"
+        fill="url(#sunlit)"/>
+  <path d="M0 895 C 250 805 560 690 870 688 C 1190 686 1480 820 1920 905 L1920 1200 L0 1200 Z"
+        fill="url(#shade)"/>
+
+  <g fill="none" stroke="#1a5807" stroke-width="5" opacity="0.13" filter="url(#grass)">
+    <path d="M80 1010 C 400 880 700 800 900 790 C 1150 780 1450 880 1850 990"/>
+    <path d="M-40 1110 C 350 960 720 880 960 875 C 1250 870 1560 980 1960 1090"/>
+    <path d="M200 1180 C 560 1040 820 980 1020 975 C 1300 970 1560 1060 1880 1180"/>
+  </g>
+</svg>

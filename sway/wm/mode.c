@@ -1,7 +1,10 @@
+#include <malloc.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_output.h>
@@ -294,6 +297,22 @@ static void wallpaper_spec_get(struct wallpaper_spec *spec) {
 		free_argv(argc, argv);
 		return;
 	}
+	// ~/.config/tileWin/wallpapers/<theme>.<ext> replaces the theme's wallpaper
+	char *config_dir = tw_config_dir();
+	static const char *exts[] = { "jpg", "jpeg", "png", "webp", "svg" };
+	for (size_t i = 0; config_dir && tw_theme && i < sizeof(exts) / sizeof(exts[0]); i++) {
+		char *path = format_str("%s/wallpapers/%s.%s", config_dir, tw_theme->name, exts[i]);
+		if (access(path, R_OK) == 0) {
+			spec->type = WALLPAPER_IMAGE;
+			spec->image = path;
+			spec->mode = strdup("fill");
+			spec->color1 = tw_theme_color(tw_theme, "wallpaper.color", 0x000000ff);
+			free(config_dir);
+			return;
+		}
+		free(path);
+	}
+	free(config_dir);
 	spec->type = parse_type(tw_theme_str(tw_theme, "wallpaper.type", "solid"));
 	spec->color1 = tw_theme_color(tw_theme, "wallpaper.color", 0x3a6ea5ff);
 	spec->color2 = tw_theme_color(tw_theme, "wallpaper.color2", spec->color1);
@@ -308,6 +327,59 @@ static void wallpaper_spec_get(struct wallpaper_spec *spec) {
 		}
 	}
 	spec->mode = strdup(tw_theme_str(tw_theme, "wallpaper.mode", "fill"));
+}
+
+/*
+ * Renders a wallpaper at the output's pixel size. The result is cached as a
+ * PNG in ~/.cache/tileWin so SVG wallpapers are only rendered once per size.
+ */
+static cairo_surface_t *wallpaper_render_cached(const char *path, int width, int height) {
+	// very large outputs are upscaled from at most 3840 pixels wide
+	if (width > 3840) {
+		height = height * 3840 / width;
+		width = 3840;
+	}
+	struct stat st;
+	if (stat(path, &st) != 0) {
+		return NULL;
+	}
+	unsigned long hash = 5381;
+	for (const char *p = path; *p; p++) {
+		hash = hash * 33 + (unsigned char)*p;
+	}
+	hash = hash * 33 + (unsigned long)st.st_mtime;
+	hash = hash * 33 + (unsigned long)st.st_size;
+
+	char *cache_dir = tw_cache_dir();
+	char *cache = cache_dir ? format_str("%s/wallpapers/%lx-%dx%d.png", cache_dir, hash,
+		width, height) : NULL;
+	free(cache_dir);
+	if (cache && access(cache, R_OK) == 0) {
+		cairo_surface_t *surface = cairo_image_surface_create_from_png(cache);
+		if (cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS &&
+				cairo_image_surface_get_width(surface) == width) {
+			free(cache);
+			return surface;
+		}
+		cairo_surface_destroy(surface);
+	}
+	struct timespec t0, t1;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	cairo_surface_t *surface = tw_image_render_cover(path, width, height);
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	sway_log(SWAY_DEBUG, "Rendered wallpaper %s at %dx%d in %ld ms", path, width, height,
+		(t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000);
+	// image decoders and SVG filters leave large freed heap blocks behind
+	malloc_trim(0);
+	if (surface && cache) {
+		char *slash = strrchr(cache, '/');
+		*slash = '\0';
+		tw_mkdir_p(cache);
+		*slash = '/';
+		cairo_surface_write_to_png(surface, cache);
+	}
+	free(cache);
+	return surface;
 }
 
 static void set_rect_color(struct wlr_scene_rect *rect, uint32_t c) {
@@ -387,6 +459,18 @@ void tw_wallpaper_update(struct sway_output *output) {
 			wlr_scene_buffer_set_filter_mode(buffer, WLR_SCALE_FILTER_BILINEAR);
 		} else {
 			cairo_surface_destroy(surface);
+		}
+	} else if (spec.type == WALLPAPER_IMAGE && spec.image &&
+			(!spec.mode || strcasecmp(spec.mode, "fill") == 0)) {
+		cairo_surface_t *image = wallpaper_render_cached(spec.image,
+			(int)ceil(w * scale), (int)ceil(h * scale));
+		struct wlr_scene_buffer *buffer = image ? wlr_scene_buffer_create(tree, NULL) : NULL;
+		if (buffer) {
+			tw_scene_buffer_set_surface(buffer, image, w, h);
+		} else if (image) {
+			cairo_surface_destroy(image);
+		} else {
+			sway_log(SWAY_ERROR, "Unable to load wallpaper %s", spec.image);
 		}
 	} else if (spec.type == WALLPAPER_IMAGE && spec.image) {
 		cairo_surface_t *image = tw_image_load(spec.image);

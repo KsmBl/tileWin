@@ -45,6 +45,10 @@ char *tw_state_dir(void) {
 	return xdg_dir("XDG_STATE_HOME", ".local/state");
 }
 
+char *tw_cache_dir(void) {
+	return xdg_dir("XDG_CACHE_HOME", ".cache");
+}
+
 const char *tw_data_dir(void) {
 	const char *env = getenv("TILEWIN_DATADIR");
 	return env && *env ? env : TILEWIN_DATADIR;
