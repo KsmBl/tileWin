@@ -139,6 +139,10 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 
 Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
 
+### Volume, brightness and media keys
+
+The volume, microphone mute, brightness and media player keys work in both modes (also on the lock screen) through `tilewin-media`: it uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for media players. A `bindsym` for the same key in your config replaces the default.
+
 ### Commands added by tileWin
 
 Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Window commands act on the focused window or on `[criteria]`.

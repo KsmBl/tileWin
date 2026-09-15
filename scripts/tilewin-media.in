@@ -1,0 +1,112 @@
+#!/bin/sh
+# tilewin-media: volume, microphone, brightness and media player keys.
+# tileWin binds the XF86 media keys to this script unless the config binds
+# them itself.
+
+STEP=${TILEWIN_VOLUME_STEP:-5}
+BRIGHTNESS_STEP=${TILEWIN_BRIGHTNESS_STEP:-5}
+
+have() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+usage() {
+	cat <<USAGE
+Usage: tilewin-media <action>
+
+  volume-up | volume-down | mute        default output (wpctl, pactl or amixer)
+  mic-mute                              default input
+  brightness-up | brightness-down       backlight (brightnessctl or light)
+  play-pause | next | previous | stop   media players (playerctl)
+
+TILEWIN_VOLUME_STEP and TILEWIN_BRIGHTNESS_STEP set the step in percent (5).
+USAGE
+}
+
+use_wpctl() {
+	have wpctl && wpctl get-volume @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1
+}
+
+volume() {
+	if use_wpctl; then
+		wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
+		if [ "$1" = up ]; then
+			wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ "$STEP%+"
+		else
+			wpctl set-volume @DEFAULT_AUDIO_SINK@ "$STEP%-"
+		fi
+	elif have pactl; then
+		pactl set-sink-mute @DEFAULT_SINK@ 0
+		if [ "$1" = up ]; then
+			current=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null |
+				sed -n 's/.* \([0-9]\{1,3\}\)%.*/\1/p' | head -n 1)
+			if [ "${current:-0}" -ge $((100 - STEP)) ]; then
+				pactl set-sink-volume @DEFAULT_SINK@ 100%
+			else
+				pactl set-sink-volume @DEFAULT_SINK@ "+$STEP%"
+			fi
+		else
+			pactl set-sink-volume @DEFAULT_SINK@ "-$STEP%"
+		fi
+	elif have amixer; then
+		if [ "$1" = up ]; then
+			amixer -q set Master "$STEP%+" unmute
+		else
+			amixer -q set Master "$STEP%-" unmute
+		fi
+	fi
+}
+
+toggle_mute() {
+	if use_wpctl; then
+		wpctl set-mute "@DEFAULT_AUDIO_$1@" toggle
+	elif have pactl; then
+		if [ "$1" = SINK ]; then
+			pactl set-sink-mute @DEFAULT_SINK@ toggle
+		else
+			pactl set-source-mute @DEFAULT_SOURCE@ toggle
+		fi
+	elif have amixer; then
+		if [ "$1" = SINK ]; then
+			amixer -q set Master toggle
+		else
+			amixer -q set Capture toggle
+		fi
+	fi
+}
+
+brightness() {
+	if have brightnessctl; then
+		if [ "$1" = up ]; then
+			brightnessctl -q set "$BRIGHTNESS_STEP%+"
+		else
+			# never turn the backlight off completely
+			brightnessctl -q -n1 set "$BRIGHTNESS_STEP%-"
+		fi
+	elif have light; then
+		if [ "$1" = up ]; then
+			light -A "$BRIGHTNESS_STEP"
+		else
+			light -U "$BRIGHTNESS_STEP"
+		fi
+	fi
+}
+
+player() {
+	have playerctl && playerctl "$1"
+}
+
+case "$1" in
+volume-up) volume up ;;
+volume-down) volume down ;;
+mute) toggle_mute SINK ;;
+mic-mute) toggle_mute SOURCE ;;
+brightness-up) brightness up ;;
+brightness-down) brightness down ;;
+play-pause|next|previous|stop) player "$1" ;;
+-h|--help|help) usage ;;
+*)
+	usage >&2
+	exit 1
+	;;
+esac

@@ -127,6 +127,8 @@ bool tw_request_theme(const char *name, char **error);
 /* Switches between the light and dark variant of the theme and tells apps. */
 bool tw_set_color_scheme(bool dark, char **error);
 void tw_load_theme_tile_config(struct sway_config *config);
+/* Binds the volume, brightness and media keys the config leaves unbound. */
+void tw_add_default_bindings(struct sway_config *config);
 void tw_after_reload(void);
 json_object *tw_describe_state(void);
 void tw_wallpaper_update(struct sway_output *output);

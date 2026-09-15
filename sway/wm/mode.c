@@ -144,6 +144,50 @@ void tw_load_theme_tile_config(struct sway_config *cfg) {
 	free(path);
 }
 
+void tw_add_default_bindings(struct sway_config *cfg) {
+	static const char *defaults[][2] = {
+		{ "XF86AudioRaiseVolume", "volume-up" },
+		{ "XF86AudioLowerVolume", "volume-down" },
+		{ "XF86AudioMute", "mute" },
+		{ "XF86AudioMicMute", "mic-mute" },
+		{ "XF86MonBrightnessUp", "brightness-up" },
+		{ "XF86MonBrightnessDown", "brightness-down" },
+		{ "XF86AudioPlay", "play-pause" },
+		{ "XF86AudioPause", "play-pause" },
+		{ "XF86AudioNext", "next" },
+		{ "XF86AudioPrev", "previous" },
+		{ "XF86AudioStop", "stop" },
+	};
+	if (!cfg->modes || cfg->modes->length == 0) {
+		return;
+	}
+	struct sway_mode *mode = cfg->modes->items[0]; // "default"
+	struct sway_mode *current = cfg->current_mode;
+	cfg->current_mode = mode;
+	for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++) {
+		xkb_keysym_t sym = xkb_keysym_from_name(defaults[i][0], XKB_KEYSYM_NO_FLAGS);
+		bool bound = false;
+		for (int j = 0; j < mode->keysym_bindings->length && !bound; j++) {
+			struct sway_binding *binding = mode->keysym_bindings->items[j];
+			bound = binding->modifiers == 0 && binding->keys->length == 1 &&
+				*(xkb_keysym_t *)binding->keys->items[0] == sym;
+		}
+		if (bound) {
+			continue;
+		}
+		char *cmd = format_str("bindsym --locked --no-warn %s exec tilewin-media %s",
+			defaults[i][0], defaults[i][1]);
+		struct cmd_results *result = config_command(cmd, NULL);
+		if (result && result->status != CMD_SUCCESS) {
+			sway_log(SWAY_ERROR, "Default binding '%s' failed: %s", cmd,
+				result->error ? result->error : "?");
+		}
+		free_cmd_results(result);
+		free(cmd);
+	}
+	cfg->current_mode = current;
+}
+
 json_object *tw_describe_state(void) {
 	json_object *obj = json_object_new_object();
 	json_object_object_add(obj, "mode", json_object_new_string(tw_mode_name(tw_mode)));

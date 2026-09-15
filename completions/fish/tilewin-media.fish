@@ -1,0 +1,11 @@
+complete -c tilewin-media -f
+complete -c tilewin-media -n __fish_use_subcommand -a volume-up -d 'Raise the volume'
+complete -c tilewin-media -n __fish_use_subcommand -a volume-down -d 'Lower the volume'
+complete -c tilewin-media -n __fish_use_subcommand -a mute -d 'Mute or unmute the output'
+complete -c tilewin-media -n __fish_use_subcommand -a mic-mute -d 'Mute or unmute the microphone'
+complete -c tilewin-media -n __fish_use_subcommand -a brightness-up -d 'Raise the screen brightness'
+complete -c tilewin-media -n __fish_use_subcommand -a brightness-down -d 'Lower the screen brightness'
+complete -c tilewin-media -n __fish_use_subcommand -a play-pause -d 'Play or pause media'
+complete -c tilewin-media -n __fish_use_subcommand -a next -d 'Next track'
+complete -c tilewin-media -n __fish_use_subcommand -a previous -d 'Previous track'
+complete -c tilewin-media -n __fish_use_subcommand -a stop -d 'Stop playback'
