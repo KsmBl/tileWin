@@ -61,7 +61,7 @@ struct keyboard_page {
 	GPtrArray *cur_layouts, *cur_variants; // char *, same length
 	GtkWidget *switch_dd, *caps_dd, *compose_dd, *numlock_switch;
 	GtkWidget *delay_spin, *rate_spin;
-	GtkWidget *mode_dd, *binds_list;
+	GtkWidget *mode_dd, *binds_box, *search;
 	guint layout_rebuild_id, binds_rebuild_id;
 };
 
@@ -562,71 +562,272 @@ static void parse_binding(struct confdoc *d, struct cstmt *stmt, char **flags, c
 	g_free(raw);
 }
 
-struct binding_row {
-	struct keyboard_page *p;
-	int index;
-	char *flags;
-	GtkWidget *keys, *command;
-};
-
-static void binding_row_free(gpointer data) {
-	struct binding_row *b = data;
-	g_free(b->flags);
-	g_free(b);
-}
-
-static void schedule_binds(struct keyboard_page *p);
-
-static void write_binding(struct binding_row *b) {
-	struct keyboard_page *p = b->p;
-	const char *keys = gtk_editable_get_text(GTK_EDITABLE(b->keys));
-	const char *command = gtk_editable_get_text(GTK_EDITABLE(b->command));
-	if (!*keys || strchr(keys, ' ') || !*command) {
-		return; // incomplete, don't write an invalid line
-	}
+/* Writes a binding: replaces the index-th one, or appends one for index < 0. */
+static void set_binding(struct keyboard_page *p, int index, const char *flags, const char *keys,
+		const char *command) {
 	struct confdoc *d = binds_doc(p);
-	struct cstmt *stmt = nth_binding(d, b->index);
-	if (!stmt) {
-		return;
+	char *text = g_strdup_printf("bindsym %s%s %s", flags ? flags : "", keys, command);
+	struct cstmt *stmt = index >= 0 ? nth_binding(d, index) : NULL;
+	if (stmt) {
+		confdoc_replace(d, stmt, text);
+	} else {
+		confdoc_append(d, d->root, text);
 	}
-	char *text = g_strdup_printf("bindsym %s%s %s", b->flags, keys, command);
-	confdoc_replace(d, stmt, text);
 	g_free(text);
 	settings_mode_changed(p->s, d);
 }
 
-static void on_binding_changed(GtkEditable *editable, gpointer data) {
-	struct binding_row *b = data;
-	if (!b->p->updating) {
-		write_binding(b);
+static void schedule_binds(struct keyboard_page *p);
+
+/* ---------- names for people ---------- */
+
+static const struct {
+	const char *from, *to;
+} key_names[] = {
+	{ "$mod", "Win" }, { "Mod4", "Win" }, { "Super", "Win" }, { "Super_L", "Win" },
+	{ "Super_R", "Right Win" }, { "Mod1", "Alt" }, { "Alt", "Alt" }, { "Control", "Ctrl" },
+	{ "Ctrl", "Ctrl" }, { "Shift", "Shift" }, { "Return", "Enter" }, { "KP_Enter", "Enter" },
+	{ "Prior", "Page Up" }, { "Page_Up", "Page Up" }, { "Next", "Page Down" },
+	{ "Page_Down", "Page Down" }, { "Escape", "Esc" }, { "space", "Space" },
+	{ "Print", "Print Screen" }, { "BackSpace", "Backspace" }, { "minus", "-" },
+	{ "plus", "+" }, { "equal", "=" }, { "comma", "," }, { "period", "." },
+	{ "slash", "/" }, { "grave", "`" }, { "Tab", "Tab" }, { "Delete", "Delete" },
+	{ "XF86AudioRaiseVolume", "Volume Up" }, { "XF86AudioLowerVolume", "Volume Down" },
+	{ "XF86AudioMute", "Mute" }, { "XF86AudioMicMute", "Microphone Mute" },
+	{ "XF86MonBrightnessUp", "Brightness Up" }, { "XF86MonBrightnessDown", "Brightness Down" },
+	{ "XF86AudioPlay", "Play/Pause" }, { "XF86AudioPause", "Pause" },
+	{ "XF86AudioNext", "Next Track" }, { "XF86AudioPrev", "Previous Track" },
+	{ "XF86AudioStop", "Stop" },
+};
+
+/* $mod+Shift+Return -> Win + Shift + Enter */
+static char *display_keys(const char *keys) {
+	gchar **parts = g_strsplit(keys, "+", -1);
+	GString *out = g_string_new(NULL);
+	for (int i = 0; parts[i]; i++) {
+		const char *name = parts[i];
+		for (size_t k = 0; k < G_N_ELEMENTS(key_names); k++) {
+			if (g_ascii_strcasecmp(parts[i], key_names[k].from) == 0) {
+				name = key_names[k].to;
+				break;
+			}
+		}
+		if (out->len) {
+			g_string_append(out, " + ");
+		}
+		if (strlen(name) == 1) {
+			g_string_append_c(out, g_ascii_toupper(name[0]));
+		} else {
+			g_string_append(out, name);
+		}
 	}
+	g_strfreev(parts);
+	return g_string_free(out, FALSE);
 }
 
-static void on_binding_remove(GtkButton *button, gpointer data) {
-	struct binding_row *b = data;
-	struct confdoc *d = binds_doc(b->p);
-	struct cstmt *stmt = nth_binding(d, b->index);
-	if (stmt) {
-		confdoc_remove(d, stmt);
-		settings_mode_changed(b->p->s, d);
-		schedule_binds(b->p);
+/* Keys in a comparable form: modifiers sorted, aliases resolved, lower case. */
+static char *normalize_keys(const char *keys) {
+	gchar **parts = g_strsplit(keys, "+", -1);
+	bool super = false, ctrl = false, alt = false, shift = false;
+	GString *rest = g_string_new(NULL);
+	for (int i = 0; parts[i]; i++) {
+		char *lower = g_ascii_strdown(parts[i], -1);
+		if (!strcmp(lower, "$mod") || !strcmp(lower, "mod4") || !strcmp(lower, "super")) {
+			super = true;
+		} else if (!strcmp(lower, "control") || !strcmp(lower, "ctrl")) {
+			ctrl = true;
+		} else if (!strcmp(lower, "mod1") || !strcmp(lower, "alt")) {
+			alt = true;
+		} else if (!strcmp(lower, "shift")) {
+			shift = true;
+		} else {
+			if (!strcmp(lower, "page_up")) {
+				g_free(lower);
+				lower = g_strdup("prior");
+			} else if (!strcmp(lower, "page_down")) {
+				g_free(lower);
+				lower = g_strdup("next");
+			}
+			g_string_append(rest, lower);
+		}
+		g_free(lower);
 	}
+	g_strfreev(parts);
+	char *out = g_strdup_printf("%s%s%s%s%s", super ? "super+" : "", ctrl ? "ctrl+" : "",
+		alt ? "alt+" : "", shift ? "shift+" : "", rest->str);
+	g_string_free(rest, TRUE);
+	return out;
 }
 
-static void on_add_binding(GtkButton *button, gpointer data) {
-	struct keyboard_page *p = data;
-	struct confdoc *d = binds_doc(p);
-	confdoc_append(d, d->root, "bindsym $mod+Shift+F12 nop");
-	settings_mode_changed(p->s, d);
-	settings_status(p->s, "Added a shortcut at the end of the list: change its keys and command");
-	schedule_binds(p);
+enum shortcut_group {
+	GROUP_APPS,
+	GROUP_WINDOWS,
+	GROUP_DESKTOPS,
+	GROUP_TASKBAR,
+	GROUP_MEDIA,
+	GROUP_SYSTEM,
+	GROUP_OTHER,
+	GROUP_COUNT,
+};
+
+static const char *const group_titles[GROUP_COUNT] = {
+	"Apps", "Windows", "Desktops", "Taskbar", "Sound & screen", "tileWin & system", "Other",
+};
+
+struct action {
+	const char *command, *label;
+	enum shortcut_group group;
+};
+
+/* The actions offered when adding or changing a shortcut. */
+static const struct action common_actions[] = {
+	{ "exec $term", "Open a terminal", GROUP_APPS },
+	{ "exec $filemanager", "Open the file manager", GROUP_APPS },
+	{ "exec $taskmanager", "Open the task manager", GROUP_APPS },
+	{ "exec tilewin-settings", "Open tileWin Settings", GROUP_APPS },
+	{ "launcher", "Search apps (launcher)", GROUP_APPS },
+	{ "panel startmenu toggle", "Open the start menu", GROUP_APPS },
+	{ "panel run", "Open the Run dialog", GROUP_APPS },
+	{ "kill", "Close the window", GROUP_WINDOWS },
+	{ "maximize enable", "Maximize the window", GROUP_WINDOWS },
+	{ "maximize toggle", "Maximize or restore the window", GROUP_WINDOWS },
+	{ "minimize enable", "Minimize the window", GROUP_WINDOWS },
+	{ "snap left", "Snap the window to the left", GROUP_WINDOWS },
+	{ "snap right", "Snap the window to the right", GROUP_WINDOWS },
+	{ "snap up", "Maximize the window (snap up)", GROUP_WINDOWS },
+	{ "snap down", "Restore or minimize the window", GROUP_WINDOWS },
+	{ "fullscreen", "Full screen", GROUP_WINDOWS },
+	{ "floating toggle", "Float or tile the window", GROUP_WINDOWS },
+	{ "alttab next", "Switch to the next window", GROUP_WINDOWS },
+	{ "alttab prev", "Switch to the previous window", GROUP_WINDOWS },
+	{ "panel window_menu", "Open the window menu", GROUP_WINDOWS },
+	{ "move output left", "Move the window to the screen on the left", GROUP_WINDOWS },
+	{ "move output right", "Move the window to the screen on the right", GROUP_WINDOWS },
+	{ "taskview", "Task view", GROUP_DESKTOPS },
+	{ "showdesktop", "Show the desktop", GROUP_DESKTOPS },
+	{ "desktop new", "New desktop", GROUP_DESKTOPS },
+	{ "desktop close", "Close the desktop", GROUP_DESKTOPS },
+	{ "workspace prev_on_output", "Previous desktop", GROUP_DESKTOPS },
+	{ "workspace next_on_output", "Next desktop", GROUP_DESKTOPS },
+	{ "exec tilewin-media volume-up", "Volume up", GROUP_MEDIA },
+	{ "exec tilewin-media volume-down", "Volume down", GROUP_MEDIA },
+	{ "exec tilewin-media mute", "Mute", GROUP_MEDIA },
+	{ "exec tilewin-media mic-mute", "Mute the microphone", GROUP_MEDIA },
+	{ "exec tilewin-media brightness-up", "Brightness up", GROUP_MEDIA },
+	{ "exec tilewin-media brightness-down", "Brightness down", GROUP_MEDIA },
+	{ "exec tilewin-media play-pause", "Play or pause music", GROUP_MEDIA },
+	{ "exec tilewin-media next", "Next track", GROUP_MEDIA },
+	{ "exec tilewin-media previous", "Previous track", GROUP_MEDIA },
+	{ "exec $screenshot", "Take a screenshot", GROUP_MEDIA },
+	{ "exec $locker", "Lock the screen", GROUP_SYSTEM },
+	{ "panel shutdown", "Shut down, restart or sign out", GROUP_SYSTEM },
+	{ "wm_mode toggle", "Switch between window and tile mode", GROUP_SYSTEM },
+	{ "reload", "Reload the configuration", GROUP_SYSTEM },
+	{ "restart", "Restart tileWin", GROUP_SYSTEM },
+	{ "restart panel", "Restart the taskbar", GROUP_SYSTEM },
+};
+
+static const char *direction_word(const char *dir) {
+	return !strcmp(dir, "left") ? "to the left" : !strcmp(dir, "right") ? "to the right" :
+		!strcmp(dir, "up") ? "above" : !strcmp(dir, "down") ? "below" : NULL;
 }
 
-/* ---------- recording a shortcut ---------- */
+/* A description of a command, NULL if there is none. */
+static char *describe_command(const char *command, enum shortcut_group *group) {
+	*group = GROUP_OTHER;
+	for (size_t i = 0; i < G_N_ELEMENTS(common_actions); i++) {
+		if (strcmp(command, common_actions[i].command) == 0) {
+			*group = common_actions[i].group;
+			return g_strdup(common_actions[i].label);
+		}
+	}
+	char word[64];
+	int n;
+	if (sscanf(command, "panel activate %d", &n) == 1) {
+		*group = GROUP_TASKBAR;
+		return g_strdup_printf("Open the app %d on the taskbar", n);
+	}
+	if (sscanf(command, "move container to workspace number %d", &n) == 1) {
+		*group = GROUP_DESKTOPS;
+		return g_strdup_printf("Move the window to desktop %d", n);
+	}
+	if (sscanf(command, "workspace number %d", &n) == 1) {
+		*group = GROUP_DESKTOPS;
+		return g_strdup_printf("Go to desktop %d", n);
+	}
+	if (g_str_has_prefix(command, "move container to workspace prev_on_output")) {
+		*group = GROUP_DESKTOPS;
+		return g_strdup("Move the window to the previous desktop");
+	}
+	if (g_str_has_prefix(command, "move container to workspace next_on_output")) {
+		*group = GROUP_DESKTOPS;
+		return g_strdup("Move the window to the next desktop");
+	}
+	if (sscanf(command, "focus %63s", word) == 1 && direction_word(word)) {
+		*group = GROUP_WINDOWS;
+		return g_strdup_printf("Focus the window %s", direction_word(word));
+	}
+	if (sscanf(command, "move %63s", word) == 1 && direction_word(word) &&
+			!strchr(command + 5, ' ')) {
+		*group = GROUP_WINDOWS;
+		return g_strdup_printf("Move the window %s", direction_word(word));
+	}
+	static const struct action tile_actions[] = {
+		{ "focus mode_toggle", "Switch focus between tiled and floating windows", GROUP_WINDOWS },
+		{ "focus parent", "Focus the parent container", GROUP_WINDOWS },
+		{ "splith", "Split the next window side by side", GROUP_WINDOWS },
+		{ "splitv", "Split the next window below", GROUP_WINDOWS },
+		{ "layout stacking", "Stacked layout", GROUP_WINDOWS },
+		{ "layout tabbed", "Tabbed layout", GROUP_WINDOWS },
+		{ "layout toggle split", "Switch the split direction", GROUP_WINDOWS },
+		{ "move scratchpad", "Move the window to the scratchpad", GROUP_WINDOWS },
+		{ "scratchpad show", "Show the scratchpad", GROUP_WINDOWS },
+		{ "mode \"resize\"", "Resize mode (arrows resize, Esc ends)", GROUP_WINDOWS },
+		{ "mode resize", "Resize mode (arrows resize, Esc ends)", GROUP_WINDOWS },
+		{ "snap restore", "Restore the window", GROUP_WINDOWS },
+	};
+	for (size_t i = 0; i < G_N_ELEMENTS(tile_actions); i++) {
+		if (strcmp(command, tile_actions[i].command) == 0) {
+			*group = tile_actions[i].group;
+			return g_strdup(tile_actions[i].label);
+		}
+	}
+	if (g_str_has_prefix(command, "panel startmenu")) {
+		*group = GROUP_APPS;
+		return g_strdup("Open the start menu");
+	}
+	if (g_str_has_prefix(command, "exec tilewin-nag") && strstr(command, "exit")) {
+		*group = GROUP_SYSTEM;
+		return g_strdup("Exit tileWin (asks first)");
+	}
+	if (g_str_has_prefix(command, "exec ")) {
+		const char *program = command + 5;
+		while (g_str_has_prefix(program, "--")) {
+			program += strcspn(program, " ");
+			while (*program == ' ') {
+				program++;
+			}
+		}
+		size_t len = strcspn(program, " ");
+		char *name = g_strndup(program, len);
+		char *base = g_path_get_basename(name);
+		char *label = g_strdup_printf("Run %s", base);
+		g_free(base);
+		g_free(name);
+		*group = GROUP_APPS;
+		return label;
+	}
+	return NULL;
+}
+
+/* ---------- recording keys ---------- */
+
+typedef void (*record_done)(const char *keys, gpointer data);
 
 struct recorder {
-	struct binding_row *row;
 	GtkWidget *window;
+	record_done done;
+	gpointer data;
 };
 
 static gboolean on_record_key(GtkEventControllerKey *controller, guint keyval, guint keycode,
@@ -663,23 +864,31 @@ static gboolean on_record_key(GtkEventControllerKey *controller, guint keyval, g
 	const char *name = gdk_keyval_name(gdk_keyval_to_lower(keyval));
 	if (name) {
 		g_string_append(combo, name);
-		gtk_editable_set_text(GTK_EDITABLE(r->row->keys), combo->str);
+		r->done(combo->str, r->data);
 	}
 	g_string_free(combo, TRUE);
 	gtk_window_destroy(GTK_WINDOW(r->window));
 	return TRUE;
 }
 
-static void on_record(GtkButton *button, gpointer data) {
-	struct binding_row *b = data;
+/* While recording, tileWin's own shortcuts reach this window too. */
+static void on_record_map(GtkWidget *window, gpointer data) {
+	GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window));
+	if (surface && GDK_IS_TOPLEVEL(surface)) {
+		gdk_toplevel_inhibit_system_shortcuts(GDK_TOPLEVEL(surface), NULL);
+	}
+}
+
+static void record_keys(GtkWindow *parent, record_done done, gpointer data) {
 	struct recorder *r = g_new0(struct recorder, 1);
-	r->row = b;
+	r->done = done;
+	r->data = data;
 	r->window = gtk_window_new();
-	gtk_window_set_transient_for(GTK_WINDOW(r->window), b->p->s->window);
+	gtk_window_set_transient_for(GTK_WINDOW(r->window), parent);
 	gtk_window_set_modal(GTK_WINDOW(r->window), TRUE);
 	gtk_window_set_title(GTK_WINDOW(r->window), "Record shortcut");
-	gtk_window_set_default_size(GTK_WINDOW(r->window), 420, 160);
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+	gtk_window_set_default_size(GTK_WINDOW(r->window), 420, 170);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 	gtk_widget_set_margin_start(box, 24);
 	gtk_widget_set_margin_end(box, 24);
 	gtk_widget_set_margin_top(box, 24);
@@ -687,8 +896,7 @@ static void on_record(GtkButton *button, gpointer data) {
 	GtkWidget *title = gtk_label_new("Press the new shortcut");
 	gtk_widget_add_css_class(title, "tw-heading");
 	gtk_box_append(GTK_BOX(box), title);
-	GtkWidget *hint = gtk_label_new("Esc cancels. Shortcuts that tileWin already uses reach "
-		"tileWin instead of this window; type those into the field.");
+	GtkWidget *hint = gtk_label_new("For example Win+E or Ctrl+Alt+T. Esc cancels.");
 	gtk_label_set_wrap(GTK_LABEL(hint), TRUE);
 	gtk_widget_add_css_class(hint, "dim-label");
 	gtk_box_append(GTK_BOX(box), hint);
@@ -696,14 +904,329 @@ static void on_record(GtkButton *button, gpointer data) {
 	GtkEventController *controller = gtk_event_controller_key_new();
 	g_signal_connect(controller, "key-pressed", G_CALLBACK(on_record_key), r);
 	gtk_widget_add_controller(r->window, controller);
+	g_signal_connect(r->window, "map", G_CALLBACK(on_record_map), NULL);
 	g_object_set_data_full(G_OBJECT(r->window), "recorder", r, g_free);
 	gtk_window_present(GTK_WINDOW(r->window));
 }
 
+/* The description of another binding with the same keys, NULL if there is none. */
+static char *conflict(struct keyboard_page *p, const char *keys, int exclude) {
+	struct confdoc *d = binds_doc(p);
+	char *wanted = normalize_keys(keys);
+	char *found = NULL;
+	for (int i = 0; !found; i++) {
+		struct cstmt *stmt = nth_binding(d, i);
+		if (!stmt) {
+			break;
+		}
+		if (i == exclude) {
+			continue;
+		}
+		char *flags, *other_keys, *command;
+		parse_binding(d, stmt, &flags, &other_keys, &command);
+		char *norm = normalize_keys(other_keys);
+		if (strcmp(norm, wanted) == 0 && !strstr(flags, "--release")) {
+			enum shortcut_group group;
+			found = describe_command(command, &group);
+			if (!found) {
+				found = g_strdup(command);
+			}
+		}
+		g_free(norm);
+		g_free(flags);
+		g_free(other_keys);
+		g_free(command);
+	}
+	g_free(wanted);
+	return found;
+}
+
+/* ---------- add / change dialog ---------- */
+
+struct shortcut_dialog {
+	struct keyboard_page *p;
+	int index; // binding being changed, -1 for a new one
+	char *flags, *keys;
+	GtkWidget *window, *keys_button, *action_dd, *custom_entry, *custom_row, *warning, *save;
+};
+
+static void shortcut_dialog_free(gpointer data) {
+	struct shortcut_dialog *d = data;
+	g_free(d->flags);
+	g_free(d->keys);
+	g_free(d);
+}
+
+static const char *dialog_command(struct shortcut_dialog *d) {
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(d->action_dd));
+	if (sel < G_N_ELEMENTS(common_actions)) {
+		return common_actions[sel].command;
+	}
+	return gtk_editable_get_text(GTK_EDITABLE(d->custom_entry));
+}
+
+static void dialog_update(struct shortcut_dialog *d) {
+	char *shown = d->keys && *d->keys ? display_keys(d->keys) : g_strdup("Click to record");
+	gtk_button_set_label(GTK_BUTTON(d->keys_button), shown);
+	g_free(shown);
+	bool custom = gtk_drop_down_get_selected(GTK_DROP_DOWN(d->action_dd)) >=
+		G_N_ELEMENTS(common_actions);
+	gtk_widget_set_visible(d->custom_row, custom);
+	char *other = d->keys && *d->keys ? conflict(d->p, d->keys, d->index) : NULL;
+	if (other) {
+		char *text = g_strdup_printf("These keys are also used for \"%s\". The shortcut saved "
+			"last wins.", other);
+		gtk_label_set_text(GTK_LABEL(d->warning), text);
+		g_free(text);
+	}
+	gtk_widget_set_visible(d->warning, other != NULL);
+	g_free(other);
+	const char *command = dialog_command(d);
+	gtk_widget_set_sensitive(d->save, d->keys && *d->keys && command && *command);
+}
+
+static void on_dialog_keys_recorded(const char *keys, gpointer data) {
+	struct shortcut_dialog *d = data;
+	g_free(d->keys);
+	d->keys = g_strdup(keys);
+	dialog_update(d);
+}
+
+static void on_dialog_record(GtkButton *button, gpointer data) {
+	struct shortcut_dialog *d = data;
+	record_keys(GTK_WINDOW(d->window), on_dialog_keys_recorded, d);
+}
+
+static void on_dialog_action(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	dialog_update(data);
+}
+
+static void on_dialog_custom(GtkEditable *editable, gpointer data) {
+	dialog_update(data);
+}
+
+static void on_dialog_save(GtkButton *button, gpointer data) {
+	struct shortcut_dialog *d = data;
+	const char *command = dialog_command(d);
+	if (!d->keys || !*d->keys || strchr(d->keys, ' ') || !command || !*command) {
+		return;
+	}
+	set_binding(d->p, d->index, d->flags, d->keys, command);
+	settings_status(d->p->s, d->index < 0 ? "Added the shortcut" : "Changed the shortcut");
+	schedule_binds(d->p);
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+static void on_dialog_cancel(GtkButton *button, gpointer data) {
+	struct shortcut_dialog *d = data;
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+static void open_shortcut_dialog(struct keyboard_page *p, int index) {
+	struct shortcut_dialog *d = g_new0(struct shortcut_dialog, 1);
+	d->p = p;
+	d->index = index;
+	char *command = NULL;
+	if (index >= 0) {
+		struct confdoc *doc = binds_doc(p);
+		struct cstmt *stmt = nth_binding(doc, index);
+		if (!stmt) {
+			g_free(d);
+			return;
+		}
+		parse_binding(doc, stmt, &d->flags, &d->keys, &command);
+	} else {
+		d->flags = g_strdup("");
+	}
+
+	d->window = gtk_window_new();
+	gtk_window_set_transient_for(GTK_WINDOW(d->window), p->s->window);
+	gtk_window_set_modal(GTK_WINDOW(d->window), TRUE);
+	gtk_window_set_title(GTK_WINDOW(d->window), index < 0 ? "Add shortcut" : "Change shortcut");
+	gtk_window_set_default_size(GTK_WINDOW(d->window), 520, -1);
+	g_object_set_data_full(G_OBJECT(d->window), "dialog", d, shortcut_dialog_free);
+
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+	gtk_widget_set_margin_start(box, 20);
+	gtk_widget_set_margin_end(box, 20);
+	gtk_widget_set_margin_top(box, 20);
+	gtk_widget_set_margin_bottom(box, 20);
+
+	GtkWidget *keys_label = gtk_label_new("Keys");
+	gtk_label_set_xalign(GTK_LABEL(keys_label), 0);
+	gtk_widget_add_css_class(keys_label, "tw-heading");
+	gtk_box_append(GTK_BOX(box), keys_label);
+	d->keys_button = gtk_button_new_with_label("");
+	gtk_widget_set_tooltip_text(d->keys_button, "Click, then press the keys");
+	g_signal_connect(d->keys_button, "clicked", G_CALLBACK(on_dialog_record), d);
+	gtk_box_append(GTK_BOX(box), d->keys_button);
+
+	GtkWidget *action_label = gtk_label_new("Action");
+	gtk_label_set_xalign(GTK_LABEL(action_label), 0);
+	gtk_widget_add_css_class(action_label, "tw-heading");
+	gtk_box_append(GTK_BOX(box), action_label);
+	GtkStringList *model = gtk_string_list_new(NULL);
+	guint selected = G_N_ELEMENTS(common_actions);
+	for (size_t i = 0; i < G_N_ELEMENTS(common_actions); i++) {
+		char *label = g_strdup_printf("%s \xe2\x80\x94 %s", group_titles[common_actions[i].group],
+			common_actions[i].label);
+		gtk_string_list_append(model, label);
+		g_free(label);
+		if (command && strcmp(command, common_actions[i].command) == 0) {
+			selected = i;
+		}
+	}
+	gtk_string_list_append(model, "Other command...");
+	d->action_dd = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
+	gtk_drop_down_set_enable_search(GTK_DROP_DOWN(d->action_dd), TRUE);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(d->action_dd), index < 0 ? 0 : selected);
+	gtk_box_append(GTK_BOX(box), d->action_dd);
+
+	d->custom_row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	d->custom_entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(d->custom_entry), "e.g. exec firefox or snap left");
+	if (command && selected == G_N_ELEMENTS(common_actions)) {
+		gtk_editable_set_text(GTK_EDITABLE(d->custom_entry), command);
+	}
+	gtk_box_append(GTK_BOX(d->custom_row), d->custom_entry);
+	GtkWidget *custom_hint = gtk_label_new("A tileWin command: \"exec <program>\" starts a "
+		"program, other commands are listed in the README.");
+	gtk_label_set_wrap(GTK_LABEL(custom_hint), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(custom_hint), 0);
+	gtk_widget_add_css_class(custom_hint, "dim-label");
+	gtk_box_append(GTK_BOX(d->custom_row), custom_hint);
+	gtk_box_append(GTK_BOX(box), d->custom_row);
+
+	d->warning = gtk_label_new("");
+	gtk_label_set_wrap(GTK_LABEL(d->warning), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(d->warning), 0);
+	gtk_widget_add_css_class(d->warning, "warning");
+	gtk_box_append(GTK_BOX(box), d->warning);
+
+	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+	GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+	g_signal_connect(cancel, "clicked", G_CALLBACK(on_dialog_cancel), d);
+	gtk_box_append(GTK_BOX(buttons), cancel);
+	d->save = gtk_button_new_with_label(index < 0 ? "Add" : "Save");
+	gtk_widget_add_css_class(d->save, "suggested-action");
+	g_signal_connect(d->save, "clicked", G_CALLBACK(on_dialog_save), d);
+	gtk_box_append(GTK_BOX(buttons), d->save);
+	gtk_box_append(GTK_BOX(box), buttons);
+
+	g_signal_connect(d->action_dd, "notify::selected", G_CALLBACK(on_dialog_action), d);
+	g_signal_connect(d->custom_entry, "changed", G_CALLBACK(on_dialog_custom), d);
+	gtk_window_set_child(GTK_WINDOW(d->window), box);
+	dialog_update(d);
+	g_free(command);
+	gtk_window_present(GTK_WINDOW(d->window));
+	if (index < 0) {
+		record_keys(GTK_WINDOW(d->window), on_dialog_keys_recorded, d);
+	}
+}
+
+/* ---------- list ---------- */
+
+struct row_keys {
+	struct keyboard_page *p;
+	int index;
+};
+
+static void on_row_keys_recorded(const char *keys, gpointer data) {
+	struct row_keys *r = data;
+	struct confdoc *d = binds_doc(r->p);
+	struct cstmt *stmt = nth_binding(d, r->index);
+	if (stmt) {
+		char *flags, *old_keys, *command;
+		parse_binding(d, stmt, &flags, &old_keys, &command);
+		set_binding(r->p, r->index, flags, keys, command);
+		char *shown = display_keys(keys);
+		settings_status(r->p->s, "The shortcut is now %s", shown);
+		g_free(shown);
+		g_free(flags);
+		g_free(old_keys);
+		g_free(command);
+		schedule_binds(r->p);
+	}
+}
+
+static void on_row_keys(GtkButton *button, gpointer data) {
+	struct keyboard_page *p = data;
+	struct row_keys *r = g_new0(struct row_keys, 1);
+	r->p = p;
+	r->index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "index"));
+	// freed with the button's row when the list is rebuilt after the change
+	g_object_set_data_full(G_OBJECT(button), "record", r, g_free);
+	record_keys(p->s->window, on_row_keys_recorded, r);
+}
+
+static void on_row_edit(GtkButton *button, gpointer data) {
+	open_shortcut_dialog(data, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "index")));
+}
+
+static void on_row_remove(GtkButton *button, gpointer data) {
+	struct keyboard_page *p = data;
+	struct confdoc *d = binds_doc(p);
+	struct cstmt *stmt = nth_binding(d, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button),
+		"index")));
+	if (stmt) {
+		confdoc_remove(d, stmt);
+		settings_mode_changed(p->s, d);
+		settings_status(p->s, "Removed the shortcut");
+		schedule_binds(p);
+	}
+}
+
+static void on_add_binding(GtkButton *button, gpointer data) {
+	open_shortcut_dialog(data, -1);
+}
+
+static bool matches_search(const char *search, const char *a, const char *b, const char *c) {
+	if (!search || !*search) {
+		return true;
+	}
+	const char *fields[] = { a, b, c };
+	for (size_t i = 0; i < G_N_ELEMENTS(fields); i++) {
+		if (!fields[i]) {
+			continue;
+		}
+		char *hay = g_utf8_casefold(fields[i], -1);
+		char *needle = g_utf8_casefold(search, -1);
+		bool found = strstr(hay, needle) != NULL;
+		g_free(hay);
+		g_free(needle);
+		if (found) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static GtkWidget *icon_button(const char *icon, const char *tooltip, int index,
+		GCallback callback, struct keyboard_page *p) {
+	GtkWidget *button = gtk_button_new_from_icon_name(icon);
+	gtk_widget_set_tooltip_text(button, tooltip);
+	gtk_widget_add_css_class(button, "flat");
+	gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+	g_object_set_data(G_OBJECT(button), "index", GINT_TO_POINTER(index));
+	g_signal_connect(button, "clicked", callback, p);
+	return button;
+}
+
 static void rebuild_binds(struct keyboard_page *p) {
 	p->updating = true;
-	gtk_list_box_remove_all(GTK_LIST_BOX(p->binds_list));
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(p->binds_box))) {
+		gtk_box_remove(GTK_BOX(p->binds_box), child);
+	}
+	const char *search = gtk_editable_get_text(GTK_EDITABLE(p->search));
 	struct confdoc *d = binds_doc(p);
+	GtkWidget *groups[GROUP_COUNT] = { 0 };
+	// create the groups in their order, empty ones are removed afterwards
+	for (int g = 0; g < GROUP_COUNT; g++) {
+		groups[g] = ui_group(p->binds_box, group_titles[g], NULL);
+	}
+	int shown = 0;
 	for (int i = 0;; i++) {
 		struct cstmt *stmt = nth_binding(d, i);
 		if (!stmt) {
@@ -711,54 +1234,55 @@ static void rebuild_binds(struct keyboard_page *p) {
 		}
 		char *flags, *keys, *command;
 		parse_binding(d, stmt, &flags, &keys, &command);
-		struct binding_row *b = g_new0(struct binding_row, 1);
-		b->p = p;
-		b->index = i;
-		b->flags = flags;
-
-		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-		gtk_widget_set_margin_start(box, 12);
-		gtk_widget_set_margin_end(box, 8);
-		gtk_widget_set_margin_top(box, 4);
-		gtk_widget_set_margin_bottom(box, 4);
-		b->keys = gtk_entry_new();
-		gtk_editable_set_text(GTK_EDITABLE(b->keys), keys);
-		gtk_editable_set_width_chars(GTK_EDITABLE(b->keys), 22);
-		if (*flags) {
-			char *tooltip = g_strdup_printf("Options: %s", flags);
-			gtk_widget_set_tooltip_text(b->keys, tooltip);
-			g_free(tooltip);
+		enum shortcut_group group;
+		char *label = describe_command(command, &group);
+		char *pretty = display_keys(keys);
+		bool release = strstr(flags, "--release") != NULL;
+		if (matches_search(search, label, command, pretty)) {
+			shown++;
+			char *other = release ? NULL : conflict(p, keys, i);
+			char *subtitle = other ?
+				g_strdup_printf("%s \xe2\x80\x94 also used for \"%s\"", command, other) :
+				g_strdup(command);
+			GtkWidget *controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+			char *key_text = release ? g_strdup_printf("%s (tap)", pretty) : g_strdup(pretty);
+			GtkWidget *keys_button = gtk_button_new_with_label(key_text);
+			g_free(key_text);
+			gtk_widget_set_tooltip_text(keys_button, "Change the keys: click, then press them");
+			gtk_widget_set_valign(keys_button, GTK_ALIGN_CENTER);
+			g_object_set_data(G_OBJECT(keys_button), "index", GINT_TO_POINTER(i));
+			g_signal_connect(keys_button, "clicked", G_CALLBACK(on_row_keys), p);
+			gtk_box_append(GTK_BOX(controls), keys_button);
+			gtk_box_append(GTK_BOX(controls), icon_button("document-edit-symbolic",
+				"Change the action", i, G_CALLBACK(on_row_edit), p));
+			gtk_box_append(GTK_BOX(controls), icon_button("user-trash-symbolic",
+				"Remove the shortcut", i, G_CALLBACK(on_row_remove), p));
+			GtkWidget *row = ui_row(groups[group], label ? label : command,
+				label || other ? subtitle : NULL, controls);
+			if (other) {
+				gtk_widget_add_css_class(row, "tw-conflict");
+			}
+			g_free(subtitle);
+			g_free(other);
 		}
-		gtk_box_append(GTK_BOX(box), b->keys);
-		GtkWidget *record = gtk_button_new_from_icon_name("input-keyboard-symbolic");
-		gtk_widget_set_tooltip_text(record, "Record the keys");
-		gtk_widget_add_css_class(record, "flat");
-		g_signal_connect(record, "clicked", G_CALLBACK(on_record), b);
-		gtk_box_append(GTK_BOX(box), record);
-		b->command = gtk_entry_new();
-		gtk_editable_set_text(GTK_EDITABLE(b->command), command);
-		gtk_widget_set_hexpand(b->command, TRUE);
-		gtk_box_append(GTK_BOX(box), b->command);
-		GtkWidget *remove = gtk_button_new_from_icon_name("list-remove-symbolic");
-		gtk_widget_set_tooltip_text(remove, "Remove");
-		gtk_widget_add_css_class(remove, "flat");
-		g_signal_connect(remove, "clicked", G_CALLBACK(on_binding_remove), b);
-		gtk_box_append(GTK_BOX(box), remove);
-
-		g_signal_connect(b->keys, "changed", G_CALLBACK(on_binding_changed), b);
-		g_signal_connect(b->command, "changed", G_CALLBACK(on_binding_changed), b);
-		GtkWidget *row = gtk_list_box_row_new();
-		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-		// the row owns the binding data used by its signal handlers
-		g_object_set_data_full(G_OBJECT(row), "binding", b, binding_row_free);
-		gtk_list_box_append(GTK_LIST_BOX(p->binds_list), row);
+		g_free(label);
+		g_free(pretty);
+		g_free(flags);
 		g_free(keys);
 		g_free(command);
 	}
-	GtkWidget *add = gtk_button_new_with_label("Add shortcut");
-	g_signal_connect(add, "clicked", G_CALLBACK(on_add_binding), p);
-	ui_row(p->binds_list, NULL, NULL, add);
+	for (int g = 0; g < GROUP_COUNT; g++) {
+		// ui_group returns the list; its parent is the group box
+		if (!gtk_widget_get_first_child(groups[g])) {
+			gtk_box_remove(GTK_BOX(p->binds_box), gtk_widget_get_parent(groups[g]));
+		}
+	}
+	if (shown == 0) {
+		GtkWidget *empty = gtk_label_new(search && *search ? "No shortcut matches the search." :
+			"No shortcuts yet.");
+		gtk_widget_add_css_class(empty, "dim-label");
+		gtk_box_append(GTK_BOX(p->binds_box), empty);
+	}
 	p->updating = false;
 }
 
@@ -776,6 +1300,10 @@ static void schedule_binds(struct keyboard_page *p) {
 }
 
 static void on_mode_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	schedule_binds(data);
+}
+
+static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
 	schedule_binds(data);
 }
 
@@ -848,9 +1376,8 @@ GtkWidget *keyboard_page_new(struct settings *s) {
 	ui_row(typing, "Test", NULL, test);
 
 	GtkWidget *binds_header = ui_group(content, "Shortcuts",
-		"$mod is the Super (Windows) key, Mod1 is Alt. Keys are joined with +, e.g. $mod+Shift+e or "
-		"Control+Mod1+Delete. Commands are tileWin commands such as exec thunar or snap left. "
-		"tileWin reloads its config after a change.");
+		"Click the keys of a shortcut to change them, the pencil to choose another action. "
+		"Win is the Windows key. tileWin applies changes right away.");
 	p->mode_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"Window mode", "Tile mode", NULL });
 	char *mode = settings_current_mode();
@@ -858,7 +1385,15 @@ GtkWidget *keyboard_page_new(struct settings *s) {
 	g_free(mode);
 	g_signal_connect(p->mode_dd, "notify::selected", G_CALLBACK(on_mode_selected), p);
 	ui_row(binds_header, "Shortcuts of", NULL, p->mode_dd);
-	p->binds_list = ui_group(content, NULL, NULL);
+	p->search = gtk_search_entry_new();
+	gtk_widget_set_size_request(p->search, 300, -1);
+	g_signal_connect(p->search, "search-changed", G_CALLBACK(on_search_changed), p);
+	ui_row(binds_header, "Search", "By action, command or keys", p->search);
+	GtkWidget *add = gtk_button_new_with_label("Add shortcut");
+	g_signal_connect(add, "clicked", G_CALLBACK(on_add_binding), p);
+	ui_row(binds_header, "New shortcut", "Press the keys, then choose what they do", add);
+	p->binds_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(content), p->binds_box);
 
 	s->keyboard_page = p;
 	keyboard_page_refresh(s);
