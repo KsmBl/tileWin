@@ -100,6 +100,12 @@ static char *format_text(const char *format, const char **values) {
 	return out;
 }
 
+/* Windows 11: the network, volume and battery icons open quick settings. */
+static bool opens_quick_settings(struct widget *w) {
+	return widget_conf_bool(w, "quick_settings",
+		tw_theme_bool(w->panel->theme, "panel.quick_settings", false));
+}
+
 static int glyph_size(struct render_ctx *ctx) {
 	return ctx->height < 32 ? 16 : 18;
 }
@@ -478,6 +484,10 @@ static bool power_click(struct widget *w, struct psurface *s, struct hotspot *hs
 	}
 	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
 	anchor.right_align = true;
+	if (opens_quick_settings(w)) {
+		quicksettings_toggle(w->panel, anchor);
+		return true;
+	}
 	flyout_power_toggle(w->panel, anchor, widget_conf(w, "settings", NULL));
 	return true;
 }
@@ -651,6 +661,10 @@ static bool network_click(struct widget *w, struct psurface *s, struct hotspot *
 	}
 	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
 	anchor.right_align = true;
+	if (opens_quick_settings(w)) {
+		quicksettings_toggle(w->panel, anchor);
+		return true;
+	}
 	flyout_network_toggle(w->panel, anchor, widget_conf(w, "settings", TW_NETWORK_SETTINGS));
 	return true;
 }
@@ -913,6 +927,10 @@ static bool volume_click(struct widget *w, struct psurface *s, struct hotspot *h
 	if (button == BTN_LEFT) {
 		struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
 		anchor.right_align = true;
+		if (opens_quick_settings(w)) {
+			quicksettings_toggle(w->panel, anchor);
+			return true;
+		}
 		flyout_volume_toggle(w->panel, anchor, widget_conf(w, "mixer", "exec pavucontrol"));
 		return true;
 	}

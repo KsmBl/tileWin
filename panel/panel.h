@@ -402,6 +402,8 @@ enum popup_kind {
 	POPUP_DIALOG,
 	POPUP_SHUTDOWN,
 	POPUP_NOTIFICATIONS,
+	POPUP_QUICKSETTINGS,
+	POPUP_BLUETOOTH,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -448,6 +450,41 @@ void notify_theme_changed(struct panel *panel);
 void notify_handle_command(struct panel *panel, int argc, char **argv);
 bool notify_dnd(void);
 void notify_set_dnd(struct panel *panel, bool on);
+/* The bell of the notifications button, crossed out for do not disturb. */
+void notify_draw_bell(cairo_t *cr, double x, double y, double size, uint32_t color,
+	bool crossed);
+
+/* quicksettings.c: Wi-Fi, Bluetooth, sound, brightness and more in one flyout */
+void quicksettings_toggle(struct panel *panel, struct popup_anchor anchor);
+/* The sound changed: reads the state again. */
+void quicksettings_changed(struct panel *panel);
+/* Bluetooth or do not disturb changed: only draws again. */
+void quicksettings_redraw(struct panel *panel);
+
+/* bluetooth.c: BlueZ on the system bus */
+struct bt_device {
+	char *path, *name, *address, *icon;
+	bool paired, connected, trusted;
+	bool has_rssi;
+	int rssi;
+	bool busy; // connecting or pairing
+};
+void bt_init(struct panel *panel);
+void bt_fini(void);
+bool bt_available(void); // bluetoothd runs and there is an adapter
+bool bt_powered(void);
+bool bt_discovering(void);
+list_t *bt_devices(void); // struct bt_device *, may be NULL
+/* The last error or pairing code to show, NULL if none. */
+const char *bt_status(void);
+void bt_set_powered(bool on);
+void bt_set_discovery(bool on);
+void bt_connect(const char *path, bool connect);
+void bt_pair(const char *path);
+void bt_remove(const char *path);
+/* flyouts.c */
+void flyout_bluetooth_toggle(struct panel *panel, struct popup_anchor anchor);
+void flyout_bluetooth_changed(struct panel *panel);
 
 /* tooltip.c */
 void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *hs);

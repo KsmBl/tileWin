@@ -309,6 +309,7 @@ int main(int argc, char **argv) {
 	}
 	panel_outputs_update_bars(&panel);
 	notify_init(&panel);
+	bt_init(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	watch_files(&panel);
@@ -335,6 +336,7 @@ int main(int argc, char **argv) {
 		loop_poll(panel.loop);
 	}
 
+	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);
 	panel_config_free(panel.config);

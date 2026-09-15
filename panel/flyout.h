@@ -22,5 +22,7 @@ void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int val
 void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on);
 void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 	const char *label, bool primary, bool hover);
+/* The Bluetooth rune in a size x size square. */
+void draw_bluetooth_glyph(cairo_t *cr, double x, double y, double size, uint32_t color);
 
 #endif

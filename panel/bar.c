@@ -632,6 +632,10 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		struct popup_anchor anchor = popup_anchor_for_bar(output->bar, output->width, 0);
 		anchor.right_align = true;
 		calendar_toggle(panel, anchor);
+	} else if (strcmp(cmd, "bluetooth") == 0 && output) {
+		flyout_bluetooth_toggle(panel, flyout_anchor(panel, output));
+	} else if (strcmp(cmd, "quicksettings") == 0 && output) {
+		quicksettings_toggle(panel, flyout_anchor(panel, output));
 	} else if (strcmp(cmd, "notifications") == 0 || strcmp(cmd, "dnd") == 0) {
 		notify_handle_command(panel, argc, argv);
 	} else if (strcmp(cmd, "osd") == 0) {

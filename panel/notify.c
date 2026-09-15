@@ -446,6 +446,7 @@ void notify_set_dnd(struct panel *panel, bool on) {
 	}
 	panel_set_dirty(panel);
 	center_changed();
+	quicksettings_redraw(panel);
 }
 
 /* ---------- bus ---------- */
@@ -1658,7 +1659,7 @@ static int bell_measure(struct widget *w, struct render_ctx *ctx) {
 	return bell_size(ctx) + 2 * pad + (nt.unread > 0 ? 6 : 0);
 }
 
-static void draw_bell(cairo_t *cr, double x, double y, double s, uint32_t color, bool dnd) {
+void notify_draw_bell(cairo_t *cr, double x, double y, double s, uint32_t color, bool dnd) {
 	double cx = x + s / 2;
 	cairo_new_path(cr);
 	cairo_move_to(cr, x + s * 0.16, y + s * 0.74);
@@ -1696,7 +1697,7 @@ static void bell_render(struct widget *w, struct render_ctx *ctx, struct pbox b)
 	int size = bell_size(ctx);
 	int pad = tw_theme_int(ctx->panel->theme, "panel.item_padding", 6);
 	double gx = b.x + pad, gy = b.y + (b.height - size) / 2.0;
-	draw_bell(ctx->cairo, gx, gy, size, widget_fg(ctx->panel, "notifications"), nt.dnd);
+	notify_draw_bell(ctx->cairo, gx, gy, size, widget_fg(ctx->panel, "notifications"), nt.dnd);
 	if (nt.unread > 0) {
 		char number[8];
 		snprintf(number, sizeof(number), nt.unread > 9 ? "9+" : "%d", nt.unread);

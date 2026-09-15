@@ -26,6 +26,7 @@ executable(
 	'tilewin-panel', [
 		'apps.c',
 		'bar.c',
+		'bluetooth.c',
 		'config.c',
 		'desktop.c',
 		'draw.c',
@@ -37,6 +38,7 @@ executable(
 		'osd.c',
 		'popup.c',
 		'proc.c',
+		'quicksettings.c',
 		'shutdown.c',
 		'startmenu.c',
 		'surface.c',

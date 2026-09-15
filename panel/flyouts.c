@@ -1094,6 +1094,7 @@ static void vol_query_later(struct volume_flyout *f) {
 }
 
 void flyout_volume_changed(struct panel *panel) {
+	quicksettings_changed(panel);
 	if (vol_current && !vol_current->dragging) {
 		vol_query_later(vol_current);
 	}
@@ -2388,4 +2389,311 @@ void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const ch
 	cpu_current = f;
 	// the first measurement needs a second sample
 	f->tick = loop_add_timer(panel->loop, 400, cpu_tick, NULL);
+}
+
+/* ================= bluetooth ================= */
+
+#define BT_HEADER 60
+#define BT_ROW 52
+#define BT_ROWS 6
+#define BT_MESSAGE 56
+#define BT_STATUS 30
+
+struct bt_row {
+	char *path;
+	struct pbox row, action, forget;
+};
+
+struct bt_flyout {
+	struct flyout base; // first member
+	int scroll;
+	bool discovery_started;
+	struct pbox power_switch, link;
+	struct bt_row rows[BT_ROWS];
+	int row_count;
+};
+
+static struct bt_flyout *bt_current = NULL;
+
+void draw_bluetooth_glyph(cairo_t *cr, double x, double y, double s, uint32_t color) {
+	cairo_new_path(cr);
+	cairo_move_to(cr, x + s * 0.24, y + s * 0.3);
+	cairo_line_to(cr, x + s * 0.72, y + s * 0.7);
+	cairo_line_to(cr, x + s * 0.5, y + s * 0.92);
+	cairo_line_to(cr, x + s * 0.5, y + s * 0.08);
+	cairo_line_to(cr, x + s * 0.72, y + s * 0.3);
+	cairo_line_to(cr, x + s * 0.24, y + s * 0.7);
+	pd_color(cr, color);
+	cairo_set_line_width(cr, s * 0.09);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_stroke(cr);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+}
+
+/* Unnamed nearby devices are only called by their address, e.g. "4C-87-5D-12-AB-01". */
+static bool bt_named(const struct bt_device *d) {
+	if (!d->name || !*d->name) {
+		return false;
+	}
+	if (strlen(d->name) != 17) {
+		return true;
+	}
+	for (int i = 0; i < 17; i++) {
+		char c = d->name[i];
+		if (i % 3 == 2 ? (c != '-' && c != ':') : !isxdigit((unsigned char)c)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static int bt_device_cmp(const void *a, const void *b) {
+	const struct bt_device *x = *(struct bt_device *const *)a;
+	const struct bt_device *y = *(struct bt_device *const *)b;
+	if (x->connected != y->connected) {
+		return x->connected ? -1 : 1;
+	}
+	if (x->paired != y->paired) {
+		return x->paired ? -1 : 1;
+	}
+	return strcasecmp(x->name ? x->name : "", y->name ? y->name : "");
+}
+
+/* Paired and named nearby devices, connected ones first. */
+static int bt_visible(struct bt_device **out, int max) {
+	list_t *devices = bt_devices();
+	int count = 0;
+	for (int i = 0; devices && i < devices->length && count < max; i++) {
+		struct bt_device *d = devices->items[i];
+		if (d->paired || d->connected || bt_named(d)) {
+			out[count++] = d;
+		}
+	}
+	qsort(out, count, sizeof(*out), bt_device_cmp);
+	return count;
+}
+
+static int bt_height(struct bt_flyout *f) {
+	struct bt_device *devices[128];
+	int count = bt_powered() ? bt_visible(devices, 128) : 0;
+	int h = BT_HEADER + 1;
+	h += count ? (count < BT_ROWS ? count : BT_ROWS) * BT_ROW + 8 : BT_MESSAGE;
+	if (bt_status()) {
+		h += BT_STATUS;
+	}
+	return h + FOOTER;
+}
+
+static void bt_rows_clear(struct bt_flyout *f) {
+	for (int i = 0; i < f->row_count; i++) {
+		free(f->rows[i].path);
+	}
+	f->row_count = 0;
+}
+
+static void bt_render(struct popup *p, cairo_t *cr) {
+	struct bt_flyout *f = p->data;
+	struct fly_style st;
+	fly_style_init(&st, p->panel);
+	int M = popup_shadow_margin(p->panel);
+	int W = p->surface->width, H = p->surface->height;
+	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
+	int y = M;
+
+	draw_bluetooth_glyph(cr, x0, y + 20, 22, st.fg);
+	pd_text(cr, st.big, "Bluetooth", x0 + 32, y + 12, cw - 90, 36, st.fg, PD_LEFT);
+	f->power_switch = (struct pbox){ 0 };
+	if (bt_available()) {
+		f->power_switch = (struct pbox){ x0 + cw - 48, y + 16, 48, 28 };
+		draw_switch(cr, &st, x0 + cw - 40, y + 20, bt_powered());
+	}
+	y += BT_HEADER;
+	draw_line(cr, &st, p, y);
+	y += 1;
+
+	bt_rows_clear(f);
+	struct bt_device *devices[128];
+	int count = bt_powered() ? bt_visible(devices, 128) : 0;
+	if (f->scroll > count - BT_ROWS) {
+		f->scroll = count - BT_ROWS;
+	}
+	if (f->scroll < 0) {
+		f->scroll = 0;
+	}
+	if (count == 0) {
+		const char *message = !bt_available() ? "Bluetooth isn't available" :
+			!bt_powered() ? "Turn on Bluetooth to connect devices" :
+			bt_discovering() ? "Searching for devices…" : "No devices found";
+		pd_text(cr, st.font, message, x0, y, cw, BT_MESSAGE, st.dim, PD_LEFT);
+		y += BT_MESSAGE;
+	} else {
+		y += 4;
+		for (int i = f->scroll; i < count && f->row_count < BT_ROWS; i++) {
+			struct bt_device *d = devices[i];
+			struct bt_row *r = &f->rows[f->row_count++];
+			r->path = strdup(d->path);
+			r->row = (struct pbox){ M + 4, y, W - 2 * M - 8, BT_ROW };
+			r->action = (struct pbox){ x0 + cw - 96, y + 11, 96, 30 };
+			r->forget = (struct pbox){ 0 };
+			bool hover = hovered(&f->base, r->row);
+			if (hover) {
+				fill_hover(cr, &st, r->row);
+			}
+			cairo_surface_t *icon = d->icon ? apps_icon(p->panel, d->icon, 24) : NULL;
+			if (icon) {
+				pd_icon(cr, icon, x0, y + 14, 24);
+			} else {
+				draw_bluetooth_glyph(cr, x0, y + 14, 24, st.fg);
+			}
+			int text_w = cw - 36 - 104 - (d->paired ? 28 : 0);
+			pd_text(cr, st.bold, d->name ? d->name : d->address, x0 + 36, y + 7, text_w, 20,
+				st.fg, PD_LEFT);
+			pd_text(cr, st.font, d->connected ? "Connected" : d->paired ? "Paired" :
+				"Not paired", x0 + 36, y + 26, text_w, 18, st.dim, PD_LEFT);
+			if (d->paired && hover && !d->busy) {
+				r->forget = (struct pbox){ r->action.x - 30, y + 14, 24, 24 };
+				if (hovered(&f->base, r->forget)) {
+					fill_hover(cr, &st, r->forget);
+				}
+				cairo_new_path(cr);
+				double cx = r->forget.x + 12, cy = r->forget.y + 12;
+				cairo_move_to(cr, cx - 4, cy - 4);
+				cairo_line_to(cr, cx + 4, cy + 4);
+				cairo_move_to(cr, cx + 4, cy - 4);
+				cairo_line_to(cr, cx - 4, cy + 4);
+				pd_color(cr, st.fg);
+				cairo_set_line_width(cr, 1.3);
+				cairo_stroke(cr);
+			}
+			const char *label = d->busy ? "…" : d->connected ? "Disconnect" :
+				d->paired ? "Connect" : "Pair";
+			draw_button(cr, &st, r->action, label, !d->paired && !d->busy,
+				hovered(&f->base, r->action));
+			y += BT_ROW;
+		}
+		y += 4;
+	}
+	if (bt_status()) {
+		pd_text(cr, st.font, bt_status(), x0, y, cw, BT_STATUS, st.fg, PD_LEFT);
+		y += BT_STATUS;
+	}
+	int fy = H - M - FOOTER;
+	draw_line(cr, &st, p, fy);
+	f->link = (struct pbox){ x0, fy + 1, cw, FOOTER - 1 };
+	draw_link(cr, &st, &f->base, f->link, "Bluetooth settings", PD_LEFT);
+}
+
+static void bt_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	struct bt_flyout *f = p->data;
+	if (!pressed || button != BTN_LEFT) {
+		return;
+	}
+	if (f->power_switch.width && pbox_contains(&f->power_switch, x, y)) {
+		bt_set_powered(!bt_powered());
+		return;
+	}
+	if (pbox_contains(&f->link, x, y)) {
+		run_settings(&f->base);
+		return;
+	}
+	for (int i = 0; i < f->row_count; i++) {
+		struct bt_row *r = &f->rows[i];
+		if (!pbox_contains(&r->row, x, y)) {
+			continue;
+		}
+		// the rows are rebuilt when BlueZ answers: keep a copy of the device path
+		char *path = strdup(r->path);
+		bool forget = r->forget.width && pbox_contains(&r->forget, x, y);
+		bool action = pbox_contains(&r->action, x, y);
+		struct bt_device *d = NULL;
+		for (int k = 0; bt_devices() && k < bt_devices()->length; k++) {
+			struct bt_device *candidate = bt_devices()->items[k];
+			if (strcmp(candidate->path, path) == 0) {
+				d = candidate;
+			}
+		}
+		if (d && forget) {
+			bt_remove(path);
+		} else if (d && action) {
+			if (d->connected) {
+				bt_connect(path, false);
+			} else if (d->paired) {
+				bt_connect(path, true);
+			} else {
+				bt_pair(path);
+			}
+		}
+		free(path);
+		return;
+	}
+}
+
+static void bt_axis(struct popup *p, double x, double y, int direction) {
+	struct bt_flyout *f = p->data;
+	f->scroll += direction < 0 ? -1 : 1;
+	popup_set_dirty(p);
+}
+
+static void bt_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	if (sym == XKB_KEY_Escape) {
+		popup_close_later(p->panel);
+	}
+}
+
+static void bt_destroy(struct popup *p) {
+	struct bt_flyout *f = p->data;
+	if (f->discovery_started && bt_discovering()) {
+		bt_set_discovery(false);
+	}
+	bt_rows_clear(f);
+	if (bt_current == f) {
+		bt_current = NULL;
+	}
+	free(f->base.settings);
+	free(f);
+}
+
+static const struct popup_vtable bt_vtable = {
+	.render = bt_render,
+	.motion = flyout_motion,
+	.leave = flyout_leave,
+	.button = bt_button,
+	.axis = bt_axis,
+	.key = bt_key,
+	.destroy = bt_destroy,
+};
+
+void flyout_bluetooth_changed(struct panel *panel) {
+	struct bt_flyout *f = bt_current;
+	if (!f || f->base.panel != panel) {
+		return;
+	}
+	// look for nearby devices while it is open
+	if (bt_powered() && !f->discovery_started) {
+		f->discovery_started = true;
+		bt_set_discovery(true);
+	} else if (!bt_powered()) {
+		f->discovery_started = false;
+	}
+	flyout_resize(&f->base, bt_height(f));
+}
+
+void flyout_bluetooth_toggle(struct panel *panel, struct popup_anchor anchor) {
+	if (popup_is_open(panel, POPUP_BLUETOOTH)) {
+		popup_close_all(panel);
+		return;
+	}
+	struct bt_flyout *f = calloc(1, sizeof(*f));
+	f->base.panel = panel;
+	f->base.anchor = anchor;
+	f->base.settings = strdup("exec tilewin-settings --page bluetooth");
+	if (!flyout_open(&f->base, POPUP_BLUETOOTH, bt_height(f), &bt_vtable, f)) {
+		free(f->base.settings);
+		free(f);
+		return;
+	}
+	bt_current = f;
+	flyout_bluetooth_changed(panel);
 }

@@ -144,6 +144,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Shift+Ctrl+P | Restart the taskbar |
 | Ctrl+Alt+Del | Shut down dialog: shut down, restart, sleep, lock or log out |
 | Win+Page Up / Win+Page Down | Maximize / minimize the window |
+| Win+A / Win+N | Quick settings / notifications (Action Center) |
 | Three fingers up / down on the touchpad | Task view / show the desktop |
 | Three fingers left / right on the touchpad | Next / previous desktop |
 
@@ -179,6 +180,16 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 - If another notification daemon (mako, dunst, …) is running, tileWin waits and takes over when it quits.
 - Theme keys: `notifications.style toast|balloon`, `notifications.center side|flyout`, `notifications.bg`, `.fg`, `.border`, `.badge`.
 - Configs from older versions get the bell button after the clock; `notifications_button no` in taskbar.conf keeps it away (the Settings app writes this when you remove it).
+
+### Quick settings
+
+`Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness, the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
+
+Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
+
+### Bluetooth
+
+The Bluetooth flyout (`panel bluetooth`, or the arrow of the Bluetooth button) turns Bluetooth on and off, lists paired and nearby devices and connects, disconnects, pairs and forgets them. It talks to BlueZ directly, so `bluetoothctl` is not needed, but `bluetoothd` must run (`sudo systemctl enable --now bluetooth`). While a device pairs, codes to type on it are shown in the flyout.
 
 ### Night light
 
