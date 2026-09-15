@@ -1168,6 +1168,10 @@ struct tw_explosion *tw_explosion_create(struct sway_container *con,
 	return e;
 }
 
+void tw_explosion_raise(struct tw_explosion *e) {
+	wlr_scene_node_raise_to_top(&e->tree->node);
+}
+
 void tw_explosion_destroy(struct tw_explosion *e) {
 	if (!e) {
 		return;

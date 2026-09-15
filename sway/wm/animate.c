@@ -800,6 +800,19 @@ void tw_animate_workspace_switch(struct sway_workspace *ws) {
 	place_workspace(ws);
 }
 
+void tw_animate_raise(void) {
+	// windows raised since (e.g. the one focused after closing) stay below
+	for (int i = 0; anims && i < anims->length; i++) {
+		struct anim *a = anims->items[i];
+		if (a->tree) {
+			wlr_scene_node_raise_to_top(&a->tree->node);
+		}
+		if (a->explosion) {
+			tw_explosion_raise(a->explosion);
+		}
+	}
+}
+
 /* ---------- cleanup ---------- */
 
 void tw_animate_container_destroyed(struct sway_container *con) {

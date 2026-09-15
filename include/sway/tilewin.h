@@ -273,6 +273,8 @@ bool tw_animate_hides(struct sway_container *con);
 void tw_animate_container_destroyed(struct sway_container *con);
 void tw_animate_workspace_destroyed(struct sway_workspace *ws);
 /* Before the compositor shuts down, while the scene still exists. */
+/* Keeps running animations above the windows; called before each repaint. */
+void tw_animate_raise(void);
 void tw_animate_shutdown(void);
 void tw_animate_fini(void);
 bool tw_animation_parse_kind(const char *name, int *kind);
@@ -290,6 +292,7 @@ struct tw_explosion *tw_explosion_create(struct sway_container *con,
 /* Shows it ms into the explosion and adds the screen shake; false once it is over. */
 bool tw_explosion_update(struct tw_explosion *explosion, double ms, double *shake_x,
 		double *shake_y);
+void tw_explosion_raise(struct tw_explosion *explosion);
 void tw_explosion_destroy(struct tw_explosion *explosion);
 void tw_explosion_release(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
