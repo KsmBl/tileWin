@@ -17,6 +17,7 @@
 #include "sway/layers.h"
 #include "sway/output.h"
 #include "sway/server.h"
+#include "sway/tilewin.h"
 #include "sway/tree/arrange.h"
 #include "sway/tree/workspace.h"
 
@@ -96,6 +97,7 @@ void arrange_layers(struct sway_output *output) {
 		sway_log(SWAY_DEBUG, "Usable area changed, rearranging output");
 		output->usable_area = usable_area;
 		arrange_output(output);
+		tw_workarea_changed(output);
 	} else {
 		arrange_popups(root->layers.popup);
 	}

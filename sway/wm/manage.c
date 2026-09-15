@@ -3,6 +3,7 @@
 #include <drm_fourcc.h>
 #include <math.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 #include <strings.h>
 #include <wlr/config.h>
@@ -728,6 +729,8 @@ static void workspace_to_window_mode(struct sway_workspace *ws) {
 			tw_set_box(con, &box);
 			if (con->tw.window_geometry_maximized) {
 				tw_maximize(con, true);
+			} else if (con->tw.window_geometry_snap != TW_SNAP_NONE) {
+				tw_snap_to(con, con->tw.window_geometry_snap);
 			}
 		} else {
 			tw_place_new_window(con);
@@ -766,6 +769,7 @@ static void workspace_to_tile_mode(struct sway_workspace *ws) {
 		bool maximized = con->pending.tw_maximized;
 		con->tw.has_window_geometry = true;
 		con->tw.window_geometry_maximized = maximized;
+		con->tw.window_geometry_snap = maximized ? TW_SNAP_NONE : con->tw.snap;
 		con->tw.window_geometry = maximized || con->tw.snap != TW_SNAP_NONE ?
 			con->tw.restore_box : current_box(con);
 		if (maximized) {
@@ -780,8 +784,48 @@ static void workspace_to_tile_mode(struct sway_workspace *ws) {
 	arrange_workspace(ws);
 }
 
+static struct timespec window_mode_since;
+
 void tw_convert_to_window_mode(void) {
+	clock_gettime(CLOCK_MONOTONIC, &window_mode_since);
 	for_each_workspace(workspace_to_window_mode);
+}
+
+void tw_workarea_changed(struct sway_output *output) {
+	if (tw_mode != TW_MODE_WINDOW) {
+		return;
+	}
+	// The taskbar moves its exclusive zone just after a mode switch, which
+	// shifts floating windows: put them back where they were.
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	bool after_switch = now.tv_sec - window_mode_since.tv_sec < 3;
+	for (int i = 0; i < output->workspaces->length; i++) {
+		struct sway_workspace *ws = output->workspaces->items[i];
+		struct wlr_box area = tw_workarea(ws);
+		bool changed = false;
+		for (int j = 0; j < ws->floating->length; j++) {
+			struct sway_container *con = ws->floating->items[j];
+			if (!con->view) {
+				continue;
+			}
+			struct wlr_box box;
+			if (con->pending.tw_maximized) {
+				box = area;
+			} else if (con->tw.snap != TW_SNAP_NONE) {
+				box = snap_box(area, con->tw.snap);
+			} else if (after_switch && con->tw.has_window_geometry) {
+				box = fit_box(con->tw.window_geometry, area);
+			} else {
+				continue;
+			}
+			tw_set_box(con, &box);
+			changed = true;
+		}
+		if (changed) {
+			arrange_workspace(ws);
+		}
+	}
 }
 
 void tw_convert_to_tile_mode(void) {

@@ -67,6 +67,7 @@ struct tw_container {
 	bool auto_floated;          // floated automatically by window mode
 	bool has_window_geometry;   // geometry remembered while tiled
 	bool window_geometry_maximized;
+	enum tw_snap window_geometry_snap;
 	struct wlr_box window_geometry;
 	enum tw_snap snap;
 	struct wlr_box restore_box; // geometry before maximize/snap
@@ -193,6 +194,8 @@ void tw_place_new_window(struct sway_container *con);
 bool tw_arrange_workspace(struct sway_workspace *ws, const char *how, char **error);
 bool tw_show_desktop(struct sway_workspace *ws, char **error);
 void tw_convert_to_window_mode(void);
+/* Refits maximized and snapped windows after the output's usable area changed. */
+void tw_workarea_changed(struct sway_output *output);
 void tw_convert_to_tile_mode(void);
 struct sway_container *tw_next_focus_candidate(struct sway_seat *seat,
 		struct sway_workspace *ws, struct sway_container *exclude);
