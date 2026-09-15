@@ -339,6 +339,7 @@ enum {
 	NET_HS_CANCEL,
 	NET_HS_SETTINGS,
 	NET_HS_REFRESH,
+	NET_HS_COPY,
 };
 
 struct wifi_net {
@@ -371,6 +372,8 @@ struct net_flyout {
 	double rx_rate, tx_rate; // bytes per second
 	bool have_rate;
 	struct loop_timer *stats_timer;
+	char copied[INET6_ADDRSTRLEN]; // the address just copied, shown for a moment
+	struct timespec copied_at;
 };
 
 static struct net_flyout *net_current = NULL;
@@ -830,21 +833,59 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	y += 1;
 
 	if (f->iface[0]) {
-		char ip[160];
-		if (f->ipv4[0] && f->ipv6[0]) {
-			snprintf(ip, sizeof(ip), "IP address %s  ·  %s", f->ipv4, f->ipv6);
-		} else if (f->ipv4[0] || f->ipv6[0]) {
-			snprintf(ip, sizeof(ip), "IP address %s", f->ipv4[0] ? f->ipv4 : f->ipv6);
+		if (!f->ipv4[0] && !f->ipv6[0]) {
+			pd_text(cr, st.font, "No IP address", x0, y + 4, cw, 20, st.fg, PD_LEFT);
 		} else {
-			snprintf(ip, sizeof(ip), "No IP address");
+			// each address is a button that copies it
+			const char *label = "IP address ";
+			int tx = x0, lw = 0, sep_w = 0;
+			pd_text_size(cr, st.font, label, &lw, NULL);
+			pd_text_size(cr, st.font, "  ·  ", &sep_w, NULL);
+			pd_text(cr, st.font, label, tx, y + 4, cw, 20, st.fg, PD_LEFT);
+			tx += lw;
+			const char *addresses[2] = { f->ipv4, f->ipv6 };
+			bool first = true;
+			for (int i = 0; i < 2; i++) {
+				if (!addresses[i][0]) {
+					continue;
+				}
+				if (!first) {
+					pd_text(cr, st.font, "  ·  ", tx, y + 4, sep_w + 2, 20, st.dim, PD_LEFT);
+					tx += sep_w;
+				}
+				first = false;
+				int w = 0;
+				pd_text_size(cr, st.font, addresses[i], &w, NULL);
+				if (w > x0 + cw - tx) {
+					w = x0 + cw - tx;
+				}
+				if (w < 12) {
+					break;
+				}
+				struct pbox b = { tx - 3, y + 3, w + 6, 22 };
+				bool hover = hovered(&f->base, b);
+				if (hover) {
+					fill_hover(cr, &st, b);
+				}
+				pd_text(cr, st.font, addresses[i], tx, y + 4, w, 20, hover ? st.accent : st.fg,
+					PD_LEFT);
+				psurface_add_hotspot(p->surface, b.x, b.y, b.width, b.height, NULL, NET_HS_COPY,
+					i, NULL);
+				tx += w;
+			}
 		}
-		pd_text(cr, st.font, ip, x0, y + 4, cw, 20, st.fg, PD_LEFT);
 		char down[24] = "…", up[24] = "…", usage[128];
 		if (f->have_rate) {
 			format_rate(f->rx_rate, down, sizeof(down));
 			format_rate(f->tx_rate, up, sizeof(up));
 		}
-		snprintf(usage, sizeof(usage), "↓ %s    ↑ %s    %s", down, up, f->iface);
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if (f->copied[0] && now.tv_sec - f->copied_at.tv_sec < 2) {
+			snprintf(usage, sizeof(usage), "Copied %s to the clipboard", f->copied);
+		} else {
+			snprintf(usage, sizeof(usage), "↓ %s    ↑ %s    %s", down, up, f->iface);
+		}
 		pd_text(cr, st.font, usage, x0, y + 23, cw, 20, st.dim, PD_LEFT);
 		y += NET_DETAILS;
 		draw_line(cr, &st, p, y);
@@ -937,6 +978,16 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 	}
 	struct wifi_net *n = hs->id >= 0 && hs->id < f->nets->length ? f->nets->items[hs->id] : NULL;
 	switch (hs->kind) {
+	case NET_HS_COPY: {
+		const char *address = hs->id == 0 ? f->ipv4 : f->ipv6;
+		if (*address) {
+			clipboard_copy_text(p->panel, address);
+			snprintf(f->copied, sizeof(f->copied), "%s", address);
+			clock_gettime(CLOCK_MONOTONIC, &f->copied_at);
+			popup_set_dirty(p);
+		}
+		break;
+	}
 	case NET_HS_TOGGLE:
 		f->wifi_enabled = !f->wifi_enabled;
 		net_run_action(f, f->wifi_enabled ? "nmcli radio wifi on 2>&1" :

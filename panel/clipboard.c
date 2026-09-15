@@ -558,6 +558,29 @@ static void set_clipboard(struct clip *c) {
 	wl_display_flush(panel->display);
 }
 
+void clipboard_copy_text(struct panel *panel, const char *text) {
+	if (!text || !*text) {
+		return;
+	}
+	if (cb.device && panel->data_control) {
+		struct clip c = { .image = false, .data = (char *)text, .len = strlen(text) };
+		set_clipboard(&c);
+		return;
+	}
+	// no data control: wl-copy does it
+	GString *cmd = g_string_new("wl-copy -- '");
+	for (const char *s = text; *s; s++) {
+		if (*s == '\'') {
+			g_string_append(cmd, "'\\''");
+		} else {
+			g_string_append_c(cmd, *s);
+		}
+	}
+	g_string_append_c(cmd, '\'');
+	proc_spawn(cmd->str);
+	g_string_free(cmd, TRUE);
+}
+
 /* ---------- pasting ---------- */
 
 static bool setup_keyboard(void) {

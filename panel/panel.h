@@ -479,6 +479,8 @@ void thumbnails_fini(struct panel *panel);
 void clipboard_init(struct panel *panel);
 void clipboard_fini(struct panel *panel);
 void clipboard_toggle(struct panel *panel, struct panel_output *output);
+/* Puts text on the clipboard. */
+void clipboard_copy_text(struct panel *panel, const char *text);
 
 /* snip.c: the snipping toolbar (Win+Shift+S) */
 void snip_toolbar_toggle(struct panel *panel, struct panel_output *output);
