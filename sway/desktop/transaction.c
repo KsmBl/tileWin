@@ -39,6 +39,11 @@ struct sway_transaction_instruction {
 	bool waiting;
 };
 
+bool transaction_awaits_configure(struct sway_node *node, uint32_t acked_serial) {
+	struct sway_transaction_instruction *instruction = node->instruction;
+	return instruction && instruction->serial && acked_serial < instruction->serial;
+}
+
 static struct sway_transaction *transaction_create(void) {
 	struct sway_transaction *transaction =
 		calloc(1, sizeof(struct sway_transaction));

@@ -61,4 +61,12 @@ bool transaction_notify_view_ready_by_geometry(struct sway_view *view,
 
 void arrange_popups(struct wlr_scene_tree *popups);
 
+struct sway_node;
+
+/*
+ * True while the view of this node has not acked the configure of the
+ * transaction in flight, i.e. its buffers still have the old size.
+ */
+bool transaction_awaits_configure(struct sway_node *node, uint32_t acked_serial);
+
 #endif

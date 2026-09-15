@@ -316,6 +316,14 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 			new_geo->x != view->geometry.x ||
 			new_geo->y != view->geometry.y;
 
+	if (new_size && container_is_floating(view->container) &&
+			transaction_awaits_configure(&view->container->node,
+				xdg_surface->current.configure_serial)) {
+		// A buffer from before the client saw the size tileWin asked for,
+		// e.g. of a restored window: wait for the one of the acked size.
+		new_size = false;
+	}
+
 	if (new_size) {
 		// The client changed its surface size in this commit. For floating
 		// containers, we resize the container to match. For tiling containers,
