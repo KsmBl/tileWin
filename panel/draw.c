@@ -163,6 +163,27 @@ void pd_text(cairo_t *cr, const char *font, const char *text, double x, double y
 	g_object_unref(layout);
 }
 
+int pd_text_wrapped(cairo_t *cr, const char *font, const char *text, double x, double y,
+		double w, int max_lines, uint32_t color, bool draw) {
+	if (!text || !*text || w <= 2) {
+		return 0;
+	}
+	PangoLayout *layout = make_layout(cr, font, text, w);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+	if (max_lines > 0) {
+		pango_layout_set_height(layout, -max_lines);
+	}
+	int tw, th;
+	pango_layout_get_pixel_size(layout, &tw, &th);
+	if (draw) {
+		cairo_set_source_u32(cr, color);
+		cairo_move_to(cr, x, y);
+		pango_cairo_show_layout(cr, layout);
+	}
+	g_object_unref(layout);
+	return th;
+}
+
 void pd_icon(cairo_t *cr, cairo_surface_t *icon, double x, double y, double size) {
 	if (!icon) {
 		pd_glyph_generic_app(cr, x, y, size);

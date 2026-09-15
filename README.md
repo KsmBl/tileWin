@@ -170,6 +170,16 @@ tilewin-media help             # all examples
 
 It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
 
+### Notifications and the Action Center
+
+The taskbar is the notification service of the desktop (`org.freedesktop.Notifications`), so `notify-send` and apps show their notifications on it. They pop up above the notification area as toasts (Windows 10 and 11) or balloons (95, XP and 7) and then go to the Action Center: the bell button next to the clock, `Win+N` or `tilewinmsg panel notifications`.
+
+- Click a notification to open the app, use its buttons, or close it with ×. Hovering keeps it on screen.
+- The Action Center groups the history by app (kept across restarts, up to 50), with *Clear all* and a *Do not disturb* switch. Do not disturb (`panel dnd on|off|toggle`) only lets urgent notifications pop up.
+- If another notification daemon (mako, dunst, …) is running, tileWin waits and takes over when it quits.
+- Theme keys: `notifications.style toast|balloon`, `notifications.center side|flyout`, `notifications.bg`, `.fg`, `.border`, `.badge`.
+- Configs from older versions get the bell button after the clock; `notifications_button no` in taskbar.conf keeps it away (the Settings app writes this when you remove it).
+
 ### Night light
 
 `tilewin-nightlight` makes the screen colors warmer, like the night light of Windows. tileWin starts it; it does nothing while the night light is off. Turn it on with the Screen page of the settings, the quick settings or `tilewin-nightlight on|off|toggle`.
@@ -242,7 +252,7 @@ Changes apply immediately (the compositor gets the matching command, the taskbar
 layout window {
     position bottom
     left start search taskbar
-    right tray keyboard volume network battery clock showdesktop
+    right tray keyboard volume network battery clock notifications showdesktop
 }
 layout tile {
     position top
@@ -279,6 +289,7 @@ menu taskbar {
 | `title` | `max_width` |
 | `tray` | (none) |
 | `clock` | `format`, `tooltip_format` (strftime) |
+| `notifications` | `always yes` shows the button also in the 95/XP/7 themes when there are no new notifications |
 | `volume` | `format "{volume}%"`, `mixer`, `step`, left click opens the volume flyout (`mixer` is its link) |
 | `network` | `interface`, `interval`, `settings` (command of the flyout's settings link), left click opens the Wi-Fi flyout |
 | `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |

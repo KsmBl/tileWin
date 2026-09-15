@@ -35,6 +35,9 @@ void pd_border_sunken_thin(cairo_t *cr, double x, double y, double w, double h);
 void pd_text_size(cairo_t *cr, const char *font, const char *text, int *w, int *h);
 void pd_text(cairo_t *cr, const char *font, const char *text, double x, double y,
 	double w, double h, uint32_t color, enum pd_align align);
+/* Word-wrapped text of at most max_lines lines (0: any); returns its height. */
+int pd_text_wrapped(cairo_t *cr, const char *font, const char *text, double x, double y,
+	double w, int max_lines, uint32_t color, bool draw);
 void pd_icon(cairo_t *cr, cairo_surface_t *icon, double x, double y, double size);
 
 /* glyphs, drawn inside a size x size square */

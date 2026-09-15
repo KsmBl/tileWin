@@ -15,7 +15,7 @@ static const char default_config[] =
 	"layout window {\n"
 	"  position bottom\n"
 	"  left start search taskbar\n"
-	"  right tray keyboard volume network battery clock showdesktop\n"
+	"  right tray keyboard volume network battery clock notifications showdesktop\n"
 	"}\n"
 	"layout tile {\n"
 	"  position top\n"
@@ -290,6 +290,37 @@ static void add_widget_names(struct panel *panel, struct panel_config *config,
 	}
 }
 
+/*
+ * Adds a widget that taskbar.conf files from older versions don't have, right
+ * after another one (or at the end of the right section).
+ */
+static void add_missing_widget(struct panel *panel, struct panel_config *config,
+		struct layout_config *layout, const char *type, const char *after) {
+	for (int i = 0; i < config->widgets->length; i++) {
+		struct widget *w = config->widgets->items[i];
+		if (strcmp(w->impl->type, type) == 0) {
+			return;
+		}
+	}
+	list_t *sections[] = { layout->left, layout->center, layout->right };
+	list_t *target = layout->right;
+	int index = layout->right->length;
+	for (size_t s = 0; s < sizeof(sections) / sizeof(sections[0]); s++) {
+		for (int i = 0; i < sections[s]->length; i++) {
+			struct widget *w = sections[s]->items[i];
+			if (strcmp(w->impl->type, after) == 0) {
+				target = sections[s];
+				index = i + 1;
+			}
+		}
+	}
+	struct widget *w = widget_create(panel, type, NULL);
+	if (w) {
+		list_add(config->widgets, w);
+		list_insert(target, index, w);
+	}
+}
+
 static void parse_layout(struct panel *panel, struct panel_config *config,
 		struct layout_config *layout, struct twconf_node *node, bool default_bottom) {
 	layout->left = create_list();
@@ -423,6 +454,12 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 		theme_window ? twconf_at(theme_window, 0) : window ? window : tile, true);
 	parse_layout(panel, config, &config->layouts[LAYOUT_TILE],
 		theme_tile ? twconf_at(theme_tile, 0) : tile ? tile : window, false);
+	// the Action Center button came later: add it next to the clock
+	if (path && !theme_window &&
+			twconf_parse_bool(twconf_value(root, "notifications_button"), true)) {
+		add_missing_widget(panel, config, &config->layouts[LAYOUT_WINDOW], "notifications",
+			"clock");
+	}
 	twconf_free(theme_window);
 	twconf_free(theme_tile);
 	config->startmenu = twconf_child(root, "startmenu");
@@ -458,7 +495,7 @@ static const struct widget_impl *impls[] = {
 	&widget_title, &widget_tray, &widget_clock, &widget_volume, &widget_battery,
 	&widget_network, &widget_cpu, &widget_memory, &widget_brightness,
 	&widget_keyboard, &widget_modeswitch, &widget_showdesktop, &widget_search,
-	&widget_separator, &widget_spacer, &widget_custom,
+	&widget_separator, &widget_spacer, &widget_custom, &widget_notifications,
 };
 
 const struct widget_impl *widget_impl_find(const char *type) {

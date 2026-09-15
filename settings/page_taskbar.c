@@ -32,6 +32,7 @@ static const struct widget_type widget_types[] = {
 	{ "cpu", "CPU usage", "Processor load" },
 	{ "memory", "Memory usage", "RAM in use" },
 	{ "clock", "Clock", "Time and date with a calendar" },
+	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
 	{ "showdesktop", "Show desktop", "Minimizes all windows" },
 	{ "separator", "Separator", "A thin line" },
@@ -284,6 +285,16 @@ static void write_section(struct taskbar_page *p, int section, GPtrArray *names)
 	struct cstmt *layout = ensure_layout(p);
 	if (layout) {
 		write_names(doc(p), layout, section_keys[section], names);
+		if (strcmp(layout_name(p), "window") == 0) {
+			// the taskbar adds the notifications button to older configs unless told not to
+			bool shown = false;
+			for (int s = 0; s < SECTION_COUNT && !shown; s++) {
+				GPtrArray *all = read_names(confdoc_child(layout, section_keys[s], NULL));
+				shown = array_has(all, "notifications");
+				g_ptr_array_unref(all);
+			}
+			confdoc_set(doc(p), doc(p)->root, "notifications_button", NULL, shown ? NULL : "no");
+		}
 		settings_taskbar_changed(p->s);
 	}
 }

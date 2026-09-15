@@ -293,6 +293,7 @@ extern const struct widget_impl widget_search;
 extern const struct widget_impl widget_separator;
 extern const struct widget_impl widget_spacer;
 extern const struct widget_impl widget_custom;
+extern const struct widget_impl widget_notifications;
 
 /* ---------- panel ---------- */
 
@@ -400,6 +401,7 @@ enum popup_kind {
 	POPUP_CPU,
 	POPUP_DIALOG,
 	POPUP_SHUTDOWN,
+	POPUP_NOTIFICATIONS,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -437,6 +439,15 @@ void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const 
 void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager);
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);
+
+/* notify.c: the notification service, pop-ups and the Action Center */
+void notify_init(struct panel *panel);
+void notify_fini(struct panel *panel);
+void notify_theme_changed(struct panel *panel);
+/* "notifications [toggle|open|close|clear]" and "dnd [toggle|on|off]" */
+void notify_handle_command(struct panel *panel, int argc, char **argv);
+bool notify_dnd(void);
+void notify_set_dnd(struct panel *panel, bool on);
 
 /* tooltip.c */
 void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *hs);

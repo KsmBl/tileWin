@@ -173,6 +173,7 @@ static void do_reload(void *data) {
 		p->config = config;
 	}
 	panel_outputs_update_bars(p);
+	notify_theme_changed(p);
 	watch_files(p);
 }
 
@@ -307,6 +308,7 @@ int main(int argc, char **argv) {
 		panel.config = panel_config_load(&panel, NULL);
 	}
 	panel_outputs_update_bars(&panel);
+	notify_init(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	watch_files(&panel);
@@ -333,6 +335,7 @@ int main(int argc, char **argv) {
 		loop_poll(panel.loop);
 	}
 
+	notify_fini(&panel);
 	panel_wayland_fini(&panel);
 	panel_config_free(panel.config);
 	tw_theme_free(panel.theme);

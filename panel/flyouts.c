@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include "draw.h"
+#include "flyout.h"
 #include "popup.h"
 #include "textfield.h"
 #include "stringop.h"
@@ -24,16 +25,7 @@
 
 /* ================= shared helpers ================= */
 
-struct fly_style {
-	enum pstyle style;
-	bool dark; // dark menu background: overlays are light instead of dark
-	uint32_t fg, dim, accent, hover, track, line, error;
-	uint32_t field_bg, field_fg, button_bg, button_hover, button_border;
-	const char *font, *bold;
-	char big[128];
-};
-
-static void fly_style_init(struct fly_style *st, struct panel *panel) {
+void fly_style_init(struct fly_style *st, struct panel *panel) {
 	const struct tw_theme *t = panel->theme;
 	st->style = panel_style(panel);
 	st->fg = tw_theme_color(t, "menu.fg", 0x000000ff);
@@ -145,24 +137,24 @@ static char *shell_quote(const char *s) {
 	return out;
 }
 
-static void fill_hover(cairo_t *cr, const struct fly_style *st, struct pbox b) {
+void fill_hover(cairo_t *cr, const struct fly_style *st, struct pbox b) {
 	cairo_new_path(cr);
 	pd_rounded(cr, b.x, b.y, b.width, b.height, st->style == PS_CLASSIC ? 0 : 4);
 	pd_color(cr, st->hover);
 	cairo_fill(cr);
 }
 
-static void draw_line(cairo_t *cr, const struct fly_style *st, struct popup *p, int y) {
+void draw_line(cairo_t *cr, const struct fly_style *st, struct popup *p, int y) {
 	int M = popup_shadow_margin(p->panel);
 	pd_rect(cr, M, y, p->surface->width - 2 * M, 1, st->line);
 }
 
-static int slider_value(struct pbox b, double x) {
+int slider_value(struct pbox b, double x) {
 	double v = (x - b.x - 10) * 100.0 / (b.width - 20);
 	return v < 0 ? 0 : v > 100 ? 100 : (int)(v + 0.5);
 }
 
-static void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int value) {
+void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int value) {
 	double x = b.x + 10, w = b.width - 20, cy = b.y + b.height / 2.0;
 	value = value < 0 ? 0 : value > 100 ? 100 : value;
 	double kx = x + w * value / 100.0;
@@ -204,7 +196,7 @@ static void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, 
 	}
 }
 
-static void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on) {
+void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on) {
 	if (st->style == PS_CLASSIC) {
 		pd_rect(cr, x, y + 3, 14, 14, 0xffffffff);
 		pd_bevel(cr, x, y + 3, 14, 14, true);
@@ -235,7 +227,7 @@ static void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, b
 	cairo_fill(cr);
 }
 
-static void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
+void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 		const char *label, bool primary, bool hover) {
 	if (st->style == PS_CLASSIC) {
 		pd_rect(cr, b.x, b.y, b.width, b.height, 0xc0c0c0ff);
