@@ -209,6 +209,7 @@ if get_option('swaynag')
 endif
 subdir('panel')
 subdir('lock')
+subdir('nightlight')
 
 gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
 if gtk4.found()

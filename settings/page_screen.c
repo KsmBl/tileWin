@@ -15,6 +15,8 @@
  *    kept (they revert after 15 seconds otherwise); kept settings are written
  *    to displays.conf, which common.conf includes.
  *  - brightness of a laptop screen (brightnessctl)
+ *  - night light: nightlight.conf and the on/off state, which
+ *    tilewin-nightlight watches
  *  - power: dimming, turning the screen off, locking and sleeping after a time
  *    without input, and what closing the lid does (idle_timeout, lid_action
  *    and lock_command in common.conf)
@@ -57,6 +59,9 @@ struct screen_page {
 	GtkWidget *brightness_scale;
 	char *backlight; // /sys/class/backlight/<name>
 	guint brightness_timer;
+
+	GtkWidget *night_switch, *night_scale, *night_schedule, *night_from, *night_to;
+	guint night_timer;
 
 	GtkWidget *idle_dd[4];
 	GtkWidget *lid_dd[2];
@@ -901,6 +906,141 @@ static void on_lock_command(GtkEditable *editable, gpointer data) {
 	p->lock_timer = g_timeout_add(600, save_lock_command, p);
 }
 
+/* ---------- night light ---------- */
+
+#define NIGHT_NEUTRAL 6500
+#define NIGHT_WARMEST 1900
+
+static char *night_path(bool state) {
+	char *dir = state ? tw_state_dir() : tw_config_dir();
+	char *path = dir ? g_build_filename(dir, state ? "nightlight" : "nightlight.conf", NULL) :
+		NULL;
+	free(dir);
+	return path;
+}
+
+static const char *night_time_labels[49];
+
+static void night_times_init(void) {
+	for (int i = 0; i < 48; i++) {
+		if (!night_time_labels[i]) {
+			night_time_labels[i] = g_strdup_printf("%02d:%02d", i / 2, i % 2 ? 30 : 0);
+		}
+	}
+}
+
+static guint night_time_index(const char *text, guint fallback) {
+	int h, m;
+	if (text && sscanf(text, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60) {
+		return h * 2 + (m >= 30);
+	}
+	return fallback;
+}
+
+static gboolean night_save(gpointer data) {
+	struct screen_page *p = data;
+	p->night_timer = 0;
+	int strength = (int)round(gtk_range_get_value(GTK_RANGE(p->night_scale)));
+	char *text = g_strdup_printf("# Night light, see tilewin-nightlight\n"
+		"temperature %d\nschedule %s\nfrom %s\nto %s\n",
+		NIGHT_NEUTRAL - strength * (NIGHT_NEUTRAL - NIGHT_WARMEST) / 100,
+		gtk_switch_get_active(GTK_SWITCH(p->night_schedule)) ? "yes" : "no",
+		night_time_labels[gtk_drop_down_get_selected(GTK_DROP_DOWN(p->night_from)) % 48],
+		night_time_labels[gtk_drop_down_get_selected(GTK_DROP_DOWN(p->night_to)) % 48]);
+	char *path = night_path(false);
+	if (!path || !tw_write_string(path, text)) {
+		settings_status(p->s, "Could not save the night light settings");
+	}
+	g_free(path);
+	g_free(text);
+	return G_SOURCE_REMOVE;
+}
+
+static void night_changed(struct screen_page *p, guint delay) {
+	gtk_widget_set_sensitive(p->night_from, gtk_switch_get_active(GTK_SWITCH(p->night_schedule)));
+	gtk_widget_set_sensitive(p->night_to, gtk_switch_get_active(GTK_SWITCH(p->night_schedule)));
+	if (p->updating) {
+		return;
+	}
+	if (p->night_timer) {
+		g_source_remove(p->night_timer);
+	}
+	p->night_timer = g_timeout_add(delay, night_save, p);
+}
+
+static gboolean on_night_switch(GtkSwitch *widget, gboolean state, gpointer data) {
+	struct screen_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	char *path = night_path(true);
+	if (path) {
+		tw_write_string(path, state ? "on\n" : "off\n");
+	}
+	g_free(path);
+	if (state && !tw_in_path("tilewin-nightlight")) {
+		settings_status(p->s, "tilewin-nightlight is not installed");
+	}
+	return FALSE;
+}
+
+static void on_night_scale(GtkRange *range, gpointer data) {
+	night_changed(data, 150);
+}
+
+static gboolean on_night_schedule(GtkSwitch *widget, gboolean state, gpointer data) {
+	struct screen_page *p = data;
+	gtk_switch_set_state(widget, state);
+	night_changed(p, 1);
+	return TRUE;
+}
+
+static void on_night_time(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	night_changed(data, 1);
+}
+
+static void night_refresh(struct screen_page *p) {
+	int temperature = 3400, from = 42, to = 14;
+	bool schedule = false;
+	char *path = night_path(false);
+	char *text = NULL;
+	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			char key[32], value[64];
+			if (sscanf(*l, " %31s %63s", key, value) != 2) {
+				continue;
+			}
+			if (strcmp(key, "temperature") == 0) {
+				temperature = CLAMP(atoi(value), NIGHT_WARMEST, NIGHT_NEUTRAL);
+			} else if (strcmp(key, "schedule") == 0) {
+				schedule = strcmp(value, "yes") == 0;
+			} else if (strcmp(key, "from") == 0) {
+				from = night_time_index(value, from);
+			} else if (strcmp(key, "to") == 0) {
+				to = night_time_index(value, to);
+			}
+		}
+		g_strfreev(lines);
+		g_free(text);
+	}
+	g_free(path);
+	path = night_path(true);
+	char *state = path ? tw_read_first_line(path) : NULL;
+	g_free(path);
+	if (p->night_timer) {
+		return; // a change is about to be saved
+	}
+	gtk_switch_set_active(GTK_SWITCH(p->night_switch), state && strcmp(state, "on") == 0);
+	free(state);
+	gtk_range_set_value(GTK_RANGE(p->night_scale),
+		(NIGHT_NEUTRAL - temperature) * 100.0 / (NIGHT_NEUTRAL - NIGHT_WARMEST));
+	gtk_switch_set_active(GTK_SWITCH(p->night_schedule), schedule);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->night_from), from);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->night_to), to);
+	night_changed(p, 0);
+}
+
 static bool has_lid(void) {
 	GDir *dir = g_dir_open("/proc/acpi/button/lid", 0, NULL);
 	bool found = dir && g_dir_read_name(dir) != NULL;
@@ -929,6 +1069,7 @@ void screen_page_refresh(struct settings *s) {
 			gtk_range_set_value(GTK_RANGE(p->brightness_scale), cur * 100.0 / max);
 		}
 	}
+	night_refresh(p);
 	struct confdoc *d = s->common;
 	for (int i = 0; i < 4; i++) {
 		struct cstmt *stmt = confdoc_child(d->root, "idle_timeout", stage_names[i]);
@@ -1027,6 +1168,26 @@ GtkWidget *screen_page_new(struct settings *s) {
 		g_signal_connect(p->brightness_scale, "value-changed", G_CALLBACK(on_brightness), p);
 		ui_row(group, "Brightness of the built-in screen", NULL, p->brightness_scale);
 	}
+
+	night_times_init();
+	GtkWidget *night = ui_group(content, "Night light",
+		"Warmer colors in the evening are easier on the eyes and help you fall asleep.");
+	p->night_switch = gtk_switch_new();
+	g_signal_connect(p->night_switch, "state-set", G_CALLBACK(on_night_switch), p);
+	ui_row(night, "Night light", "On right now", p->night_switch);
+	p->night_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
+	gtk_widget_set_size_request(p->night_scale, 280, -1);
+	g_signal_connect(p->night_scale, "value-changed", G_CALLBACK(on_night_scale), p);
+	ui_row(night, "Strength", "How warm the colors get", p->night_scale);
+	p->night_schedule = gtk_switch_new();
+	g_signal_connect(p->night_schedule, "state-set", G_CALLBACK(on_night_schedule), p);
+	ui_row(night, "Schedule", "Turn on and off by itself", p->night_schedule);
+	p->night_from = gtk_drop_down_new_from_strings(night_time_labels);
+	g_signal_connect(p->night_from, "notify::selected", G_CALLBACK(on_night_time), p);
+	ui_row(night, "Turn on at", NULL, p->night_from);
+	p->night_to = gtk_drop_down_new_from_strings(night_time_labels);
+	g_signal_connect(p->night_to, "notify::selected", G_CALLBACK(on_night_time), p);
+	ui_row(night, "Turn off at", NULL, p->night_to);
 
 	GtkWidget *power = ui_group(content, "Power & sleep",
 		"Times without using the mouse or keyboard. Videos and other apps that keep the "

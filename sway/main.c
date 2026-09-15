@@ -387,6 +387,7 @@ int main(int argc, char **argv) {
 	load_swaybars();
 	tw_session_export_environment();
 	tw_panel_start();
+	tw_nightlight_start();
 	tw_session_restore();
 	run_deferred_commands();
 	run_deferred_bindings();

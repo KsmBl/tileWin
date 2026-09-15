@@ -119,6 +119,24 @@ static int handle_panel_exit(int fd, uint32_t mask, void *data) {
 	return 0;
 }
 
+void tw_nightlight_start(void) {
+	if (!tw_in_path("tilewin-nightlight")) {
+		return;
+	}
+	// double fork: the helper is not our child and needs no reaping
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execlp("tilewin-nightlight", "tilewin-nightlight", (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
+}
+
 void tw_panel_start(void) {
 	if (panel.pid < 0 && !panel.timer) {
 		panel_spawn();

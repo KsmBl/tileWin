@@ -235,6 +235,8 @@ bool tw_desktop_close(struct sway_workspace *ws);
 
 /* session.c */
 void tw_panel_start(void);
+/* Starts tilewin-nightlight, which keeps the night light colors. */
+void tw_nightlight_start(void);
 void tw_panel_restart(void);
 void tw_panel_stop(void);
 void tw_panel_config_reloaded(void);
