@@ -68,6 +68,10 @@ SESSION_DIR=/usr/share/wayland-sessions
 if [ "$UNINSTALL" -eq 1 ]; then
 	log="$BUILD_DIR/meson-logs/install-log.txt"
 	[ -f "$log" ] || die "no install log found ($log); cannot uninstall"
+	if [ -z "$DESTDIR" ] && command -v tilewin-app-icons >/dev/null 2>&1; then
+		msg "Giving apps your own icon theme back"
+		tilewin-app-icons restore
+	fi
 	msg "Removing installed files"
 	grep -v '^#' "$log" | while read -r file; do
 		[ -n "$file" ] && [ -e "$DESTDIR$file" ] && $SUDO rm -f "$DESTDIR$file" && echo "  removed $file"

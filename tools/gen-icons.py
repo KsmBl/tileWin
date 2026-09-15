@@ -465,7 +465,7 @@ EMBLEMS = {
 
 # ---------------------------------------------------------------- base shapes
 
-def folder(ic, emblem=None, band=None, emblem_scale=1.0):
+def folder(ic, emblem=None, band=None, emblem_scale=1.0, open_=False):
     t = ic.t
     back, front = {
         'win95': ('#c0c000', '#ffff80'),
@@ -482,8 +482,10 @@ def folder(ic, emblem=None, band=None, emblem_scale=1.0):
             ic.rect(10, 11, 28, 20, '#f2f6fb')
             emblem_lines(ic, 24, 20, 14, '#b9c3d0')
         front_pts = [(9, 18), (46, 18), (40, 42), (3, 42)]
+        if open_:
+            front_pts = [(13, 25), (47, 25), (40, 42), (3, 42)]
         ic.poly(front_pts, front)
-        if t == 'win7':
+        if t == 'win7' and not open_:
             ic.poly([(9.5, 18.5), (45.4, 18.5), (44.4, 23), (8.3, 23)], '#ffffff', outline=False,
                     flat=True, opacity=.45)
         ecx, ecy = 24.5, 30
@@ -491,7 +493,12 @@ def folder(ic, emblem=None, band=None, emblem_scale=1.0):
         ic.poly([(4, 9), (18, 9), (21, 13), (44, 13), (44, 40), (4, 40)], back)
         if t == 'win11':
             ic.rect(7, 14, 34, 20, '#ffffff', outline=False)
-        ic.rect(4, 17, 40, 23, front, r=2)
+        if open_:
+            if t != 'win11':
+                ic.rect(8, 14, 32, 18, '#ffffff', outline=t == 'win95')
+            ic.poly([(9, 23), (47, 23), (43, 40), (4, 40)], front)
+        else:
+            ic.rect(4, 17, 40, 23, front, r=2)
         ecx, ecy = 24, 28.5
     if band:
         if t in ('winxp', 'win7'):
@@ -644,6 +651,9 @@ for _name, _emblem in (('folder', None), ('folder-documents', 'page'), ('folder-
                        ('folder-download', 'download'), ('user-desktop', 'monitor'),
                        ('folder-remote', 'globe'), ('folder-new', 'star')):
     ICONS[_name] = folder_icon(_emblem)
+ICONS['inode-directory'] = ICONS['folder-visiting'] = ICONS['folder']
+ICONS['folder-open'] = ICONS['folder-drag-accept'] = lambda ic: folder(ic, open_=True)
+ICONS['folder-publicshare'] = ICONS['folder-remote']
 
 for _name, _emblem in (('applications-accessories', 'pencil'), ('applications-development', 'chevrons'),
                        ('applications-games', 'cards'), ('applications-graphics', 'palette'),
@@ -973,9 +983,32 @@ def script_file(ic):
     emblem_prompt(ic, 23, 25, 11, '#e6e6e6')
 
 
-@icon('unknown')
+@icon('unknown', 'application-octet-stream')
 def unknown_file(ic):
     page(ic)
+
+
+@icon('font-x-generic', 'application-x-font-ttf', 'font-ttf', 'font-otf')
+def font_file(ic):
+    page(ic)
+    c = pick(ic, win95='#000080', winxp='#2a4fb8', win7='#2f5ea8', win10='#2b2b2b', win11='#3b5bdb')
+    ic.line([(16, 37), (24, 15), (32, 37)], c, 4)
+    ic.line([(19.5, 29), (28.5, 29)], c, 3.2)
+
+
+@icon('drive-optical', 'media-optical', 'media-optical-cd', 'media-optical-dvd')
+def optical_disc(ic):
+    ic.shadow(rx=17)
+    disc = pick(ic, win95='#c0c0c0', default='#cfd6e0')
+    ic.circle(24, 24, 20, disc)
+    cl = ic.clip_circle(24, 24, 19)
+    if ic.t != 'win95':
+        ic.poly([(24, 24), (4, 6), (22, 2)], '#8fe3ff', outline=False, flat=True, opacity=.45, clip=cl)
+        ic.poly([(24, 24), (46, 40), (30, 46)], '#f7a8ff', outline=False, flat=True, opacity=.4, clip=cl)
+    else:
+        ic.poly([(24, 24), (4, 6), (22, 2)], '#ffffff', outline=False, flat=True, clip=cl)
+    ic.circle(24, 24, 7, pick(ic, win95='#808080', default='#9aa5b4'))
+    ic.circle(24, 24, 3, '#ffffff', outline=False, flat=True)
 
 
 @icon('document-new')

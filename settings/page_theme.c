@@ -13,6 +13,7 @@ struct theme_page {
 	GtkWidget *target_dd; // which mode's theme the cards change
 	GtkWidget *summary;
 	GtkWidget *dark_switch;
+	GtkWidget *icons_switch;
 };
 
 static const char *target_mode(struct theme_page *p) {
@@ -96,6 +97,45 @@ static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data
 	return FALSE;
 }
 
+static char *app_icons_path(void) {
+	char *dir = tw_config_dir();
+	char *path = dir ? g_build_filename(dir, "app-icons", NULL) : NULL;
+	free(dir);
+	return path;
+}
+
+static bool app_icons_enabled(void) {
+	char *path = app_icons_path();
+	char *value = path ? tw_read_first_line(path) : NULL;
+	bool enabled = !value || strcmp(value, "no") != 0;
+	free(value);
+	g_free(path);
+	return enabled;
+}
+
+static gboolean on_icons_switch(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct theme_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	char *path = app_icons_path();
+	if (!path || !tw_write_string(path, active ? "yes\n" : "no\n")) {
+		g_free(path);
+		return FALSE;
+	}
+	g_free(path);
+	if (tw_ipc_available()) {
+		// a reload runs tilewin-app-icons with the current theme
+		settings_command(p->s, "reload");
+	} else if (!active) {
+		const char *argv[] = { "tilewin-app-icons", "restore", NULL };
+		g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, NULL);
+	}
+	settings_status(p->s, active ? "Apps use the icons of the theme" :
+		"Apps use your own icon theme again");
+	return FALSE;
+}
+
 static void on_theme_activated(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointer data) {
 	struct theme_page *p = data;
 	if (p->updating) {
@@ -173,6 +213,7 @@ void theme_page_refresh(struct settings *s) {
 	gtk_switch_set_active(GTK_SWITCH(p->dark_switch),
 		scheme ? strcmp(scheme, "dark") == 0 : tw_color_scheme_is_dark());
 	g_free(scheme);
+	gtk_switch_set_active(GTK_SWITCH(p->icons_switch), app_icons_enabled());
 
 	gtk_flow_box_remove_all(GTK_FLOW_BOX(p->flow));
 	list_t *names = tw_theme_list();
@@ -238,6 +279,12 @@ GtkWidget *theme_page_new(struct settings *s) {
 	ui_row(group, "Dark mode",
 		"Dark title bars, taskbar menus and flyouts. GTK, GNOME and KDE apps switch too.",
 		p->dark_switch);
+	p->icons_switch = gtk_switch_new();
+	g_signal_connect(p->icons_switch, "state-set", G_CALLBACK(on_icons_switch), p);
+	ui_row(group, "Theme icons in apps",
+		"File managers like Thunar and Dolphin, file dialogs and other apps use the icons of "
+		"the theme, e.g. Windows XP folders. Turned off, they use your own icon theme again.",
+		p->icons_switch);
 
 	p->target_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"Window mode", "Tile mode", NULL });

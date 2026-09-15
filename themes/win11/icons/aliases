@@ -14,6 +14,10 @@ user-home folder-home
 folder-download folder-downloads
 user-desktop desktop
 folder-documents folder-templates
+folder inode-directory
+folder folder-visiting
+folder-open folder-drag-accept
+folder-remote folder-publicshare
 preferences-system preferences-desktop
 network-workgroup network-server
 drive-removable-media drive-removable-media-usb
@@ -41,3 +45,10 @@ x-office-spreadsheet application-vnd.oasis.opendocument.spreadsheet
 x-office-presentation application-vnd.oasis.opendocument.presentation
 text-x-script application-x-shellscript
 text-x-script text-x-python
+unknown application-octet-stream
+font-x-generic application-x-font-ttf
+font-x-generic font-ttf
+font-x-generic font-otf
+drive-optical media-optical
+drive-optical media-optical-cd
+drive-optical media-optical-dvd

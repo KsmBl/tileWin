@@ -223,7 +223,7 @@ install_subdir('config', install_dir: tilewin_datadir)
 scripts_conf = configuration_data()
 scripts_conf.set('datadir', tilewin_datadir)
 scripts_conf.set('bindir', join_paths(prefix, get_option('bindir')))
-foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme']
+foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme', 'tilewin-app-icons']
 	configure_file(
 		input: 'scripts' / script + '.in',
 		output: script,
@@ -267,6 +267,7 @@ if get_option('fish-completions')
 		'completions/fish/tilewin-theme.fish',
 		'completions/fish/tilewin-settings.fish',
 		'completions/fish/tilewin-media.fish',
+		'completions/fish/tilewin-app-icons.fish',
 		install_dir: fish_completions_dir,
 	)
 endif

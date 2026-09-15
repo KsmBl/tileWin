@@ -1,0 +1,317 @@
+#!/bin/sh
+# tilewin-app-icons: gives other apps (Thunar, Dolphin, Nautilus, file dialogs,
+# ...) the icons of the tileWin theme, e.g. Windows XP folders and files.
+# tileWin runs it whenever the theme or the config changes.
+#
+#   tilewin-app-icons on | off     turn it on or off (off brings back your icons)
+#   tilewin-app-icons status       show what apps use now
+#
+# How it works: the theme's icons become a normal icon theme in
+# ~/.local/share/icons/tileWin-<theme>, which falls back to your own icon
+# theme for everything tileWin has no icon for. GTK apps (GNOME settings and
+# settings.ini), KDE apps (kdeglobals) and qt5ct/qt6ct are switched to it.
+# Your icon theme is remembered and set again when you turn it off or use a
+# theme without icons.
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}"
+data="${XDG_DATA_HOME:-$HOME/.local/share}"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/tileWin"
+switch_file="$config/tileWin/app-icons"
+original_file="$state/app-icons-original"
+applied_file="$state/app-icons-applied"
+prefix=tileWin-
+
+usage() {
+	cat <<EOF
+Usage: tilewin-app-icons on | off | status
+
+  on       apps use the icons of the tileWin theme
+  off      apps use your own icon theme again
+  status   show whether it is on and which icon theme apps use
+EOF
+}
+
+has_gsettings() {
+	command -v gsettings >/dev/null 2>&1 &&
+		gsettings list-keys org.gnome.desktop.interface >/dev/null 2>&1
+}
+
+ini_get() { # file key
+	[ -f "$1" ] && sed -n "s/^$2[[:space:]]*=[[:space:]]*//p" "$1" | head -n 1
+}
+
+ini_set() { # file section key value
+	[ -f "$1" ] || return 0
+	if grep -q "^$3[[:space:]]*=" "$1"; then
+		sed -i "s|^$3[[:space:]]*=.*|$3=$4|" "$1"
+	elif grep -q "^\[$2\]" "$1"; then
+		sed -i "/^\[$2\]/a $3=$4" "$1"
+	else
+		printf '\n[%s]\n%s=%s\n' "$2" "$3" "$4" >>"$1"
+	fi
+}
+
+kwrite() { command -v kwriteconfig6 || command -v kwriteconfig5; }
+kread() { command -v kreadconfig6 || command -v kreadconfig5; }
+
+gtk_current() {
+	if has_gsettings; then
+		gsettings get org.gnome.desktop.interface icon-theme | tr -d "'"
+	else
+		ini_get "$config/gtk-3.0/settings.ini" gtk-icon-theme-name
+	fi
+}
+
+kde_current() {
+	reader=$(kread)
+	[ -n "$reader" ] && [ -f "$config/kdeglobals" ] &&
+		"$reader" --file kdeglobals --group Icons --key Theme
+}
+
+gsettings_current() {
+	has_gsettings && gsettings get org.gnome.desktop.interface icon-theme | tr -d "'"
+}
+
+# Sets an ini key, or removes it when the value is empty.
+ini_put() { # file section key value
+	[ -f "$1" ] || return 0
+	if [ -z "$4" ]; then
+		if grep -q "^$3[[:space:]]*=" "$1"; then
+			sed -i "/^$3[[:space:]]*=/d" "$1"
+		fi
+	elif [ "$(ini_get "$1" "$3")" != "$4" ]; then
+		ini_set "$1" "$2" "$3" "$4"
+	fi
+	return 0
+}
+
+# The places an icon theme is set: key, current value, and how to change it.
+targets="gsettings gtk3 gtk4 kde qt5ct qt6ct"
+
+target_get() {
+	case "$1" in
+	gsettings) gsettings_current ;;
+	gtk3) ini_get "$config/gtk-3.0/settings.ini" gtk-icon-theme-name ;;
+	gtk4) ini_get "$config/gtk-4.0/settings.ini" gtk-icon-theme-name ;;
+	kde) kde_current ;;
+	qt5ct | qt6ct) ini_get "$config/$1/$1.conf" icon_theme ;;
+	esac
+}
+
+target_put() { # target value (empty: remove the setting)
+	case "$1" in
+	gsettings)
+		if [ -n "$2" ] && has_gsettings && [ "$(gsettings_current)" != "$2" ]; then
+			gsettings set org.gnome.desktop.interface icon-theme "$2"
+		fi
+		;;
+	gtk3) ini_put "$config/gtk-3.0/settings.ini" Settings gtk-icon-theme-name "$2" ;;
+	gtk4) ini_put "$config/gtk-4.0/settings.ini" Settings gtk-icon-theme-name "$2" ;;
+	kde)
+		writer=$(kwrite)
+		if [ -n "$writer" ] && [ -f "$config/kdeglobals" ] && [ "$(kde_current)" != "$2" ]; then
+			if [ -n "$2" ]; then
+				"$writer" --file kdeglobals --group Icons --key Theme "$2"
+			else
+				"$writer" --file kdeglobals --group Icons --key Theme --delete
+			fi
+		fi
+		;;
+	qt5ct | qt6ct) ini_put "$config/$1/$1.conf" Appearance icon_theme "$2" ;;
+	esac
+	return 0
+}
+
+# Sets the icon theme of every toolkit that is configured on this system.
+set_icon_theme() { # name
+	for target in $targets; do
+		target_put "$target" "$1"
+	done
+}
+
+original() { # key
+	[ -f "$original_file" ] && sed -n "s/^$1 //p" "$original_file" | head -n 1
+}
+
+# The icon theme the user had before tileWin changed it.
+own_theme() {
+	for target in gsettings gtk3 gtk4 kde qt6ct qt5ct; do
+		value=$(original "$target")
+		case "$value" in
+		"" | "$prefix"*) ;;
+		*)
+			echo "$value"
+			return
+			;;
+		esac
+	done
+}
+
+# Remembers the user's icon themes, unless tileWin set the current ones.
+save_original() {
+	applied=$(cat "$applied_file" 2>/dev/null)
+	mkdir -p "$state"
+	for target in $targets; do
+		value=$(target_get "$target")
+		case "$value" in
+		"$prefix"*) value=$(original "$target") ;;
+		*) [ -n "$applied" ] && [ "$value" = "$applied" ] && value=$(original "$target") ;;
+		esac
+		echo "$target $value"
+	done >"$original_file.new"
+	mv "$original_file.new" "$original_file"
+}
+
+restore() {
+	[ -f "$applied_file" ] || return 0
+	for target in $targets; do
+		value=$(original "$target")
+		case "$value" in
+		"$prefix"*) value= ;;
+		esac
+		if [ "$target" = gsettings ] && [ -z "$value" ]; then
+			value=Adwaita
+		fi
+		target_put "$target" "$value"
+	done
+	rm -f "$applied_file"
+	remove_generated ""
+}
+
+remove_generated() { # name to keep
+	for dir in "$data/icons/$prefix"*; do
+		[ -f "$dir/.tilewin-generated" ] || continue
+		[ "$dir" = "$data/icons/$1" ] && continue
+		rm -rf "$dir"
+	done
+}
+
+# Builds ~/.local/share/icons/tileWin-<set> from a tileWin theme icon folder.
+build_theme() { # set-name icon-dir inherit title
+	name="$prefix$1"
+	out="$data/icons/$name"
+	tmp="$data/icons/.$name.new"
+	rm -rf "$tmp"
+	mkdir -p "$tmp/scalable/apps" || return 1
+	: >"$tmp/.tilewin-generated"
+	for file in "$2"/*.svg "$2"/*.png; do
+		[ -f "$file" ] || continue
+		base=${file##*/}
+		case "$base" in
+		tray-*) continue ;; # taskbar-only
+		esac
+		ln -s "$file" "$tmp/scalable/apps/$base"
+	done
+	if [ -f "$2/aliases" ]; then
+		while read -r target names; do
+			case "$target" in
+			"" | "#"*) continue ;;
+			esac
+			src=
+			for ext in svg png; do
+				[ -f "$2/$target.$ext" ] && src="$2/$target.$ext" && break
+			done
+			[ -n "$src" ] || continue
+			for alias in $names; do
+				case "$alias" in
+				[@]* | */*) continue ;; # desktop categories
+				esac
+				[ -e "$tmp/scalable/apps/$alias.${src##*.}" ] ||
+					ln -s "$src" "$tmp/scalable/apps/$alias.${src##*.}"
+			done
+		done <"$2/aliases"
+	fi
+	inherits=hicolor
+	case "$3" in
+	"" | hicolor | "$prefix"*) ;;
+	*) inherits="$3,hicolor" ;;
+	esac
+	cat >"$tmp/index.theme" <<EOF
+[Icon Theme]
+Name=tileWin $4
+Comment=Icons of the tileWin theme $4, other icons come from $3
+Inherits=$inherits
+Directories=scalable/apps
+
+[scalable/apps]
+Size=48
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications
+EOF
+	rm -rf "$out"
+	mv "$tmp" "$out"
+}
+
+enabled() {
+	[ "$(sed -n 1p "$switch_file" 2>/dev/null)" != no ]
+}
+
+reapply() {
+	if command -v tilewinmsg >/dev/null 2>&1 && tilewinmsg -t get_version >/dev/null 2>&1; then
+		tilewinmsg reload >/dev/null
+	else
+		echo "tileWin is not running; this applies when it starts."
+	fi
+}
+
+case "$1" in
+on | off)
+	mkdir -p "$config/tileWin"
+	[ "$1" = on ] && echo yes >"$switch_file" || echo no >"$switch_file"
+	[ "$1" = off ] && restore
+	reapply
+	[ "$1" = on ] && echo "Apps use the icons of the tileWin theme." ||
+		echo "Apps use your own icon theme again."
+	;;
+status)
+	if enabled; then
+		echo "Theme icons in apps: on"
+	else
+		echo "Theme icons in apps: off"
+	fi
+	echo "Apps use the icon theme: $(gtk_current)"
+	mine=$(own_theme)
+	[ -n "$mine" ] && echo "Your own icon theme: $mine"
+	;;
+apply)
+	# apply <set-name> <icon-dir|-> <fallback icon theme|-> <title>  (run by tileWin)
+	if ! enabled; then
+		restore
+		exit 0
+	fi
+	set_name=$2 dir=$3 inherit=$4 title=${5:-$2}
+	[ "$dir" = - ] && dir=
+	[ "$inherit" = - ] && inherit=
+	save_original
+	if [ -z "$inherit" ]; then
+		inherit=$(own_theme)
+	fi
+	if [ -n "$dir" ] && [ -d "$dir" ]; then
+		build_theme "$set_name" "$dir" "${inherit:-hicolor}" "$title" || exit 1
+		target="$prefix$set_name"
+		remove_generated "$target"
+		set_icon_theme "$target"
+		echo "$target" >"$applied_file"
+	elif [ -n "$4" ] && [ "$4" != - ]; then
+		# the theme names an existing icon theme, e.g. breeze
+		set_icon_theme "$4"
+		echo "$4" >"$applied_file"
+		remove_generated ""
+	else
+		restore
+	fi
+	;;
+restore)
+	restore
+	;;
+-h | --help | help | "")
+	usage
+	;;
+*)
+	usage >&2
+	exit 2
+	;;
+esac
+exit 0

@@ -97,6 +97,7 @@ static struct tw_theme *load_theme_or_fallback(const char *name) {
 }
 
 static void apply_app_color_scheme(bool dark);
+static void apply_app_icons(void);
 
 void tw_init(const char *mode_override) {
 	enum tw_mode mode = TW_MODE_WINDOW;
@@ -127,6 +128,7 @@ void tw_init(const char *mode_override) {
 		// apps may have been changed by another desktop since the last session
 		apply_app_color_scheme(tw_color_scheme_is_dark());
 	}
+	apply_app_icons();
 	sway_log(SWAY_INFO, "tileWin starting in %s mode with theme %s",
 		tw_mode_name(tw_mode), tw_theme->name);
 }
@@ -236,6 +238,7 @@ static void emit_state_event(const char *change) {
 void tw_after_reload(void) {
 	tw_wallpaper_invalidate();
 	tw_panel_config_reloaded();
+	apply_app_icons();
 }
 
 static void mark_container_dirty(struct sway_container *con, void *data);
@@ -360,6 +363,36 @@ static void apply_app_color_scheme(bool dark) {
 	} else if (pid > 0) {
 		waitpid(pid, NULL, 0);
 	}
+}
+
+/*
+ * Runs tilewin-app-icons so file managers and other apps use the theme's
+ * icons (or the icon theme it names), unless turned off.
+ */
+static void apply_app_icons(void) {
+	if (!tw_theme || getenv("TILEWIN_NO_APP_TWEAKS")) {
+		return;
+	}
+	char *dir = tw_theme_icon_dir(tw_theme);
+	const char *set = tw_theme_str(tw_theme, "icons.set", tw_theme->name);
+	const char *fallback = tw_theme_str(tw_theme, "icons.theme", NULL);
+	if (!fallback || strcmp(fallback, "hicolor") == 0) {
+		fallback = "-";
+	}
+	const char *title = tw_theme->title ? tw_theme->title : tw_theme->name;
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execlp("tilewin-app-icons", "tilewin-app-icons", "apply", set, dir ? dir : "-",
+				fallback, title, (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
+	free(dir);
 }
 
 bool tw_set_color_scheme(bool dark, char **error) {
