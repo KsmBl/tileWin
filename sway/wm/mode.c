@@ -220,6 +220,26 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 			config_command("bindsym --no-warn Control+Mod1+Delete panel shutdown", NULL);
 		free_cmd_results(result);
 	}
+	// Win+Page Up maximizes and Win+Page Down minimizes in window mode
+	static const char *window_keys[][2] = {
+		{ "Prior", "maximize enable" },
+		{ "Next", "minimize enable" },
+	};
+	for (size_t i = 0; tw_mode == TW_MODE_WINDOW && i < sizeof(window_keys) / sizeof(window_keys[0]); i++) {
+		xkb_keysym_t sym = xkb_keysym_from_name(window_keys[i][0], XKB_KEYSYM_NO_FLAGS);
+		bool bound = false;
+		for (int j = 0; j < mode->keysym_bindings->length && !bound; j++) {
+			struct sway_binding *binding = mode->keysym_bindings->items[j];
+			bound = binding->modifiers == WLR_MODIFIER_LOGO && binding->keys->length == 1 &&
+				*(xkb_keysym_t *)binding->keys->items[0] == sym;
+		}
+		if (!bound) {
+			char *cmd = format_str("bindsym --no-warn Mod4+%s %s", window_keys[i][0],
+				window_keys[i][1]);
+			free_cmd_results(config_command(cmd, NULL));
+			free(cmd);
+		}
+	}
 	cfg->current_mode = current;
 }
 
