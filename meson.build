@@ -223,7 +223,7 @@ install_subdir('config', install_dir: tilewin_datadir)
 scripts_conf = configuration_data()
 scripts_conf.set('datadir', tilewin_datadir)
 scripts_conf.set('bindir', join_paths(prefix, get_option('bindir')))
-foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme', 'tilewin-media']
+foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme']
 	configure_file(
 		input: 'scripts' / script + '.in',
 		output: script,
@@ -232,6 +232,14 @@ foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme', 't
 		install_mode: 'rwxr-xr-x',
 	)
 endforeach
+
+# not a configure_file: it uses wpctl/pactl names like @DEFAULT_SINK@
+install_data(
+	'scripts/tilewin-media.in',
+	rename: 'tilewin-media',
+	install_dir: get_option('bindir'),
+	install_mode: 'rwxr-xr-x',
+)
 
 install_data(
 	'data/tilewin.desktop',

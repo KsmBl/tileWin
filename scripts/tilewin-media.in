@@ -1,112 +1,425 @@
 #!/bin/sh
-# tilewin-media: volume, microphone, brightness and media player keys.
-# tileWin binds the XF86 media keys to this script unless the config binds
-# them itself.
+# tilewin-media: change and show the volume, microphone, screen brightness and
+# the playing music. tileWin runs it for the volume, brightness and media keys
+# and shows a popup for every change.
 
 STEP=${TILEWIN_VOLUME_STEP:-5}
 BRIGHTNESS_STEP=${TILEWIN_BRIGHTNESS_STEP:-5}
+POPUP=1
+
+# Names of the default devices for wpctl and pactl, put together at runtime.
+AT=@
+WP_SINK="${AT}DEFAULT_AUDIO_SINK${AT}"
+WP_SOURCE="${AT}DEFAULT_AUDIO_SOURCE${AT}"
+PA_SINK="${AT}DEFAULT_SINK${AT}"
+PA_SOURCE="${AT}DEFAULT_SOURCE${AT}"
 
 have() {
 	command -v "$1" >/dev/null 2>&1
 }
 
 usage() {
-	cat <<USAGE
-Usage: tilewin-media <action>
+	cat <<'USAGE'
+tilewin-media changes the volume, microphone, brightness and music.
 
-  volume-up | volume-down | mute        default output (wpctl, pactl or amixer)
-  mic-mute                              default input
-  brightness-up | brightness-down       backlight (brightnessctl or light)
-  play-pause | next | previous | stop   media players (playerctl)
+Examples:
+  tilewin-media                     show volume, microphone, brightness and music
+  tilewin-media volume up           louder
+  tilewin-media volume down         quieter
+  tilewin-media volume up 20        louder by 20%
+  tilewin-media volume 40           set the volume to 40%
+  tilewin-media mute                mute, or unmute when muted
+  tilewin-media unmute              unmute
+  tilewin-media mic                 mute or unmute the microphone
+  tilewin-media brightness up       brighter
+  tilewin-media brightness 70       set the brightness to 70%
+  tilewin-media play                play or pause the music
+  tilewin-media next                next track
+  tilewin-media previous            previous track
 
-TILEWIN_VOLUME_STEP and TILEWIN_BRIGHTNESS_STEP set the step in percent (5).
+You can also write +10 or -10 (e.g. "tilewin-media volume -10").
+Add --no-popup to change something without showing the popup.
 USAGE
 }
 
-use_wpctl() {
-	have wpctl && wpctl get-volume @DEFAULT_AUDIO_SINK@ >/dev/null 2>&1
-}
-
-volume() {
-	if use_wpctl; then
-		wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
-		if [ "$1" = up ]; then
-			wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ "$STEP%+"
-		else
-			wpctl set-volume @DEFAULT_AUDIO_SINK@ "$STEP%-"
-		fi
-	elif have pactl; then
-		pactl set-sink-mute @DEFAULT_SINK@ 0
-		if [ "$1" = up ]; then
-			current=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null |
-				sed -n 's/.* \([0-9]\{1,3\}\)%.*/\1/p' | head -n 1)
-			if [ "${current:-0}" -ge $((100 - STEP)) ]; then
-				pactl set-sink-volume @DEFAULT_SINK@ 100%
-			else
-				pactl set-sink-volume @DEFAULT_SINK@ "+$STEP%"
-			fi
-		else
-			pactl set-sink-volume @DEFAULT_SINK@ "-$STEP%"
-		fi
-	elif have amixer; then
-		if [ "$1" = up ]; then
-			amixer -q set Master "$STEP%+" unmute
-		else
-			amixer -q set Master "$STEP%-" unmute
-		fi
-	fi
-}
-
-toggle_mute() {
-	if use_wpctl; then
-		wpctl set-mute "@DEFAULT_AUDIO_$1@" toggle
-	elif have pactl; then
-		if [ "$1" = SINK ]; then
-			pactl set-sink-mute @DEFAULT_SINK@ toggle
-		else
-			pactl set-source-mute @DEFAULT_SOURCE@ toggle
-		fi
-	elif have amixer; then
-		if [ "$1" = SINK ]; then
-			amixer -q set Master toggle
-		else
-			amixer -q set Capture toggle
-		fi
-	fi
-}
-
-brightness() {
-	if have brightnessctl; then
-		if [ "$1" = up ]; then
-			brightnessctl -q set "$BRIGHTNESS_STEP%+"
-		else
-			# never turn the backlight off completely
-			brightnessctl -q -n1 set "$BRIGHTNESS_STEP%-"
-		fi
-	elif have light; then
-		if [ "$1" = up ]; then
-			light -A "$BRIGHTNESS_STEP"
-		else
-			light -U "$BRIGHTNESS_STEP"
-		fi
-	fi
-}
-
-player() {
-	have playerctl && playerctl "$1"
-}
-
-case "$1" in
-volume-up) volume up ;;
-volume-down) volume down ;;
-mute) toggle_mute SINK ;;
-mic-mute) toggle_mute SOURCE ;;
-brightness-up) brightness up ;;
-brightness-down) brightness down ;;
-play-pause|next|previous|stop) player "$1" ;;
--h|--help|help) usage ;;
-*)
+oops() {
+	echo "Sorry, I don't understand \"$*\"." >&2
+	echo "Here are some examples:" >&2
+	echo >&2
 	usage >&2
 	exit 1
+}
+
+popup() {
+	[ "$POPUP" = 1 ] || return 0
+	have tilewinmsg || return 0
+	tilewinmsg panel osd "$@" >/dev/null 2>&1 || true
+}
+
+is_number() {
+	case "$1" in
+	''|*[!0-9]*) return 1 ;;
+	esac
+	return 0
+}
+
+clamp() {
+	value=$1
+	[ "$value" -lt "$2" ] && value=$2
+	[ "$value" -gt "$3" ] && value=$3
+	echo "$value"
+}
+
+# Reads a number that may be written as 10, 10%, +10 or -10.
+# Prints "set N", "change N" or nothing.
+parse_amount() {
+	amount=${1%\%}
+	case "$amount" in
+	+*) is_number "${amount#+}" && echo "change ${amount#+}" ;;
+	-*) is_number "${amount#-}" && echo "change -${amount#-}" ;;
+	*) is_number "$amount" && echo "set $amount" ;;
+	esac
+}
+
+# ---------- audio ----------
+
+audio_backend() {
+	if have wpctl && wpctl get-volume "$WP_SINK" >/dev/null 2>&1; then
+		echo wpctl
+	elif have pactl && pactl get-sink-volume "$PA_SINK" >/dev/null 2>&1; then
+		echo pactl
+	elif have amixer && amixer get Master >/dev/null 2>&1; then
+		echo amixer
+	fi
+}
+
+# Prints "<percent> <muted 0|1>" of the output (sink) or input (source).
+audio_get() {
+	device=$1
+	case "$BACKEND" in
+	wpctl)
+		[ "$device" = sink ] && name=$WP_SINK || name=$WP_SOURCE
+		out=$(wpctl get-volume "$name" 2>/dev/null)
+		percent=$(echo "$out" | awk '{ printf "%d", $2 * 100 + 0.5 }')
+		case "$out" in *MUTED*) muted=1 ;; *) muted=0 ;; esac
+		;;
+	pactl)
+		if [ "$device" = sink ]; then
+			percent=$(pactl get-sink-volume "$PA_SINK" 2>/dev/null |
+				sed -n 's|^[^/]*/ *\([0-9]\{1,3\}\)%.*|\1|p' | head -n 1)
+			pactl get-sink-mute "$PA_SINK" 2>/dev/null | grep -q yes && muted=1 || muted=0
+		else
+			percent=$(pactl get-source-volume "$PA_SOURCE" 2>/dev/null |
+				sed -n 's|^[^/]*/ *\([0-9]\{1,3\}\)%.*|\1|p' | head -n 1)
+			pactl get-source-mute "$PA_SOURCE" 2>/dev/null | grep -q yes && muted=1 || muted=0
+		fi
+		;;
+	amixer)
+		[ "$device" = sink ] && control=Master || control=Capture
+		out=$(amixer get "$control" 2>/dev/null)
+		percent=$(echo "$out" | sed -n 's/.*\[\([0-9]\{1,3\}\)%\].*/\1/p' | head -n 1)
+		case "$out" in *"[off]"*) muted=1 ;; *) muted=0 ;; esac
+		;;
+	esac
+	echo "${percent:-0} ${muted:-0}"
+}
+
+# audio_mute sink|source on|off|toggle
+audio_mute() {
+	case "$BACKEND" in
+	wpctl)
+		[ "$1" = sink ] && name=$WP_SINK || name=$WP_SOURCE
+		case "$2" in on) arg=1 ;; off) arg=0 ;; *) arg=toggle ;; esac
+		wpctl set-mute "$name" "$arg"
+		;;
+	pactl)
+		case "$2" in on) arg=1 ;; off) arg=0 ;; *) arg=toggle ;; esac
+		if [ "$1" = sink ]; then
+			pactl set-sink-mute "$PA_SINK" "$arg"
+		else
+			pactl set-source-mute "$PA_SOURCE" "$arg"
+		fi
+		;;
+	amixer)
+		[ "$1" = sink ] && control=Master || control=Capture
+		case "$2" in on) arg=mute ;; off) arg=unmute ;; *) arg=toggle ;; esac
+		[ "$1" = source ] && case "$2" in on) arg=nocap ;; off) arg=cap ;; esac
+		amixer -q set "$control" "$arg"
+		;;
+	esac
+}
+
+volume_set() {
+	percent=$(clamp "$1" 0 100)
+	case "$BACKEND" in
+	wpctl) wpctl set-volume "$WP_SINK" "$percent%" ;;
+	pactl) pactl set-sink-volume "$PA_SINK" "$percent%" ;;
+	amixer) amixer -q set Master "$percent%" ;;
+	esac
+}
+
+show_volume() {
+	set -- $(audio_get sink)
+	if [ "$2" = 1 ]; then
+		echo "Volume: $1% (muted)"
+	else
+		echo "Volume: $1%"
+	fi
+	popup volume "$1" "$2"
+}
+
+need_audio() {
+	BACKEND=$(audio_backend)
+	if [ -z "$BACKEND" ]; then
+		echo "No sound system found (install pipewire with wpctl, or pulseaudio with pactl)." >&2
+		exit 1
+	fi
+}
+
+# volume [up|down|+N|-N|N|mute|unmute|toggle] [N]
+volume_command() {
+	need_audio
+	word=$1
+	amount=$2
+	case "$word" in
+	'')
+		show_volume
+		return
+		;;
+	up|louder|increase|raise|more|plus)
+		change=${amount:-$STEP}
+		;;
+	down|quieter|decrease|lower|less|minus)
+		change=-${amount:-$STEP}
+		;;
+	mute|off)
+		audio_mute sink on
+		show_volume
+		return
+		;;
+	unmute|on)
+		audio_mute sink off
+		show_volume
+		return
+		;;
+	toggle)
+		audio_mute sink toggle
+		show_volume
+		return
+		;;
+	*)
+		parsed=$(parse_amount "$word")
+		[ -n "$parsed" ] || oops volume "$word"
+		set -- $parsed
+		if [ "$1" = set ]; then
+			audio_mute sink off
+			volume_set "$2"
+			show_volume
+			return
+		fi
+		change=$2
+		;;
+	esac
+	is_number "${change#-}" || oops volume "$word" "$amount"
+	set -- $(audio_get sink)
+	# like on Windows, changing the volume unmutes
+	audio_mute sink off
+	volume_set $(($1 + change))
+	show_volume
+}
+
+# mute [on|off|toggle|yes|no|1|0]
+mute_command() {
+	need_audio
+	case "$1" in
+	''|toggle) audio_mute sink toggle ;;
+	on|yes|1|true) audio_mute sink on ;;
+	off|no|0|false) audio_mute sink off ;;
+	*) oops mute "$1" ;;
+	esac
+	show_volume
+}
+
+mic_command() {
+	need_audio
+	case "$1" in
+	''|toggle) audio_mute source toggle ;;
+	mute|off|0|no) audio_mute source on ;;
+	unmute|on|1|yes) audio_mute source off ;;
+	*) oops mic "$1" ;;
+	esac
+	set -- $(audio_get source)
+	if [ "$2" = 1 ]; then
+		echo "Microphone: muted"
+	else
+		echo "Microphone: on"
+	fi
+	popup mic "$2"
+}
+
+# ---------- brightness ----------
+
+brightness_get() {
+	if have brightnessctl; then
+		brightnessctl -m 2>/dev/null | head -n 1 | cut -d, -f4 | tr -d %
+	elif have light; then
+		light -G 2>/dev/null | cut -d. -f1
+	else
+		for dir in /sys/class/backlight/*; do
+			[ -r "$dir/brightness" ] || continue
+			echo $(($(cat "$dir/brightness") * 100 / $(cat "$dir/max_brightness")))
+			return
+		done
+	fi
+}
+
+brightness_set() {
+	# never turn the backlight off completely
+	percent=$(clamp "$1" 1 100)
+	if have brightnessctl; then
+		brightnessctl -q set "$percent%"
+	elif have light; then
+		light -S "$percent"
+	else
+		echo "Install brightnessctl to change the brightness." >&2
+		exit 1
+	fi
+}
+
+show_brightness() {
+	value=$(brightness_get)
+	if [ -z "$value" ]; then
+		echo "This screen has no adjustable brightness."
+		return
+	fi
+	echo "Brightness: $value%"
+	popup brightness "$value"
+}
+
+brightness_command() {
+	word=$1
+	amount=$2
+	current=$(brightness_get)
+	if [ -z "$current" ]; then
+		echo "This screen has no adjustable brightness." >&2
+		exit 1
+	fi
+	case "$word" in
+	'')
+		show_brightness
+		return
+		;;
+	up|brighter|increase|raise|more|plus)
+		brightness_set $((current + ${amount:-$BRIGHTNESS_STEP}))
+		;;
+	down|darker|dimmer|decrease|lower|less|minus)
+		brightness_set $((current - ${amount:-$BRIGHTNESS_STEP}))
+		;;
+	*)
+		parsed=$(parse_amount "$word")
+		[ -n "$parsed" ] || oops brightness "$word"
+		set -- $parsed
+		if [ "$1" = set ]; then
+			brightness_set "$2"
+		else
+			brightness_set $((current + $2))
+		fi
+		;;
+	esac
+	show_brightness
+}
+
+# ---------- music ----------
+
+player_command() {
+	if ! have playerctl; then
+		echo "Install playerctl to control music and video players." >&2
+		exit 1
+	fi
+	if ! playerctl status >/dev/null 2>&1; then
+		echo "No music or video player is running."
+		popup media
+		return
+	fi
+	playerctl "$1"
+	sleep 0.2
+	show_media
+}
+
+show_media() {
+	if ! have playerctl; then
+		echo "Music: (playerctl is not installed)"
+		return
+	fi
+	info=$(playerctl metadata --format '{{status}}: {{artist}} - {{title}}' 2>/dev/null)
+	echo "Music: ${info:-nothing is playing}"
+	popup media
+}
+
+show_status() {
+	BACKEND=$(audio_backend)
+	if [ -n "$BACKEND" ]; then
+		set -- $(audio_get sink)
+		[ "$2" = 1 ] && echo "Volume:     $1% (muted)" || echo "Volume:     $1%"
+		set -- $(audio_get source)
+		[ "$2" = 1 ] && echo "Microphone: muted" || echo "Microphone: on"
+	else
+		echo "Volume:     no sound system found"
+	fi
+	value=$(brightness_get)
+	if [ -n "$value" ]; then
+		echo "Brightness: $value%"
+	else
+		echo "Brightness: not adjustable"
+	fi
+	if have playerctl; then
+		info=$(playerctl metadata --format '{{status}}: {{artist}} - {{title}}' 2>/dev/null)
+		echo "Music:      ${info:-nothing is playing}"
+	fi
+	echo
+	echo 'Type "tilewin-media help" to see what you can do.'
+}
+
+# ---------- main ----------
+
+args=
+for arg in "$@"; do
+	case "$arg" in
+	--no-popup|--no-osd|-q|--quiet) POPUP=0 ;;
+	*) args="$args $arg" ;;
+	esac
+done
+# shellcheck disable=SC2086
+set -- $args
+
+command=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+[ $# -gt 0 ] && shift
+
+case "$command" in
+'') show_status ;;
+status|show|info) show_status ;;
+help|-h|--help|'?') usage ;;
+volume|vol|sound|audio|speaker) volume_command "$@" ;;
+volume-up|louder|up) volume_command up "$@" ;;
+volume-down|quieter|down) volume_command down "$@" ;;
+mute) mute_command "$@" ;;
+unmute) mute_command off ;;
+toggle|toggle-mute|mute-toggle) mute_command toggle ;;
+mic|microphone|mic-mute|mute-mic) mic_command "$@" ;;
+brightness|bright|screen|backlight) brightness_command "$@" ;;
+brightness-up|brighter) brightness_command up "$@" ;;
+brightness-down|darker|dimmer) brightness_command down "$@" ;;
+play|pause|play-pause|playpause) player_command play-pause ;;
+next|skip|forward) player_command next ;;
+previous|prev|back|last) player_command previous ;;
+stop) player_command stop ;;
+music|media|song|track|playing) show_media ;;
+*)
+	parsed=$(parse_amount "$command")
+	if [ -n "$parsed" ]; then
+		volume_command "$command"
+	else
+		oops "$command" "$@"
+	fi
 	;;
 esac
