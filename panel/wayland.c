@@ -479,6 +479,10 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 	} else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0) {
 		panel->cursor_shape_manager = wl_registry_bind(registry, name,
 			&wp_cursor_shape_manager_v1_interface, 1);
+	} else if (strcmp(interface, zwlr_screencopy_manager_v1_interface.name) == 0) {
+		panel->screencopy_version = version < 3 ? version : 3;
+		panel->screencopy = wl_registry_bind(registry, name,
+			&zwlr_screencopy_manager_v1_interface, panel->screencopy_version);
 	} else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
 		panel->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {

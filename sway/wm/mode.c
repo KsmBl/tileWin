@@ -177,6 +177,12 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 			free(binding->command);
 			binding->command = strdup("taskview");
 		}
+		// and Ctrl+Alt+Delete to a tilewin-nag log out question
+		if (binding->modifiers == (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT) &&
+				binding->command && strstr(binding->command, "Log out of tileWin?")) {
+			free(binding->command);
+			binding->command = strdup("panel shutdown");
+		}
 	}
 	struct sway_mode *current = cfg->current_mode;
 	cfg->current_mode = mode;
@@ -200,6 +206,19 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 		}
 		free_cmd_results(result);
 		free(cmd);
+	}
+	// Ctrl+Alt+Delete: the shut down dialog of the theme
+	bool del_bound = false;
+	for (int j = 0; j < mode->keysym_bindings->length && !del_bound; j++) {
+		struct sway_binding *binding = mode->keysym_bindings->items[j];
+		del_bound = binding->modifiers == (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT) &&
+			binding->keys->length == 1 &&
+			*(xkb_keysym_t *)binding->keys->items[0] == XKB_KEY_Delete;
+	}
+	if (!del_bound) {
+		struct cmd_results *result =
+			config_command("bindsym --no-warn Control+Mod1+Delete panel shutdown", NULL);
+		free_cmd_results(result);
 	}
 	cfg->current_mode = current;
 }

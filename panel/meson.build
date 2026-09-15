@@ -36,6 +36,7 @@ executable(
 		'osd.c',
 		'popup.c',
 		'proc.c',
+		'shutdown.c',
 		'startmenu.c',
 		'surface.c',
 		'tooltip.c',

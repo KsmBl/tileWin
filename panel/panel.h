@@ -14,6 +14,7 @@
 #include "twconf.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "wlr-screencopy-unstable-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 
 struct panel;
@@ -305,6 +306,8 @@ struct panel {
 	struct zxdg_output_manager_v1 *xdg_output_manager;
 	struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
 	struct wp_viewporter *viewporter;
+	struct zwlr_screencopy_manager_v1 *screencopy;
+	uint32_t screencopy_version;
 	struct wl_list outputs;  // panel_output::link
 	struct wl_list seats;    // panel_seat::link
 	struct wl_list surfaces; // psurface::link
@@ -392,6 +395,7 @@ enum popup_kind {
 	POPUP_POWER,
 	POPUP_CPU,
 	POPUP_DIALOG,
+	POPUP_SHUTDOWN,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -404,6 +408,8 @@ bool popup_is_open(struct panel *panel, enum popup_kind kind);
 void menu_open(struct panel *panel, list_t *items, bool owns_items,
 	struct popup_anchor anchor, const char *context_id);
 void startmenu_toggle(struct panel *panel, struct panel_output *output, bool search);
+/* shutdown.c: the shut down dialog of the theme */
+void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool logoff);
 void rundialog_open(struct panel *panel, struct panel_output *output);
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
 void launcher_toggle(struct panel *panel, struct panel_output *output);

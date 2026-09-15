@@ -592,6 +592,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		flyout_cpu_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "power") == 0 && output) {
 		flyout_power_toggle(panel, flyout_anchor(panel, output), NULL);
+	} else if (strcmp(cmd, "shutdown") == 0) {
+		shutdown_dialog_open(panel, output, argc > 1 && strcmp(argv[1], "logoff") == 0);
 	} else if (strcmp(cmd, "run") == 0) {
 		if (output) {
 			rundialog_open(panel, output);

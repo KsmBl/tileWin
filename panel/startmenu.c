@@ -222,6 +222,24 @@ static char *app_command(struct panel *panel, const struct tw_desktop_entry *e) 
 	return full;
 }
 
+/*
+ * Windows 95 and XP show a shut down dialog, the newer looks a menu.
+ * startmenu.power_dialog in the theme changes that.
+ */
+static bool power_dialog(struct panel *panel) {
+	enum pstyle style = panel_style(panel);
+	return tw_theme_bool(panel->theme, "startmenu.power_dialog",
+		style == PS_CLASSIC || style == PS_LUNA);
+}
+
+static void open_shutdown_later(void *data) {
+	shutdown_dialog_open(data, NULL, false);
+}
+
+static void open_logoff_later(void *data) {
+	shutdown_dialog_open(data, NULL, true);
+}
+
 /* ---------- classic (Windows 95) ---------- */
 
 static const struct {
@@ -330,9 +348,12 @@ static void open_classic(struct panel *panel, struct panel_output *output) {
 	themes->children = theme_menu_items(panel);
 	list_add(settings->children, themes);
 
-	struct menu_item *power = menu_item_new("Shut Down...", NULL);
+	bool dialog = power_dialog(panel);
+	struct menu_item *power = menu_item_new("Shut Down...", dialog ? "panel shutdown" : NULL);
 	power->icon = strdup("system-shutdown");
-	power->children = power_menu_items(panel);
+	if (!dialog) {
+		power->children = power_menu_items(panel);
+	}
 
 	list_t *items = create_list();
 	list_add(items, programs);
@@ -991,6 +1012,13 @@ static void sm_button(struct popup *p, double x, double y, uint32_t button, bool
 		}
 		break;
 	case HS_POWER:
+		if (power_dialog(p->panel)) {
+			popup_close_later(p->panel);
+			// the XP menu has Turn Off Computer (0) and Log Off (1)
+			loop_add_timer(p->panel->loop, 5, hs->id == 1 ? open_logoff_later :
+				open_shutdown_later, p->panel);
+			break;
+		}
 		menu_open_at(p->panel, p, p->output, power_menu_items(p->panel), true,
 			p->x + (int)x, p->y + (int)y, true, NULL);
 		break;
