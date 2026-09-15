@@ -144,8 +144,12 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Shift+Ctrl+P | Restart the taskbar |
 | Ctrl+Alt+Del | Shut down dialog: shut down, restart, sleep, lock or log out |
 | Win+Page Up / Win+Page Down | Maximize / minimize the window |
+| Three fingers up / down on the touchpad | Task view / show the desktop |
+| Three fingers left / right on the touchpad | Next / previous desktop |
 
-Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
+Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode, `Super+Shift+Ctrl+R` to restart and the three finger swipes (up: task view, left / right: workspaces).
+
+Configs from before the gestures get them added on start unless they already bind a three finger swipe (`bindgesture swipe:3:…`); an `unbindgesture swipe:3:up` line removes one again.
 
 ### Volume, brightness and media keys
 

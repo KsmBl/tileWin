@@ -247,6 +247,25 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 			free(cmd);
 		}
 	}
+	// three finger touchpad swipes, unless the config binds one itself
+	bool swipe_bound = false;
+	for (int j = 0; j < mode->gesture_bindings->length && !swipe_bound; j++) {
+		struct sway_gesture_binding *binding = mode->gesture_bindings->items[j];
+		swipe_bound = binding->gesture.type == GESTURE_TYPE_SWIPE &&
+			(binding->gesture.fingers == 3 || binding->gesture.fingers == GESTURE_FINGERS_ANY);
+	}
+	static const char *swipes[][2] = {
+		{ "up", "taskview" },
+		{ "left", "workspace next_on_output" },
+		{ "right", "workspace prev_on_output" },
+		{ "down", "showdesktop" },
+	};
+	size_t swipe_count = sizeof(swipes) / sizeof(swipes[0]) - (tw_mode == TW_MODE_WINDOW ? 0 : 1);
+	for (size_t i = 0; !swipe_bound && i < swipe_count; i++) {
+		char *cmd = format_str("bindgesture --no-warn swipe:3:%s %s", swipes[i][0], swipes[i][1]);
+		free_cmd_results(config_command(cmd, NULL));
+		free(cmd);
+	}
 	cfg->current_mode = current;
 }
 
