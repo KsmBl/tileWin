@@ -338,6 +338,7 @@ int main(int argc, char **argv) {
 	}
 
 	clipboard_fini(&panel);
+	thumbnails_fini(&panel);
 	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);

@@ -8,6 +8,9 @@
 #include <xkbcommon/xkbcommon.h>
 #include "cursor-shape-v1-client-protocol.h"
 #include "ext-data-control-v1-client-protocol.h"
+#include "ext-foreign-toplevel-list-v1-client-protocol.h"
+#include "ext-image-capture-source-v1-client-protocol.h"
+#include "ext-image-copy-capture-v1-client-protocol.h"
 #include "list.h"
 #include "loop.h"
 #include "pool-buffer.h"
@@ -144,6 +147,7 @@ struct pwindow {
 	char *title;
 	char *workspace;
 	char *output;
+	char *identifier; // foreign toplevel identifier
 	int pid;
 	bool focused, urgent, minimized, maximized, floating;
 	int order; // creation order
@@ -311,6 +315,9 @@ struct panel {
 	struct wp_viewporter *viewporter;
 	struct ext_data_control_manager_v1 *data_control;
 	struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard;
+	struct ext_foreign_toplevel_list_v1 *toplevel_list;
+	struct ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture;
+	struct ext_image_copy_capture_manager_v1 *copy_capture;
 	struct zwlr_screencopy_manager_v1 *screencopy;
 	uint32_t screencopy_version;
 	struct wl_list outputs;  // panel_output::link
@@ -459,6 +466,14 @@ void notify_set_dnd(struct panel *panel, bool on);
 /* The bell of the notifications button, crossed out for do not disturb. */
 void notify_draw_bell(cairo_t *cr, double x, double y, double size, uint32_t color,
 	bool crossed);
+
+/* thumbnails.c: window previews above taskbar buttons */
+void thumbnails_list_bound(struct panel *panel);
+/* Shows previews instead of a tooltip; false if the hotspot has none. */
+bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *hs);
+void thumbnails_hide_later(struct panel *panel);
+bool thumbnails_visible(void);
+void thumbnails_fini(struct panel *panel);
 
 /* clipboard.c: clipboard history (Win+V) */
 void clipboard_init(struct panel *panel);

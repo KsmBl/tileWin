@@ -483,6 +483,17 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 		panel->screencopy_version = version < 3 ? version : 3;
 		panel->screencopy = wl_registry_bind(registry, name,
 			&zwlr_screencopy_manager_v1_interface, panel->screencopy_version);
+	} else if (strcmp(interface, ext_foreign_toplevel_list_v1_interface.name) == 0) {
+		panel->toplevel_list = wl_registry_bind(registry, name,
+			&ext_foreign_toplevel_list_v1_interface, 1);
+		thumbnails_list_bound(panel);
+	} else if (strcmp(interface,
+			ext_foreign_toplevel_image_capture_source_manager_v1_interface.name) == 0) {
+		panel->toplevel_capture = wl_registry_bind(registry, name,
+			&ext_foreign_toplevel_image_capture_source_manager_v1_interface, 1);
+	} else if (strcmp(interface, ext_image_copy_capture_manager_v1_interface.name) == 0) {
+		panel->copy_capture = wl_registry_bind(registry, name,
+			&ext_image_copy_capture_manager_v1_interface, 1);
 	} else if (strcmp(interface, ext_data_control_manager_v1_interface.name) == 0) {
 		panel->data_control = wl_registry_bind(registry, name,
 			&ext_data_control_manager_v1_interface, 1);

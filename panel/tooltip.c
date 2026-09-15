@@ -65,6 +65,10 @@ static void show_tooltip(void *data) {
 	if (!source || !hs->widget || !hs->widget->impl->tooltip || panel->popup) {
 		return;
 	}
+	if (thumbnails_show(panel, source, hs)) {
+		destroy_tooltip_surface(panel);
+		return;
+	}
 	char *text = hs->widget->impl->tooltip(hs->widget, hs);
 	if (!text || !*text) {
 		free(text);
@@ -121,7 +125,7 @@ void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *h
 			cur->kind == hs->kind && cur->box.x == hs->box.x) {
 		return;
 	}
-	bool visible = panel->tooltip != NULL;
+	bool visible = panel->tooltip != NULL || thumbnails_visible();
 	tooltip_cancel(panel);
 	panel->tooltip_source = s;
 	*cur = *hs;
@@ -144,6 +148,7 @@ void tooltip_cancel(struct panel *panel) {
 	memset(&panel->tooltip_hotspot, 0, sizeof(panel->tooltip_hotspot));
 	panel->tooltip_source = NULL;
 	destroy_tooltip_surface(panel);
+	thumbnails_hide_later(panel);
 }
 
 void bar_hide_tooltip(struct panel *panel) {

@@ -302,7 +302,7 @@ menu taskbar {
 | Widget | Options |
 |---|---|
 | `start` | `label`, `width` |
-| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all`, `middle_click close\|new`, `max_width` |
+| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all`, `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]` |
 | `workspaces` | (none) |
 | `title` | `max_width` |

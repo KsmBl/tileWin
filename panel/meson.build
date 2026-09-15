@@ -45,6 +45,7 @@ executable(
 		'startmenu.c',
 		'surface.c',
 		'textfield.c',
+		'thumbnails.c',
 		'tooltip.c',
 		'trayicons.c',
 		'wayland.c',

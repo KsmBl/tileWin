@@ -14,6 +14,7 @@ static void free_window(struct pwindow *w) {
 	free(w->title);
 	free(w->workspace);
 	free(w->output);
+	free(w->identifier);
 	free(w);
 }
 
@@ -70,6 +71,9 @@ static void update_window_from_json(struct pwindow *w, json_object *con) {
 	w->minimized = jbool(con, "minimized");
 	w->maximized = jbool(con, "maximized");
 	w->pid = (int)jint(con, "pid");
+	const char *identifier = jstr(con, "foreign_toplevel_identifier");
+	free(w->identifier);
+	w->identifier = identifier ? strdup(identifier) : NULL;
 	const char *type = jstr(con, "type");
 	w->floating = type && strcmp(type, "floating_con") == 0;
 }
