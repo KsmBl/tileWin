@@ -20,9 +20,9 @@ struct kind {
 static const char *const open_styles[] = { "rise", "fade", "zoom", "pop", "drop", NULL };
 static const char *const open_labels[] = { "Fade in and rise", "Fade in", "Zoom in", "Pop up",
 	"Drop in", NULL };
-static const char *const close_styles[] = { "shrink", "fade", "grow", "drop", NULL };
+static const char *const close_styles[] = { "shrink", "fade", "grow", "drop", "explode", NULL };
 static const char *const close_labels[] = { "Shrink and fade out", "Fade out",
-	"Grow and fade out", "Fall and fade out", NULL };
+	"Grow and fade out", "Fall and fade out", "Explode", NULL };
 static const char *const minimize_styles[] = { "taskbar", "fade", "shrink", "drop", NULL };
 static const char *const minimize_labels[] = { "Fly to the taskbar", "Fade out",
 	"Shrink in place", "Slide down", NULL };

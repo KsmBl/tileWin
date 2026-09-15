@@ -10,6 +10,7 @@
  * snapshot) while the real window is hidden or already gone. Windows that fade
  * or rise in and the desktop that slides in move the real windows, so they stay
  * live. Windows that zoom in wait for their first frame and animate a copy of it.
+ * Windows that explode are handled by explode.c.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -48,7 +49,7 @@
 
 /* Styles, in the order of the names below; the first one is the default. */
 enum { OPEN_RISE, OPEN_FADE, OPEN_ZOOM, OPEN_POP, OPEN_DROP };
-enum { CLOSE_SHRINK, CLOSE_FADE, CLOSE_GROW, CLOSE_DROP };
+enum { CLOSE_SHRINK, CLOSE_FADE, CLOSE_GROW, CLOSE_DROP, CLOSE_EXPLODE };
 enum { MINIMIZE_TASKBAR, MINIMIZE_FADE, MINIMIZE_SHRINK, MINIMIZE_DROP };
 enum { MAXIMIZE_MORPH, MAXIMIZE_BOUNCE, MAXIMIZE_FADE };
 enum { DESKTOP_SLIDE, DESKTOP_VERTICAL, DESKTOP_FADE, DESKTOP_ZOOM };
@@ -57,7 +58,7 @@ static const char *const kind_names[TW_ANIM_KIND_COUNT] = {
 	"open", "close", "minimize", "maximize", "desktop",
 };
 static const char *const open_styles[] = { "rise", "fade", "zoom", "pop", "drop", NULL };
-static const char *const close_styles[] = { "shrink", "fade", "grow", "drop", NULL };
+static const char *const close_styles[] = { "shrink", "fade", "grow", "drop", "explode", NULL };
 static const char *const minimize_styles[] = { "taskbar", "fade", "shrink", "drop", NULL };
 static const char *const maximize_styles[] = { "morph", "bounce", "fade", NULL };
 static const char *const desktop_styles[] = { "slide", "vertical", "fade", "zoom", NULL };
@@ -77,6 +78,7 @@ enum kind {
 	ANIM_GROW,     // a copy of a new window's first frame zooms in
 	ANIM_SNAPSHOT, // a copy of a window moves between two boxes
 	ANIM_DESKTOP,  // desktop switch: a copy of the old desktop, the new one offset
+	ANIM_EXPLODE,  // a closing window blowing up (explode.c)
 };
 
 struct piece {
@@ -107,11 +109,13 @@ struct anim {
 	double scale0;              // ANIM_GROW: size of the first frame at the start
 	bool has_frame;             // ANIM_GROW: the first frame was captured
 	bool reveal;                // show con again at the end
+	struct tw_explosion *explosion;
 };
 
 static list_t *anims;
 static struct wl_event_source *timer;
 static bool shutting_down;
+static bool shaken; // the screen is moved by an explosion
 
 bool tw_animation_parse_kind(const char *name, int *kind) {
 	for (int i = 0; i < TW_ANIM_KIND_COUNT; i++) {
@@ -398,6 +402,13 @@ static void reveal(struct sway_container *con) {
 /* ---------- the animation list ---------- */
 
 static void finish(struct anim *a) {
+	if (a->explosion) {
+		tw_explosion_destroy(a->explosion);
+		if (root && root->layer_tree) {
+			wlr_scene_node_set_position(&root->layer_tree->node, 0, 0);
+		}
+		shaken = false;
+	}
 	if (a->con) {
 		if (a->kind == ANIM_LIVE) {
 			a->con->tw.anim.active = false;
@@ -447,10 +458,19 @@ static void capture_first_frame(struct anim *a) {
 static int tick(void *data) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
+	double shake_x = 0, shake_y = 0;
 	for (int i = anims ? anims->length - 1 : -1; i >= 0; i--) {
 		struct anim *a = anims->items[i];
 		double ms = (now.tv_sec - a->start.tv_sec) * 1000.0 +
 			(now.tv_nsec - a->start.tv_nsec) / 1e6;
+		if (a->kind == ANIM_EXPLODE) {
+			double speed = config->tw_animation_speed > 0 ? config->tw_animation_speed : 1;
+			if (!tw_explosion_update(a->explosion, ms * speed, &shake_x, &shake_y)) {
+				list_del(anims, i);
+				finish(a);
+			}
+			continue;
+		}
 		if (a->kind == ANIM_GROW && !a->has_frame) {
 			if (a->con && ms < OPEN_WAIT_MS) {
 				if (first_frame_ready(a->con)) {
@@ -483,11 +503,18 @@ static int tick(void *data) {
 			a->dy = a->dy0 * (1 - e);
 			place_workspace(a->ws);
 			break;
+		case ANIM_EXPLODE:
+			break; // handled above
 		}
 		if (t >= 1 || ((a->kind == ANIM_LIVE || a->kind == ANIM_GROW) && !a->con)) {
 			list_del(anims, i);
 			finish(a);
 		}
+	}
+	if (shake_x != 0 || shake_y != 0 || shaken) {
+		wlr_scene_node_set_position(&root->layer_tree->node, (int)round(shake_x),
+			(int)round(shake_y));
+		shaken = shake_x != 0 || shake_y != 0;
 	}
 	schedule_frames();
 	if (anims && anims->length) {
@@ -589,6 +616,19 @@ void tw_animate_close(struct sway_container *con) {
 		return;
 	}
 	cancel_for(con);
+	if (style(TW_ANIM_CLOSE) == CLOSE_EXPLODE) {
+		struct tw_explosion *explosion = tw_explosion_create(con, root->layers.floating);
+		if (explosion) {
+			struct anim *a = anim_new(ANIM_EXPLODE, 0, EASE_OUT);
+			if (a) {
+				a->explosion = explosion;
+			} else {
+				tw_explosion_destroy(explosion);
+			}
+			return;
+		}
+		// the fire images are still being made: shrink this once
+	}
 	struct anim *a = copy_anim_new(ANIM_SNAPSHOT, CLOSE_MS, EASE_IN);
 	if (!a) {
 		return;
@@ -792,6 +832,8 @@ void tw_animate_shutdown(void) {
 		wl_event_source_remove(timer);
 		timer = NULL;
 	}
+	// the renderer still exists: the images' textures can go now
+	tw_explosion_release();
 }
 
 void tw_animate_fini(void) {

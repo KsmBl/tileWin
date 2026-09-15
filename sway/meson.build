@@ -22,6 +22,7 @@ sway_sources = files(
 	'wm/taskview.c',
 	'wm/buffer.c',
 	'wm/decoration.c',
+	'wm/explode.c',
 	'wm/icons.c',
 	'wm/manage.c',
 	'wm/mode.c',

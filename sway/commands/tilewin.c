@@ -433,6 +433,9 @@ struct cmd_results *cmd_animation(int argc, char **argv) {
 	}
 	config->tw_animation_style[kind] = style;
 	config->tw_animation_on[kind] = on;
+	if (on && kind == TW_ANIM_CLOSE && strcmp(tw_animation_styles(kind)[style], "explode") == 0) {
+		tw_explosion_prepare(); // the fire images are ready before a window closes
+	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

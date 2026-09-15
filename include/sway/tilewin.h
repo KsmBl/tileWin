@@ -279,6 +279,19 @@ bool tw_animation_parse_kind(const char *name, int *kind);
 /* Index of a style of that kind of animation, -1 if there is none of that name. */
 int tw_animation_parse_style(int kind, const char *name);
 const char *const *tw_animation_styles(int kind);
+
+/* explode.c */
+struct tw_explosion;
+/* Starts making the fire images in a thread, if not done yet. */
+void tw_explosion_prepare(void);
+/* A window blowing up, NULL if the images are not ready yet. */
+struct tw_explosion *tw_explosion_create(struct sway_container *con,
+		struct wlr_scene_tree *parent);
+/* Shows it ms into the explosion and adds the screen shake; false once it is over. */
+bool tw_explosion_update(struct tw_explosion *explosion, double ms, double *shake_x,
+		double *shake_y);
+void tw_explosion_destroy(struct tw_explosion *explosion);
+void tw_explosion_release(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);
 

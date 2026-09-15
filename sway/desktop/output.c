@@ -210,8 +210,8 @@ static enum wlr_scale_filter_mode get_scale_filter(struct sway_output *output,
 	}
 }
 
-void output_configure_scene(struct sway_output *output,
-		struct wlr_scene_node *node, float opacity) {
+static void configure_scene(struct sway_output *output,
+		struct wlr_scene_node *node, float opacity, bool animation) {
 	if (!node->enabled) {
 		return;
 	}
@@ -224,6 +224,7 @@ void output_configure_scene(struct sway_output *output,
 	float *animation_alpha = scene_descriptor_try_get(node, SWAY_SCENE_DESC_TW_ANIMATION);
 	if (animation_alpha) {
 		opacity *= *animation_alpha;
+		animation = true;
 	}
 
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
@@ -241,7 +242,8 @@ void output_configure_scene(struct sway_output *output,
 		// hack: don't call the scene setter because that will damage all outputs
 		// We don't want to damage outputs that aren't our current output that
 		// we're configuring
-		if (output) {
+		// animations keep smooth scaling: their copies and images are stretched a lot
+		if (output && !animation) {
 			buffer->filter_mode = get_scale_filter(output, buffer);
 		}
 
@@ -250,9 +252,14 @@ void output_configure_scene(struct sway_output *output,
 		struct wlr_scene_tree *tree = wlr_scene_tree_from_node(node);
 		struct wlr_scene_node *node;
 		wl_list_for_each(node, &tree->children, link) {
-			output_configure_scene(output, node, opacity);
+			configure_scene(output, node, opacity, animation);
 		}
 	}
+}
+
+void output_configure_scene(struct sway_output *output,
+		struct wlr_scene_node *node, float opacity) {
+	configure_scene(output, node, opacity, false);
 }
 
 static bool output_can_tear(struct sway_output *output) {
