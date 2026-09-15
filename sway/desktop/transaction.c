@@ -10,6 +10,7 @@
 #include "sway/input/cursor.h"
 #include "sway/input/input-manager.h"
 #include "sway/output.h"
+#include "sway/tilewin.h"
 #include "sway/server.h"
 #include "sway/tree/container.h"
 #include "sway/tree/node.h"
@@ -398,7 +399,8 @@ static void arrange_container(struct sway_container *con,
 		int width, int height, bool title_bar, int gaps) {
 	// this container might have previously been in the scratchpad,
 	// make sure it's enabled for viewing
-	wlr_scene_node_set_enabled(&con->scene_tree->node, true);
+	// a copy of the window is animated instead while it is hidden
+	wlr_scene_node_set_enabled(&con->scene_tree->node, !tw_animate_hides(con));
 
 	if (con->view && con->current.tw_deco) {
 		struct tw_insets in = tw_deco_insets(con->current.tw_maximized);
@@ -566,8 +568,9 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 
 		wlr_scene_node_reparent(&floater->scene_tree->node, layer);
 		wlr_scene_node_set_position(&floater->scene_tree->node,
-			floater->current.x, floater->current.y);
-		wlr_scene_node_set_enabled(&floater->scene_tree->node, true);
+			floater->current.x + tw_animate_workspace_dx(ws),
+			floater->current.y + tw_animate_container_dy(floater));
+		wlr_scene_node_set_enabled(&floater->scene_tree->node, !tw_animate_hides(floater));
 		wlr_scene_node_set_enabled(&floater->border.tree->node, true);
 
 		arrange_container(floater, floater->current.width, floater->current.height,
@@ -615,7 +618,7 @@ static void arrange_output(struct sway_output *output, int width, int height) {
 			struct sway_container *floater = child->current.floating->items[i];
 			wlr_scene_node_reparent(&floater->scene_tree->node, root->layers.floating);
 			wlr_scene_node_set_enabled(&floater->scene_tree->node,
-				activated && !floater->current.tw_minimized);
+				activated && !floater->current.tw_minimized && !tw_animate_hides(floater));
 		}
 
 		if (activated) {
@@ -640,7 +643,7 @@ static void arrange_output(struct sway_output *output, int width, int height) {
 				struct side_gaps *gaps = &child->current_gaps;
 
 				wlr_scene_node_set_position(&child->layers.tiling->node,
-					gaps->left + area->x, gaps->top + area->y);
+					gaps->left + area->x + tw_animate_workspace_dx(child), gaps->top + area->y);
 
 				arrange_workspace_tiling(child,
 					area->width - gaps->left - gaps->right,

@@ -241,6 +241,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
 | `idle_timeout dim\|screen_off\|lock\|sleep <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`) or sleep. Apps that keep the screen on (videos) pause it. |
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
+| `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
+| `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 
@@ -255,7 +257,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 
 | Page | What you can change |
 |---|---|
-| Theme | Window/tile mode and the theme, with wallpaper previews |
+| Theme | Window/tile mode and the theme, with wallpaper previews, dark mode, animations |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
 | Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps |
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |

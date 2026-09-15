@@ -156,6 +156,7 @@ void tw_maximize(struct sway_container *con, bool enable) {
 		box = fit_box(box, tw_workarea(con->pending.workspace));
 		tw_set_box(con, &box);
 	}
+	tw_animate_resize(con);
 	tw_view_notify_maximized(con->view, enable);
 	ipc_event_window(con, enable ? "maximize" : "restore");
 }
@@ -194,6 +195,7 @@ void tw_minimize(struct sway_container *con, bool enable) {
 	}
 	con->pending.tw_minimized = enable;
 	view_notify_minimized(con->view, enable);
+	tw_animate_minimize(con, enable);
 
 	if (enable) {
 		struct sway_seat *seat = input_manager_current_seat();
@@ -349,6 +351,7 @@ void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
 	struct wlr_box box = snap_box(tw_workarea(con->pending.workspace), snap);
 	tw_set_box(con, &box);
 	ipc_event_window(con, "snap");
+	tw_animate_resize(con);
 }
 
 void tw_restore(struct sway_container *con) {

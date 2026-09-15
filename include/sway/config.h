@@ -543,6 +543,8 @@ struct sway_config {
 	int tw_lid_action[2]; // enum tw_lid_action with the lid closed, and docked
 	char *tw_lock_command;
 	bool tw_xdg_autostart; // run the XDG autostart entries at start
+	bool tw_animations;
+	float tw_animation_speed;
 
 	// Flags
 	enum focus_follows_mouse_mode focus_follows_mouse;

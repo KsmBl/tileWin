@@ -383,6 +383,30 @@ struct cmd_results *cmd_lid_action(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_animations(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "animations", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_animations = parse_boolean(argv[0], config->tw_animations);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_animation_speed(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "animation_speed", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	double speed = strtod(argv[0], &end);
+	if (!end || *end || speed <= 0) {
+		return cmd_results_new(CMD_INVALID,
+			"animation_speed needs a factor above 0, e.g. 2 for twice as fast");
+	}
+	config->tw_animation_speed = speed;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_xdg_autostart(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "xdg_autostart", EXPECTED_EQUAL_TO, 1))) {

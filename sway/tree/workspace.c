@@ -300,6 +300,7 @@ void workspace_destroy(struct sway_workspace *workspace) {
 void workspace_begin_destroy(struct sway_workspace *workspace) {
 	sway_log(SWAY_DEBUG, "Destroying workspace '%s'", workspace->name);
 	tw_taskview_workspace_destroyed(workspace);
+	tw_animate_workspace_destroyed(workspace);
 	ipc_event_workspace(NULL, workspace, "empty"); // intentional
 	wl_signal_emit_mutable(&workspace->node.events.destroy, &workspace->node);
 
@@ -742,6 +743,7 @@ bool workspace_switch(struct sway_workspace *workspace) {
 	if (next == NULL) {
 		next = &workspace->node;
 	}
+	tw_animate_workspace_switch(workspace);
 	seat_set_focus(seat, next);
 	arrange_workspace(workspace);
 	return true;

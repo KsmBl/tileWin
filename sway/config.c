@@ -307,6 +307,8 @@ static void config_defaults(struct sway_config *config) {
 	memset(config->tw_lid_action, 0, sizeof(config->tw_lid_action));
 	if (!(config->tw_lock_command = strdup("tilewin-lock -f"))) goto cleanup;
 	config->tw_xdg_autostart = true;
+	config->tw_animations = true;
+	config->tw_animation_speed = 1.0f;
 
 	if (!(config->config_chain = create_list())) goto cleanup;
 	config->current_config_path = NULL;

@@ -92,6 +92,12 @@ struct tw_container {
 		enum tw_hit hover, pressed;
 		cairo_surface_t *icon;
 	} top_cache;
+	struct {
+		bool active; // fading in after opening
+		bool hidden; // a copy of the window is animated instead
+		float alpha;
+		double dy;
+	} anim;
 };
 
 /* Frame description passed to the theme renderers. */
@@ -237,6 +243,21 @@ bool tw_desktop_close(struct sway_workspace *ws);
 void tw_panel_start(void);
 /* Starts tilewin-nightlight, which keeps the night light colors. */
 void tw_nightlight_start(void);
+/* animate.c: window and desktop animations ("animations", "animation_speed") */
+void tw_animate_open(struct sway_container *con);
+void tw_animate_close(struct sway_container *con);
+void tw_animate_minimize(struct sway_container *con, bool minimize);
+/* After the pending geometry of a floating window changed (maximize, snap). */
+void tw_animate_resize(struct sway_container *con);
+/* Before switching to the workspace: slides the old one out and the new one in. */
+void tw_animate_workspace_switch(struct sway_workspace *ws);
+float tw_animate_container_alpha(struct sway_container *con);
+double tw_animate_container_dy(struct sway_container *con);
+int tw_animate_workspace_dx(struct sway_workspace *ws);
+bool tw_animate_hides(struct sway_container *con);
+void tw_animate_container_destroyed(struct sway_container *con);
+void tw_animate_workspace_destroyed(struct sway_workspace *ws);
+void tw_animate_fini(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);
 void tw_panel_restart(void);

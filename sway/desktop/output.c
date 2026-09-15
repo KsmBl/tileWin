@@ -27,6 +27,7 @@
 #include "sway/ipc-server.h"
 #include "sway/layers.h"
 #include "sway/output.h"
+#include "sway/tilewin.h"
 #include "sway/scene_descriptor.h"
 #include "sway/server.h"
 #include "sway/tree/arrange.h"
@@ -218,7 +219,11 @@ void output_configure_scene(struct sway_output *output,
 	struct sway_container *con =
 		scene_descriptor_try_get(node, SWAY_SCENE_DESC_CONTAINER);
 	if (con) {
-		opacity = con->alpha;
+		opacity = con->alpha * tw_animate_container_alpha(con);
+	}
+	float *animation_alpha = scene_descriptor_try_get(node, SWAY_SCENE_DESC_TW_ANIMATION);
+	if (animation_alpha) {
+		opacity *= *animation_alpha;
 	}
 
 	if (node->type == WLR_SCENE_NODE_BUFFER) {
