@@ -58,6 +58,7 @@ struct startmenu {
 	int scroll;
 	int max_scroll;
 	int selected;
+	bool scroll_to_selected; // the keyboard moved the selection
 	list_t *hits; // borrowed entries in display order
 	bool inside;
 	double px, py;
@@ -453,6 +454,11 @@ static void draw_simple_row(struct sm_ctx *c, int kind, int64_t id, const char *
 	psurface_add_hotspot(c->p->surface, x, y, w, h, NULL, kind, id, NULL);
 }
 
+static char header_letter(const struct tw_desktop_entry *e) {
+	char letter = (char)toupper((unsigned char)e->name[0]);
+	return isalpha((unsigned char)letter) ? letter : '#';
+}
+
 /* Scrollable list of apps with letter headers; returns content height. */
 static int draw_app_list(struct sm_ctx *c, list_t *entries, bool headers, double x, double y,
 		double w, double h, int row_h, int icon_size, uint32_t fg, uint32_t header_fg,
@@ -461,15 +467,35 @@ static int draw_app_list(struct sm_ctx *c, list_t *entries, bool headers, double
 	cairo_save(c->cr);
 	cairo_rectangle(c->cr, x, y, w, h);
 	cairo_clip(c->cr);
+	int base = sm->hits->length;
+	if (sm->scroll_to_selected && sm->selected >= base &&
+			sm->selected < base + entries->length) {
+		// keep the row selected with the arrow keys visible
+		double top = 0;
+		char prev = 0;
+		for (int i = 0; i <= sm->selected - base; i++) {
+			char letter = header_letter(entries->items[i]);
+			if (headers && letter != prev) {
+				prev = letter;
+				top += row_h;
+			}
+			if (i < sm->selected - base) {
+				top += row_h;
+			}
+		}
+		if (top < sm->scroll) {
+			sm->scroll = (int)top;
+		} else if (top + row_h > sm->scroll + h) {
+			sm->scroll = (int)ceil(top + row_h - h);
+		}
+		sm->scroll_to_selected = false;
+	}
 	double cy = y - sm->scroll;
 	char last = 0;
 	for (int i = 0; i < entries->length; i++) {
 		struct tw_desktop_entry *e = entries->items[i];
 		if (headers) {
-			char letter = (char)toupper((unsigned char)e->name[0]);
-			if (!isalpha((unsigned char)letter)) {
-				letter = '#';
-			}
+			char letter = header_letter(e);
 			if (letter != last) {
 				last = letter;
 				char text[2] = { letter, 0 };
@@ -647,10 +673,22 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 	cairo_translate(cr, -M, -M);
 	c.sm->hits->length = 0;
 	double col_x = M + lx + 4, col_y = M + ly + 6, col_w = lw - 8, col_h = lh - 12;
-	if (sm->search[0]) {
+	if (sm->search[0] || (xp && sm->show_search)) {
 		list_t *results = search_results(sm);
-		pd_text(cr, bold, "Programs", col_x + 6, col_y, col_w, 22, xp ? 0x6d6d6dff : 0x1e395bff, PD_LEFT);
-		draw_app_list(&c, results, false, col_x, col_y + 24, col_w, col_h - 24, 30, 24,
+		double top = col_y;
+		if (xp) {
+			// the XP menu has no search box of its own: show what is typed
+			draw_search_box(&c, col_x + 2, top, col_w - 4, 26,
+				tw_theme_color(t, "startmenu.search_bg",
+					tw_theme_color(t, "menu.field_bg", 0xffffffff)),
+				tw_theme_color(t, "startmenu.search_fg",
+					tw_theme_color(t, "menu.field_fg", 0x000000ff)),
+				tw_theme_color(t, "startmenu.search_border", 0x7f9db9ff), 0,
+				"Type to search programs");
+			top += 32;
+		}
+		pd_text(cr, bold, "Programs", col_x + 6, top, col_w, 22, xp ? 0x6d6d6dff : 0x1e395bff, PD_LEFT);
+		draw_app_list(&c, results, false, col_x, top + 24, col_w, col_h - (top - col_y) - 24, 30, 24,
 			left_fg, 0, hl_bg, hl_fg, xp ? 0 : 3);
 		list_free(results);
 	} else if (sm->all_apps) {
@@ -893,6 +931,7 @@ static void sm_render(struct popup *p, cairo_t *cr) {
 	if (sm->selected >= sm->hits->length) {
 		sm->selected = sm->hits->length - 1;
 	}
+	sm->scroll_to_selected = false;
 }
 
 static void sm_motion(struct popup *p, double x, double y) {
@@ -1017,11 +1056,13 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 	case XKB_KEY_Down:
 		if (sm->selected < sm->hits->length - 1) {
 			sm->selected++;
+			sm->scroll_to_selected = true;
 		}
 		break;
 	case XKB_KEY_Up:
 		if (sm->selected > 0) {
 			sm->selected--;
+			sm->scroll_to_selected = true;
 		}
 		break;
 	case XKB_KEY_BackSpace:
