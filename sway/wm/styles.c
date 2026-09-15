@@ -19,6 +19,7 @@ enum style {
 	STYLE_WIN95,
 	STYLE_WINXP,
 	STYLE_WIN7,
+	STYLE_WIN8,
 	STYLE_WIN10,
 	STYLE_WIN11,
 };
@@ -42,6 +43,8 @@ static enum style get_style(const struct tw_theme *theme) {
 		return STYLE_WINXP;
 	} else if (strcasecmp(s, "win7") == 0 || strcasecmp(s, "aero") == 0) {
 		return STYLE_WIN7;
+	} else if (strcasecmp(s, "win8") == 0 || strcasecmp(s, "metro") == 0) {
+		return STYLE_WIN8;
 	} else if (strcasecmp(s, "win11") == 0 || strcasecmp(s, "fluent") == 0) {
 		return STYLE_WIN11;
 	}
@@ -55,6 +58,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		[STYLE_WIN95] = { 23, 19, 4, 2, 0 },
 		[STYLE_WINXP] = { 30, 26, 4, 3, 8 },
 		[STYLE_WIN7] = { 30, 22, 8, 0, 6 },
+		[STYLE_WIN8] = { 30, 22, 8, 0, 0 },
 		[STYLE_WIN10] = { 31, 30, 1, 6, 0 },
 		[STYLE_WIN11] = { 33, 32, 1, 8, 8 },
 	};
@@ -119,6 +123,17 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 		b->close = (struct wlr_box){ right - cw, y, cw, bh };
 		b->maximize = (struct wlr_box){ b->close.x - bw + 1, y, bw - 1, bh };
 		b->minimize = (struct wlr_box){ b->maximize.x - bw, y, bw, bh };
+		break;
+	}
+	case STYLE_WIN8: {
+		// small buttons hanging from the top edge, a wide red close button
+		int bh = tw_theme_int(t, "decoration.button_height", 20);
+		int cw = tw_theme_int(t, "decoration.close_width", 45);
+		int bw = tw_theme_int(t, "decoration.button_width", 26);
+		int right = width - m.side;
+		b->close = (struct wlr_box){ right - cw, 0, cw, bh };
+		b->maximize = (struct wlr_box){ b->close.x - bw, 0, bw, bh };
+		b->minimize = (struct wlr_box){ b->maximize.x - bw, 0, bw, bh };
 		break;
 	}
 	case STYLE_WIN10:
@@ -844,6 +859,73 @@ static void draw_modern(cairo_t *cr, const struct tw_theme *t,
 	(void)state_str;
 }
 
+/* ---------- Windows 8 ---------- */
+
+static void draw_win8(cairo_t *cr, const struct tw_theme *t,
+		const struct tw_frame *f, const struct metrics *m) {
+	int W = f->width, H = f->height;
+	uint32_t frame_bg = state_color(t, f, "title_bg", 0x6ba5e7ff, 0xebebebff);
+	fill_rect(cr, 0, 0, W, H, frame_bg);
+	cairo_rectangle(cr, 0.5, 0.5, W - 1, H - 1);
+	cairo_set_source_u32(cr, state_color(t, f, "frame", 0x4f84c0ff, 0xaaaaaaff));
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	if (m->side > 0) {
+		// the thin line around the window content
+		cairo_rectangle(cr, m->side - 0.5, m->top - 0.5, W - 2 * m->side + 1,
+			H - m->top - m->bottom + 1);
+		cairo_set_source_u32(cr, 0x00000030);
+		cairo_stroke(cr);
+	}
+
+	struct tw_buttons b;
+	tw_style_buttons(t, W, f->maximized, &b);
+	const struct {
+		const struct wlr_box *box;
+		enum tw_hit hit;
+		enum glyph glyph;
+	} buttons[] = {
+		{ &b.minimize, TW_HIT_MINIMIZE, GLYPH_MINIMIZE },
+		{ &b.maximize, TW_HIT_MAXIMIZE, max_glyph(f) },
+		{ &b.close, TW_HIT_CLOSE, GLYPH_CLOSE },
+	};
+	uint32_t glyph_color = state_color(t, f, "glyph", 0x000000ff, 0x999999ff);
+	for (size_t i = 0; i < 3; i++) {
+		bool close = buttons[i].hit == TW_HIT_CLOSE;
+		bool hover = f->hover == buttons[i].hit;
+		bool pressed = hover && f->pressed == buttons[i].hit;
+		const struct wlr_box *box = buttons[i].box;
+		uint32_t bg = 0, fg = glyph_color;
+		if (close) {
+			bg = tw_theme_color(t, pressed ? "decoration.close.pressed" : hover ?
+				"decoration.close.hover" : "decoration.close.normal",
+				pressed ? 0x993d3dff : hover ? 0xe04343ff : f->focused ? 0xc75050ff : 0xbcbcbcff);
+			fg = 0xffffffff;
+		} else if (pressed || hover) {
+			bg = tw_theme_color(t, pressed ? "decoration.button.pressed" :
+				"decoration.button.hover", pressed ? 0x00000030 : 0xffffff50);
+		}
+		fill_rect(cr, box->x, box->y, box->width, box->height, bg);
+		cairo_set_antialias(cr, buttons[i].glyph == GLYPH_CLOSE ? CAIRO_ANTIALIAS_DEFAULT :
+			CAIRO_ANTIALIAS_NONE);
+		draw_vector_glyph(cr, buttons[i].glyph, box, close ? 8 : 9, close ? 1.5 : 1, fg, false);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+	}
+
+	double icon_y = floor((m->top - 16) / 2.0);
+	if (f->icon) {
+		draw_icon(cr, f->icon, m->side, icon_y, 16);
+	} else {
+		draw_generic_icon(cr, m->side, icon_y, 16, 0x767676ff, 0x0078d7ff);
+	}
+	// the title is centered in the title bar, clear of the icon and the buttons
+	double reserve = W - b.minimize.x + 4;
+	double left = m->side + 24 > reserve ? m->side + 24 : reserve;
+	draw_text(cr, tw_theme_str(t, "decoration.title_font", "Segoe UI, Noto Sans 9"),
+		f->title, left, 0, W - 2 * left, m->top,
+		state_color(t, f, "title_fg", 0x000000ff, 0x999999ff), true, TEXT_PLAIN, 0);
+}
+
 void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 		const struct tw_frame *frame) {
 	struct metrics m;
@@ -857,6 +939,9 @@ void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 		break;
 	case STYLE_WIN7:
 		draw_win7(cr, theme, frame, &m);
+		break;
+	case STYLE_WIN8:
+		draw_win8(cr, theme, frame, &m);
 		break;
 	case STYLE_WIN10:
 		draw_modern(cr, theme, frame, &m, false);

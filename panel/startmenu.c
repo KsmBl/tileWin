@@ -21,6 +21,7 @@
  *   twocolumn - Windows XP / 7: pinned apps left, places right
  *   list      - Windows 10: side strip + alphabetical list
  *   centered  - Windows 11: search box, pinned grid, footer
+ *   tiles     - Windows 8: a start screen of colored tiles over the whole screen
  */
 
 enum sm_layout {
@@ -28,6 +29,7 @@ enum sm_layout {
 	SM_TWOCOLUMN,
 	SM_LIST,
 	SM_CENTERED,
+	SM_TILES,
 };
 
 enum sm_hotspot {
@@ -936,6 +938,190 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 	psurface_add_hotspot(p->surface, pbx, pby, 40, 40, NULL, HS_POWER, 0, NULL);
 }
 
+/* ---------- start screen (8) ---------- */
+
+#define TILE 120
+#define TILE_GAP 8
+#define APPS_COLUMN 250
+#define APPS_ROW 40
+
+static uint32_t tile_color(struct panel *panel, const struct tw_desktop_entry *e) {
+	const char *list = tw_theme_str(panel->theme, "startmenu.tile_colors",
+		"#2672ec #00a300 #dc572e #8c0095 #00aba9 #ac193d #2e8def #d24726");
+	char *copy = strdup(list);
+	list_t *colors = create_list();
+	char *save = NULL;
+	for (char *tok = strtok_r(copy, " ,", &save); tok; tok = strtok_r(NULL, " ,", &save)) {
+		list_add(colors, tok);
+	}
+	unsigned long hash = 5381;
+	for (const char *s = e->id; s && *s; s++) {
+		hash = hash * 33 + (unsigned char)*s;
+	}
+	uint32_t color = 0x2672ecff;
+	if (colors->length > 0) {
+		tw_parse_color(colors->items[hash % colors->length], &color);
+	}
+	list_free(colors);
+	free(copy);
+	return color;
+}
+
+/* Apps in columns that continue to the right; returns the width of all columns. */
+static double draw_app_columns(struct sm_ctx *c, list_t *entries, bool headers, double x0,
+		double y0, double h, double W, uint32_t fg, uint32_t hl_bg) {
+	struct startmenu *sm = c->sm;
+	int rows = (int)(h / APPS_ROW);
+	rows = rows < 1 ? 1 : rows;
+	int slot = 0;
+	char last = 0;
+	for (int i = 0; i < entries->length; i++) {
+		struct tw_desktop_entry *e = entries->items[i];
+		if (headers && header_letter(e) != last) {
+			last = header_letter(e);
+			double hx = x0 + (slot / rows) * APPS_COLUMN - sm->scroll;
+			double hy = y0 + (slot % rows) * APPS_ROW;
+			char text[2] = { last, 0 };
+			pd_text(c->cr, bar_bold_font(c->panel), text, hx + 6, hy, 60, APPS_ROW, fg, PD_LEFT);
+			slot++;
+		}
+		double x = x0 + (slot / rows) * APPS_COLUMN - sm->scroll;
+		double y = y0 + (slot % rows) * APPS_ROW;
+		if (x + APPS_COLUMN > 0 && x < W) {
+			draw_app_row(c, e, x, y, APPS_COLUMN - 16, APPS_ROW, 24, bar_font(c->panel), fg,
+				hl_bg, fg, 0, NULL, 0);
+		} else {
+			add_hit(c, e);
+		}
+		slot++;
+	}
+	return ((slot + rows - 1) / rows) * APPS_COLUMN;
+}
+
+static void draw_round_button(struct sm_ctx *c, int kind, double x, double y, double size,
+		int arrow_direction, uint32_t fg) {
+	cairo_t *cr = c->cr;
+	cairo_new_path(cr);
+	if (hovered(c, x, y, size, size)) {
+		cairo_arc(cr, x + size / 2, y + size / 2, size / 2, 0, 2 * M_PI);
+		pd_color(cr, 0xffffff30);
+		cairo_fill(cr);
+	}
+	cairo_new_path(cr);
+	cairo_arc(cr, x + size / 2, y + size / 2, size / 2 - 1, 0, 2 * M_PI);
+	pd_color(cr, fg);
+	cairo_set_line_width(cr, 1.5);
+	cairo_stroke(cr);
+	pd_glyph_arrow(cr, x + size / 2 - 6, y + size / 2 - 6, 12, arrow_direction, fg);
+	psurface_add_hotspot(c->p->surface, x, y, size, size, NULL, kind, 0, NULL);
+}
+
+static void render_tiles(struct popup *p, cairo_t *cr) {
+	struct startmenu *sm = p->data;
+	struct panel *panel = p->panel;
+	const struct tw_theme *t = panel->theme;
+	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
+	double W = p->surface->width, H = p->surface->height;
+	uint32_t bg = tw_theme_color(t, "startmenu.bg", 0x180052ff);
+	uint32_t fg = tw_theme_color(t, "startmenu.fg", 0xffffffff);
+	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg", 0xffffff26);
+	pd_rect(cr, 0, 0, W, H, bg);
+	sm->hits->length = 0;
+
+	double left = W > 900 ? 116 : 40, top = 40;
+	const char *title = sm->search[0] ? "Search" : sm->all_apps ? "Apps" : "Start";
+	const char *title_font = tw_theme_str(t, "startmenu.title_font",
+		"Segoe UI Light, Noto Sans Light 32");
+	pd_text(cr, title_font, title, left, top, 260, 56, fg, PD_LEFT);
+	if (sm->show_search || sm->search[0]) {
+		draw_search_box(&c, left + 220, top + 12, W - left - 220 - 300 > 360 ? 360 :
+			W - left - 520, 34, tw_theme_color(t, "startmenu.search_bg", 0xffffffff),
+			tw_theme_color(t, "startmenu.search_fg", 0x000000ff), 0x00000000, 0, "Search");
+	}
+
+	// account and power at the top right, like the Windows 8.1 start screen
+	double avatar = 40, ax = W - 64 - avatar - 8;
+	pd_text(cr, bar_font(panel), sm->user, ax - 208, top + 8, 200, avatar, fg, PD_RIGHT);
+	draw_avatar(cr, ax, top + 8, avatar, 0xffffff40, fg, false);
+	double px = W - 64, py = top + 8;
+	if (hovered(&c, px, py, 40, 40)) {
+		pd_rect(cr, px, py, 40, 40, hl_bg);
+	}
+	pd_glyph_power(cr, px + 10, py + 10, 20, fg);
+	psurface_add_hotspot(p->surface, px, py, 40, 40, NULL, HS_POWER, 0, NULL);
+	double sx = px - avatar - 216 - 48;
+	if (!sm->show_search && !sm->search[0]) {
+		if (hovered(&c, sx, py, 40, 40)) {
+			pd_rect(cr, sx, py, 40, 40, hl_bg);
+		}
+		pd_glyph_search(cr, sx + 11, py + 11, 18, fg);
+		psurface_add_hotspot(p->surface, sx, py, 40, 40, NULL, HS_SEARCH, 0, NULL);
+	}
+
+	double content_y = top + 104, content_h = H - content_y - 96;
+	double view_w = W - left - 40;
+	double content_w = 0;
+	cairo_save(cr);
+	cairo_rectangle(cr, 0, content_y - 8, W, content_h + 16);
+	cairo_clip(cr);
+	if (sm->search[0]) {
+		list_t *results = search_results(sm);
+		if (results->length == 0) {
+			pd_text(cr, bar_font(panel), "No apps match your search", left, content_y, 400,
+				APPS_ROW, fg, PD_LEFT);
+		}
+		content_w = draw_app_columns(&c, results, false, left, content_y, content_h, W, fg,
+			hl_bg);
+		list_free(results);
+	} else if (sm->all_apps) {
+		content_w = draw_app_columns(&c, sm->apps, true, left, content_y, content_h, W, fg,
+			hl_bg);
+	} else {
+		int rows = (int)((content_h + TILE_GAP) / (TILE + TILE_GAP));
+		rows = rows < 1 ? 1 : rows > 4 ? 4 : rows;
+		int cell = TILE + TILE_GAP;
+		for (int i = 0; i < sm->pinned->length; i++) {
+			struct tw_desktop_entry *e = sm->pinned->items[i];
+			double x = left + (i / rows) * cell - sm->scroll;
+			double y = content_y + (i % rows) * cell;
+			int hit_index = sm->hits->length;
+			add_hit(&c, e);
+			if (x + TILE < 0 || x > W) {
+				continue;
+			}
+			pd_rect(cr, x, y, TILE, TILE, tile_color(panel, e));
+			if (hovered(&c, x, y, TILE, TILE) || hit_index == sm->selected) {
+				cairo_rectangle(cr, x + 1.5, y + 1.5, TILE - 3, TILE - 3);
+				pd_color(cr, 0xffffffb0);
+				cairo_set_line_width(cr, 3);
+				cairo_stroke(cr);
+			}
+			cairo_surface_t *icon = e->icon ? apps_icon(panel, e->icon, 48 * c.scale) : NULL;
+			pd_icon(cr, icon, x + (TILE - 48) / 2.0, y + 26, 48);
+			pd_text(cr, bar_font(panel), e->name, x + 8, y + TILE - 28, TILE - 14, 22,
+				0xffffffff, PD_LEFT);
+			psurface_add_hotspot(p->surface, x, y, TILE, TILE, NULL, HS_APP,
+				list_find(sm->apps, e), NULL);
+		}
+		content_w = ((sm->pinned->length + rows - 1) / rows) * cell;
+		if (sm->pinned->length == 0) {
+			pd_text(cr, bar_font(panel), "Pin apps in the Settings app (Menus) to see them "
+				"here as tiles", left, content_y, W - left, 30, fg, PD_LEFT);
+		}
+	}
+	cairo_restore(cr);
+	sm->max_scroll = content_w > view_w ? (int)(content_w - view_w) : 0;
+	if (sm->scroll > sm->max_scroll) {
+		sm->scroll = sm->max_scroll;
+	}
+
+	// down to all apps, up back to the tiles
+	if (!sm->search[0]) {
+		draw_round_button(&c, sm->all_apps ? HS_BACK : HS_ALLAPPS, left, H - 72, 36,
+			sm->all_apps ? 3 : 1, fg);
+	}
+}
+
 /* ---------- input ---------- */
 
 static void sm_render(struct popup *p, cairo_t *cr) {
@@ -946,6 +1132,9 @@ static void sm_render(struct popup *p, cairo_t *cr) {
 		break;
 	case SM_LIST:
 		render_list(p, cr);
+		break;
+	case SM_TILES:
+		render_tiles(p, cr);
 		break;
 	default:
 		render_centered(p, cr);
@@ -1156,7 +1345,8 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 		style == PS_FLAT ? "list" : "centered");
 	enum sm_layout layout = strcmp(layout_name, "classic") == 0 ? SM_CLASSIC :
 		strcmp(layout_name, "twocolumn") == 0 ? SM_TWOCOLUMN :
-		strcmp(layout_name, "list") == 0 ? SM_LIST : SM_CENTERED;
+		strcmp(layout_name, "list") == 0 ? SM_LIST :
+		strcmp(layout_name, "tiles") == 0 ? SM_TILES : SM_CENTERED;
 	if (layout == SM_CLASSIC) {
 		open_classic(panel, output);
 		return;
@@ -1169,6 +1359,11 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	sm->selected = -1;
 	sm->show_search = search;
 	load_config(panel, sm);
+	if (layout == SM_TILES) {
+		popup_create(panel, POPUP_STARTMENU, NULL, output, 0, 0, output->width, output->height,
+			&startmenu_vtable, sm);
+		return;
+	}
 
 	int M = layout == SM_LIST ? 0 : popup_shadow_margin(panel);
 	int def_w = layout == SM_TWOCOLUMN ? (style == PS_AERO ? 400 : 380) :

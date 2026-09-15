@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <!-- tileWin Windows 8 theme wallpaper: overlapping color bands on deep purple -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#23005f"/>
+      <stop offset="0.55" stop-color="#180052"/>
+      <stop offset="1" stop-color="#0b0033"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00aba9" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#00aba9" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#00d3c8" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="magenta" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d80073" stop-opacity="0.1"/>
+      <stop offset="0.6" stop-color="#d80073" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#f09609" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2672ec" stop-opacity="0"/>
+      <stop offset="1" stop-color="#2e8def" stop-opacity="0.45"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.72" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <path d="M-100 820 C 400 700, 900 560, 2020 300 L 2020 470 C 1000 700, 500 820, -100 980 Z" fill="url(#teal)"/>
+  <path d="M-100 640 C 600 600, 1100 480, 2020 120 L 2020 250 C 1200 560, 700 700, -100 760 Z" fill="url(#magenta)"/>
+  <path d="M300 1180 C 900 900, 1400 620, 2020 540 L 2020 700 C 1500 760, 1000 980, 560 1180 Z" fill="url(#blue)"/>
+  <path d="M1180 -80 L 1520 -80 L 1040 1160 L 700 1160 Z" fill="#ffffff" fill-opacity="0.035"/>
+  <path d="M1580 -80 L 1700 -80 L 1220 1160 L 1100 1160 Z" fill="#ffffff" fill-opacity="0.03"/>
+  <rect width="1920" height="1080" fill="url(#glow)"/>
+</svg>

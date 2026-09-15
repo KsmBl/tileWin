@@ -39,6 +39,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - XP / 7: two-column menu.
   - Windows 10: list.
   - Windows 11: centered grid.
+  - Windows 8: a full-screen start screen with colored tiles, all apps in columns and search.
   - All include app search, pinned apps, places and a power menu.
 - **Run dialog**, tooltips, calendar flyout.
 - **Desktop** like on Windows: icons of the files in `~/Desktop` (double-click opens them) and a right-click menu to create folders, text documents and shortcuts to programs, files or web addresses, rename or delete (to the trash) items, open a terminal there, and change the wallpaper or theme. Turn the icons off with `desktop_icons no` in `taskbar.conf`.
@@ -354,6 +355,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
 | `winxp` | Luna blue title bars, green start button, two-column start menu |
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |
+| `win8` | Colored window frames with centered titles, translucent blue taskbar, a start screen of colored tiles over the whole screen |
 | `win10` | Flat white title bars, dark taskbar with search box, list start menu |
 | `win11` | Rounded light title bars, centered taskbar, grid start menu |
 | `sway` | A sway + waybar desktop: dark Catppuccin-like colors, 3px lavender borders and gaps in tile mode, a floating bar with rounded groups and colored widgets, GoMono Nerd Font |
