@@ -134,6 +134,7 @@ void tw_init(const char *mode_override) {
 }
 
 void tw_fini(void) {
+	tw_power_fini();
 	tw_icon_cache_clear();
 	tw_theme_free(tw_theme);
 	tw_theme = NULL;
@@ -284,6 +285,7 @@ void tw_after_reload(void) {
 	tw_wallpaper_invalidate();
 	tw_panel_config_reloaded();
 	apply_app_icons();
+	tw_power_config_changed();
 }
 
 static void mark_container_dirty(struct sway_container *con, void *data);

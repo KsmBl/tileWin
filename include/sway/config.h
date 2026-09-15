@@ -539,6 +539,9 @@ struct sway_config {
 	char *tw_wallpaper;
 	char *tw_launcher_command;
 	bool tw_session_restore;
+	int tw_idle_timeout[4]; // seconds per enum tw_idle_stage, 0: never
+	int tw_lid_action[2]; // enum tw_lid_action with the lid closed, and docked
+	char *tw_lock_command;
 
 	// Flags
 	enum focus_follows_mouse_mode focus_follows_mouse;

@@ -143,6 +143,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Shift+Ctrl+R | Restart tileWin |
 | Super+Shift+Ctrl+P | Restart the taskbar |
 | Ctrl+Alt+Del | Shut down dialog: shut down, restart, sleep, lock or log out |
+| Win+Page Up / Win+Page Down | Maximize / minimize the window |
 
 Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode and `Super+Shift+Ctrl+R` to restart.
 
@@ -189,6 +190,9 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
 | `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
+| `idle_timeout dim\|screen_off\|lock\|sleep <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`) or sleep. Apps that keep the screen on (videos) pause it. |
+| `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
+| `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 
 - `tilewinmsg -t get_tilewin` prints the current mode, theme and panel pid.
 - IPC clients can subscribe to `["tilewin"]` events.
@@ -205,6 +209,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps |
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
+| Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 | Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size |
 

@@ -194,6 +194,7 @@ void settings_refresh(struct settings *s) {
 	launcher_page_refresh(s);
 	keyboard_page_refresh(s);
 	mouse_page_refresh(s);
+	screen_page_refresh(s);
 }
 
 static void flush_saves(struct settings *s) {
@@ -289,6 +290,7 @@ static void build_window(struct settings *s) {
 
 	gtk_stack_add_titled(s->stack, theme_page_new(s), "theme", "Theme");
 	gtk_stack_add_titled(s->stack, wallpaper_page_new(s), "wallpaper", "Wallpaper");
+	gtk_stack_add_titled(s->stack, screen_page_new(s), "screen", "Screen");
 	gtk_stack_add_titled(s->stack, taskbar_page_new(s), "taskbar", "Taskbar");
 	gtk_stack_add_titled(s->stack, menus_page_new(s), "menus", "Menus");
 	gtk_stack_add_titled(s->stack, launcher_page_new(s), "launcher", "Launcher & apps");

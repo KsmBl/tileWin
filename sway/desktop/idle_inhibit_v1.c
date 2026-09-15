@@ -7,6 +7,7 @@
 #include "sway/tree/container.h"
 #include "sway/tree/view.h"
 #include "sway/server.h"
+#include "sway/tilewin.h"
 
 
 static void destroy_inhibitor(struct sway_idle_inhibitor_v1 *inhibitor) {
@@ -172,6 +173,7 @@ void sway_idle_inhibit_v1_check_active(void) {
 		}
 	}
 	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier_v1, inhibited);
+	tw_power_set_inhibited(inhibited);
 }
 
 bool sway_idle_inhibit_manager_v1_init(void) {

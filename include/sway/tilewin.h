@@ -255,4 +255,32 @@ void tw_session_shutdown(void);
 /* Gives D-Bus and systemd services (portals, Thunar) the session environment. */
 void tw_session_export_environment(void);
 
+/* power.c: idle timeouts and the laptop lid */
+enum tw_idle_stage {
+	TW_IDLE_DIM,
+	TW_IDLE_SCREEN_OFF,
+	TW_IDLE_LOCK,
+	TW_IDLE_SLEEP,
+	TW_IDLE_STAGES,
+};
+enum tw_lid_action {
+	TW_LID_DEFAULT,
+	TW_LID_NOTHING,
+	TW_LID_SLEEP,
+	TW_LID_HIBERNATE,
+	TW_LID_LOCK,
+	TW_LID_SCREEN_OFF,
+	TW_LID_SHUTDOWN,
+};
+bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage);
+bool tw_lid_action_parse(const char *name, enum tw_lid_action *action);
+/* Input happened (cheap, called for every event). */
+void tw_power_activity(void);
+/* An app keeps the screen on (idle inhibitor) or stopped doing so. */
+void tw_power_set_inhibited(bool inhibited);
+void tw_power_lid(bool closed);
+/* The config was loaded or an idle_timeout/lid_action command ran. */
+void tw_power_config_changed(void);
+void tw_power_fini(void);
+
 #endif

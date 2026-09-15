@@ -181,6 +181,7 @@ void free_config(struct sway_config *config) {
 	free(config->tw_panel_command);
 	free(config->tw_wallpaper);
 	free(config->tw_launcher_command);
+	free(config->tw_lock_command);
 	free((char *)config->current_config_path);
 	free((char *)config->current_config);
 	keysym_translation_state_destroy(config->keysym_translation_state);
@@ -302,6 +303,9 @@ static void config_defaults(struct sway_config *config) {
 	if (!(config->tw_panel_command = strdup("tilewin-panel"))) goto cleanup;
 	if (!(config->tw_launcher_command = strdup("builtin"))) goto cleanup;
 	config->tw_session_restore = true;
+	memset(config->tw_idle_timeout, 0, sizeof(config->tw_idle_timeout));
+	memset(config->tw_lid_action, 0, sizeof(config->tw_lid_action));
+	if (!(config->tw_lock_command = strdup("tilewin-lock -f"))) goto cleanup;
 
 	if (!(config->config_chain = create_list())) goto cleanup;
 	config->current_config_path = NULL;

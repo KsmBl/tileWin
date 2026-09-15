@@ -23,6 +23,7 @@ sway_sources = files(
 	'wm/icons.c',
 	'wm/manage.c',
 	'wm/mode.c',
+	'wm/power.c',
 	'wm/session.c',
 	'wm/styles.c',
 
@@ -251,6 +252,10 @@ sway_deps = [
 	xcb,
 	xcb_icccm,
 ]
+
+if sdbus.found()
+	sway_deps += sdbus # logind lid inhibitor
+endif
 
 if wlroots_features['xwayland']
 	sway_sources += 'desktop/xwayland.c'

@@ -382,6 +382,7 @@ int main(int argc, char **argv) {
 	}
 
 	config->active = true;
+	tw_power_config_changed();
 	force_modeset();
 	load_swaybars();
 	tw_session_export_environment();

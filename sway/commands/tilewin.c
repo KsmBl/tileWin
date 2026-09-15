@@ -343,3 +343,52 @@ struct cmd_results *cmd_launcher(int argc, char **argv) {
 	free_argv(cmd_argc, cmd_argv);
 	return res;
 }
+
+struct cmd_results *cmd_idle_timeout(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "idle_timeout", EXPECTED_EQUAL_TO, 2))) {
+		return error;
+	}
+	enum tw_idle_stage stage;
+	char *end = NULL;
+	long seconds = strcasecmp(argv[1], "never") == 0 ? 0 : strtol(argv[1], &end, 10);
+	if (!tw_idle_stage_parse(argv[0], &stage) || (end && (end == argv[1] || *end)) ||
+			seconds < 0) {
+		return cmd_results_new(CMD_INVALID,
+			"Expected 'idle_timeout dim|screen_off|lock|sleep <seconds>|never'");
+	}
+	config->tw_idle_timeout[stage] = seconds > (1L << 30) ? (1 << 30) : (int)seconds;
+	if (config->active && !config->reading) {
+		tw_power_config_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_lid_action(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "lid_action", EXPECTED_EQUAL_TO, 2))) {
+		return error;
+	}
+	enum tw_lid_action action;
+	int which = strcasecmp(argv[0], "closed") == 0 ? 0 :
+		strcasecmp(argv[0], "docked") == 0 ? 1 : -1;
+	if (which < 0 || !tw_lid_action_parse(argv[1], &action)) {
+		return cmd_results_new(CMD_INVALID, "Expected 'lid_action closed|docked "
+			"default|nothing|sleep|hibernate|lock|screen_off|shutdown'");
+	}
+	config->tw_lid_action[which] = action;
+	if (config->active && !config->reading) {
+		tw_power_config_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_lock_command(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "lock_command", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	free(config->tw_lock_command);
+	config->tw_lock_command = join_args(argv, argc);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}

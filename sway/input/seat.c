@@ -34,6 +34,7 @@
 #include "sway/tree/root.h"
 #include "sway/tree/view.h"
 #include "sway/tree/workspace.h"
+#include "sway/tilewin.h"
 
 static void seat_device_destroy(struct sway_seat_device *seat_device) {
 	if (!seat_device) {
@@ -108,6 +109,7 @@ void seat_idle_notify_activity(struct sway_seat *seat,
 	if ((source & seat->idle_inhibit_sources) == 0) {
 		return;
 	}
+	tw_power_activity();
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier_v1, seat->wlr_seat);
 }
 

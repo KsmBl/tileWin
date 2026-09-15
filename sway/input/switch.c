@@ -1,6 +1,7 @@
 #include "sway/config.h"
 #include "sway/input/switch.h"
 #include "sway/server.h"
+#include "sway/tilewin.h"
 #include "log.h"
 
 struct sway_switch *sway_switch_create(struct sway_seat *seat,
@@ -91,6 +92,9 @@ static void handle_switch_toggle(struct wl_listener *listener, void *data) {
 
 	sway_switch->type = event->switch_type;
 	sway_switch->state = event->switch_state;
+	if (event->switch_type == WLR_SWITCH_TYPE_LID) {
+		tw_power_lid(event->switch_state == WLR_SWITCH_STATE_ON);
+	}
 	execute_binding(sway_switch);
 }
 
