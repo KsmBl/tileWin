@@ -453,7 +453,11 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 	struct key_info keyinfo;
 	update_keyboard_state(keyboard, event->keycode, event->state, &keyinfo);
 
-	if (tw_alttab_active()) {
+	// A keyboard in a group gets each key twice, once for the group (handled
+	// first) and once for the device: react only to the group's copy, or
+	// Win+Tab would open the task view and close it again at once.
+	bool tw_input = !keyboard->wlr->group;
+	if (tw_input && tw_alttab_active()) {
 		bool consumed = false;
 		for (size_t i = 0; i < keyinfo.translated_keysyms_len; i++) {
 			consumed |= tw_alttab_handle_key(keyinfo.translated_keysyms[i],
@@ -465,7 +469,7 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 		}
 	}
 
-	if (tw_taskview_active()) {
+	if (tw_input && tw_taskview_active()) {
 		bool pressed = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
 		uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr);
 		for (size_t i = 0; i < keyinfo.translated_keysyms_len; i++) {
