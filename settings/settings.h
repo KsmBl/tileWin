@@ -14,6 +14,7 @@ struct launcher_page;
 struct keyboard_page;
 struct mouse_page;
 struct screen_page;
+struct sound_page;
 
 struct settings {
 	GtkApplication *app;
@@ -34,6 +35,7 @@ struct settings {
 	struct keyboard_page *keyboard_page;
 	struct mouse_page *mouse_page;
 	struct screen_page *screen_page;
+	struct sound_page *sound_page;
 };
 
 /* ipc.c: talks to the running tileWin, if any */
@@ -110,5 +112,7 @@ GtkWidget *mouse_page_new(struct settings *s);
 void mouse_page_refresh(struct settings *s);
 GtkWidget *screen_page_new(struct settings *s);
 void screen_page_refresh(struct settings *s);
+GtkWidget *sound_page_new(struct settings *s);
+void sound_page_refresh(struct settings *s);
 
 #endif

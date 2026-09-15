@@ -8,6 +8,7 @@ executable(
 		'page_menus.c',
 		'page_mouse.c',
 		'page_screen.c',
+		'page_sound.c',
 		'page_taskbar.c',
 		'page_theme.c',
 		'page_wallpaper.c',
