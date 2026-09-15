@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
 #include "sway/commands.h"
@@ -162,6 +163,16 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 		return;
 	}
 	struct sway_mode *mode = cfg->modes->items[0]; // "default"
+	for (int j = 0; j < mode->keysym_bindings->length; j++) {
+		struct sway_binding *binding = mode->keysym_bindings->items[j];
+		// configs from before the task view bound Win+Tab to Alt+Tab
+		if (binding->modifiers == WLR_MODIFIER_LOGO && binding->keys->length == 1 &&
+				*(xkb_keysym_t *)binding->keys->items[0] == XKB_KEY_Tab &&
+				binding->command && strcmp(binding->command, "alttab next") == 0) {
+			free(binding->command);
+			binding->command = strdup("taskview");
+		}
+	}
 	struct sway_mode *current = cfg->current_mode;
 	cfg->current_mode = mode;
 	for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++) {

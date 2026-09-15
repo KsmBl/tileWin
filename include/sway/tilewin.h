@@ -215,6 +215,22 @@ void tw_alttab_modifiers(uint32_t modifiers);
 bool tw_alttab_handle_key(xkb_keysym_t sym, bool pressed);
 void tw_alttab_container_destroyed(struct sway_container *con);
 
+/* taskview.c: Win+Tab task view and desktops */
+bool tw_taskview_active(void);
+void tw_taskview_open(struct sway_seat *seat);
+void tw_taskview_close(void);
+void tw_taskview_toggle(struct sway_seat *seat);
+void tw_taskview_motion(struct sway_seat *seat);
+void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed);
+/* Handles a key while the task view is open; true if consumed. */
+bool tw_taskview_handle_key(xkb_keysym_t sym, bool pressed, uint32_t modifiers);
+void tw_taskview_container_destroyed(struct sway_container *con);
+void tw_taskview_workspace_destroyed(struct sway_workspace *ws);
+/* Creates a desktop (workspace) that stays when empty. */
+struct sway_workspace *tw_desktop_new(struct sway_output *output);
+/* Moves the windows of a desktop to its neighbor and removes it. */
+bool tw_desktop_close(struct sway_workspace *ws);
+
 /* session.c */
 void tw_panel_start(void);
 void tw_panel_restart(void);

@@ -186,6 +186,7 @@ void tw_container_destroy(struct sway_container *con) {
 		last_click.con = NULL;
 	}
 	tw_alttab_container_destroyed(con);
+	tw_taskview_container_destroyed(con);
 }
 
 static void refresh_top(struct sway_container *con) {

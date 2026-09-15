@@ -465,6 +465,19 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 		}
 	}
 
+	if (tw_taskview_active()) {
+		bool pressed = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+		uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr);
+		for (size_t i = 0; i < keyinfo.translated_keysyms_len; i++) {
+			tw_taskview_handle_key(keyinfo.translated_keysyms[i], pressed, modifiers);
+		}
+		if (pressed) {
+			// no key presses reach the windows behind the task view
+			free(device_identifier);
+			return;
+		}
+	}
+
 	bool handled = false;
 	// Identify active release binding
 	struct sway_binding *binding_released = NULL;

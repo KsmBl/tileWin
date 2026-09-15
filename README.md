@@ -23,6 +23,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
   - `Super+Arrow` snapping.
   - Minimize to the taskbar; show desktop; Alt+Tab switcher.
+  - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
   - Arrange windows: cascade, stacked, side by side, optimal grid.
 - **Tile mode:** everything sway does.
 - **Taskbar:**
@@ -122,7 +123,9 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+D, Super+M | Show desktop |
 | Super+L | Lock |
 | Super+↑ / ↓ / ← / → | Maximize / restore or minimize / snap left / snap right |
-| Alt+Tab, Alt+Shift+Tab, Super+Tab | Switch windows (release Alt to confirm, Esc to cancel) |
+| Alt+Tab, Alt+Shift+Tab | Switch windows (release Alt to confirm, Esc to cancel) |
+| Super+Tab | Task view: windows and desktops; drag windows onto another or a new desktop |
+| Super+Ctrl+D, Super+Ctrl+F4 | New desktop, close the current desktop |
 | Alt+F4 | Close window |
 | Alt+Space | Window menu |
 | Ctrl+Shift+Esc | Task manager |
@@ -159,6 +162,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
 | `showdesktop` | Minimize all windows / restore them |
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
+| `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
+| `desktop new\|close` | Create a desktop, or close the current one (its windows move to the desktop before it) |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
 | `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |

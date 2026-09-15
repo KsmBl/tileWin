@@ -342,6 +342,11 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
 		enum wl_pointer_button_state state) {
 	struct sway_cursor *cursor = seat->cursor;
 
+	if (tw_taskview_active()) {
+		tw_taskview_button(seat, button, state == WL_POINTER_BUTTON_STATE_PRESSED);
+		return;
+	}
+
 	// Determine what's under the cursor
 	struct wlr_surface *surface = NULL;
 	double sx, sy;
@@ -613,6 +618,10 @@ static void check_focus_follows_mouse(struct sway_seat *seat,
 }
 
 static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
+	if (tw_taskview_active()) {
+		tw_taskview_motion(seat);
+		return;
+	}
 	struct seatop_default_event *e = seat->seatop_data;
 	struct sway_cursor *cursor = seat->cursor;
 
@@ -724,6 +733,9 @@ static uint32_t wl_axis_to_button(struct wlr_pointer_axis_event *event) {
 
 static void handle_pointer_axis(struct sway_seat *seat,
 		struct wlr_pointer_axis_event *event) {
+	if (tw_taskview_active()) {
+		return;
+	}
 	struct sway_input_device *input_device =
 		event->pointer ? event->pointer->base.data : NULL;
 	struct input_config *ic =
@@ -1122,6 +1134,10 @@ static void handle_swipe_end(struct sway_seat *seat,
  *--------------------------------*/
 
 static void handle_rebase(struct sway_seat *seat, uint32_t time_msec) {
+	if (tw_taskview_active()) {
+		wlr_seat_pointer_notify_clear_focus(seat->wlr_seat);
+		return;
+	}
 	struct seatop_default_event *e = seat->seatop_data;
 	struct sway_cursor *cursor = seat->cursor;
 	struct wlr_surface *surface = NULL;

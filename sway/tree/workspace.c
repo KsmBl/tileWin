@@ -22,6 +22,7 @@
 #include "sway/tree/workspace.h"
 #include "list.h"
 #include "util.h"
+#include "sway/tilewin.h"
 
 static const uint32_t WORKSPACE_CAPABILITIES =
 	EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE |
@@ -298,6 +299,7 @@ void workspace_destroy(struct sway_workspace *workspace) {
 
 void workspace_begin_destroy(struct sway_workspace *workspace) {
 	sway_log(SWAY_DEBUG, "Destroying workspace '%s'", workspace->name);
+	tw_taskview_workspace_destroyed(workspace);
 	ipc_event_workspace(NULL, workspace, "empty"); // intentional
 	wl_signal_emit_mutable(&workspace->node.events.destroy, &workspace->node);
 
@@ -313,6 +315,9 @@ void workspace_begin_destroy(struct sway_workspace *workspace) {
 
 void workspace_consider_destroy(struct sway_workspace *ws) {
 	if (ws->tiling->length || ws->floating->length) {
+		return;
+	}
+	if (ws->tw_keep && tw_mode == TW_MODE_WINDOW) {
 		return;
 	}
 

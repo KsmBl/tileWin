@@ -158,6 +158,56 @@ struct cmd_results *cmd_alttab(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_taskview(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "taskview", EXPECTED_AT_MOST, 1))) {
+		return error;
+	}
+	if (config->reading) {
+		return cmd_results_new(CMD_FAILURE, "taskview can't be used in the config file");
+	}
+	struct sway_seat *seat = config->handler_context.seat ?
+		config->handler_context.seat : input_manager_current_seat();
+	const char *action = argc ? argv[0] : "toggle";
+	if (strcasecmp(action, "toggle") == 0) {
+		tw_taskview_toggle(seat);
+	} else if (strcasecmp(action, "open") == 0) {
+		tw_taskview_open(seat);
+	} else if (strcasecmp(action, "close") == 0) {
+		tw_taskview_close();
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'taskview [toggle|open|close]'");
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_desktop(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "desktop", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (config->reading) {
+		return cmd_results_new(CMD_FAILURE, "desktop can't be used in the config file");
+	}
+	struct sway_seat *seat = config->handler_context.seat ?
+		config->handler_context.seat : input_manager_current_seat();
+	struct sway_workspace *ws = seat_get_focused_workspace(seat);
+	if (strcasecmp(argv[0], "new") == 0) {
+		struct sway_workspace *created = tw_desktop_new(ws ? ws->output : NULL);
+		if (!created) {
+			return cmd_results_new(CMD_FAILURE, "Cannot create a desktop");
+		}
+		workspace_switch(created);
+	} else if (strcasecmp(argv[0], "close") == 0) {
+		if (!ws || !tw_desktop_close(ws)) {
+			return cmd_results_new(CMD_FAILURE, "The last desktop cannot be closed");
+		}
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'desktop new|close'");
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_restart(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "restart", EXPECTED_AT_MOST, 1))) {

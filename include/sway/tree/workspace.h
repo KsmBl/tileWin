@@ -50,6 +50,7 @@ struct sway_workspace {
 	list_t *tiling;             // struct sway_container
 	list_t *output_priority;
 	bool urgent;
+	bool tw_keep; // tileWin desktop that stays when empty in window mode
 
 	struct sway_workspace_state current;
 	struct wlr_ext_workspace_handle_v1 *ext_workspace; // Always set.
