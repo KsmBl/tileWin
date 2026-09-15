@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
 #include <json.h>
@@ -7,6 +8,11 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <time.h>
 #include "draw.h"
 #include "flyout.h"
 #include "popup.h"
@@ -323,6 +329,7 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 #define NET_ROWS 6
 #define NET_EXPAND 42
 #define NET_MESSAGE 56
+#define NET_DETAILS 46
 
 enum {
 	NET_HS_TOGGLE = 1,
@@ -356,6 +363,14 @@ struct net_flyout {
 	bool status_error;
 	int scroll;
 	struct loop_timer *timer;
+	// the interface of the default route: addresses and current usage
+	char iface[IFNAMSIZ];
+	char ipv4[INET_ADDRSTRLEN], ipv6[INET6_ADDRSTRLEN];
+	uint64_t rx_bytes, tx_bytes;
+	struct timespec sampled;
+	double rx_rate, tx_rate; // bytes per second
+	bool have_rate;
+	struct loop_timer *stats_timer;
 };
 
 static struct net_flyout *net_current = NULL;
@@ -391,7 +406,7 @@ static int net_visible_rows(struct net_flyout *f) {
 }
 
 static int net_height(struct net_flyout *f) {
-	int h = NET_HEADER + 1;
+	int h = NET_HEADER + 1 + (f->iface[0] ? NET_DETAILS + 1 : 0);
 	if (net_list_shown(f)) {
 		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0);
 	} else {
@@ -624,6 +639,158 @@ static int net_expanded_index(struct net_flyout *f) {
 	return -1;
 }
 
+/* The interface of the default route with the lowest metric. */
+static bool default_route_iface(char *out, size_t size) {
+	FILE *file = fopen("/proc/net/route", "r");
+	if (!file) {
+		return false;
+	}
+	char line[256];
+	int best_metric = -1;
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		return false; // just the header, or nothing
+	}
+	while (fgets(line, sizeof(line), file)) {
+		char name[IFNAMSIZ + 1], dest[16];
+		unsigned flags;
+		int metric;
+		if (sscanf(line, "%16s %15s %*s %x %*d %*d %d", name, dest, &flags, &metric) != 4) {
+			continue;
+		}
+		if (strcmp(dest, "00000000") == 0 && (flags & 1) && strcmp(name, "lo") != 0 &&
+				(best_metric < 0 || metric < best_metric)) {
+			best_metric = metric;
+			snprintf(out, size, "%s", name);
+		}
+	}
+	fclose(file);
+	return best_metric >= 0;
+}
+
+/* The interface of the IPv6 default route (some networks only route IPv6 by default). */
+static bool default_route6_iface(char *out, size_t size) {
+	FILE *file = fopen("/proc/net/ipv6_route", "r");
+	if (!file) {
+		return false;
+	}
+	char line[256];
+	bool found = false;
+	while (!found && fgets(line, sizeof(line), file)) {
+		char dest[40], name[IFNAMSIZ + 1];
+		unsigned prefix;
+		if (sscanf(line, "%39s %x %*s %*s %*s %*s %*s %*s %*s %16s", dest, &prefix, name) == 3 &&
+				prefix == 0 && strspn(dest, "0") == strlen(dest) && strcmp(name, "lo") != 0) {
+			snprintf(out, size, "%s", name);
+			found = true;
+		}
+	}
+	fclose(file);
+	return found;
+}
+
+/* Any interface that is up, isn't the loopback and has an address. */
+static bool first_up_iface(char *out, size_t size) {
+	struct ifaddrs *addrs = NULL;
+	if (getifaddrs(&addrs) != 0) {
+		return false;
+	}
+	bool found = false;
+	for (struct ifaddrs *a = addrs; a && !found; a = a->ifa_next) {
+		if (a->ifa_addr && a->ifa_name && (a->ifa_flags & IFF_UP) &&
+				!(a->ifa_flags & IFF_LOOPBACK) && (a->ifa_addr->sa_family == AF_INET ||
+				a->ifa_addr->sa_family == AF_INET6)) {
+			snprintf(out, size, "%s", a->ifa_name);
+			found = true;
+		}
+	}
+	freeifaddrs(addrs);
+	return found;
+}
+
+static uint64_t read_counter(const char *iface, const char *name) {
+	char path[256], buf[32];
+	snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/%s", iface, name);
+	return read_sys(path, buf, sizeof(buf)) ? strtoull(buf, NULL, 10) : 0;
+}
+
+static void net_stats_sample(struct net_flyout *f) {
+	char iface[IFNAMSIZ] = "";
+	if (!default_route_iface(iface, sizeof(iface)) &&
+			!default_route6_iface(iface, sizeof(iface))) {
+		if (f->wifi_device) {
+			snprintf(iface, sizeof(iface), "%s", f->wifi_device);
+		} else {
+			first_up_iface(iface, sizeof(iface));
+		}
+	}
+	if (strcmp(iface, f->iface) != 0) {
+		snprintf(f->iface, sizeof(f->iface), "%s", iface);
+		f->have_rate = false;
+		f->rx_bytes = f->tx_bytes = 0;
+	}
+	f->ipv4[0] = f->ipv6[0] = '\0';
+	if (!f->iface[0]) {
+		return;
+	}
+	struct ifaddrs *addrs = NULL;
+	if (getifaddrs(&addrs) == 0) {
+		bool link_local = false;
+		for (struct ifaddrs *a = addrs; a; a = a->ifa_next) {
+			if (!a->ifa_addr || !a->ifa_name || strcmp(a->ifa_name, f->iface) != 0) {
+				continue;
+			}
+			if (a->ifa_addr->sa_family == AF_INET && !f->ipv4[0]) {
+				struct sockaddr_in *in = (struct sockaddr_in *)a->ifa_addr;
+				inet_ntop(AF_INET, &in->sin_addr, f->ipv4, sizeof(f->ipv4));
+			} else if (a->ifa_addr->sa_family == AF_INET6) {
+				struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)a->ifa_addr;
+				bool local = IN6_IS_ADDR_LINKLOCAL(&in6->sin6_addr);
+				// a global address wins over the link-local one
+				if (!f->ipv6[0] || (link_local && !local)) {
+					inet_ntop(AF_INET6, &in6->sin6_addr, f->ipv6, sizeof(f->ipv6));
+					link_local = local;
+				}
+			}
+		}
+		freeifaddrs(addrs);
+	}
+	uint64_t rx = read_counter(f->iface, "rx_bytes");
+	uint64_t tx = read_counter(f->iface, "tx_bytes");
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double dt = (now.tv_sec - f->sampled.tv_sec) + (now.tv_nsec - f->sampled.tv_nsec) / 1e9;
+	if ((f->rx_bytes || f->tx_bytes) && dt > 0.2 && rx >= f->rx_bytes && tx >= f->tx_bytes) {
+		f->rx_rate = (rx - f->rx_bytes) / dt;
+		f->tx_rate = (tx - f->tx_bytes) / dt;
+		f->have_rate = true;
+	}
+	f->rx_bytes = rx;
+	f->tx_bytes = tx;
+	f->sampled = now;
+}
+
+static void net_stats_tick(void *data) {
+	struct net_flyout *f = net_current;
+	if (!f) {
+		return;
+	}
+	f->stats_timer = NULL;
+	net_stats_sample(f);
+	net_update(f);
+	f->stats_timer = loop_add_timer(f->base.panel->loop, 1000, net_stats_tick, NULL);
+}
+
+static void format_rate(double bytes, char *out, size_t size) {
+	static const char *const units[] = { "B/s", "kB/s", "MB/s", "GB/s" };
+	int unit = 0;
+	while (bytes >= 1000 && unit < 3) {
+		bytes /= 1000;
+		unit++;
+	}
+	snprintf(out, size, bytes < 10 && unit > 0 ? "%.1f %s" : "%.0f %s", bytes, units[unit]);
+}
+
 static void net_render(struct popup *p, cairo_t *cr) {
 	struct net_flyout *f = p->data;
 	struct fly_style st;
@@ -661,6 +828,28 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	y += NET_HEADER;
 	draw_line(cr, &st, p, y);
 	y += 1;
+
+	if (f->iface[0]) {
+		char ip[160];
+		if (f->ipv4[0] && f->ipv6[0]) {
+			snprintf(ip, sizeof(ip), "IP address %s  ·  %s", f->ipv4, f->ipv6);
+		} else if (f->ipv4[0] || f->ipv6[0]) {
+			snprintf(ip, sizeof(ip), "IP address %s", f->ipv4[0] ? f->ipv4 : f->ipv6);
+		} else {
+			snprintf(ip, sizeof(ip), "No IP address");
+		}
+		pd_text(cr, st.font, ip, x0, y + 4, cw, 20, st.fg, PD_LEFT);
+		char down[24] = "…", up[24] = "…", usage[128];
+		if (f->have_rate) {
+			format_rate(f->rx_rate, down, sizeof(down));
+			format_rate(f->tx_rate, up, sizeof(up));
+		}
+		snprintf(usage, sizeof(usage), "↓ %s    ↑ %s    %s", down, up, f->iface);
+		pd_text(cr, st.font, usage, x0, y + 23, cw, 20, st.dim, PD_LEFT);
+		y += NET_DETAILS;
+		draw_line(cr, &st, p, y);
+		y += 1;
+	}
 
 	if (net_list_shown(f)) {
 		y += 4;
@@ -841,6 +1030,9 @@ static void net_destroy(struct popup *p) {
 	if (f->timer) {
 		loop_remove_timer(p->panel->loop, f->timer);
 	}
+	if (f->stats_timer) {
+		loop_remove_timer(p->panel->loop, f->stats_timer);
+	}
 	memset(f->password, 0, sizeof(f->password));
 	net_clear(f);
 	list_free(f->nets);
@@ -879,6 +1071,7 @@ void flyout_network_toggle(struct panel *panel, struct popup_anchor anchor,
 	}
 	net_current = f;
 	net_query(f, false);
+	net_stats_tick(NULL);
 }
 
 /* ================= volume ================= */
