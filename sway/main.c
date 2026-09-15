@@ -395,18 +395,11 @@ int main(int argc, char **argv) {
 		swaynag_show(&config->swaynag_config_errors);
 	}
 
-	struct swaynag_instance nag_gpu = (struct swaynag_instance){
-		.args = "--type error "
-			"--message 'Proprietary GPU drivers are not supported by sway. Do not report issues.' "
-			"--detailed-message",
-		.detailed = true,
-	};
-
+	// tileWin runs on proprietary drivers (e.g. NVIDIA) without complaining;
+	// problems there are logged, not shown as an error bar
 	if (unsupported_gpu_detected && !allow_unsupported_gpu) {
-		swaynag_log(config->swaynag_command, &nag_gpu,
-			"To remove this message, launch sway with --unsupported-gpu "
-			"or set the environment variable SWAY_UNSUPPORTED_GPU=true.");
-		swaynag_show(&nag_gpu);
+		sway_log(SWAY_INFO, "Proprietary GPU driver detected; tileWin runs anyway. "
+			"If the cursor is invisible or flickers, set WLR_NO_HARDWARE_CURSORS=1.");
 	}
 
 	server_run(&server);
@@ -421,10 +414,6 @@ shutdown:
 	free(config_path);
 	free_config(config);
 	tw_fini();
-
-	if (nag_gpu.client != NULL) {
-		wl_client_destroy(nag_gpu.client);
-	}
 
 	pango_cairo_font_map_set_default(NULL);
 

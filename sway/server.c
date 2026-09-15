@@ -165,12 +165,12 @@ static void detect_proprietary(struct wlr_backend *backend, void *data) {
 
 	if (strcmp(version->name, "nvidia-drm") == 0) {
 		unsupported_gpu_detected = true;
-		sway_log(SWAY_ERROR, "!!! Proprietary Nvidia drivers are in use !!!");
+		sway_log(SWAY_INFO, "Proprietary NVIDIA driver in use");
 	}
 
 	if (strcmp(version->name, "evdi") == 0) {
 		unsupported_gpu_detected = true;
-		sway_log(SWAY_ERROR, "!!! Proprietary DisplayLink drivers are in use !!!");
+		sway_log(SWAY_INFO, "Proprietary DisplayLink driver in use");
 	}
 
 	drmFreeVersion(version);
