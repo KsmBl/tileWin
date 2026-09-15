@@ -3,16 +3,20 @@
  * rise a little, closing windows shrink and fade out, minimized windows fly to
  * the taskbar and back, maximizing and snapping stretch a window to its new
  * place, and switching desktops slides them. "animations disable" turns them
- * off, "animation_speed <factor>" makes them faster (2) or slower (0.5).
+ * all off, "animation_speed <factor>" makes them faster (2) or slower (0.5) and
+ * "animation <kind> <style>|disable" picks the style of one of them.
  *
  * Closing, minimizing and resizing animate a copy of the window's buffers (a
- * snapshot) while the real window is hidden or already gone. Opening windows
- * and the desktop that slides in move the real windows, so they stay live.
+ * snapshot) while the real window is hidden or already gone. Windows that fade
+ * or rise in and the desktop that slides in move the real windows, so they stay
+ * live. Windows that zoom in wait for their first frame and animate a copy of it.
  */
 #include <math.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <time.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/box.h>
@@ -23,28 +27,56 @@
 #include "sway/tilewin.h"
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
+#include "sway/tree/view.h"
 #include "sway/tree/workspace.h"
 #include "list.h"
 #include "log.h"
 
 #define OPEN_MS 180
+#define ZOOM_MS 200
+#define POP_MS 300
 #define CLOSE_MS 160
 #define MINIMIZE_MS 240
 #define RESIZE_MS 180
+#define BOUNCE_MS 320
 #define SLIDE_MS 280
-#define OPEN_RISE 18
+#define FADE_MS 220
+#define RISE_PX 18
+#define DROP_PX 36
+#define OPEN_WAIT_MS 400 // longest wait for the first frame of a zooming window
 #define FRAME_MS 8
+
+/* Styles, in the order of the names below; the first one is the default. */
+enum { OPEN_RISE, OPEN_FADE, OPEN_ZOOM, OPEN_POP, OPEN_DROP };
+enum { CLOSE_SHRINK, CLOSE_FADE, CLOSE_GROW, CLOSE_DROP };
+enum { MINIMIZE_TASKBAR, MINIMIZE_FADE, MINIMIZE_SHRINK, MINIMIZE_DROP };
+enum { MAXIMIZE_MORPH, MAXIMIZE_BOUNCE, MAXIMIZE_FADE };
+enum { DESKTOP_SLIDE, DESKTOP_VERTICAL, DESKTOP_FADE, DESKTOP_ZOOM };
+
+static const char *const kind_names[TW_ANIM_KIND_COUNT] = {
+	"open", "close", "minimize", "maximize", "desktop",
+};
+static const char *const open_styles[] = { "rise", "fade", "zoom", "pop", "drop", NULL };
+static const char *const close_styles[] = { "shrink", "fade", "grow", "drop", NULL };
+static const char *const minimize_styles[] = { "taskbar", "fade", "shrink", "drop", NULL };
+static const char *const maximize_styles[] = { "morph", "bounce", "fade", NULL };
+static const char *const desktop_styles[] = { "slide", "vertical", "fade", "zoom", NULL };
+static const char *const *const style_names[TW_ANIM_KIND_COUNT] = {
+	open_styles, close_styles, minimize_styles, maximize_styles, desktop_styles,
+};
 
 enum ease {
 	EASE_OUT,
 	EASE_IN,
 	EASE_IN_OUT,
+	EASE_OUT_BACK, // overshoots a little and settles
 };
 
 enum kind {
-	ANIM_OPEN,     // a live window fades in and rises
+	ANIM_LIVE,     // a live window fades in and rises or drops
+	ANIM_GROW,     // a copy of a new window's first frame zooms in
 	ANIM_SNAPSHOT, // a copy of a window moves between two boxes
-	ANIM_SLIDE,    // desktop switch: a copy of the old desktop, the new one offset
+	ANIM_DESKTOP,  // desktop switch: a copy of the old desktop, the new one offset
 };
 
 struct piece {
@@ -64,14 +96,16 @@ struct anim {
 	struct timespec start;
 	double duration; // ms
 	struct sway_container *con; // the live window, or the window hidden during the copy
-	struct sway_workspace *ws;  // ANIM_SLIDE: the desktop sliding in
+	struct sway_workspace *ws;  // ANIM_DESKTOP: the desktop coming in
 	struct wlr_scene_tree *tree;
 	list_t *pieces;             // struct piece *
 	struct fbox captured;       // bounding box of the pieces
 	struct fbox box0, box1;     // where the copy moves
 	double alpha0, alpha1;
 	float alpha;                // read by output_configure_scene
-	double dx0, dx;             // ANIM_SLIDE: offset of the incoming desktop
+	double dx0, dy0, dx, dy;    // offset of the incoming desktop, or ANIM_LIVE's rise
+	double scale0;              // ANIM_GROW: size of the first frame at the start
+	bool has_frame;             // ANIM_GROW: the first frame was captured
 	bool reveal;                // show con again at the end
 };
 
@@ -79,9 +113,36 @@ static list_t *anims;
 static struct wl_event_source *timer;
 static bool shutting_down;
 
-static bool enabled(void) {
+bool tw_animation_parse_kind(const char *name, int *kind) {
+	for (int i = 0; i < TW_ANIM_KIND_COUNT; i++) {
+		if (strcasecmp(name, kind_names[i]) == 0) {
+			*kind = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+int tw_animation_parse_style(int kind, const char *name) {
+	for (int i = 0; kind >= 0 && kind < TW_ANIM_KIND_COUNT && style_names[kind][i]; i++) {
+		if (strcasecmp(name, style_names[kind][i]) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+const char *const *tw_animation_styles(int kind) {
+	return kind >= 0 && kind < TW_ANIM_KIND_COUNT ? style_names[kind] : NULL;
+}
+
+static bool enabled(enum tw_anim_kind kind) {
 	return !shutting_down && config && config->active && !config->reading &&
-		config->tw_animations && server.wl_event_loop;
+		config->tw_animations && config->tw_animation_on[kind] && server.wl_event_loop;
+}
+
+static int style(enum tw_anim_kind kind) {
+	return config->tw_animation_style[kind];
 }
 
 static double scaled_duration(int ms) {
@@ -97,12 +158,22 @@ static double ease(enum ease e, double t) {
 		return t * t * t;
 	case EASE_IN_OUT:
 		return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+	case EASE_OUT_BACK:;
+		const double c1 = 1.70158, c3 = c1 + 1;
+		return 1 + c3 * pow(t - 1, 3) + c1 * pow(t - 1, 2);
 	}
 	return t;
 }
 
 static double lerp(double a, double b, double t) {
 	return a + (b - a) * t;
+}
+
+static struct fbox scale_box(struct fbox b, double scale) {
+	return (struct fbox){
+		b.x + b.width * (1 - scale) / 2, b.y + b.height * (1 - scale) / 2,
+		b.width * scale, b.height * scale,
+	};
 }
 
 static void schedule_frames(void) {
@@ -232,7 +303,8 @@ static void apply_copy(struct anim *a, double e) {
 	};
 	double sx = a->captured.width > 0 ? b.width / a->captured.width : 1;
 	double sy = a->captured.height > 0 ? b.height / a->captured.height : 1;
-	a->alpha = lerp(a->alpha0, a->alpha1, e);
+	// an overshooting curve moves past the end, the opacity stops there
+	a->alpha = lerp(a->alpha0, a->alpha1, fmin(1, fmax(0, e)));
 	for (int i = 0; a->pieces && i < a->pieces->length; i++) {
 		struct piece *p = a->pieces->items[i];
 		double x = b.x + (p->x - a->captured.x) * sx;
@@ -252,10 +324,10 @@ static void apply_copy(struct anim *a, double e) {
 
 /* ---------- live windows ---------- */
 
-static struct anim *slide_for(struct sway_workspace *ws) {
+static struct anim *desktop_anim_for(struct sway_workspace *ws) {
 	for (int i = 0; ws && anims && i < anims->length; i++) {
 		struct anim *a = anims->items[i];
-		if (a->kind == ANIM_SLIDE && a->ws == ws) {
+		if (a->kind == ANIM_DESKTOP && a->ws == ws) {
 			return a;
 		}
 	}
@@ -263,8 +335,13 @@ static struct anim *slide_for(struct sway_workspace *ws) {
 }
 
 int tw_animate_workspace_dx(struct sway_workspace *ws) {
-	struct anim *a = slide_for(ws);
+	struct anim *a = desktop_anim_for(ws);
 	return a ? (int)round(a->dx) : 0;
+}
+
+int tw_animate_workspace_dy(struct sway_workspace *ws) {
+	struct anim *a = desktop_anim_for(ws);
+	return a ? (int)round(a->dy) : 0;
 }
 
 double tw_animate_container_dy(struct sway_container *con) {
@@ -290,9 +367,10 @@ static bool floating_shown(struct sway_container *con) {
 /* Puts a floating window where arrange put it, plus the animation offsets. */
 static void place_floating(struct sway_container *con) {
 	if (floating_shown(con)) {
+		struct sway_workspace *ws = con->current.workspace;
 		wlr_scene_node_set_position(&con->scene_tree->node,
-			con->current.x + tw_animate_workspace_dx(con->current.workspace),
-			con->current.y + tw_animate_container_dy(con));
+			con->current.x + tw_animate_workspace_dx(ws),
+			con->current.y + tw_animate_workspace_dy(ws) + tw_animate_container_dy(con));
 	}
 }
 
@@ -304,7 +382,7 @@ static void place_workspace(struct sway_workspace *ws) {
 	struct wlr_box *area = &output->usable_area;
 	wlr_scene_node_set_position(&ws->layers.tiling->node,
 		ws->current_gaps.left + area->x + tw_animate_workspace_dx(ws),
-		ws->current_gaps.top + area->y);
+		ws->current_gaps.top + area->y + tw_animate_workspace_dy(ws));
 	for (int i = 0; i < ws->current.floating->length; i++) {
 		place_floating(ws->current.floating->items[i]);
 	}
@@ -321,7 +399,7 @@ static void reveal(struct sway_container *con) {
 
 static void finish(struct anim *a) {
 	if (a->con) {
-		if (a->kind == ANIM_OPEN) {
+		if (a->kind == ANIM_LIVE) {
 			a->con->tw.anim.active = false;
 			a->con->tw.anim.alpha = 1;
 			a->con->tw.anim.dy = 0;
@@ -331,8 +409,8 @@ static void finish(struct anim *a) {
 			reveal(a->con);
 		}
 	}
-	if (a->kind == ANIM_SLIDE) {
-		a->dx = 0;
+	if (a->kind == ANIM_DESKTOP) {
+		a->dx = a->dy = 0;
 		place_workspace(a->ws);
 	}
 	if (a->tree) {
@@ -352,6 +430,20 @@ static void remove_anim(struct anim *a) {
 	finish(a);
 }
 
+/* A new window zooming in has its place and a first frame to copy. */
+static bool first_frame_ready(struct sway_container *con) {
+	return floating_shown(con) && con->current.width > 0 && con->current.height > 0 &&
+		con->view && con->view->surface && wlr_surface_has_buffer(con->view->surface);
+}
+
+static void capture_first_frame(struct anim *a) {
+	capture_container(a, a->con);
+	measure(a);
+	a->box0 = scale_box(a->captured, a->scale0);
+	a->has_frame = true;
+	apply_copy(a, 0);
+}
+
 static int tick(void *data) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -359,27 +451,40 @@ static int tick(void *data) {
 		struct anim *a = anims->items[i];
 		double ms = (now.tv_sec - a->start.tv_sec) * 1000.0 +
 			(now.tv_nsec - a->start.tv_nsec) / 1e6;
+		if (a->kind == ANIM_GROW && !a->has_frame) {
+			if (a->con && ms < OPEN_WAIT_MS) {
+				if (first_frame_ready(a->con)) {
+					capture_first_frame(a);
+					a->start = now;
+				}
+				continue;
+			}
+			list_del(anims, i);
+			finish(a); // no frame in time: just show the window
+			continue;
+		}
 		double t = a->duration > 0 ? fmin(1, ms / a->duration) : 1;
 		double e = ease(a->ease, t);
 		switch (a->kind) {
-		case ANIM_OPEN:
+		case ANIM_LIVE:
 			if (a->con) {
-				a->con->tw.anim.alpha = e;
-				a->con->tw.anim.dy = a->con->tw.anim.dy > 0 || e < 1 ?
-					OPEN_RISE * (1 - e) * (container_is_floating(a->con) ? 1 : 0) : 0;
+				a->con->tw.anim.alpha = fmin(1, e);
+				a->con->tw.anim.dy = container_is_floating(a->con) ? a->dy0 * (1 - e) : 0;
 				place_floating(a->con);
 			}
 			break;
+		case ANIM_GROW:
 		case ANIM_SNAPSHOT:
 			apply_copy(a, e);
 			break;
-		case ANIM_SLIDE:
+		case ANIM_DESKTOP:
 			apply_copy(a, e);
 			a->dx = a->dx0 * (1 - e);
+			a->dy = a->dy0 * (1 - e);
 			place_workspace(a->ws);
 			break;
 		}
-		if (t >= 1 || (a->kind == ANIM_OPEN && !a->con)) {
+		if (t >= 1 || ((a->kind == ANIM_LIVE || a->kind == ANIM_GROW) && !a->con)) {
 			list_del(anims, i);
 			finish(a);
 		}
@@ -416,6 +521,16 @@ static struct anim *anim_new(enum kind kind, int ms, enum ease e) {
 	return a;
 }
 
+/* An animation that copies nodes: NULL (and nothing left behind) if that fails. */
+static struct anim *copy_anim_new(enum kind kind, int ms, enum ease e) {
+	struct anim *a = anim_new(kind, ms, e);
+	if (a && !make_tree(a)) {
+		remove_anim(a);
+		return NULL;
+	}
+	return a;
+}
+
 /* Ends the animations of a window right away (e.g. before starting another). */
 static void cancel_for(struct sway_container *con) {
 	for (int i = anims ? anims->length - 1 : -1; i >= 0; i--) {
@@ -430,73 +545,106 @@ static void cancel_for(struct sway_container *con) {
 /* ---------- starting animations ---------- */
 
 void tw_animate_open(struct sway_container *con) {
-	if (!enabled() || !con || !con->view || con->pending.fullscreen_mode != FULLSCREEN_NONE) {
+	if (!enabled(TW_ANIM_OPEN) || !con || !con->view ||
+			con->pending.fullscreen_mode != FULLSCREEN_NONE) {
 		return;
 	}
 	cancel_for(con);
-	struct anim *a = anim_new(ANIM_OPEN, OPEN_MS, EASE_OUT);
+	int s = style(TW_ANIM_OPEN);
+	bool floating = container_is_floating(con);
+	if ((s == OPEN_ZOOM || s == OPEN_POP) && floating) {
+		bool pop = s == OPEN_POP;
+		struct anim *a = copy_anim_new(ANIM_GROW, pop ? POP_MS : ZOOM_MS,
+			pop ? EASE_OUT_BACK : EASE_OUT);
+		if (!a) {
+			return;
+		}
+		a->con = con;
+		a->scale0 = pop ? 0.7 : 0.88;
+		a->alpha0 = 0;
+		a->alpha = 0;
+		a->reveal = true;
+		con->tw.anim.hidden = true;
+		if (con->scene_tree) {
+			wlr_scene_node_set_enabled(&con->scene_tree->node, false);
+		}
+		return;
+	}
+	// tiled windows only fade: they have no room to move in
+	struct anim *a = anim_new(ANIM_LIVE, OPEN_MS, EASE_OUT);
 	if (!a) {
 		return;
 	}
 	a->con = con;
+	a->dy0 = !floating ? 0 : s == OPEN_RISE ? RISE_PX : s == OPEN_DROP ? -DROP_PX : 0;
 	con->tw.anim.active = true;
 	con->tw.anim.alpha = 0;
-	con->tw.anim.dy = container_is_floating(con) ? OPEN_RISE : 0;
+	con->tw.anim.dy = a->dy0;
 }
 
 void tw_animate_close(struct sway_container *con) {
-	if (!enabled() || !con || !con->scene_tree || !con->scene_tree->node.enabled ||
+	if (!enabled(TW_ANIM_CLOSE) || !con || !con->scene_tree || !con->scene_tree->node.enabled ||
 			con->current.fullscreen_mode != FULLSCREEN_NONE || con->current.tw_minimized ||
 			!con->current.workspace || !workspace_is_visible(con->current.workspace)) {
 		return;
 	}
 	cancel_for(con);
-	struct anim *a = anim_new(ANIM_SNAPSHOT, CLOSE_MS, EASE_IN);
-	if (!a || !make_tree(a)) {
-		if (a) {
-			remove_anim(a);
-		}
+	struct anim *a = copy_anim_new(ANIM_SNAPSHOT, CLOSE_MS, EASE_IN);
+	if (!a) {
 		return;
 	}
 	capture_container(a, con);
 	measure(a);
-	double shrink = 0.9;
-	a->box1 = (struct fbox){
-		a->captured.x + a->captured.width * (1 - shrink) / 2,
-		a->captured.y + a->captured.height * (1 - shrink) / 2,
-		a->captured.width * shrink, a->captured.height * shrink,
-	};
+	switch (style(TW_ANIM_CLOSE)) {
+	case CLOSE_SHRINK:
+		a->box1 = scale_box(a->captured, 0.9);
+		break;
+	case CLOSE_GROW:
+		a->box1 = scale_box(a->captured, 1.08);
+		break;
+	case CLOSE_DROP:
+		a->box1.y += DROP_PX * 2;
+		break;
+	}
 	a->alpha1 = 0;
 	apply_copy(a, 0);
 }
 
 void tw_animate_minimize(struct sway_container *con, bool minimize) {
 	struct sway_workspace *ws = con ? con->current.workspace : NULL;
-	if (!enabled() || !con || !con->scene_tree || !container_is_floating(con) || !ws ||
-			!ws->output || !workspace_is_visible(ws) ||
+	if (!enabled(TW_ANIM_MINIMIZE) || !con || !con->scene_tree || !container_is_floating(con) ||
+			!ws || !ws->output || !workspace_is_visible(ws) ||
 			con->current.fullscreen_mode != FULLSCREEN_NONE) {
 		return;
 	}
 	cancel_for(con);
-	struct anim *a = anim_new(ANIM_SNAPSHOT, MINIMIZE_MS, minimize ? EASE_IN : EASE_OUT);
-	if (!a || !make_tree(a)) {
-		if (a) {
-			remove_anim(a);
-		}
+	struct anim *a = copy_anim_new(ANIM_SNAPSHOT, MINIMIZE_MS, minimize ? EASE_IN : EASE_OUT);
+	if (!a) {
 		return;
 	}
 	capture_container(a, con);
 	measure(a);
 	struct sway_output *output = ws->output;
-	double w = fmax(40, a->captured.width * 0.12), h = fmax(30, a->captured.height * 0.12);
-	struct fbox taskbar = {
-		output->lx + output->width / 2.0 - w / 2, output->ly + output->height - h, w, h,
-	};
+	struct fbox away = a->captured;
+	switch (style(TW_ANIM_MINIMIZE)) {
+	case MINIMIZE_TASKBAR:;
+		double w = fmax(40, a->captured.width * 0.12), h = fmax(30, a->captured.height * 0.12);
+		away = (struct fbox){
+			output->lx + output->width / 2.0 - w / 2, output->ly + output->height - h, w, h,
+		};
+		break;
+	case MINIMIZE_SHRINK:
+		away = scale_box(a->captured, 0.6);
+		break;
+	case MINIMIZE_DROP:
+		away.y = output->ly + output->height;
+		break;
+	}
 	if (minimize) {
-		a->box1 = taskbar;
+		a->box1 = away;
 		a->alpha1 = 0;
 	} else {
-		a->box0 = taskbar;
+		a->box0 = away;
 		a->alpha0 = 0;
 		a->con = con;
 		a->reveal = true;
@@ -507,7 +655,7 @@ void tw_animate_minimize(struct sway_container *con, bool minimize) {
 }
 
 void tw_animate_resize(struct sway_container *con) {
-	if (!enabled() || !con || !floating_shown(con)) {
+	if (!enabled(TW_ANIM_MAXIMIZE) || !con || !floating_shown(con)) {
 		return;
 	}
 	struct wlr_box old = { con->current.x, con->current.y, con->current.width,
@@ -519,15 +667,21 @@ void tw_animate_resize(struct sway_container *con) {
 		return;
 	}
 	cancel_for(con);
-	struct anim *a = anim_new(ANIM_SNAPSHOT, RESIZE_MS, EASE_OUT);
-	if (!a || !make_tree(a)) {
-		if (a) {
-			remove_anim(a);
-		}
+	int s = style(TW_ANIM_MAXIMIZE);
+	struct anim *a = copy_anim_new(ANIM_SNAPSHOT, s == MAXIMIZE_BOUNCE ? BOUNCE_MS :
+		s == MAXIMIZE_FADE ? FADE_MS : RESIZE_MS,
+		s == MAXIMIZE_BOUNCE ? EASE_OUT_BACK : s == MAXIMIZE_FADE ? EASE_IN_OUT : EASE_OUT);
+	if (!a) {
 		return;
 	}
 	capture_container(a, con);
 	measure(a);
+	if (s == MAXIMIZE_FADE) {
+		// the old look fades out over the window at its new place
+		a->alpha1 = 0;
+		apply_copy(a, 0);
+		return;
+	}
 	// keep the margins (shadow, borders) of the captured frame around the new box
 	double left = old.x - a->captured.x, top = old.y - a->captured.y;
 	double right = a->captured.x + a->captured.width - (old.x + old.width);
@@ -544,8 +698,8 @@ void tw_animate_resize(struct sway_container *con) {
 void tw_animate_workspace_switch(struct sway_workspace *ws) {
 	struct sway_output *output = ws ? ws->output : NULL;
 	struct sway_workspace *old = output ? output->current.active_workspace : NULL;
-	if (!enabled() || !old || old == ws || old->output != output || old->current.fullscreen ||
-			ws->current.fullscreen) {
+	if (!enabled(TW_ANIM_DESKTOP) || !old || old == ws || old->output != output ||
+			old->current.fullscreen || ws->current.fullscreen) {
 		return;
 	}
 	int old_index = list_find(output->workspaces, old);
@@ -555,16 +709,16 @@ void tw_animate_workspace_switch(struct sway_workspace *ws) {
 	}
 	for (int i = anims ? anims->length - 1 : -1; i >= 0; i--) {
 		struct anim *a = anims->items[i];
-		if (a->kind == ANIM_SLIDE) {
+		if (a->kind == ANIM_DESKTOP) {
 			list_del(anims, i);
 			finish(a);
 		}
 	}
-	struct anim *a = anim_new(ANIM_SLIDE, SLIDE_MS, EASE_IN_OUT);
-	if (!a || !make_tree(a)) {
-		if (a) {
-			remove_anim(a);
-		}
+	int s = style(TW_ANIM_DESKTOP);
+	bool slide = s == DESKTOP_SLIDE || s == DESKTOP_VERTICAL;
+	struct anim *a = copy_anim_new(ANIM_DESKTOP, slide ? SLIDE_MS : FADE_MS,
+		slide ? EASE_IN_OUT : EASE_OUT);
+	if (!a) {
 		return;
 	}
 	for (int i = 0; i < old->current.tiling->length; i++) {
@@ -582,9 +736,26 @@ void tw_animate_workspace_switch(struct sway_workspace *ws) {
 	}
 	measure(a);
 	int direction = new_index > old_index ? 1 : -1;
-	a->box1.x -= direction * output->width;
+	switch (s) {
+	case DESKTOP_SLIDE:
+		a->box1.x -= direction * output->width;
+		a->dx0 = direction * output->width;
+		break;
+	case DESKTOP_VERTICAL:
+		a->box1.y -= direction * output->height;
+		a->dy0 = direction * output->height;
+		break;
+	case DESKTOP_FADE:
+		a->alpha1 = 0;
+		break;
+	case DESKTOP_ZOOM:
+		a->box1 = scale_box(a->captured, 0.85);
+		a->alpha1 = 0;
+		break;
+	}
 	a->ws = ws;
-	a->dx0 = a->dx = direction * output->width;
+	a->dx = a->dx0;
+	a->dy = a->dy0;
 	apply_copy(a, 0);
 	place_workspace(ws);
 }

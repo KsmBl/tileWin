@@ -569,7 +569,7 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 		wlr_scene_node_reparent(&floater->scene_tree->node, layer);
 		wlr_scene_node_set_position(&floater->scene_tree->node,
 			floater->current.x + tw_animate_workspace_dx(ws),
-			floater->current.y + tw_animate_container_dy(floater));
+			floater->current.y + tw_animate_workspace_dy(ws) + tw_animate_container_dy(floater));
 		wlr_scene_node_set_enabled(&floater->scene_tree->node, !tw_animate_hides(floater));
 		wlr_scene_node_set_enabled(&floater->border.tree->node, true);
 
@@ -643,7 +643,8 @@ static void arrange_output(struct sway_output *output, int width, int height) {
 				struct side_gaps *gaps = &child->current_gaps;
 
 				wlr_scene_node_set_position(&child->layers.tiling->node,
-					gaps->left + area->x + tw_animate_workspace_dx(child), gaps->top + area->y);
+					gaps->left + area->x + tw_animate_workspace_dx(child),
+					gaps->top + area->y + tw_animate_workspace_dy(child));
 
 				arrange_workspace_tiling(child,
 					area->width - gaps->left - gaps->right,

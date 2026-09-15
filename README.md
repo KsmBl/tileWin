@@ -245,8 +245,11 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
 | `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
 | `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
+| `animation open\|close\|minimize\|maximize\|desktop <style> [enable\|disable]` | Style of one animation, or turn it off. open: `rise` (default), `fade`, `zoom`, `pop`, `drop`; close: `shrink`, `fade`, `grow`, `drop`; minimize: `taskbar`, `fade`, `shrink`, `drop`; maximize (also snapping): `morph`, `bounce`, `fade`; desktop: `slide`, `vertical`, `fade`, `zoom` |
 | `window_stick enable\|disable` | Moved and resized windows stick to the edges of other windows and of the screen (default enable) |
 | `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |
+| `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
+| `window_stretch enable\|disable` | Double-clicking a side of a window stretches it (default enable) |
 | `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
@@ -262,7 +265,9 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 
 | Page | What you can change |
 |---|---|
-| Theme | Window/tile mode and the theme, with wallpaper previews, dark mode, animations |
+| Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
+| Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview |
+| Window behavior | Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
 | Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps |
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |

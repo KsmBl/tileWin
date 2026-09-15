@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -393,6 +394,48 @@ struct cmd_results *cmd_animations(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_animation(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "animation", EXPECTED_AT_LEAST, 2))) {
+		return error;
+	}
+	int kind;
+	if (!tw_animation_parse_kind(argv[0], &kind)) {
+		return cmd_results_new(CMD_INVALID, "Expected 'animation "
+			"open|close|minimize|maximize|desktop [<style>] [enable|disable]'");
+	}
+	// "animation open zoom" picks a style and turns it on, "animation open zoom
+	// disable" keeps the style for when it is turned on again
+	static const char *const toggles[] = { "enable", "disable", "yes", "no", "on", "off",
+		"true", "false", "toggle" };
+	bool on = true;
+	int style = config->tw_animation_style[kind];
+	for (int i = 1; i < argc; i++) {
+		bool toggle = false;
+		for (size_t j = 0; j < sizeof(toggles) / sizeof(toggles[0]); j++) {
+			toggle = toggle || strcasecmp(argv[i], toggles[j]) == 0;
+		}
+		if (toggle) {
+			on = parse_boolean(argv[i], config->tw_animation_on[kind]);
+			continue;
+		}
+		style = tw_animation_parse_style(kind, argv[i]);
+		if (style < 0) {
+			const char *const *names = tw_animation_styles(kind);
+			char list[256] = "";
+			for (int j = 0; names[j]; j++) {
+				snprintf(list + strlen(list), sizeof(list) - strlen(list), "%s%s",
+					j ? ", " : "", names[j]);
+			}
+			return cmd_results_new(CMD_INVALID, "Unknown %s animation '%s', expected %s, "
+				"enable or disable", argv[0], argv[i], list);
+		}
+	}
+	config->tw_animation_style[kind] = style;
+	config->tw_animation_on[kind] = on;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_animation_speed(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "animation_speed", EXPECTED_EQUAL_TO, 1))) {
@@ -414,6 +457,24 @@ struct cmd_results *cmd_window_stick(int argc, char **argv) {
 		return error;
 	}
 	config->tw_stick = parse_boolean(argv[0], config->tw_stick);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_snap(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_snap", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_snap = parse_boolean(argv[0], config->tw_snap);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_stretch(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_stretch", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_stretch = parse_boolean(argv[0], config->tw_stretch);
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

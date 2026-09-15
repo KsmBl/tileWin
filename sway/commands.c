@@ -42,6 +42,7 @@ struct cmd_results *checkarg(int argc, const char *name, enum expected_args type
 
 /* Keep alphabetized */
 static const struct cmd_handler handlers[] = {
+	{ "animation", cmd_animation },
 	{ "animation_speed", cmd_animation_speed },
 	{ "animations", cmd_animations },
 	{ "assign", cmd_assign },
@@ -105,8 +106,10 @@ static const struct cmd_handler handlers[] = {
 	{ "unbindsym", cmd_unbindsym },
 	{ "wallpaper", cmd_wallpaper },
 	{ "window_group_modifier", cmd_window_group_modifier },
+	{ "window_snap", cmd_window_snap },
 	{ "window_stick", cmd_window_stick },
 	{ "window_stick_distance", cmd_window_stick_distance },
+	{ "window_stretch", cmd_window_stretch },
 	{ "workspace", cmd_workspace },
 	{ "workspace_auto_back_and_forth", cmd_ws_auto_back_and_forth },
 	{ "xdg_autostart", cmd_xdg_autostart },

@@ -383,7 +383,8 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 		}
 		// double-click on a side: stretch the window to the next window or
 		// the screen edge (again: back to its size)
-		if (last_click.con == cont && last_click.hit == hit && last_click.edges == edges &&
+		if (config->tw_stretch && last_click.con == cont && last_click.hit == hit &&
+				last_click.edges == edges &&
 				time_msec - last_click.time < DOUBLE_CLICK_MS) {
 			last_click.con = NULL;
 			if (tw_expand(cont, edges)) {

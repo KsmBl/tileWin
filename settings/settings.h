@@ -18,6 +18,8 @@ struct sound_page;
 struct bluetooth_page;
 struct apps_page;
 struct account_page;
+struct animations_page;
+struct window_page;
 
 struct settings {
 	GtkApplication *app;
@@ -42,6 +44,8 @@ struct settings {
 	struct bluetooth_page *bluetooth_page;
 	struct apps_page *apps_page;
 	struct account_page *account_page;
+	struct animations_page *animations_page;
+	struct window_page *window_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -137,5 +141,9 @@ GtkWidget *apps_page_new(struct settings *s);
 void apps_page_refresh(struct settings *s);
 GtkWidget *account_page_new(struct settings *s);
 void account_page_refresh(struct settings *s);
+GtkWidget *animations_page_new(struct settings *s);
+void animations_page_refresh(struct settings *s);
+GtkWidget *window_page_new(struct settings *s);
+void window_page_refresh(struct settings *s);
 
 #endif

@@ -545,9 +545,13 @@ struct sway_config {
 	bool tw_xdg_autostart; // run the XDG autostart entries at start
 	bool tw_animations;
 	float tw_animation_speed;
+	bool tw_animation_on[5]; // per enum tw_anim_kind
+	int tw_animation_style[5];
 	bool tw_stick; // windows stick to screen and window edges
 	int tw_stick_distance;
 	uint32_t tw_group_modifier; // held: touching windows move together
+	bool tw_snap; // dragging a window to a screen edge snaps it
+	bool tw_stretch; // double-clicking a frame side stretches the window
 
 	// Flags
 	enum focus_follows_mouse_mode focus_follows_mouse;

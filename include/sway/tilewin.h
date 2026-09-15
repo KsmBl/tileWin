@@ -40,6 +40,16 @@ enum tw_hit {
 	TW_HIT_EDGE,
 };
 
+/* The animations that can be turned off or styled one by one. */
+enum tw_anim_kind {
+	TW_ANIM_OPEN,
+	TW_ANIM_CLOSE,
+	TW_ANIM_MINIMIZE,
+	TW_ANIM_MAXIMIZE, // also snapping and stretching
+	TW_ANIM_DESKTOP,
+	TW_ANIM_KIND_COUNT,
+};
+
 enum tw_snap {
 	TW_SNAP_NONE,
 	TW_SNAP_LEFT,
@@ -258,12 +268,17 @@ void tw_animate_workspace_switch(struct sway_workspace *ws);
 float tw_animate_container_alpha(struct sway_container *con);
 double tw_animate_container_dy(struct sway_container *con);
 int tw_animate_workspace_dx(struct sway_workspace *ws);
+int tw_animate_workspace_dy(struct sway_workspace *ws);
 bool tw_animate_hides(struct sway_container *con);
 void tw_animate_container_destroyed(struct sway_container *con);
 void tw_animate_workspace_destroyed(struct sway_workspace *ws);
 /* Before the compositor shuts down, while the scene still exists. */
 void tw_animate_shutdown(void);
 void tw_animate_fini(void);
+bool tw_animation_parse_kind(const char *name, int *kind);
+/* Index of a style of that kind of animation, -1 if there is none of that name. */
+int tw_animation_parse_style(int kind, const char *name);
+const char *const *tw_animation_styles(int kind);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);
 

@@ -881,7 +881,8 @@ enum tw_snap tw_snap_zone(double lx, double ly) {
 }
 
 void tw_snap_preview_update(struct sway_container *con, double lx, double ly) {
-	enum tw_snap snap = tw_mode == TW_MODE_WINDOW ? tw_snap_zone(lx, ly) : TW_SNAP_NONE;
+	enum tw_snap snap = tw_mode == TW_MODE_WINDOW && config->tw_snap ?
+		tw_snap_zone(lx, ly) : TW_SNAP_NONE;
 	preview.con = con;
 	if (snap == preview.snap) {
 		return;

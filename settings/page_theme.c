@@ -14,7 +14,6 @@ struct theme_page {
 	GtkWidget *summary;
 	GtkWidget *dark_switch;
 	GtkWidget *icons_switch;
-	GtkWidget *animations_switch;
 };
 
 static const char *target_mode(struct theme_page *p) {
@@ -96,24 +95,6 @@ static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data
 	}
 	settings_apply_color_scheme(active);
 	return FALSE;
-}
-
-static gboolean on_animations_switch(GtkSwitch *widget, gboolean active, gpointer data) {
-	struct theme_page *p = data;
-	if (p->updating) {
-		return FALSE;
-	}
-	confdoc_set(p->s->common, p->s->common->root, "animations", NULL, active ? NULL : "disable");
-	settings_common_changed(p->s, true);
-	settings_status(p->s, active ? "Windows and desktops are animated" : "Animations are off");
-	return FALSE;
-}
-
-static bool animations_enabled(struct settings *s) {
-	struct cstmt *stmt = confdoc_child(s->common->root, "animations", NULL);
-	const char *value = stmt ? cstmt_arg(stmt, 0) : NULL;
-	return !value || !(strcmp(value, "disable") == 0 || strcmp(value, "no") == 0 ||
-		strcmp(value, "false") == 0 || strcmp(value, "off") == 0);
 }
 
 static char *app_icons_path(void) {
@@ -233,7 +214,6 @@ void theme_page_refresh(struct settings *s) {
 		scheme ? strcmp(scheme, "dark") == 0 : tw_color_scheme_is_dark());
 	g_free(scheme);
 	gtk_switch_set_active(GTK_SWITCH(p->icons_switch), app_icons_enabled());
-	gtk_switch_set_active(GTK_SWITCH(p->animations_switch), animations_enabled(p->s));
 
 	gtk_flow_box_remove_all(GTK_FLOW_BOX(p->flow));
 	list_t *names = tw_theme_list();
@@ -301,11 +281,6 @@ GtkWidget *theme_page_new(struct settings *s) {
 		p->dark_switch);
 	p->icons_switch = gtk_switch_new();
 	g_signal_connect(p->icons_switch, "state-set", G_CALLBACK(on_icons_switch), p);
-	p->animations_switch = gtk_switch_new();
-	g_signal_connect(p->animations_switch, "state-set", G_CALLBACK(on_animations_switch), p);
-	ui_row(group, "Animations",
-		"Windows fade in and out, minimize to the taskbar and desktops slide when you switch.",
-		p->animations_switch);
 	ui_row(group, "Theme icons in apps",
 		"File managers like Thunar and Dolphin, file dialogs and other apps use the icons of "
 		"the theme, e.g. Windows XP folders. Turned off, they use your own icon theme again.",

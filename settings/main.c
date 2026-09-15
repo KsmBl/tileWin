@@ -166,9 +166,9 @@ static gboolean save_modes(gpointer data) {
 	}
 	copy_default_if_missing("common.conf");
 	if (settings_command(s, "reload")) {
-		settings_status(s, "Saved the shortcuts and reloaded tileWin");
+		settings_status(s, "Saved and reloaded tileWin");
 	} else {
-		settings_status(s, "Saved the shortcuts");
+		settings_status(s, "Saved");
 	}
 	return G_SOURCE_REMOVE;
 }
@@ -196,6 +196,8 @@ void settings_refresh(struct settings *s) {
 	launcher_page_refresh(s);
 	keyboard_page_refresh(s);
 	mouse_page_refresh(s);
+	animations_page_refresh(s);
+	window_page_refresh(s);
 	screen_page_refresh(s);
 	sound_page_refresh(s);
 	bluetooth_page_refresh(s);
@@ -405,6 +407,10 @@ static void build_window(struct settings *s) {
 	} pages[] = {
 		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new },
 		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new },
+		{ "animations", "Animations", "effects motion speed fade zoom slide minimize maximize "
+			"open close desktop switch", animations_page_new },
+		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
+			"double click focus follows mouse attention activation", window_page_new },
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
@@ -414,7 +420,7 @@ static void build_window(struct settings *s) {
 		{ "menus", "Menus", "start menu right click context pinned", menus_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
-		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap windows stick snap move together group modifier stretch", mouse_page_new },
+		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
 	};
@@ -500,7 +506,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
+				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -516,7 +522,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps or account", "PAGE");
+		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps or account", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 
