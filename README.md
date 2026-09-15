@@ -296,6 +296,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |
 | `win10` | Flat white title bars, dark taskbar with search box, list start menu |
 | `win11` | Rounded light title bars, centered taskbar, grid start menu |
+| `sway` | A sway + waybar desktop: dark Catppuccin-like colors, 3px lavender borders and gaps in tile mode, a floating bar with rounded groups and colored widgets, GoMono Nerd Font |
 
 A theme is a directory with:
 - `theme.conf`: decorations, taskbar, menus, start menu, Alt+Tab, wallpaper
@@ -315,6 +316,13 @@ To make your own:
 1. Create `~/.config/tileWin/themes/mytheme/theme.conf` starting with `inherit win10`.
 2. Override only the keys you want, e.g. `decoration { active { title_bg #202020; title_fg #ffffff } }`.
 3. Look at the built-in theme files for all available keys.
+
+Keys for a bar like waybar (see `themes/sway/theme.conf`):
+- `panel { margin 20; margin_side 20 }` keeps the bar away from the screen edges.
+- `panel { groups yes; group_bg <color>; group_border <color>; group_radius 14; group_inset 3; group_padding 6 }` draws a rounded background behind the left, center and right widgets instead of one full bar.
+- `workspaces { style pill; active_bg; active_fg; hover_bg; urgent_bg; urgent_fg; radius; inset }` draws rounded workspace buttons.
+- `<widget> { fg <color>; format "..." }` sets the text color and default format of a widget type, e.g. `cpu { fg #7eb8f7; format "󰍛 {usage}%" }`. A `format` in `taskbar.conf` still wins.
+- `decoration { frame_width 3 }` draws thicker window frames with the Windows 11 style.
 
 ### Wallpapers
 

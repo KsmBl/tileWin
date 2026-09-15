@@ -395,7 +395,23 @@ void widget_destroy(struct widget *w) {
 	free(w);
 }
 
+static const char *widget_conf_own(struct widget *w, const char *key, const char *fallback);
+
 const char *widget_conf(struct widget *w, const char *key, const char *fallback) {
+	const char *value = widget_conf_own(w, key, NULL);
+	if (value) {
+		return value;
+	}
+	// a theme can give widgets a format, e.g. cpu { format "CPU {usage}%" }
+	if (strcmp(key, "format") == 0 && w->panel && w->panel->theme) {
+		char theme_key[64];
+		snprintf(theme_key, sizeof(theme_key), "%s.format", w->impl->type);
+		return tw_theme_str(w->panel->theme, theme_key, fallback);
+	}
+	return fallback;
+}
+
+static const char *widget_conf_own(struct widget *w, const char *key, const char *fallback) {
 	struct twconf_node *node = w->conf ? twconf_child(w->conf, key) : NULL;
 	if (!node || node->argc == 0) {
 		return fallback;

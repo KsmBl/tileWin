@@ -222,6 +222,8 @@ struct render_ctx {
 const char *bar_font(struct panel *panel);
 const char *bar_bold_font(struct panel *panel);
 uint32_t bar_fg(struct panel *panel);
+/* Text color of a widget type: theme key "<type>.fg", else the panel color. */
+uint32_t widget_fg(struct panel *panel, const char *type);
 bool render_hover(struct render_ctx *ctx, struct pbox box);
 bool render_pressed(struct render_ctx *ctx, struct pbox box);
 int render_text_width(struct render_ctx *ctx, const char *font, const char *text);

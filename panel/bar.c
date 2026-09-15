@@ -54,6 +54,12 @@ uint32_t bar_fg(struct panel *panel) {
 		style == PS_CLASSIC || style == PS_FLUENT ? 0x000000ff : 0xffffffff);
 }
 
+uint32_t widget_fg(struct panel *panel, const char *type) {
+	char key[64];
+	snprintf(key, sizeof(key), "%s.fg", type);
+	return tw_theme_color(panel->theme, key, bar_fg(panel));
+}
+
 bool render_hover(struct render_ctx *ctx, struct pbox box) {
 	return ctx->pointer_inside && pbox_contains(&box, ctx->px, ctx->py);
 }
@@ -126,9 +132,34 @@ static bool is_system_widget(struct widget *w) {
 	return false;
 }
 
+static bool use_groups(struct panel *panel) {
+	return tw_theme_bool(panel->theme, "panel.groups", false);
+}
+
+/* Rounded background behind a section of widgets ("panel.groups yes"). */
+static void draw_group(struct render_ctx *ctx, int x, int width) {
+	const struct tw_theme *t = ctx->panel->theme;
+	cairo_t *cr = ctx->cairo;
+	int inset = tw_theme_int(t, "panel.group_inset", 3);
+	double h = ctx->height - 2 * inset;
+	double r = tw_theme_int(t, "panel.group_radius", 12);
+	if (r > h / 2) {
+		r = h / 2;
+	}
+	pd_rounded(cr, x + 0.5, inset + 0.5, width - 1, h - 1, r);
+	pd_color(cr, tw_theme_color(t, "panel.group_bg", 0x101010f0));
+	cairo_fill_preserve(cr);
+	pd_color(cr, tw_theme_color(t, "panel.group_border", 0x00000000));
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+}
+
 static void draw_background(struct render_ctx *ctx, int width, int height) {
 	cairo_t *cr = ctx->cairo;
 	const struct tw_theme *t = ctx->panel->theme;
+	if (use_groups(ctx->panel)) {
+		return; // only the groups have a background
+	}
 	cairo_rectangle(cr, 0, 0, width, height);
 	uint32_t fallback = ctx->style == PSV_CLASSIC ? 0xc0c0c0ff :
 		ctx->style == PSV_FLUENT ? 0xeeeeeef2 : 0x101010f0;
@@ -244,6 +275,11 @@ static void bar_render(struct psurface *s, cairo_t *cr) {
 
 	int total_exp = left_exp + center_exp + right_exp;
 	int remaining = s->width - left_fixed - center_fixed - right_fixed;
+	bool groups = use_groups(panel);
+	int pad = groups ? tw_theme_int(panel->theme, "panel.group_padding", 6) : 0;
+	if (groups) {
+		remaining -= 2 * pad * ((left->length > 0) + (center->length > 0) + (right->length > 0));
+	}
 	int exp_width = total_exp > 0 && remaining > 0 ? remaining / total_exp : 0;
 
 	int left_x = 0;
@@ -270,6 +306,16 @@ static void bar_render(struct psurface *s, cairo_t *cr) {
 	sections[1].x = (s->width - center_width) / 2;
 	int right_width = right_fixed + right_exp * exp_width;
 	sections[2].x = s->width - right_width;
+	if (groups) {
+		sections[0].x += pad;
+		sections[2].x -= pad;
+		int widths[3] = { left_fixed + left_exp * exp_width, center_width, right_width };
+		for (int sec = 0; sec < 3; sec++) {
+			if (sections[sec].list->length > 0 && widths[sec] > 0) {
+				draw_group(&ctx, sections[sec].x - pad, widths[sec] + 2 * pad);
+			}
+		}
+	}
 
 	render_group_background(&ctx, right, sections[2].x);
 	for (int sec = 0; sec < 3; sec++) {
@@ -476,6 +522,13 @@ void bar_create(struct panel_output *output) {
 	zwlr_layer_surface_v1_set_anchor(s->layer_surface,
 		ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
 		(layout->bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP));
+	// a floating bar keeps "panel.margin" away from the screen edges
+	int margin = tw_theme_int(panel->theme, "panel.margin", 0);
+	int side = tw_theme_int(panel->theme, "panel.margin_side", margin);
+	if (margin > 0 || side > 0) {
+		zwlr_layer_surface_v1_set_margin(s->layer_surface, layout->bottom ? 0 : margin, side,
+			layout->bottom ? margin : 0, side);
+	}
 	psurface_set_size(s, 0, height);
 	zwlr_layer_surface_v1_set_exclusive_zone(s->layer_surface, height);
 	wl_surface_commit(s->surface);

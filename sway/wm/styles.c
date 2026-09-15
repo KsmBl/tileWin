@@ -831,10 +831,14 @@ static void draw_modern(cairo_t *cr, const struct tw_theme *t,
 	cairo_restore(cr);
 
 	if (m->side > 0) {
-		rounded_path(cr, 0.5, 0.5, W - 1, H - 1, r, r, r, r);
+		double fw = tw_theme_int(t, "decoration.frame_width", 1);
+		if (fw > m->side) {
+			fw = m->side;
+		}
+		rounded_path(cr, fw / 2, fw / 2, W - fw, H - fw, r, r, r, r);
 		cairo_set_source_u32(cr, state_color(t, f, "frame",
 			win11 ? 0x00000055 : 0x1f6fc5d0, win11 ? 0x00000030 : 0xaaaaaaff));
-		cairo_set_line_width(cr, 1);
+		cairo_set_line_width(cr, fw);
 		cairo_stroke(cr);
 	}
 	(void)state_str;

@@ -220,8 +220,27 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 		int bw = workspace_button_width(ctx, ws);
 		struct pbox b = { x, box.y, bw, box.height };
 		bool hover = render_hover(ctx, b);
-		uint32_t fg = bar_fg(ctx->panel);
-		if (ctx->style == PSV_CLASSIC) {
+		const struct tw_theme *t = ctx->panel->theme;
+		uint32_t fg = widget_fg(ctx->panel, "workspaces");
+		bool pill = strcmp(tw_theme_str(t, "workspaces.style", "default"), "pill") == 0;
+		if (pill) {
+			// rounded buttons like waybar's sway/workspaces
+			int inset = tw_theme_int(t, "workspaces.inset", 6);
+			uint32_t bg = ws->urgent ? tw_theme_color(t, "workspaces.urgent_bg", 0xe8112338) :
+				ws->focused ? tw_theme_color(t, "workspaces.active_bg", 0xffffff29) :
+				hover ? tw_theme_color(t, "workspaces.hover_bg", 0xffffff14) : 0;
+			if (bg) {
+				pd_rounded(cr, b.x, b.y + inset, b.width, b.height - 2 * inset,
+					tw_theme_int(t, "workspaces.radius", 10));
+				pd_color(cr, bg);
+				cairo_fill(cr);
+			}
+			if (ws->urgent) {
+				fg = tw_theme_color(t, "workspaces.urgent_fg", fg);
+			} else if (ws->focused) {
+				fg = tw_theme_color(t, "workspaces.active_fg", fg);
+			}
+		} else if (ctx->style == PSV_CLASSIC) {
 			struct pbox bb = { b.x, b.y + 3, b.width, b.height - 5 };
 			pd_rect(cr, bb.x, bb.y, bb.width, bb.height, ws->visible ? 0xe0e0e0ff : 0xc0c0c0ff);
 			pd_bevel(cr, bb.x, bb.y, bb.width, bb.height, ws->visible);
@@ -232,7 +251,7 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 					tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x76b9edff));
 			}
 		}
-		if (ws->urgent) {
+		if (ws->urgent && !pill) {
 			pd_rect(cr, b.x + 2, b.y + 2, b.width - 4, 2, 0xe81123ff);
 		}
 		pd_text(cr, ws->focused ? bar_bold_font(ctx->panel) : bar_font(ctx->panel),
