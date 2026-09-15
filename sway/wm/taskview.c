@@ -1,8 +1,9 @@
 /*
  * Task view (Win+Tab): thumbnails of the windows of a desktop and a strip of
  * all desktops (workspaces) of the output. Click a window to switch to it,
- * hover a desktop to see its windows, click it to switch, drag windows onto
- * desktops or "New desktop" to move them, close windows and desktops.
+ * click a desktop to go to it and see its windows (click it again to close
+ * the view), drag windows onto desktops or "New desktop" to move them, close
+ * windows and desktops.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -817,16 +818,6 @@ void tw_taskview_motion(struct sway_seat *seat) {
 	}
 	tv.hover = target;
 	tv.hover_index = index;
-	if (!tv.press.dragging && target == TV_DESK) {
-		struct tv_desk *d = tv.desks->items[index];
-		if (d->ws && d->ws != tv.shown) {
-			// show the windows of the hovered desktop
-			tv.shown = d->ws;
-			tv.selected = -1;
-			rebuild();
-			return;
-		}
-	}
 	render_chrome();
 }
 
@@ -905,11 +896,23 @@ void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed) {
 				tv.shown = ws;
 			}
 			rebuild();
-		} else if (d->ws) {
+		} else if (d->ws && d->ws == tv.shown) {
 			struct sway_workspace *ws = d->ws;
 			tw_taskview_close();
 			workspace_switch(ws);
 			transaction_commit_dirty();
+		} else if (d->ws) {
+			// go to the desktop and show its windows; the view stays open and
+			// the desktop left stays, even when it is empty
+			struct sway_workspace *left = seat_get_focused_workspace(tv.seat);
+			if (left) {
+				left->tw_keep = true;
+			}
+			workspace_switch(d->ws);
+			transaction_commit_dirty();
+			tv.shown = d->ws;
+			tv.selected = -1;
+			rebuild();
 		}
 		break;
 	}
