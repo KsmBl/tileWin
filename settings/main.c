@@ -15,7 +15,8 @@ static const char css[] =
 	".tw-thumb { border-radius: 6px; }\n"
 	"flowboxchild.tw-card { padding: 8px; border-radius: 10px; }\n"
 	"flowboxchild.tw-card:selected { background: alpha(@theme_selected_bg_color, 0.3); }\n"
-	".tw-status { padding: 6px 12px; }\n";
+	".tw-status { padding: 6px 12px; }\n"
+	"image.tw-avatar { border-radius: 9999px; }\n";
 
 static struct settings settings;
 
@@ -197,6 +198,8 @@ void settings_refresh(struct settings *s) {
 	screen_page_refresh(s);
 	sound_page_refresh(s);
 	bluetooth_page_refresh(s);
+	apps_page_refresh(s);
+	account_page_refresh(s);
 }
 
 static void flush_saves(struct settings *s) {
@@ -300,6 +303,8 @@ static void build_window(struct settings *s) {
 	gtk_stack_add_titled(s->stack, launcher_page_new(s), "launcher", "Launcher & apps");
 	gtk_stack_add_titled(s->stack, keyboard_page_new(s), "keyboard", "Keyboard");
 	gtk_stack_add_titled(s->stack, mouse_page_new(s), "mouse", "Mouse & touchpad");
+	gtk_stack_add_titled(s->stack, apps_page_new(s), "apps", "Apps");
+	gtk_stack_add_titled(s->stack, account_page_new(s), "account", "Account");
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);

@@ -16,6 +16,8 @@ struct mouse_page;
 struct screen_page;
 struct sound_page;
 struct bluetooth_page;
+struct apps_page;
+struct account_page;
 
 struct settings {
 	GtkApplication *app;
@@ -38,6 +40,8 @@ struct settings {
 	struct screen_page *screen_page;
 	struct sound_page *sound_page;
 	struct bluetooth_page *bluetooth_page;
+	struct apps_page *apps_page;
+	struct account_page *account_page;
 };
 
 /* ipc.c: talks to the running tileWin, if any */
@@ -118,5 +122,9 @@ GtkWidget *sound_page_new(struct settings *s);
 void sound_page_refresh(struct settings *s);
 GtkWidget *bluetooth_page_new(struct settings *s);
 void bluetooth_page_refresh(struct settings *s);
+GtkWidget *apps_page_new(struct settings *s);
+void apps_page_refresh(struct settings *s);
+GtkWidget *account_page_new(struct settings *s);
+void account_page_refresh(struct settings *s);
 
 #endif

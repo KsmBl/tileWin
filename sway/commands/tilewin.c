@@ -383,6 +383,15 @@ struct cmd_results *cmd_lid_action(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_xdg_autostart(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "xdg_autostart", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_xdg_autostart = parse_boolean(argv[0], config->tw_xdg_autostart);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_lock_command(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "lock_command", EXPECTED_AT_LEAST, 1))) {

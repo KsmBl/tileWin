@@ -16,6 +16,7 @@ sway_sources = files(
 	'xdg_decoration.c',
 
 	'wm/alttab.c',
+	'wm/autostart.c',
 
 	'wm/taskview.c',
 	'wm/buffer.c',

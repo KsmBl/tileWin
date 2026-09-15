@@ -104,6 +104,7 @@ static const struct cmd_handler handlers[] = {
 	{ "wallpaper", cmd_wallpaper },
 	{ "workspace", cmd_workspace },
 	{ "workspace_auto_back_and_forth", cmd_ws_auto_back_and_forth },
+	{ "xdg_autostart", cmd_xdg_autostart },
 };
 
 /* Config-time only commands. Keep alphabetized */

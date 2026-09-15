@@ -126,6 +126,7 @@ sway_cmd cmd_wm_mode;
 sway_cmd cmd_idle_timeout;
 sway_cmd cmd_lid_action;
 sway_cmd cmd_lock_command;
+sway_cmd cmd_xdg_autostart;
 sway_cmd cmd_assign;
 sway_cmd cmd_bar;
 sway_cmd cmd_bindcode;

@@ -3,6 +3,8 @@ executable(
 		'confdoc.c',
 		'ipc.c',
 		'main.c',
+		'page_account.c',
+		'page_apps.c',
 		'page_bluetooth.c',
 		'page_keyboard.c',
 		'page_launcher.c',
@@ -16,7 +18,7 @@ executable(
 		'ui.c',
 	],
 	include_directories: [sway_inc],
-	dependencies: [gtk4, jsonc, cairo, gdk_pixbuf, math, rsvg, pango],
+	dependencies: [gtk4, dependency('gio-unix-2.0'), jsonc, cairo, gdk_pixbuf, math, rsvg, pango],
 	link_with: [lib_sway_common],
 	install: true,
 )
