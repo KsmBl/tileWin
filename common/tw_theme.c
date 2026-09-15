@@ -246,10 +246,6 @@ uint32_t tw_theme_color(const struct tw_theme *theme, const char *key,
 	return fallback;
 }
 
-static int str_cmp(const void *a, const void *b) {
-	return strcmp(*(char **)a, *(char **)b);
-}
-
 static void scan_theme_dir(list_t *names, const char *dir) {
 	DIR *d = opendir(dir);
 	if (!d) {
@@ -280,6 +276,23 @@ static void scan_theme_dir(list_t *names, const char *dir) {
 	closedir(d);
 }
 
+/* Built-in themes in the order Windows came out, then all others by name. */
+static int theme_order(const void *a, const void *b) {
+	static const char *const order[] = { "win95", "winxp", "win7", "win8", "win10", "win11",
+		"sway" };
+	const char *x = *(const char **)a, *y = *(const char **)b;
+	int rx = 100, ry = 100;
+	for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); i++) {
+		if (strcmp(x, order[i]) == 0) {
+			rx = i;
+		}
+		if (strcmp(y, order[i]) == 0) {
+			ry = i;
+		}
+	}
+	return rx != ry ? rx - ry : strcmp(x, y);
+}
+
 list_t *tw_theme_list(void) {
 	list_t *names = create_list();
 	char *config_dir = tw_config_dir();
@@ -292,7 +305,7 @@ list_t *tw_theme_list(void) {
 	char *dir = format_str("%s/themes", tw_data_dir());
 	scan_theme_dir(names, dir);
 	free(dir);
-	list_qsort(names, str_cmp);
+	list_qsort(names, theme_order);
 	return names;
 }
 

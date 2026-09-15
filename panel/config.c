@@ -252,6 +252,20 @@ list_t *menu_items_parse(struct twconf_node *node) {
 		}
 		list_add(items, item);
 	}
+	// theme menus copied from before the Windows 8 theme: add it after Windows 7
+	int win7 = -1;
+	bool win8 = false;
+	for (int i = 0; i < items->length; i++) {
+		struct menu_item *item = items->items[i];
+		if (item->command && strcmp(item->command, "exec tilewin-theme set win7") == 0) {
+			win7 = i;
+		} else if (item->command && strstr(item->command, "tilewin-theme set win8")) {
+			win8 = true;
+		}
+	}
+	if (win7 >= 0 && !win8) {
+		list_insert(items, win7 + 1, menu_item_new("Windows 8", "exec tilewin-theme set win8"));
+	}
 	return items;
 }
 

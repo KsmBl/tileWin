@@ -22,7 +22,7 @@ Commands:
   scheme [light|dark|toggle]
                   Show or change the color scheme (dark mode)
 
-Built-in themes: win95 winxp win7 win10 win11
+Built-in themes: win95 winxp win7 win8 win10 win11
 User themes live in $CONFIG_DIR/themes/<name>/theme.conf
 (use "inherit <theme>" in theme.conf to base a theme on another one).
 EOF
