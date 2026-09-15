@@ -87,6 +87,113 @@ void menu_items_free(list_t *items) {
  *   separator
  *   submenu "Label" [icon <name>] { ... }
  */
+static bool contains(const char *text, const char *word) {
+	return text && strstr(text, word) != NULL;
+}
+
+char *menu_default_icon(const char *label, const char *command) {
+	if (!command) {
+		// submenus
+		if (contains(label, "Theme") || contains(label, "theme")) {
+			return strdup("preferences-desktop-theme");
+		}
+		if (contains(label, "desktop")) {
+			return strdup("user-desktop");
+		}
+		if (contains(label, "Shut down") || contains(label, "shut down")) {
+			return strdup("system-shutdown");
+		}
+		return NULL;
+	}
+	if (command[0] == '[') {
+		// skip criteria such as [con_id={id}]
+		const char *end = strchr(command, ']');
+		command = end ? end + 1 : command;
+		while (*command == ' ') {
+			command++;
+		}
+	}
+	static const struct {
+		const char *prefix;
+		const char *icon;
+	} commands[] = {
+		{ "arrange cascade", "window-cascade" },
+		{ "arrange vertical", "window-stack" },
+		{ "arrange horizontal", "window-side-by-side" },
+		{ "arrange optimal", "window-arrange" },
+		{ "showdesktop", "user-desktop" },
+		{ "wm_mode", "tilewin-mode" },
+		{ "floating toggle", "tilewin-mode" },
+		{ "restart panel", "view-refresh" },
+		{ "restart", "system-reboot" },
+		{ "panel run", "system-run" },
+		{ "panel shutdown", "system-shutdown" },
+		{ "exit", "system-log-out" },
+		{ "maximize disable", "window-restore" },
+		{ "minimize disable", "window-restore" },
+		{ "maximize", "window-maximize" },
+		{ "minimize", "window-minimize" },
+		{ "kill", "window-close" },
+	};
+	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
+		if (strncmp(command, commands[i].prefix, strlen(commands[i].prefix)) == 0) {
+			return strdup(commands[i].icon);
+		}
+	}
+	if (strncmp(command, "exec ", 5) != 0) {
+		return NULL;
+	}
+	const char *program = command + 5;
+	while (*program == ' ') {
+		program++;
+	}
+	if (strncmp(program, "--", 2) == 0) {
+		program += strcspn(program, " ");
+		while (*program == ' ') {
+			program++;
+		}
+	}
+	static const struct {
+		const char *word;
+		const char *icon;
+	} programs[] = {
+		{ "tilewin-theme", NULL },
+		{ "tilewin-settings", "preferences-system" },
+		{ "poweroff", "system-shutdown" },
+		{ "reboot", "system-reboot" },
+		{ "lock", "system-lock-screen" },
+		{ "btop", "utilities-system-monitor" },
+		{ "htop", "utilities-system-monitor" },
+		{ "taskmanager", "utilities-system-monitor" },
+		{ "system-monitor", "utilities-system-monitor" },
+		{ "xdg-open", "folder" },
+	};
+	for (size_t i = 0; i < sizeof(programs) / sizeof(programs[0]); i++) {
+		if (contains(program, programs[i].word)) {
+			return programs[i].icon ? strdup(programs[i].icon) : NULL;
+		}
+	}
+	// the program itself, e.g. "exec thunar" (themes alias common apps)
+	size_t len = strcspn(program, " ");
+	for (size_t i = len; i > 0; i--) {
+		if (program[i - 1] == '/') {
+			program += i;
+			len -= i;
+			break;
+		}
+	}
+	return len > 0 ? strndup(program, len) : NULL;
+}
+
+void menu_items_default_icons(list_t *items) {
+	for (int i = 0; items && i < items->length; i++) {
+		struct menu_item *item = items->items[i];
+		if (!item->separator && !item->icon) {
+			item->icon = menu_default_icon(item->label, item->command);
+		}
+	}
+}
+
 list_t *menu_items_parse(struct twconf_node *node) {
 	list_t *items = create_list();
 	for (int i = 0; i < twconf_count(node); i++) {
@@ -105,11 +212,14 @@ list_t *menu_items_parse(struct twconf_node *node) {
 			continue;
 		}
 		struct menu_item *item = menu_item_new(child->argv[0], NULL);
+		bool explicit_icon = false;
 		int arg = 1;
 		while (arg < child->argc) {
 			if (strcmp(child->argv[arg], "icon") == 0 && arg + 1 < child->argc) {
 				free(item->icon);
+				// "icon none": no icon, not even one from the command
 				item->icon = strdup(child->argv[arg + 1]);
+				explicit_icon = true;
 				arg += 2;
 			} else if (strcmp(child->argv[arg], "disabled") == 0) {
 				item->disabled = true;
@@ -133,6 +243,12 @@ list_t *menu_items_parse(struct twconf_node *node) {
 				free(item->command);
 				item->command = strdup("exec tilewin-settings --page taskbar");
 			}
+		}
+		if (explicit_icon && item->icon && strcmp(item->icon, "none") == 0) {
+			free(item->icon);
+			item->icon = NULL;
+		} else if (!explicit_icon) {
+			item->icon = menu_default_icon(item->label, item->command);
 		}
 		list_add(items, item);
 	}

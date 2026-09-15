@@ -416,6 +416,7 @@ static list_t *default_taskbar_menu(struct panel *panel) {
 	list_add(items, menu_item_new("Taskbar settings",
 		"exec tilewin-settings --page taskbar"));
 	list_add(items, menu_item_new("Restart taskbar", "restart panel"));
+	menu_items_default_icons(items);
 	return items;
 }
 

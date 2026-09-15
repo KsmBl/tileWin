@@ -1011,6 +1011,103 @@ def optical_disc(ic):
     ic.circle(24, 24, 3, '#ffffff', outline=False, flat=True)
 
 
+def mini_window(ic, x, y, w, h, active=True):
+    """A small window with a title bar in the theme's look (arrange icons)."""
+    t = ic.t
+    title = pick(ic, win95='#000080' if active else '#808080', winxp='#2a63e0' if active else '#7a96df',
+                 win7='#6f9ccc' if active else '#a9bfd6', win10='#2b2b2b' if active else '#7a7a7a',
+                 win11='#5b7fd6' if active else '#c3ccd8')
+    frame = pick(ic, win95='#c0c0c0', winxp=title, win7='#8fb0d3', win10=title, win11='#e9edf2')
+    r = pick(ic, win95=0, winxp=2, win7=2, win10=0, win11=2.5)
+    ic.rect(x, y, w, h, frame, r=r)
+    bar = 6 if h >= 14 else 4
+    ic.rect(x + 1.5, y + 1.5, w - 3, bar, title, r=r * .6, outline=False, grad='vert' if t in ('winxp', 'win7') else None)
+    ic.rect(x + 1.5, y + 1.5 + bar, w - 3, h - 3 - bar, '#ffffff', outline=False, flat=True)
+
+
+@icon('window-cascade')
+def arrange_cascade(ic):
+    ic.shadow(rx=18)
+    for i in range(3):
+        mini_window(ic, 4 + i * 8, 5 + i * 8, 26, 22, active=i == 2)
+
+
+@icon('window-stack')
+def arrange_stack(ic):
+    ic.shadow(rx=18)
+    mini_window(ic, 5, 4, 38, 18, active=False)
+    mini_window(ic, 5, 25, 38, 18)
+
+
+@icon('window-side-by-side')
+def arrange_side_by_side(ic):
+    ic.shadow(rx=18)
+    mini_window(ic, 3, 7, 20, 34, active=False)
+    mini_window(ic, 25, 7, 20, 34)
+
+
+@icon('window-arrange')
+def arrange_optimal(ic):
+    ic.shadow(rx=18)
+    for i in range(4):
+        mini_window(ic, 4 + (i % 2) * 21, 5 + (i // 2) * 20, 19, 18, active=i == 3)
+
+
+@icon('tilewin-mode')
+def mode_switch(ic):
+    ic.shadow(rx=18)
+    mini_window(ic, 4, 5, 22, 38)
+    mini_window(ic, 28, 5, 16, 18, active=False)
+    mini_window(ic, 28, 25, 16, 18, active=False)
+
+
+def caption_button(ic, glyph):
+    """Title bar button of the theme with a white or black glyph."""
+    t = ic.t
+    red = glyph == 'close'
+    if t == 'win95':
+        ic.rect(6, 8, 36, 32, '#c0c0c0')
+        c = '#000000'
+    else:
+        base = T(ic, RED) if red else pick(ic, winxp='#2a63e0', win7='#6f9ccc', win10='#3a3a3a', win11='#5b7fd6')
+        ic.shadow(rx=16)
+        ic.rect(6, 8, 36, 32, base, r=pick(ic, winxp=6, win7=5, win10=0, win11=6))
+        ic.gloss(6, 8, 36, 32, 5, force=t == 'winxp')
+        c = '#ffffff'
+    w = 4 if t != 'win95' else 4.5
+    if glyph == 'close':
+        ic.line([(16, 16), (32, 32)], c, w)
+        ic.line([(32, 16), (16, 32)], c, w)
+    elif glyph == 'minimize':
+        ic.line([(15, 31), (33, 31)], c, w)
+    elif glyph == 'maximize':
+        ic.line([(15, 15), (33, 15), (33, 32), (15, 32), (15, 15)], c, 3)
+        ic.line([(15, 16.5), (33, 16.5)], c, 3)
+    else:  # restore
+        ic.line([(19, 13), (35, 13), (35, 27)], c, 2.6)
+        ic.line([(13, 19), (29, 19), (29, 35), (13, 35), (13, 19)], c, 2.6)
+
+
+@icon('window-close')
+def window_close(ic):
+    caption_button(ic, 'close')
+
+
+@icon('window-minimize')
+def window_minimize(ic):
+    caption_button(ic, 'minimize')
+
+
+@icon('window-maximize')
+def window_maximize(ic):
+    caption_button(ic, 'maximize')
+
+
+@icon('window-restore')
+def window_restore(ic):
+    caption_button(ic, 'restore')
+
+
 @icon('document-new')
 def document_new(ic):
     page(ic, 'lines')

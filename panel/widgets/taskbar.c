@@ -359,6 +359,7 @@ list_t *taskbar_window_menu(struct panel *panel, struct pwindow *win) {
 	struct menu_item *close = menu_item_new("Close window", cmd);
 	close->bold = !entry;
 	list_add(items, close);
+	menu_items_default_icons(items);
 	return items;
 }
 

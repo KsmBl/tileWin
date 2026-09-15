@@ -382,6 +382,10 @@ list_t *menu_items_parse(struct twconf_node *node);
 void menu_items_free(list_t *items);
 struct menu_item *menu_item_new(const char *label, const char *command);
 struct menu_item *menu_item_separator(void);
+/* Icon for a menu entry without one, from its command or submenu label; NULL if none. */
+char *menu_default_icon(const char *label, const char *command);
+/* Gives the entries of a menu (not its submenus) their default icons. */
+void menu_items_default_icons(list_t *items);
 
 /* popup.c */
 enum popup_kind {
