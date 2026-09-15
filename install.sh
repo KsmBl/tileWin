@@ -12,7 +12,7 @@ UNINSTALL=0
 BUILDTYPE=release
 DESTDIR=""
 USER_CONFIG=1
-BUILD_DIR=build-release
+BUILD_DIR="${TILEWIN_BUILD_DIR:-build-release}"
 MESON="${MESON:-meson}"
 
 usage() {
@@ -50,6 +50,10 @@ done
 msg() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+	die "run ./install.sh without sudo; it asks for your password when it needs it"
+fi
 
 SUDO=""
 needs_root() {
@@ -126,6 +130,13 @@ command -v ninja >/dev/null 2>&1 || die "ninja not found"
 pkg-config --exists wlroots-0.20 || die "wlroots 0.20 development files not found"
 
 # ---------------------------------------------------------------- build
+# Older versions of this script let "sudo meson install" rebuild, which left
+# files of root in the build directory that a normal build cannot overwrite.
+if [ -d "$BUILD_DIR" ] && [ -n "$(find "$BUILD_DIR" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+	msg "Files in $BUILD_DIR belong to root; giving them back to $(id -un)"
+	sudo chown -R "$(id -u):$(id -g)" "$BUILD_DIR"
+fi
+
 msg "Configuring ($BUILDTYPE build, prefix $PREFIX)"
 setup_args=(--prefix "$PREFIX" --buildtype "$BUILDTYPE" -Dman-pages=disabled -Dwerror=false)
 if [ "$BUILDTYPE" = release ]; then
@@ -143,9 +154,13 @@ msg "Building"
 # ---------------------------------------------------------------- install
 msg "Installing"
 if [ -n "$DESTDIR" ]; then
-	"$MESON" install -C "$BUILD_DIR" --destdir "$DESTDIR" >/dev/null
+	"$MESON" install -C "$BUILD_DIR" --destdir "$DESTDIR" --no-rebuild >/dev/null
 else
-	$SUDO "$MESON" install -C "$BUILD_DIR" >/dev/null
+	# --no-rebuild: everything is built above, root must not write build files
+	$SUDO "$MESON" install -C "$BUILD_DIR" --no-rebuild >/dev/null
+	if [ -n "$SUDO" ] && [ -e "$BUILD_DIR/meson-logs/install-log.txt" ]; then
+		$SUDO chown "$(id -u):$(id -g)" "$BUILD_DIR/meson-logs/install-log.txt"
+	fi
 fi
 
 # Display managers only look in /usr/share/wayland-sessions.
