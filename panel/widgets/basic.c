@@ -192,8 +192,23 @@ const struct widget_impl widget_title = {
 
 /* ================= workspaces ================= */
 
+/* Label of a workspace: "workspaces { icon { 1 <icon>; urgent ! } }" or its name. */
+static const char *workspace_label(struct render_ctx *ctx, struct pworkspace *ws) {
+	const struct tw_theme *t = ctx->panel->theme;
+	if (ws->urgent) {
+		const char *urgent = tw_theme_str(t, "workspaces.icon.urgent", NULL);
+		if (urgent) {
+			return urgent;
+		}
+	}
+	char key[256];
+	snprintf(key, sizeof(key), "workspaces.icon.%s", ws->name);
+	return tw_theme_str(t, key, ws->name);
+}
+
 static int workspace_button_width(struct render_ctx *ctx, struct pworkspace *ws) {
-	return render_text_width(ctx, bar_font(ctx->panel), ws->name) + 16;
+	return render_text_width(ctx, bar_bold_font(ctx->panel), workspace_label(ctx, ws)) +
+		2 * tw_theme_int(ctx->panel->theme, "workspaces.padding", 8);
 }
 
 static int workspaces_measure(struct widget *w, struct render_ctx *ctx) {
@@ -205,13 +220,15 @@ static int workspaces_measure(struct widget *w, struct render_ctx *ctx) {
 			total += workspace_button_width(ctx, ws) + 2;
 		}
 	}
-	return total ? total + 2 : 0;
+	// "workspaces.margin": space around the buttons, like waybar's module padding
+	int margin = tw_theme_int(ctx->panel->theme, "workspaces.margin", 0);
+	return total ? total + 2 + 2 * margin : 0;
 }
 
 static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct pbox box) {
 	cairo_t *cr = ctx->cairo;
 	list_t *wss = ctx->panel->state.workspaces;
-	int x = box.x + 2;
+	int x = box.x + 2 + tw_theme_int(ctx->panel->theme, "workspaces.margin", 0);
 	for (int i = 0; wss && i < wss->length; i++) {
 		struct pworkspace *ws = wss->items[i];
 		if (!ctx->output->name || strcmp(ws->output, ctx->output->name) != 0) {
@@ -255,7 +272,7 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 			pd_rect(cr, b.x + 2, b.y + 2, b.width - 4, 2, 0xe81123ff);
 		}
 		pd_text(cr, ws->focused ? bar_bold_font(ctx->panel) : bar_font(ctx->panel),
-			ws->name, b.x, b.y, b.width, b.height, fg, PD_CENTER);
+			workspace_label(ctx, ws), b.x, b.y, b.width, b.height, fg, PD_CENTER);
 		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, i, ws->name);
 		x += bw + 2;
 	}

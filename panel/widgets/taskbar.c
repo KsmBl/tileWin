@@ -507,6 +507,16 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 	const char *label = widget_conf(w, "label", tw_theme_str(t, "start.label", "Start"));
 	uint32_t fg = tw_theme_color(t, "start.fg", bar_fg(panel));
 
+	// "start.icon": a text icon (e.g. a Nerd Font logo) instead of the drawn logo
+	const char *icon = tw_theme_str(t, "start.icon", NULL);
+	if (icon && ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA && ctx->style != PSV_AERO) {
+		render_item_bg(ctx, b, false, hover, pressed);
+		pd_text(cr, tw_theme_str(t, "start.icon_font", bar_font(panel)), icon, b.x, b.y,
+			b.width, b.height, hover ? tw_theme_color(t, "start.hover_fg", fg) : fg, PD_CENTER);
+		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+		return;
+	}
+
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
 		struct pbox bb = { b.x + 2, b.y + 4, b.width - 3, b.height - 6 };

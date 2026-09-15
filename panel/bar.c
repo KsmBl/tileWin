@@ -111,7 +111,9 @@ void render_item_bg(struct render_ctx *ctx, struct pbox b, bool active, bool hov
 		break;
 	case PSV_FLUENT:
 		if (hover || active || pressed) {
-			pd_rounded(cr, b.x + 2, b.y + 4, b.width - 4, b.height - 8, 4);
+			int inset = tw_theme_int(t, "panel.item_inset", 4);
+			pd_rounded(cr, b.x + 2, b.y + inset, b.width - 4, b.height - 2 * inset,
+				tw_theme_int(t, "panel.item_radius", 4));
 			cairo_set_source_u32(cr, tw_theme_color(t,
 				pressed || active ? "taskbar.active_bg" : "taskbar.hover_bg",
 				pressed || active ? 0x00000014 : 0x0000000d));

@@ -196,6 +196,41 @@ static void parse_layout(struct panel *panel, struct panel_config *config,
 	add_widget_names(panel, config, layout->right, twconf_child(node, "right"));
 }
 
+/*
+ * Layout of a mode from the theme, e.g. "layout { tile { left workspaces; center
+ * clock } }". Returns a parsed root with one layout node, or NULL.
+ */
+static struct twconf_node *theme_layout(struct panel *panel, const char *mode) {
+	if (!panel->theme) {
+		return NULL;
+	}
+	static const char *keys[] = { "position", "height", "left", "center", "right" };
+	char *body = strdup("");
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "layout.%s.%s", mode, keys[i]);
+		const char *value = tw_theme_str(panel->theme, key, NULL);
+		if (value) {
+			char *next = format_str("%s\t%s %s\n", body, keys[i], value);
+			free(body);
+			body = next;
+		}
+	}
+	struct twconf_node *root = NULL;
+	if (*body) {
+		char *text = format_str("layout %s {\n%s}\n", mode, body);
+		char *error = NULL;
+		root = twconf_parse_string(text, "<theme layout>", &error);
+		if (!root) {
+			sway_log(SWAY_ERROR, "Theme layout error: %s", error ? error : "?");
+		}
+		free(error);
+		free(text);
+	}
+	free(body);
+	return root;
+}
+
 struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 	char *error = NULL;
 	struct twconf_node *root = path ? twconf_parse_file(path, &error) :
@@ -262,8 +297,18 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 			twconf_free(builtin);
 		}
 	}
-	parse_layout(panel, config, &config->layouts[LAYOUT_WINDOW], window ? window : tile, true);
-	parse_layout(panel, config, &config->layouts[LAYOUT_TILE], tile ? tile : window, false);
+	// a theme may bring its own layouts unless taskbar.conf says "theme_layout no"
+	struct twconf_node *theme_window = NULL, *theme_tile = NULL;
+	if (twconf_parse_bool(twconf_value(root, "theme_layout"), true)) {
+		theme_window = theme_layout(panel, "window");
+		theme_tile = theme_layout(panel, "tile");
+	}
+	parse_layout(panel, config, &config->layouts[LAYOUT_WINDOW],
+		theme_window ? twconf_at(theme_window, 0) : window ? window : tile, true);
+	parse_layout(panel, config, &config->layouts[LAYOUT_TILE],
+		theme_tile ? twconf_at(theme_tile, 0) : tile ? tile : window, false);
+	twconf_free(theme_window);
+	twconf_free(theme_tile);
 	config->startmenu = twconf_child(root, "startmenu");
 	return config;
 }
@@ -397,18 +442,27 @@ void widget_destroy(struct widget *w) {
 
 static const char *widget_conf_own(struct widget *w, const char *key, const char *fallback);
 
+static bool theme_widget_key(const char *key) {
+	return strncmp(key, "format", 6) == 0 || strcmp(key, "icons") == 0;
+}
+
 const char *widget_conf(struct widget *w, const char *key, const char *fallback) {
+	// a theme can give widgets formats and icons, e.g. cpu { format "CPU {usage}%" }
+	const char *themed = NULL;
+	if (theme_widget_key(key) && w->panel && w->panel->theme) {
+		char theme_key[96];
+		snprintf(theme_key, sizeof(theme_key), "%s.%s", w->impl->type, key);
+		themed = tw_theme_str(w->panel->theme, theme_key, NULL);
+		// themes that restyle all widgets win over taskbar.conf
+		if (themed && tw_theme_bool(w->panel->theme, "panel.theme_formats", false)) {
+			return themed;
+		}
+	}
 	const char *value = widget_conf_own(w, key, NULL);
 	if (value) {
 		return value;
 	}
-	// a theme can give widgets a format, e.g. cpu { format "CPU {usage}%" }
-	if (strcmp(key, "format") == 0 && w->panel && w->panel->theme) {
-		char theme_key[64];
-		snprintf(theme_key, sizeof(theme_key), "%s.format", w->impl->type);
-		return tw_theme_str(w->panel->theme, theme_key, fallback);
-	}
-	return fallback;
+	return themed ? themed : fallback;
 }
 
 static const char *widget_conf_own(struct widget *w, const char *key, const char *fallback) {

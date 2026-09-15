@@ -18,7 +18,8 @@ static void tooltip_render(struct psurface *s, cairo_t *cr) {
 	uint32_t bg = tw_theme_color(panel->theme, "tooltip.bg", 0xffffe1ff);
 	uint32_t fg = tw_theme_color(panel->theme, "tooltip.fg", 0x000000ff);
 	uint32_t border = tw_theme_color(panel->theme, "tooltip.border", 0x000000ff);
-	double r = style == PS_FLUENT ? 6 : style == PS_AERO ? 3 : 0;
+	double r = tw_theme_int(panel->theme, "tooltip.radius",
+		style == PS_FLUENT ? 6 : style == PS_AERO ? 3 : 0);
 	pd_rounded(cr, 0.5, 0.5, s->width - 1, s->height - 1, r);
 	pd_color(cr, bg);
 	cairo_fill_preserve(cr);

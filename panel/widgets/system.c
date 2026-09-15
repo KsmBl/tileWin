@@ -104,8 +104,72 @@ static int glyph_size(struct render_ctx *ctx) {
 	return ctx->height < 32 ? 16 : 18;
 }
 
+static int item_padding(struct render_ctx *ctx) {
+	return tw_theme_int(ctx->panel->theme, "panel.item_padding", 6);
+}
+
+static bool has_icon(const char *format) {
+	return format && strstr(format, "{icon}");
+}
+
+/* Picks the "{icon}" for a percentage from the widget's "icons" list (lowest first). */
+static void level_icon(struct widget *w, int percent, char *buf, size_t size) {
+	buf[0] = '\0';
+	const char *list = widget_conf(w, "icons", NULL);
+	if (!list) {
+		return;
+	}
+	char *copy = strdup(list);
+	int count = 0;
+	char *save = NULL;
+	for (char *tok = strtok_r(copy, " \t", &save); tok; tok = strtok_r(NULL, " \t", &save)) {
+		count++;
+	}
+	free(copy);
+	if (count == 0) {
+		return;
+	}
+	int index = percent < 0 ? 0 : percent * count / 101;
+	if (index >= count) {
+		index = count - 1;
+	}
+	copy = strdup(list);
+	save = NULL;
+	char *tok = strtok_r(copy, " \t", &save);
+	for (int i = 0; tok && i < index; i++) {
+		tok = strtok_r(NULL, " \t", &save);
+	}
+	snprintf(buf, size, "%s", tok ? tok : "");
+	free(copy);
+}
+
+/* Widgets with text icons ("{icon}" or an "icons" list) draw no glyph. */
+static bool text_icons(struct widget *w, const char *format) {
+	return has_icon(format) || widget_conf(w, "icons", NULL) != NULL;
+}
+
+/* Text color for "<type>.warning" and "<type>.critical" levels. */
+static uint32_t level_fg(struct widget *w, struct render_ctx *ctx, int value, bool low_is_bad) {
+	const struct tw_theme *t = ctx->panel->theme;
+	const char *type = w->impl->type;
+	char key[64];
+	snprintf(key, sizeof(key), "%s.critical", type);
+	int critical = tw_theme_int(t, key, -1);
+	snprintf(key, sizeof(key), "%s.warning", type);
+	int warning = tw_theme_int(t, key, -1);
+	if (critical >= 0 && (low_is_bad ? value <= critical : value >= critical)) {
+		snprintf(key, sizeof(key), "%s.critical_fg", type);
+		return tw_theme_color(t, key, 0xf87171ff);
+	}
+	if (warning >= 0 && (low_is_bad ? value <= warning : value >= warning)) {
+		snprintf(key, sizeof(key), "%s.warning_fg", type);
+		return tw_theme_color(t, key, 0xfbbf24ff);
+	}
+	return widget_fg(ctx->panel, type);
+}
+
 static int text_item_measure(struct render_ctx *ctx, const char *text, bool glyph) {
-	int width = glyph ? glyph_size(ctx) + 12 : 12;
+	int width = glyph ? glyph_size(ctx) + 2 * item_padding(ctx) : 2 * item_padding(ctx);
 	if (text && *text) {
 		width += render_text_width(ctx, bar_font(ctx->panel), text) + (glyph ? 4 : 0);
 	}
@@ -116,7 +180,7 @@ static double render_item_start(struct render_ctx *ctx, struct pbox b) {
 	if (ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) {
 		render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
 	}
-	return b.x + 6;
+	return b.x + item_padding(ctx);
 }
 
 /* ================= cpu ================= */
@@ -185,7 +249,7 @@ static int cpu_measure(struct widget *w, struct render_ctx *ctx) {
 static void cpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct cpu_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
-	uint32_t fg = widget_fg(ctx->panel, "cpu");
+	uint32_t fg = level_fg(w, ctx, s->usage, false);
 	if (graph_style(w)) {
 		double gh = b.height * 0.6, gy = b.y + (b.height - gh) / 2;
 		double gw = b.width - 8, step = gw / (CPU_HISTORY - 1);
@@ -265,10 +329,12 @@ static int memory_measure(struct widget *w, struct render_ctx *ctx) {
 }
 
 static void memory_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct mem_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
 	char *text = memory_text(w);
-	pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.width - 12, b.height,
-		widget_fg(ctx->panel, "memory"), PD_LEFT);
+	int percent = s->total_kb ? (int)((s->total_kb - s->available_kb) * 100 / s->total_kb) : 0;
+	pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.width - 2 * item_padding(ctx),
+		b.height, level_fg(w, ctx, percent, false), PD_LEFT);
 	free(text);
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
@@ -335,15 +401,27 @@ static void battery_init(struct widget *w) {
 	poll_init(w, 30, battery_update, sizeof(struct battery_state));
 }
 
-static char *battery_text(struct widget *w) {
+static char *battery_text(struct widget *w, bool *icons_in_text) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
-	const char *format = widget_conf(w, "format", NULL);
+	const char *format = NULL;
+	if (strcmp(s->status, "Charging") == 0) {
+		format = widget_conf(w, "format_charging", NULL);
+	} else if (strcmp(s->status, "Full") == 0) {
+		format = widget_conf(w, "format_full", NULL);
+	} else if (strcmp(s->status, "Not charging") == 0) {
+		format = widget_conf(w, "format_plugged", NULL);
+	}
+	if (!format) {
+		format = widget_conf(w, "format", NULL);
+	}
+	*icons_in_text = text_icons(w, format);
 	if (!format) {
 		return NULL;
 	}
-	char capacity[16];
+	char capacity[16], icon[64];
 	snprintf(capacity, sizeof(capacity), "%d", s->capacity);
-	const char *values[] = { "capacity", capacity, "status", s->status, NULL };
+	level_icon(w, s->capacity, icon, sizeof(icon));
+	const char *values[] = { "capacity", capacity, "status", s->status, "icon", icon, NULL };
 	return format_text(format, values);
 }
 
@@ -352,8 +430,9 @@ static int battery_measure(struct widget *w, struct render_ctx *ctx) {
 	if (!s->present) {
 		return 0;
 	}
-	char *text = battery_text(w);
-	int width = text_item_measure(ctx, text, true);
+	bool icons_in_text;
+	char *text = battery_text(w, &icons_in_text);
+	int width = text_item_measure(ctx, text, !icons_in_text);
 	free(text);
 	return width;
 }
@@ -361,13 +440,18 @@ static int battery_measure(struct widget *w, struct render_ctx *ctx) {
 static void battery_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
-	int g = glyph_size(ctx);
-	ti_battery(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, s->capacity,
-		strcmp(s->status, "Charging") == 0, widget_fg(ctx->panel, "battery"));
-	char *text = battery_text(w);
+	uint32_t fg = level_fg(w, ctx, s->capacity, true);
+	bool icons_in_text;
+	char *text = battery_text(w, &icons_in_text);
+	if (!icons_in_text) {
+		int g = glyph_size(ctx);
+		ti_battery(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, s->capacity,
+			strcmp(s->status, "Charging") == 0, fg);
+		x += g + 4;
+	}
 	if (text) {
-		pd_text(ctx->cairo, bar_font(ctx->panel), text, x + g + 4, b.y, b.width - g - 16,
-			b.height, widget_fg(ctx->panel, "battery"), PD_LEFT);
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.x + b.width - x,
+			b.height, fg, PD_LEFT);
 		free(text);
 	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
@@ -481,18 +565,59 @@ static void network_init(struct widget *w) {
 	poll_init(w, 5, network_update, sizeof(struct net_state));
 }
 
+static char *network_text(struct widget *w, bool *icons_in_text) {
+	struct net_state *s = ((struct poll_data *)w->data)->state;
+	const char *format = NULL;
+	if (!s->connected) {
+		format = widget_conf(w, "format_disconnected", NULL);
+	} else if (!s->wireless) {
+		format = widget_conf(w, "format_ethernet", NULL);
+	}
+	if (!format) {
+		format = widget_conf(w, "format", NULL);
+	}
+	*icons_in_text = text_icons(w, format);
+	if (!format) {
+		return NULL;
+	}
+	char quality[16], icon[64];
+	snprintf(quality, sizeof(quality), "%d", s->quality);
+	level_icon(w, s->connected ? s->quality : 0, icon, sizeof(icon));
+	const char *values[] = { "quality", quality, "iface", s->iface, "address", s->address,
+		"icon", icon, NULL };
+	return format_text(format, values);
+}
+
 static int network_measure(struct widget *w, struct render_ctx *ctx) {
 	struct net_state *s = ((struct poll_data *)w->data)->state;
-	return s->iface[0] ? text_item_measure(ctx, NULL, true) : 0;
+	if (!s->iface[0]) {
+		return 0;
+	}
+	bool icons_in_text;
+	char *text = network_text(w, &icons_in_text);
+	int width = text_item_measure(ctx, text, !icons_in_text);
+	free(text);
+	return width;
 }
 
 static void network_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct net_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
-	int g = glyph_size(ctx);
-	int bars = s->quality > 75 ? 4 : s->quality > 50 ? 3 : s->quality > 25 ? 2 : 1;
-	ti_network(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bars, s->wireless,
-		s->connected, widget_fg(ctx->panel, "network"));
+	uint32_t fg = widget_fg(ctx->panel, "network");
+	bool icons_in_text;
+	char *text = network_text(w, &icons_in_text);
+	if (!icons_in_text) {
+		int g = glyph_size(ctx);
+		int bars = s->quality > 75 ? 4 : s->quality > 50 ? 3 : s->quality > 25 ? 2 : 1;
+		ti_network(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bars, s->wireless,
+			s->connected, fg);
+		x += g + 4;
+	}
+	if (text) {
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.x + b.width - x, b.height,
+			fg, PD_LEFT);
+		free(text);
+	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
@@ -566,15 +691,47 @@ static void brightness_init(struct widget *w) {
 	poll_init(w, 10, brightness_update, sizeof(struct brightness_state));
 }
 
+static char *brightness_text(struct widget *w, bool *icons_in_text) {
+	struct brightness_state *s = ((struct poll_data *)w->data)->state;
+	const char *format = widget_conf(w, "format", NULL);
+	*icons_in_text = text_icons(w, format);
+	if (!format) {
+		return NULL;
+	}
+	char percent[16], icon[64];
+	snprintf(percent, sizeof(percent), "%d", s->percent);
+	level_icon(w, s->percent, icon, sizeof(icon));
+	const char *values[] = { "percent", percent, "icon", icon, NULL };
+	return format_text(format, values);
+}
+
 static int brightness_measure(struct widget *w, struct render_ctx *ctx) {
 	struct brightness_state *s = ((struct poll_data *)w->data)->state;
-	return s->present ? text_item_measure(ctx, NULL, true) : 0;
+	if (!s->present) {
+		return 0;
+	}
+	bool icons_in_text;
+	char *text = brightness_text(w, &icons_in_text);
+	int width = text_item_measure(ctx, text, !icons_in_text);
+	free(text);
+	return width;
 }
 
 static void brightness_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	double x = render_item_start(ctx, b);
-	int g = glyph_size(ctx);
-	ti_brightness(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, widget_fg(ctx->panel, "brightness"));
+	uint32_t fg = widget_fg(ctx->panel, "brightness");
+	bool icons_in_text;
+	char *text = brightness_text(w, &icons_in_text);
+	if (!icons_in_text) {
+		int g = glyph_size(ctx);
+		ti_brightness(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, fg);
+		x += g + 4;
+	}
+	if (text) {
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.x + b.width - x, b.height,
+			fg, PD_LEFT);
+		free(text);
+	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
@@ -689,38 +846,50 @@ static void volume_destroy(struct widget *w) {
 	free(w->data);
 }
 
+static char *volume_text(struct widget *w, bool *icons_in_text) {
+	struct volume_data *d = w->data;
+	const char *format = d->muted ? widget_conf(w, "format_muted", NULL) : NULL;
+	if (!format) {
+		format = widget_conf(w, "format", NULL);
+	}
+	*icons_in_text = text_icons(w, format);
+	if (!format) {
+		return NULL;
+	}
+	char vol[16], icon[64];
+	snprintf(vol, sizeof(vol), "%d", d->volume);
+	level_icon(w, d->volume, icon, sizeof(icon));
+	const char *values[] = { "volume", vol, "icon", icon, NULL };
+	return format_text(format, values);
+}
+
 static int volume_measure(struct widget *w, struct render_ctx *ctx) {
 	struct volume_data *d = w->data;
 	if (!d->available) {
 		return 0;
 	}
-	const char *format = widget_conf(w, "format", NULL);
-	if (format) {
-		char vol[16];
-		snprintf(vol, sizeof(vol), "%d", d->volume);
-		const char *values[] = { "volume", vol, NULL };
-		char *text = format_text(format, values);
-		int width = text_item_measure(ctx, text, true);
-		free(text);
-		return width;
-	}
-	return text_item_measure(ctx, NULL, true);
+	bool icons_in_text;
+	char *text = volume_text(w, &icons_in_text);
+	int width = text_item_measure(ctx, text, !icons_in_text);
+	free(text);
+	return width;
 }
 
 static void volume_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct volume_data *d = w->data;
 	double x = render_item_start(ctx, b);
-	int g = glyph_size(ctx);
-	ti_speaker(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, d->volume, d->muted,
-		widget_fg(ctx->panel, "volume"));
-	const char *format = widget_conf(w, "format", NULL);
-	if (format) {
-		char vol[16];
-		snprintf(vol, sizeof(vol), "%d", d->volume);
-		const char *values[] = { "volume", vol, NULL };
-		char *text = format_text(format, values);
-		pd_text(ctx->cairo, bar_font(ctx->panel), text, x + g + 4, b.y, b.width - g - 16,
-			b.height, widget_fg(ctx->panel, "volume"), PD_LEFT);
+	uint32_t fg = widget_fg(ctx->panel, "volume");
+	bool icons_in_text;
+	char *text = volume_text(w, &icons_in_text);
+	if (!icons_in_text) {
+		int g = glyph_size(ctx);
+		ti_speaker(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, d->volume, d->muted,
+			fg);
+		x += g + 4;
+	}
+	if (text) {
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.x + b.width - x, b.height,
+			fg, PD_LEFT);
 		free(text);
 	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
