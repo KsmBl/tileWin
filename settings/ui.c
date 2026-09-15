@@ -9,6 +9,129 @@
 #include "tw_paths.h"
 #include "tw_theme.h"
 
+/* ---------- search index ---------- */
+
+static GPtrArray *search_index; // struct ui_search_entry *
+static char *index_page, *index_page_title, *index_keywords, *index_group;
+
+static void index_add(const char *title, const char *subtitle, GtkWidget *widget) {
+	if (!index_page || !title || !*title) {
+		return;
+	}
+	if (!search_index) {
+		search_index = g_ptr_array_new();
+	}
+	struct ui_search_entry *e = g_new0(struct ui_search_entry, 1);
+	e->page = g_strdup(index_page);
+	e->page_title = g_strdup(index_page_title);
+	e->group = g_strdup(widget ? index_group : NULL);
+	e->title = g_strdup(title);
+	e->subtitle = g_strdup(subtitle);
+	e->keywords = g_strdup(widget ? NULL : index_keywords);
+	e->widget = widget;
+	if (widget) {
+		// rows that are rebuilt later disappear from the results
+		g_object_add_weak_pointer(G_OBJECT(widget), (gpointer *)&e->widget);
+	}
+	g_ptr_array_add(search_index, e);
+}
+
+void ui_index_page(const char *name, const char *title, const char *keywords) {
+	g_clear_pointer(&index_page, g_free);
+	g_clear_pointer(&index_page_title, g_free);
+	g_clear_pointer(&index_keywords, g_free);
+	g_clear_pointer(&index_group, g_free);
+	if (!name) {
+		return;
+	}
+	index_page = g_strdup(name);
+	index_page_title = g_strdup(title);
+	index_keywords = g_strdup(keywords);
+	index_add(title, NULL, NULL);
+}
+
+static bool contains(const char *text, const char *word) {
+	if (!text || !*word) {
+		return false;
+	}
+	char *folded = g_utf8_casefold(text, -1);
+	bool found = strstr(folded, word) != NULL;
+	g_free(folded);
+	return found;
+}
+
+static int score(const struct ui_search_entry *e, char **words) {
+	int total = 0;
+	for (int i = 0; words[i]; i++) {
+		const char *w = words[i];
+		int best = 0;
+		char *title = g_utf8_casefold(e->title, -1);
+		if (g_str_has_prefix(title, w)) {
+			best = 100;
+		} else if (strstr(title, w)) {
+			best = 60;
+		} else if (contains(e->group, w)) {
+			best = 30;
+		} else if (contains(e->subtitle, w)) {
+			best = 20;
+		} else if (contains(e->page_title, w) || contains(e->keywords, w)) {
+			best = 10;
+		}
+		g_free(title);
+		if (best == 0) {
+			return 0; // every word has to match
+		}
+		total += best;
+	}
+	return total + (e->widget ? 0 : 5);
+}
+
+static int hit_cmp(gconstpointer a, gconstpointer b) {
+	const struct ui_search_entry *x = *(struct ui_search_entry **)a;
+	const struct ui_search_entry *y = *(struct ui_search_entry **)b;
+	if (x->score != y->score) {
+		return y->score - x->score;
+	}
+	return g_utf8_collate(x->title, y->title);
+}
+
+GPtrArray *ui_search(const char *query) {
+	GPtrArray *hits = g_ptr_array_new();
+	char *folded = g_utf8_casefold(query, -1);
+	char **words = g_strsplit_set(g_strstrip(folded), " \t", -1);
+	int count = 0;
+	for (int i = 0; words[i]; i++) {
+		if (*words[i]) {
+			words[count++] = words[i];
+		} else {
+			g_free(words[i]);
+		}
+	}
+	words[count] = NULL;
+	for (guint i = 0; count && search_index && i < search_index->len; i++) {
+		struct ui_search_entry *e = search_index->pdata[i];
+		bool gone = e->group && !e->widget; // a row that no longer exists
+		e->score = gone ? 0 : score(e, words);
+		if (e->score > 0) {
+			g_ptr_array_add(hits, e);
+		}
+	}
+	g_ptr_array_sort(hits, hit_cmp);
+	// a group and its first row often have the same name: show it once
+	for (guint i = 0; i < hits->len; i++) {
+		struct ui_search_entry *a = hits->pdata[i];
+		for (guint j = i + 1; j < hits->len; j++) {
+			struct ui_search_entry *b = hits->pdata[j];
+			if (strcmp(a->page, b->page) == 0 && g_utf8_collate(a->title, b->title) == 0) {
+				g_ptr_array_remove_index(hits, j--);
+			}
+		}
+	}
+	g_strfreev(words);
+	g_free(folded);
+	return hits;
+}
+
 GtkWidget *ui_page(const char *title, const char *description, GtkWidget **content) {
 	GtkWidget *scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER,
@@ -56,6 +179,11 @@ GtkWidget *ui_group(GtkWidget *content, const char *title, const char *descripti
 	gtk_widget_add_css_class(list, "tw-group");
 	gtk_box_append(GTK_BOX(box), list);
 	gtk_box_append(GTK_BOX(content), box);
+	if (title) {
+		g_free(index_group);
+		index_group = g_strdup(title);
+		index_add(title, description, list);
+	}
 	return list;
 }
 
@@ -92,6 +220,7 @@ GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
 	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
 	gtk_list_box_append(GTK_LIST_BOX(group), row);
+	index_add(title, subtitle, row);
 	return row;
 }
 

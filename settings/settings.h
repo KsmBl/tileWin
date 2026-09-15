@@ -42,6 +42,7 @@ struct settings {
 	struct bluetooth_page *bluetooth_page;
 	struct apps_page *apps_page;
 	struct account_page *account_page;
+	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
 /* ipc.c: talks to the running tileWin, if any */
@@ -67,6 +68,16 @@ char *settings_current_mode(void);
 void settings_apply_color_scheme(bool dark);
 
 /* ui.c */
+/* A setting found by the search of the settings window. */
+struct ui_search_entry {
+	char *page, *page_title, *group, *title, *subtitle, *keywords;
+	GtkWidget *widget; // the row or group, NULL for the page itself or once it is gone
+	int score;
+};
+/* Rows and groups created from now on belong to this page (NULL stops indexing). */
+void ui_index_page(const char *name, const char *title, const char *keywords);
+/* Entries matching every word of the query, best first. Borrowed, free the array. */
+GPtrArray *ui_search(const char *query);
 GtkWidget *ui_page(const char *title, const char *description, GtkWidget **content);
 /* A heading and a framed list; returns the list. Its parent is the group box. */
 GtkWidget *ui_group(GtkWidget *content, const char *title, const char *description);

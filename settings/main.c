@@ -16,7 +16,8 @@ static const char css[] =
 	"flowboxchild.tw-card { padding: 8px; border-radius: 10px; }\n"
 	"flowboxchild.tw-card:selected { background: alpha(@theme_selected_bg_color, 0.3); }\n"
 	".tw-status { padding: 6px 12px; }\n"
-	"image.tw-avatar { border-radius: 9999px; }\n";
+	"image.tw-avatar { border-radius: 9999px; }\n"
+	".tw-found { background-color: alpha(@theme_selected_bg_color, 0.28); }\n";
 
 static struct settings settings;
 
@@ -264,6 +265,111 @@ static void on_config_dir_changed(GFileMonitor *monitor, GFile *file, GFile *oth
 	}
 }
 
+/* ---------- search ---------- */
+
+static gboolean unmark_found(gpointer data) {
+	GtkWidget **widget = data;
+	if (*widget) {
+		gtk_widget_remove_css_class(*widget, "tw-found");
+		g_object_remove_weak_pointer(G_OBJECT(*widget), (gpointer *)widget);
+	}
+	g_free(widget);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean show_found(gpointer data) {
+	GtkWidget **widget = data;
+	if (!*widget) {
+		g_free(widget);
+		return G_SOURCE_REMOVE;
+	}
+	if (!gtk_widget_grab_focus(*widget)) {
+		gtk_widget_child_focus(*widget, GTK_DIR_TAB_FORWARD);
+	}
+	gtk_widget_add_css_class(*widget, "tw-found");
+	g_timeout_add(1600, unmark_found, widget);
+	return G_SOURCE_REMOVE;
+}
+
+static void show_entry(struct settings *s, struct ui_search_entry *e) {
+	gtk_stack_set_visible_child_name(s->stack, e->page);
+	if (e->widget) {
+		GtkWidget **widget = g_new(GtkWidget *, 1);
+		*widget = e->widget;
+		g_object_add_weak_pointer(G_OBJECT(*widget), (gpointer *)widget);
+		// after the page is shown, so it can scroll to the row
+		g_timeout_add(80, show_found, widget);
+	}
+}
+
+static void on_result_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+	struct settings *s = data;
+	struct ui_search_entry *e = g_object_get_data(G_OBJECT(row), "entry");
+	if (e) {
+		show_entry(s, e);
+	}
+}
+
+static void on_search_activate(GtkSearchEntry *entry, gpointer data) {
+	struct settings *s = data;
+	GtkListBoxRow *first = gtk_list_box_get_row_at_index(GTK_LIST_BOX(s->results), 0);
+	if (first) {
+		on_result_activated(GTK_LIST_BOX(s->results), first, s);
+	}
+}
+
+static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
+	struct settings *s = data;
+	const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));
+	bool active = text && *text;
+	gtk_widget_set_visible(s->sidebar, !active);
+	gtk_widget_set_visible(s->results_scroll, active);
+	gtk_list_box_remove_all(GTK_LIST_BOX(s->results));
+	if (!active) {
+		return;
+	}
+	GPtrArray *hits = ui_search(text);
+	for (guint i = 0; i < hits->len && i < 60; i++) {
+		struct ui_search_entry *e = hits->pdata[i];
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+		gtk_widget_set_margin_top(box, 4);
+		gtk_widget_set_margin_bottom(box, 4);
+		GtkWidget *title = gtk_label_new(e->title);
+		gtk_label_set_xalign(GTK_LABEL(title), 0);
+		gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
+		gtk_box_append(GTK_BOX(box), title);
+		char *where = e->widget && e->group && strcmp(e->group, e->title) != 0 ?
+			g_strdup_printf("%s › %s", e->page_title, e->group) : g_strdup(e->page_title);
+		GtkWidget *caption = gtk_label_new(where);
+		g_free(where);
+		gtk_label_set_xalign(GTK_LABEL(caption), 0);
+		gtk_label_set_ellipsize(GTK_LABEL(caption), PANGO_ELLIPSIZE_END);
+		gtk_widget_add_css_class(caption, "dim-label");
+		gtk_widget_add_css_class(caption, "tw-caption");
+		gtk_box_append(GTK_BOX(box), caption);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+		g_object_set_data(G_OBJECT(row), "entry", e);
+		gtk_list_box_append(GTK_LIST_BOX(s->results), row);
+	}
+	if (hits->len == 0) {
+		GtkWidget *none = gtk_label_new("No settings found");
+		gtk_widget_add_css_class(none, "dim-label");
+		gtk_widget_set_margin_top(none, 12);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), none);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+		gtk_list_box_append(GTK_LIST_BOX(s->results), row);
+	}
+	g_ptr_array_free(hits, TRUE);
+}
+
+static gboolean on_find_shortcut(GtkWidget *widget, GVariant *args, gpointer data) {
+	struct settings *s = data;
+	gtk_widget_grab_focus(s->search);
+	return TRUE;
+}
+
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
 	flush_saves(data);
 	return FALSE;
@@ -293,25 +399,70 @@ static void build_window(struct settings *s) {
 	gtk_widget_add_css_class(status, "tw-status");
 	gtk_box_append(GTK_BOX(right), status);
 
-	gtk_stack_add_titled(s->stack, theme_page_new(s), "theme", "Theme");
-	gtk_stack_add_titled(s->stack, wallpaper_page_new(s), "wallpaper", "Wallpaper");
-	gtk_stack_add_titled(s->stack, screen_page_new(s), "screen", "Screen");
-	gtk_stack_add_titled(s->stack, sound_page_new(s), "sound", "Sound");
-	gtk_stack_add_titled(s->stack, bluetooth_page_new(s), "bluetooth", "Bluetooth");
-	gtk_stack_add_titled(s->stack, taskbar_page_new(s), "taskbar", "Taskbar");
-	gtk_stack_add_titled(s->stack, menus_page_new(s), "menus", "Menus");
-	gtk_stack_add_titled(s->stack, launcher_page_new(s), "launcher", "Launcher & apps");
-	gtk_stack_add_titled(s->stack, keyboard_page_new(s), "keyboard", "Keyboard");
-	gtk_stack_add_titled(s->stack, mouse_page_new(s), "mouse", "Mouse & touchpad");
-	gtk_stack_add_titled(s->stack, apps_page_new(s), "apps", "Apps");
-	gtk_stack_add_titled(s->stack, account_page_new(s), "account", "Account");
+	static const struct {
+		const char *name, *title, *keywords;
+		GtkWidget *(*create)(struct settings *s);
+	} pages[] = {
+		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new },
+		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new },
+		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
+			"night light sleep lock lid power", screen_page_new },
+		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
+		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
+			bluetooth_page_new },
+		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications", taskbar_page_new },
+		{ "menus", "Menus", "start menu right click context pinned", menus_page_new },
+		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
+		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
+		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
+		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
+		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
+	};
+	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
+		ui_index_page(pages[i].name, pages[i].title, pages[i].keywords);
+		gtk_stack_add_titled(s->stack, pages[i].create(s), pages[i].name, pages[i].title);
+	}
+	ui_index_page(NULL, NULL, NULL);
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);
 	gtk_widget_set_size_request(sidebar, 190, -1);
+	gtk_widget_set_vexpand(sidebar, TRUE);
+	s->sidebar = sidebar;
+
+	// search across all settings: typing anywhere in the window starts it
+	GtkWidget *search = gtk_search_entry_new();
+	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(search), "Find a setting");
+	gtk_search_entry_set_key_capture_widget(GTK_SEARCH_ENTRY(search), window);
+	gtk_widget_set_margin_start(search, 8);
+	gtk_widget_set_margin_end(search, 8);
+	gtk_widget_set_margin_top(search, 8);
+	gtk_widget_set_margin_bottom(search, 4);
+	g_signal_connect(search, "search-changed", G_CALLBACK(on_search_changed), s);
+	g_signal_connect(search, "activate", G_CALLBACK(on_search_activate), s);
+	s->search = search;
+	s->results = gtk_list_box_new();
+	gtk_widget_add_css_class(s->results, "navigation-sidebar");
+	g_signal_connect(s->results, "row-activated", G_CALLBACK(on_result_activated), s);
+	s->results_scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(s->results_scroll), GTK_POLICY_NEVER,
+		GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(s->results_scroll), s->results);
+	gtk_widget_set_vexpand(s->results_scroll, TRUE);
+	gtk_widget_set_size_request(s->results_scroll, 190, -1);
+	gtk_widget_set_visible(s->results_scroll, FALSE);
+	GtkWidget *left = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(left), search);
+	gtk_box_append(GTK_BOX(left), sidebar);
+	gtk_box_append(GTK_BOX(left), s->results_scroll);
+	GtkEventController *keys = gtk_shortcut_controller_new();
+	gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(keys), gtk_shortcut_new(
+		gtk_shortcut_trigger_parse_string("<Control>f"),
+		gtk_callback_action_new(on_find_shortcut, s, NULL)));
+	gtk_widget_add_controller(window, keys);
 
 	GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_box_append(GTK_BOX(hbox), sidebar);
+	gtk_box_append(GTK_BOX(hbox), left);
 	gtk_box_append(GTK_BOX(hbox), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
 	gtk_box_append(GTK_BOX(hbox), right);
 	gtk_window_set_child(s->window, hbox);
@@ -349,7 +500,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, taskbar, menus, launcher, keyboard, mouse)\n", page);
+				"Unknown page '%s' (theme, wallpaper, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -365,7 +516,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, taskbar, menus, launcher, keyboard or mouse", "PAGE");
+		"Page to open: theme, wallpaper, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps or account", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

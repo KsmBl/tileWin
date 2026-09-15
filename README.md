@@ -250,7 +250,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 
 ## Settings app
 
-`tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you:
+`tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you. Type anywhere in the window (or press Ctrl+F) to search all settings; a result opens its page and highlights the setting.
+
 
 | Page | What you can change |
 |---|---|
