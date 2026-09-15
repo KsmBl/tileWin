@@ -409,6 +409,7 @@ int main(int argc, char **argv) {
 
 shutdown:
 	sway_log(SWAY_INFO, "Shutting down sway");
+	tw_animate_shutdown();
 
 	server_fini(&server);
 	root_destroy(root);

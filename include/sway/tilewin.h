@@ -257,6 +257,8 @@ int tw_animate_workspace_dx(struct sway_workspace *ws);
 bool tw_animate_hides(struct sway_container *con);
 void tw_animate_container_destroyed(struct sway_container *con);
 void tw_animate_workspace_destroyed(struct sway_workspace *ws);
+/* Before the compositor shuts down, while the scene still exists. */
+void tw_animate_shutdown(void);
 void tw_animate_fini(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);

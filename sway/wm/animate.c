@@ -77,10 +77,11 @@ struct anim {
 
 static list_t *anims;
 static struct wl_event_source *timer;
+static bool shutting_down;
 
 static bool enabled(void) {
-	return config && config->active && !config->reading && config->tw_animations &&
-		server.wl_event_loop;
+	return !shutting_down && config && config->active && !config->reading &&
+		config->tw_animations && server.wl_event_loop;
 }
 
 static double scaled_duration(int ms) {
@@ -608,16 +609,30 @@ void tw_animate_workspace_destroyed(struct sway_workspace *ws) {
 	}
 }
 
-void tw_animate_fini(void) {
+void tw_animate_shutdown(void) {
+	// windows closing while tileWin exits (or restarts) are not animated
+	shutting_down = true;
 	while (anims && anims->length) {
 		struct anim *a = anims->items[anims->length - 1];
 		list_del(anims, anims->length - 1);
 		finish(a);
 	}
-	list_free(anims);
-	anims = NULL;
 	if (timer) {
 		wl_event_source_remove(timer);
 		timer = NULL;
 	}
+}
+
+void tw_animate_fini(void) {
+	// the scene and the event loop are gone by now: only free what is left
+	for (int i = 0; anims && i < anims->length; i++) {
+		struct anim *a = anims->items[i];
+		if (a->pieces) {
+			list_free_items_and_destroy(a->pieces);
+		}
+		free(a);
+	}
+	list_free(anims);
+	anims = NULL;
+	timer = NULL;
 }
