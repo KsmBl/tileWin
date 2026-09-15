@@ -11,6 +11,7 @@
 #include "draw.h"
 #include "log.h"
 #include "popup.h"
+#include "textfield.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 
@@ -53,6 +54,7 @@ struct startmenu {
 	list_t *places; // struct place *
 	char user[128];
 	char search[256];
+	struct text_cursor tc;
 	bool show_search;
 	bool all_apps;
 	int scroll;
@@ -555,14 +557,14 @@ static void draw_search_box(struct sm_ctx *c, double x, double y, double w, doub
 	cairo_stroke(c->cr);
 	pd_glyph_search(c->cr, x + 10, y + (h - 16) / 2.0, 16, fg);
 	bool empty = !sm->search[0];
-	const char *text = empty ? placeholder : sm->search;
-	int tw = 0;
-	pd_text_size(c->cr, bar_font(c->panel), sm->search, &tw, NULL);
-	pd_text(c->cr, bar_font(c->panel), text, x + 34, y, w - 44, h,
-		empty ? (fg & 0xffffff00) | 0x99 : fg, PD_LEFT);
-	if (sm->show_search || !empty) {
-		pd_rect(c->cr, x + 34 + tw + 1, y + h * 0.25, 1, h * 0.5, fg);
+	if (empty) {
+		pd_text(c->cr, bar_font(c->panel), placeholder, x + 34, y, w - 44, h,
+			(fg & 0xffffff00) | 0x99, PD_LEFT);
 	}
+	struct text_style ts = { .font = bar_font(c->panel), .fg = fg,
+		.caret = sm->show_search || !empty };
+	text_style_colors(c->panel, &ts);
+	text_draw(c->cr, &ts, sm->search, &sm->tc, x + 34, y, w - 44, h);
 	psurface_add_hotspot(c->p->surface, x, y, w, h, NULL, HS_SEARCH, 0, NULL);
 }
 
@@ -1061,7 +1063,6 @@ static void sm_axis(struct popup *p, double x, double y, int direction) {
 
 static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct startmenu *sm = p->data;
-	size_t len = strlen(sm->search);
 	switch (sym) {
 	case XKB_KEY_Escape:
 		if (sm->search[0]) {
@@ -1093,24 +1094,17 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 			sm->scroll_to_selected = true;
 		}
 		break;
-	case XKB_KEY_BackSpace:
-		while (len > 0) {
-			unsigned char ch = sm->search[--len];
-			sm->search[len] = '\0';
-			if ((ch & 0xc0) != 0x80) {
-				break;
-			}
-		}
-		sm->selected = 0;
-		sm->scroll = 0;
-		break;
 	default:
-		if (utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f && !(mods & 1) &&
-				len + strlen(utf8) < sizeof(sm->search) - 1) {
-			strcat(sm->search, utf8);
+		switch (text_key(sm->search, sizeof(sm->search), &sm->tc, sym, utf8, mods)) {
+		case TEXT_KEY_IGNORED:
+			return;
+		case TEXT_KEY_CHANGED:
 			sm->selected = 0;
 			sm->scroll = 0;
 			sm->show_search = true;
+			break;
+		case TEXT_KEY_MOVED:
+			break;
 		}
 		break;
 	}

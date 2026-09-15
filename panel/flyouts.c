@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "draw.h"
 #include "popup.h"
+#include "textfield.h"
 #include "stringop.h"
 
 /*
@@ -261,7 +262,7 @@ static void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 }
 
 static void draw_field(cairo_t *cr, const struct fly_style *st, struct pbox b,
-		const char *text, const char *placeholder) {
+		const char *text, const struct text_cursor *tc, bool mask, const char *placeholder) {
 	if (st->style == PS_CLASSIC) {
 		pd_rect(cr, b.x, b.y, b.width, b.height, st->field_bg);
 		pd_bevel(cr, b.x, b.y, b.width, b.height, true);
@@ -275,15 +276,13 @@ static void draw_field(cairo_t *cr, const struct fly_style *st, struct pbox b,
 		cairo_stroke(cr);
 		pd_rect(cr, b.x + 1, b.y + b.height - 2, b.width - 2, 2, st->accent);
 	}
-	int tw = 0;
-	if (*text) {
-		pd_text_size(cr, st->font, text, &tw, NULL);
-		pd_text(cr, st->font, text, b.x + 8, b.y, b.width - 16, b.height, st->field_fg, PD_LEFT);
-	} else {
+	if (!*text) {
 		pd_text(cr, st->font, placeholder, b.x + 8, b.y, b.width - 16, b.height, st->dim,
 			PD_LEFT);
 	}
-	pd_rect(cr, b.x + 8 + tw + 1, b.y + b.height * 0.25, 1, b.height * 0.5, st->field_fg);
+	struct text_style ts = { .font = st->font, .fg = st->field_fg, .selection_bg = st->accent,
+		.selection_fg = 0xffffffff, .caret = true, .mask = mask };
+	text_draw(cr, &ts, text, tc, b.x + 8, b.y, b.width - 16, b.height);
 }
 
 static void draw_link(cairo_t *cr, const struct fly_style *st, struct flyout *f, struct pbox b,
@@ -310,17 +309,6 @@ static bool read_sys(const char *path, char *buf, size_t size) {
 		buf[--n] = '\0';
 	}
 	return true;
-}
-
-static void backspace_utf8(char *text) {
-	size_t len = strlen(text);
-	while (len > 0) {
-		unsigned char c = text[--len];
-		text[len] = '\0';
-		if ((c & 0xc0) != 0x80) {
-			break;
-		}
-	}
 }
 
 struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *output) {
@@ -371,6 +359,7 @@ struct net_flyout {
 	char *expanded; // SSID of the expanded row
 	bool asking_password;
 	char password[128];
+	struct text_cursor password_cursor;
 	char status[256];
 	bool status_error;
 	int scroll;
@@ -705,16 +694,9 @@ static void net_render(struct popup *p, cairo_t *cr) {
 			if (expanded) {
 				int by = y + NET_ROW + 2, bh = 30;
 				if (f->asking_password) {
-					char dots[4 * 64 + 1] = "";
-					size_t count = 0;
-					for (const char *c = f->password; *c && count < 64; c++) {
-						if (((unsigned char)*c & 0xc0) != 0x80) {
-							strcat(dots, "\xe2\x97\x8f"); // U+25CF black circle
-							count++;
-						}
-					}
 					struct pbox field = { x0 + 34, by, cw - 34 - 170, bh };
-					draw_field(cr, &st, field, dots, "Password");
+					draw_field(cr, &st, field, f->password, &f->password_cursor, true,
+						"Password");
 					struct pbox ok = { x0 + cw - 164, by, 80, bh };
 					struct pbox cancel = { x0 + cw - 80, by, 80, bh };
 					draw_button(cr, &st, ok, "Connect", true, hovered(&f->base, ok));
@@ -846,18 +828,15 @@ static void net_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_
 		}
 		return;
 	}
-	size_t len = strlen(f->password);
 	if (sym == XKB_KEY_Escape) {
 		f->asking_password = false;
 		memset(f->password, 0, sizeof(f->password));
 	} else if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
 		net_connect(f, net_expanded_index(f));
 		return;
-	} else if (sym == XKB_KEY_BackSpace) {
-		backspace_utf8(f->password);
-	} else if (utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f &&
-			len + strlen(utf8) < sizeof(f->password) - 1) {
-		strcat(f->password, utf8);
+	} else if (text_key(f->password, sizeof(f->password), &f->password_cursor, sym, utf8,
+			mods) == TEXT_KEY_IGNORED) {
+		return;
 	}
 	net_update(f);
 }

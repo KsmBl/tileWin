@@ -14,6 +14,7 @@
 #include "draw.h"
 #include "log.h"
 #include "popup.h"
+#include "textfield.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 #include "tw_paths.h"
@@ -507,6 +508,7 @@ struct name_dialog {
 	enum dialog_mode mode;
 	char *path; // item being renamed
 	char text[512];
+	struct text_cursor tc;
 	char error[200];
 	double px, py;
 	bool inside;
@@ -560,15 +562,9 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 		cairo_stroke(cr);
 		pd_rect(cr, x0 + 1, y + fh - 2, cw - 2, 2, accent);
 	}
-	int text_w = 0;
-	pd_text_size(cr, font, d->text, &text_w, NULL);
-	double shift = text_w > cw - 20 ? text_w - (cw - 20) : 0;
-	cairo_save(cr);
-	cairo_rectangle(cr, x0 + 2, y + 2, cw - 4, fh - 4);
-	cairo_clip(cr);
-	pd_text(cr, font, d->text, x0 + 8 - shift, y, text_w + 10, fh, field_fg, PD_LEFT);
-	pd_rect(cr, x0 + 8 - shift + text_w + 1, y + 7, 1, fh - 14, field_fg);
-	cairo_restore(cr);
+	struct text_style ts = { .font = font, .fg = field_fg, .caret = true };
+	text_style_colors(panel, &ts);
+	text_draw(cr, &ts, d->text, &d->tc, x0 + 8, y, cw - 16, fh);
 	y += fh + 6;
 	if (d->error[0]) {
 		pd_text(cr, font, d->error, x0, y, cw, 20, 0xe04040ff, PD_LEFT);
@@ -774,7 +770,6 @@ static void dialog_button(struct popup *p, double x, double y, uint32_t button, 
 
 static void dialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct name_dialog *d = p->data;
-	size_t len = strlen(d->text);
 	switch (sym) {
 	case XKB_KEY_Escape:
 		popup_close_later(p->panel);
@@ -783,25 +778,18 @@ static void dialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint
 	case XKB_KEY_KP_Enter:
 		dialog_submit(p);
 		return;
-	case XKB_KEY_BackSpace:
-		while (len > 0) {
-			unsigned char c = d->text[--len];
-			d->text[len] = '\0';
-			if ((c & 0xc0) != 0x80) {
-				break;
-			}
-		}
-		break;
 	default:
-		if ((mods & 1) && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
-			d->text[0] = '\0';
-		} else if (utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f &&
-				len + strlen(utf8) < sizeof(d->text) - 1) {
-			strcat(d->text, utf8);
+		switch (text_key(d->text, sizeof(d->text), &d->tc, sym, utf8, mods)) {
+		case TEXT_KEY_IGNORED:
+			return;
+		case TEXT_KEY_CHANGED:
+			d->error[0] = '\0';
+			break;
+		case TEXT_KEY_MOVED:
+			break;
 		}
 		break;
 	}
-	d->error[0] = '\0';
 	popup_set_dirty(p);
 }
 
@@ -840,6 +828,12 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 		free(path);
 	}
 	free(dir);
+	// like Windows: the name is selected, without the extension of a file
+	const char *dot = strrchr(d->text, '.');
+	bool keep_extension = dot && dot != d->text && mode != DIALOG_NEW_FOLDER &&
+		!(item && item->dir);
+	d->tc.anchor = 0;
+	d->tc.cursor = keep_extension ? (size_t)(dot - d->text) : strlen(d->text);
 	int M = popup_shadow_margin(panel);
 	int width = 460 + 2 * M, height = 210 + 2 * M;
 	popup_create(panel, POPUP_DIALOG, NULL, output, (output->width - width) / 2,

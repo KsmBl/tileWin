@@ -5,6 +5,7 @@
 #include <strings.h>
 #include "draw.h"
 #include "popup.h"
+#include "textfield.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 
@@ -27,6 +28,7 @@ struct launcher {
 	list_t *apps;    // struct tw_desktop_entry *, owned
 	list_t *results; // borrowed from apps
 	char query[256];
+	struct text_cursor tc;
 	int selected;
 	int scroll;
 	bool inside;
@@ -90,15 +92,13 @@ static void launcher_render(struct popup *p, cairo_t *cr) {
 			tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
 	}
 	pd_glyph_search(cr, sx + 12, sy + (sh - 18) / 2, 18, field_fg);
-	int tw = 0;
-	pd_text_size(cr, font, l->query, &tw, NULL);
-	if (l->query[0]) {
-		pd_text(cr, font, l->query, sx + 42, sy, sw - 52, sh, field_fg, PD_LEFT);
-	} else {
+	if (!l->query[0]) {
 		pd_text(cr, font, "Type to search apps, or enter a command", sx + 42, sy, sw - 52, sh,
 			dim, PD_LEFT);
 	}
-	pd_rect(cr, sx + 42 + tw + 1, sy + sh * 0.25, 1, sh * 0.5, field_fg);
+	struct text_style ts = { .font = font, .fg = field_fg, .caret = true };
+	text_style_colors(p->panel, &ts);
+	text_draw(cr, &ts, l->query, &l->tc, sx + 42, sy, sw - 52, sh);
 
 	// results
 	double ly = M + SEARCH_HEIGHT;
@@ -212,7 +212,6 @@ static void launcher_axis(struct popup *p, double x, double y, int direction) {
 
 static void launcher_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct launcher *l = p->data;
-	size_t len = strlen(l->query);
 	int n = l->results->length;
 	switch (sym) {
 	case XKB_KEY_Escape:
@@ -240,24 +239,15 @@ static void launcher_key(struct popup *p, xkb_keysym_t sym, const char *utf8, ui
 	case XKB_KEY_Page_Up:
 		l->selected = l->selected > LAUNCHER_ROWS ? l->selected - LAUNCHER_ROWS : 0;
 		break;
-	case XKB_KEY_BackSpace:
-		while (len > 0) {
-			unsigned char c = l->query[--len];
-			l->query[len] = '\0';
-			if ((c & 0xc0) != 0x80) {
-				break;
-			}
-		}
-		update_results(l);
-		break;
 	default:
-		if ((mods & 1) && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
-			l->query[0] = '\0';
+		switch (text_key(l->query, sizeof(l->query), &l->tc, sym, utf8, mods)) {
+		case TEXT_KEY_IGNORED:
+			return;
+		case TEXT_KEY_CHANGED:
 			update_results(l);
-		} else if (utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f && !(mods & 1) &&
-				len + strlen(utf8) < sizeof(l->query) - 1) {
-			strcat(l->query, utf8);
-			update_results(l);
+			break;
+		case TEXT_KEY_MOVED:
+			break;
 		}
 		break;
 	}

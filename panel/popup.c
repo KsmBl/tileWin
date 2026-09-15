@@ -10,6 +10,7 @@
 #include "draw.h"
 #include "log.h"
 #include "popup.h"
+#include "textfield.h"
 #include "stringop.h"
 #include "tw_paths.h"
 
@@ -1058,6 +1059,7 @@ void calendar_toggle(struct panel *panel, struct popup_anchor anchor) {
 /* ================= run dialog ================= */
 
 struct rundialog {
+	struct text_cursor tc;
 	char text[1024];
 	list_t *history;
 	int history_pos;
@@ -1274,15 +1276,9 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 	}
-	int text_w = 0;
-	pd_text_size(cr, bar_font(panel), rd->text, &text_w, NULL);
-	double shift = text_w > fw - 14 ? text_w - (fw - 14) : 0;
-	cairo_save(cr);
-	cairo_rectangle(cr, fx + 2, fy + 2, fw - 4, fh - 4);
-	cairo_clip(cr);
-	pd_text(cr, bar_font(panel), rd->text, fx + 5 - shift, fy, text_w + 10, fh, 0x000000ff, PD_LEFT);
-	pd_rect(cr, fx + 5 - shift + text_w + 1, fy + 5, 1, fh - 10, 0x000000ff);
-	cairo_restore(cr);
+	struct text_style ts = { .font = bar_font(panel), .fg = 0x000000ff, .caret = true };
+	text_style_colors(panel, &ts);
+	text_draw(cr, &ts, rd->text, &rd->tc, fx + 5, fy, fw - 10, fh);
 
 	double btn_w = 75, btn_h = style == PS_CLASSIC ? 23 : 26;
 	double btn_y = h - btn_h - 14;
@@ -1334,7 +1330,6 @@ static void rundialog_button(struct popup *p, double x, double y, uint32_t butto
 
 static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct rundialog *rd = p->data;
-	size_t len = strlen(rd->text);
 	switch (sym) {
 	case XKB_KEY_Escape:
 		popup_close_later(p->panel);
@@ -1343,15 +1338,6 @@ static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, u
 	case XKB_KEY_KP_Enter:
 		rundialog_execute(p);
 		return;
-	case XKB_KEY_BackSpace:
-		while (len > 0) {
-			unsigned char c = rd->text[--len];
-			rd->text[len] = '\0';
-			if ((c & 0xc0) != 0x80) {
-				break;
-			}
-		}
-		break;
 	case XKB_KEY_Up:
 	case XKB_KEY_Down:
 		if (rd->history->length > 0) {
@@ -1364,14 +1350,12 @@ static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, u
 			}
 			snprintf(rd->text, sizeof(rd->text), "%s", rd->history_pos == 0 ? "" :
 				(char *)rd->history->items[rd->history_pos - 1]);
+			text_cursor_end(rd->text, &rd->tc, true);
 		}
 		break;
 	default:
-		if ((mods & 1) && (sym == XKB_KEY_u || sym == XKB_KEY_U)) {
-			rd->text[0] = '\0';
-		} else if (utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f &&
-				len + strlen(utf8) < sizeof(rd->text) - 1) {
-			strcat(rd->text, utf8);
+		if (text_key(rd->text, sizeof(rd->text), &rd->tc, sym, utf8, mods) == TEXT_KEY_IGNORED) {
+			return;
 		}
 		break;
 	}
@@ -1398,6 +1382,8 @@ void rundialog_open(struct panel *panel, struct panel_output *output) {
 		snprintf(rd->text, sizeof(rd->text), "%s", (char *)rd->history->items[0]);
 		rd->history_pos = 1;
 	}
+	// the last command is selected, so typing replaces it
+	text_cursor_end(rd->text, &rd->tc, true);
 	int M = popup_shadow_margin(panel);
 	int width = 420 + 2 * M, height = 200 + 2 * M;
 	bool bottom = panel->config->layouts[panel->layout].bottom;
