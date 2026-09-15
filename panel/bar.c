@@ -566,6 +566,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		struct popup_anchor anchor = popup_anchor_for_bar(output->bar, output->width, 0);
 		anchor.right_align = true;
 		calendar_toggle(panel, anchor);
+	} else if (strcmp(cmd, "osd") == 0) {
+		osd_handle_command(panel, argc - 1, argv + 1);
 	} else if (strcmp(cmd, "reload") == 0) {
 		panel_request_reload(panel);
 	} else if (strcmp(cmd, "close") == 0) {

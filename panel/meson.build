@@ -33,6 +33,7 @@ executable(
 		'ipc.c',
 		'launcher.c',
 		'main.c',
+		'osd.c',
 		'popup.c',
 		'proc.c',
 		'startmenu.c',

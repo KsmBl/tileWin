@@ -442,6 +442,9 @@ void apps_launch(struct panel *panel, const struct tw_desktop_entry *entry);
 struct tw_desktop_entry *apps_find(const char *id_or_app_id);
 cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, int size);
 cairo_surface_t *apps_icon(struct panel *panel, const char *name, int size);
+/* osd.c: volume, brightness and media popup ("panel osd volume 45 0") */
+void osd_handle_command(struct panel *panel, int argc, char **argv);
+
 /* trayicons.c: the theme's notification area icons, or drawn glyphs */
 void ti_speaker(struct panel *panel, cairo_t *cr, double x, double y, double size,
 	int volume, bool muted, uint32_t color);

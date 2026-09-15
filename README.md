@@ -144,7 +144,22 @@ Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launc
 
 ### Volume, brightness and media keys
 
-The volume, microphone mute, brightness and media player keys work in both modes (also on the lock screen) through `tilewin-media`: it uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for media players. A `bindsym` for the same key in your config replaces the default.
+The volume, microphone mute, brightness and media player keys work in both modes (also on the lock screen) and show a popup like on Windows. A `bindsym` for the same key in your config replaces the default.
+
+The same can be done from a terminal with `tilewin-media`:
+
+```sh
+tilewin-media                  # show volume, microphone, brightness and music
+tilewin-media volume up        # louder (volume down: quieter)
+tilewin-media volume 40        # set the volume to 40%
+tilewin-media mute             # mute or unmute
+tilewin-media mic              # mute or unmute the microphone
+tilewin-media brightness 70    # set the brightness to 70% (up, down, +10, -10)
+tilewin-media play             # play or pause (next, previous, stop)
+tilewin-media help             # all examples
+```
+
+It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
 
 ### Commands added by tileWin
 
