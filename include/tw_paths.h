@@ -31,4 +31,7 @@ bool tw_write_string(const char *path, const char *content);
  */
 char *tw_find_data_file(const char *relpath);
 
+/* True if an executable of that name is found in PATH. */
+bool tw_in_path(const char *program);
+
 #endif

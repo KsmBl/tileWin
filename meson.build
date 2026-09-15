@@ -199,9 +199,8 @@ subdir('common')
 subdir('sway')
 subdir('swaymsg')
 
-if get_option('swaybar') or get_option('swaynag')
-	subdir('client')
-endif
+# the taskbar and the lock screen use the client helpers too
+subdir('client')
 if get_option('swaybar')
 	subdir('swaybar')
 endif
@@ -209,6 +208,7 @@ if get_option('swaynag')
 	subdir('swaynag')
 endif
 subdir('panel')
+subdir('lock')
 
 gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
 if gtk4.found()

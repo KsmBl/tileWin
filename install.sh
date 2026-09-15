@@ -172,6 +172,12 @@ if [ -z "$DESTDIR" ] && [ "$PREFIX" != /usr ]; then
 	rm -f "$tmp"
 fi
 
+# The lock screen checks passwords with its own PAM service.
+if [ -z "$DESTDIR" ] && [ -d /etc/pam.d ] && [ ! -e /etc/pam.d/tilewin-lock ]; then
+	msg "Installing the PAM service of the lock screen"
+	sudo install -Dm644 data/tilewin-lock.pam /etc/pam.d/tilewin-lock
+fi
+
 # ---------------------------------------------------------------- user config
 if [ "$USER_CONFIG" -eq 1 ]; then
 	config_home="${XDG_CONFIG_HOME:-$HOME/.config}/tileWin"

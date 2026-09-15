@@ -177,6 +177,12 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 			free(binding->command);
 			binding->command = strdup("taskview");
 		}
+		// and the lock screen to swaylock, which may not be installed
+		if (binding->command && strncmp(binding->command, "exec swaylock", 13) == 0 &&
+				!tw_in_path("swaylock")) {
+			free(binding->command);
+			binding->command = strdup("exec tilewin-lock -f");
+		}
 		// and Ctrl+Alt+Delete to a tilewin-nag log out question
 		if (binding->modifiers == (WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT) &&
 				binding->command && strstr(binding->command, "Log out of tileWin?")) {

@@ -856,7 +856,7 @@ list_t *power_menu_items(struct panel *panel) {
 		}
 	}
 	if (items->length == 0) {
-		list_add(items, menu_item_new("Lock", "exec swaylock -f -c 000000"));
+		list_add(items, menu_item_new("Lock", "exec tilewin-lock -f"));
 		list_add(items, menu_item_new("Sign out", "exit"));
 		list_add(items, menu_item_new("Restart tileWin", "restart"));
 		list_add(items, menu_item_separator());

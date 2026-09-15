@@ -143,3 +143,23 @@ char *tw_find_data_file(const char *relpath) {
 	free(path);
 	return NULL;
 }
+
+bool tw_in_path(const char *program) {
+	const char *path = getenv("PATH");
+	if (!program || !*program || !path) {
+		return false;
+	}
+	if (strchr(program, '/')) {
+		return access(program, X_OK) == 0;
+	}
+	char *copy = strdup(path);
+	bool found = false;
+	for (char *save = NULL, *dir = strtok_r(copy, ":", &save); dir && !found;
+			dir = strtok_r(NULL, ":", &save)) {
+		char *full = format_str("%s/%s", *dir ? dir : ".", program);
+		found = access(full, X_OK) == 0;
+		free(full);
+	}
+	free(copy);
+	return found;
+}

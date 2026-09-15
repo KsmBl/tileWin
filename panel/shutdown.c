@@ -240,8 +240,8 @@ static const char *action_label(struct shutdown *sd, enum sd_action action) {
 
 /* The command of an action: a matching power entry of the start menu, or a default. */
 static char *action_command(struct panel *panel, enum sd_action action) {
-	static const char *const defaults[ACT_COUNT] = { "exec swaylock -f -c 000000",
-		"exec swaylock -f -c 000000", "exit", "exec systemctl suspend",
+	static const char *const defaults[ACT_COUNT] = { "exec tilewin-lock -f",
+		"exec tilewin-lock -f", "exit", "exec systemctl suspend",
 		"exec systemctl reboot", "exec systemctl poweroff" };
 	struct twconf_node *sm = panel->config ? panel->config->startmenu : NULL;
 	for (int i = 0; sm && i < twconf_count(sm); i++) {

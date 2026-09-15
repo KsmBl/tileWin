@@ -6,6 +6,7 @@
 #include "log.h"
 #include "panel.h"
 #include "stringop.h"
+#include "tw_paths.h"
 
 struct bar {
 	struct panel_output *output;
@@ -386,6 +387,11 @@ void bar_run_command(struct panel *panel, const char *command, const char *conte
 			free(cmd);
 			cmd = next;
 		}
+	}
+	if (strncmp(cmd, "exec swaylock", 13) == 0 && !tw_in_path("swaylock")) {
+		// configs from before tilewin-lock, on systems without swaylock
+		free(cmd);
+		cmd = strdup("exec tilewin-lock -f");
 	}
 	if (strncmp(cmd, "panel ", 6) == 0) {
 		bar_handle_panel_command(panel, cmd + 6);

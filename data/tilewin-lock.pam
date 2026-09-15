@@ -1,0 +1,5 @@
+#%PAM-1.0
+# PAM service of tilewin-lock, the tileWin lock screen: checks the user's
+# password like logging in does.
+auth include system-local-login
+account include system-local-login
