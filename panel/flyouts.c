@@ -1807,3 +1807,614 @@ void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const 
 	f->tick = loop_add_timer(panel->loop, 10000, power_tick, NULL);
 	power_query_profiles(f);
 }
+
+/* ================= cpu ================= */
+
+/*
+ * CPU flyout: usage of the last minute, the cores, load, uptime and the
+ * processes using the most CPU. Everything is read from /proc and /sys once a
+ * second while the flyout is open.
+ */
+
+#define CPU_HISTORY_LEN 60
+#define CPU_MAX_CORES 256
+#define CPU_TOP 5
+#define CPU_HEADER 66
+#define CPU_GRAPH 112
+#define CPU_CORE_ROW 20
+#define CPU_INFO 60
+#define CPU_PROC_ROW 24
+
+enum cpu_hotspot {
+	CPU_HS_TASK_MANAGER = 1,
+};
+
+struct cpu_ticks {
+	unsigned long long total, idle;
+};
+
+struct proc_sample {
+	int pid;
+	unsigned long long ticks;
+};
+
+struct proc_usage {
+	char name[64];
+	double percent;
+	int count;
+};
+
+struct cpu_flyout {
+	struct flyout base;
+	char model[128];
+	int cores;
+	struct cpu_ticks total;
+	struct cpu_ticks core_ticks[CPU_MAX_CORES];
+	int usage; // percent of all cores together
+	int core_usage[CPU_MAX_CORES];
+	int history[CPU_HISTORY_LEN];
+	int history_len;
+	double mhz;
+	int temp; // degrees Celsius, -1 if unknown
+	double load[3];
+	int processes, threads;
+	long uptime;
+	struct proc_sample *samples; // sorted by pid
+	int sample_count;
+	struct proc_usage top[CPU_TOP];
+	int top_count;
+	struct loop_timer *tick;
+};
+
+static struct cpu_flyout *cpu_current = NULL;
+
+static void cpu_read_stat(struct cpu_flyout *f, unsigned long long *total_delta) {
+	*total_delta = 0;
+	FILE *file = fopen("/proc/stat", "r");
+	if (!file) {
+		return;
+	}
+	char line[512];
+	int core = 0;
+	while (fgets(line, sizeof(line), file) && strncmp(line, "cpu", 3) == 0) {
+		char name[16];
+		unsigned long long v[8] = { 0 };
+		if (sscanf(line, "%15s %llu %llu %llu %llu %llu %llu %llu %llu", name, &v[0], &v[1],
+				&v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) < 5) {
+			continue;
+		}
+		unsigned long long idle = v[3] + v[4], total = 0;
+		for (int i = 0; i < 8; i++) {
+			total += v[i];
+		}
+		bool all = strcmp(name, "cpu") == 0;
+		if (!all && core >= CPU_MAX_CORES) {
+			continue;
+		}
+		struct cpu_ticks *prev = all ? &f->total : &f->core_ticks[core];
+		int *usage = all ? &f->usage : &f->core_usage[core];
+		if (!all) {
+			core++;
+		}
+		if (prev->total && total > prev->total) {
+			unsigned long long dt = total - prev->total;
+			unsigned long long di = idle >= prev->idle ? idle - prev->idle : 0;
+			*usage = (int)((dt - (di > dt ? dt : di)) * 100 / dt);
+			if (all) {
+				*total_delta = dt;
+			}
+		}
+		prev->total = total;
+		prev->idle = idle;
+	}
+	fclose(file);
+	f->cores = core;
+}
+
+static void cpu_tidy_model(char *model);
+
+static void cpu_read_info(struct cpu_flyout *f) {
+	FILE *file = fopen("/proc/cpuinfo", "r");
+	double sum = 0;
+	int count = 0;
+	if (file) {
+		char line[512];
+		while (fgets(line, sizeof(line), file)) {
+			char *colon = strchr(line, ':');
+			if (!colon) {
+				continue;
+			}
+			char *value = colon + 1;
+			while (*value == ' ' || *value == '\t') {
+				value++;
+			}
+			value[strcspn(value, "\n")] = '\0';
+			if (!f->model[0] && (strncmp(line, "model name", 10) == 0 ||
+					strncmp(line, "Hardware", 8) == 0)) {
+				snprintf(f->model, sizeof(f->model), "%s", value);
+				cpu_tidy_model(f->model);
+			} else if (strncmp(line, "cpu MHz", 7) == 0) {
+				sum += atof(value);
+				count++;
+			}
+		}
+		fclose(file);
+	}
+	if (count > 0) {
+		f->mhz = sum / count;
+	} else {
+		char buf[64];
+		f->mhz = read_sys("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", buf,
+			sizeof(buf)) ? atol(buf) / 1000.0 : 0;
+	}
+}
+
+/* "Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz" -> "Intel Core i7-8665U" */
+static void cpu_tidy_model(char *model) {
+	static const char *const noise[] = { "(R)", "(r)", "(TM)", "(tm)", " CPU", " Processor",
+		" processor" };
+	char *at = strstr(model, " @ ");
+	if (at) {
+		*at = '\0';
+	}
+	for (size_t i = 0; i < sizeof(noise) / sizeof(noise[0]); i++) {
+		char *hit;
+		size_t len = strlen(noise[i]);
+		while ((hit = strstr(model, noise[i]))) {
+			memmove(hit, hit + len, strlen(hit + len) + 1);
+		}
+	}
+	// collapse double spaces left behind
+	char *out = model;
+	for (char *in = model; *in; in++) {
+		if (*in == ' ' && (out == model || out[-1] == ' ')) {
+			continue;
+		}
+		*out++ = *in;
+	}
+	while (out > model && out[-1] == ' ') {
+		out--;
+	}
+	*out = '\0';
+}
+
+static int cpu_read_temp(void) {
+	static const char *const sensors[] = { "coretemp", "k10temp", "zenpower", "cpu_thermal",
+		"soc_thermal", "acpitz" };
+	int best = -1;
+	size_t best_rank = sizeof(sensors) / sizeof(sensors[0]);
+	DIR *dir = opendir("/sys/class/hwmon");
+	struct dirent *de;
+	while (dir && (de = readdir(dir))) {
+		if (de->d_name[0] == '.') {
+			continue;
+		}
+		char path[512], buf[64];
+		snprintf(path, sizeof(path), "/sys/class/hwmon/%s/name", de->d_name);
+		if (!read_sys(path, buf, sizeof(buf))) {
+			continue;
+		}
+		for (size_t i = 0; i < best_rank; i++) {
+			if (strcmp(buf, sensors[i]) == 0) {
+				snprintf(path, sizeof(path), "/sys/class/hwmon/%s/temp1_input", de->d_name);
+				if (read_sys(path, buf, sizeof(buf))) {
+					best = atoi(buf);
+					best_rank = i;
+				}
+				break;
+			}
+		}
+	}
+	if (dir) {
+		closedir(dir);
+	}
+	if (best < 0) {
+		char buf[64];
+		if (read_sys("/sys/class/thermal/thermal_zone0/temp", buf, sizeof(buf))) {
+			best = atoi(buf);
+		}
+	}
+	return best > 0 ? best / 1000 : -1;
+}
+
+static int sample_cmp(const void *a, const void *b) {
+	const struct proc_sample *sa = a, *sb = b;
+	return (sa->pid > sb->pid) - (sa->pid < sb->pid);
+}
+
+static int usage_cmp(const void *a, const void *b) {
+	const struct proc_usage *ua = a, *ub = b;
+	return (ua->percent < ub->percent) - (ua->percent > ub->percent);
+}
+
+static void cpu_read_processes(struct cpu_flyout *f, unsigned long long total_delta) {
+	DIR *dir = opendir("/proc");
+	if (!dir) {
+		return;
+	}
+	struct proc_sample *samples = NULL;
+	int count = 0, cap = 0;
+	struct proc_usage *groups = NULL;
+	int group_count = 0, group_cap = 0;
+	struct dirent *de;
+	while ((de = readdir(dir))) {
+		if (!isdigit((unsigned char)de->d_name[0])) {
+			continue;
+		}
+		char path[300], buf[1024];
+		snprintf(path, sizeof(path), "/proc/%s/stat", de->d_name);
+		FILE *file = fopen(path, "r");
+		if (!file) {
+			continue;
+		}
+		size_t n = fread(buf, 1, sizeof(buf) - 1, file);
+		fclose(file);
+		buf[n] = '\0';
+		char *open = strchr(buf, '('), *close = strrchr(buf, ')');
+		if (!open || !close || close < open || !close[1]) {
+			continue;
+		}
+		// after the name: state is field 3, utime 14 and stime 15
+		unsigned long long ticks = 0;
+		int field = 3;
+		char *save = NULL;
+		for (char *tok = strtok_r(close + 2, " ", &save); tok && field <= 15;
+				tok = strtok_r(NULL, " ", &save), field++) {
+			if (field == 14 || field == 15) {
+				ticks += strtoull(tok, NULL, 10);
+			}
+		}
+		if (count == cap) {
+			cap = cap ? cap * 2 : 256;
+			samples = realloc(samples, cap * sizeof(*samples));
+		}
+		struct proc_sample sample = { atoi(de->d_name), ticks };
+		samples[count++] = sample;
+		if (!f->samples || total_delta == 0) {
+			continue;
+		}
+		struct proc_sample *prev = bsearch(&sample, f->samples, f->sample_count,
+			sizeof(sample), sample_cmp);
+		if (!prev || ticks <= prev->ticks) {
+			continue;
+		}
+		char name[64];
+		size_t len = (size_t)(close - open - 1);
+		if (len >= sizeof(name)) {
+			len = sizeof(name) - 1;
+		}
+		memcpy(name, open + 1, len);
+		name[len] = '\0';
+		struct proc_usage *group = NULL;
+		for (int i = 0; i < group_count; i++) {
+			if (strcmp(groups[i].name, name) == 0) {
+				group = &groups[i];
+				break;
+			}
+		}
+		if (!group) {
+			if (group_count == group_cap) {
+				group_cap = group_cap ? group_cap * 2 : 32;
+				groups = realloc(groups, group_cap * sizeof(*groups));
+			}
+			group = &groups[group_count++];
+			memset(group, 0, sizeof(*group));
+			snprintf(group->name, sizeof(group->name), "%s", name);
+		}
+		group->percent += (double)(ticks - prev->ticks) * 100.0 / total_delta;
+		group->count++;
+	}
+	closedir(dir);
+	f->processes = count;
+	if (samples) {
+		qsort(samples, count, sizeof(*samples), sample_cmp);
+	}
+	free(f->samples);
+	f->samples = samples;
+	f->sample_count = count;
+	if (total_delta > 0) {
+		if (groups) {
+			qsort(groups, group_count, sizeof(*groups), usage_cmp);
+		}
+		f->top_count = group_count < CPU_TOP ? group_count : CPU_TOP;
+		for (int i = 0; i < f->top_count; i++) {
+			f->top[i] = groups[i];
+		}
+	}
+	free(groups);
+}
+
+static void cpu_sample(struct cpu_flyout *f) {
+	unsigned long long delta;
+	cpu_read_stat(f, &delta);
+	cpu_read_info(f);
+	f->temp = cpu_read_temp();
+	FILE *file = fopen("/proc/loadavg", "r");
+	if (file) {
+		int running = 0;
+		if (fscanf(file, "%lf %lf %lf %d/%d", &f->load[0], &f->load[1], &f->load[2],
+				&running, &f->threads) < 5) {
+			f->threads = 0;
+		}
+		fclose(file);
+	}
+	file = fopen("/proc/uptime", "r");
+	if (file) {
+		double up = 0;
+		if (fscanf(file, "%lf", &up) == 1) {
+			f->uptime = (long)up;
+		}
+		fclose(file);
+	}
+	cpu_read_processes(f, delta);
+	if (delta > 0) {
+		if (f->history_len == CPU_HISTORY_LEN) {
+			memmove(f->history, f->history + 1, (CPU_HISTORY_LEN - 1) * sizeof(int));
+			f->history_len--;
+		}
+		f->history[f->history_len++] = f->usage;
+	}
+}
+
+static int cpu_core_rows(struct cpu_flyout *f, int *columns) {
+	int n = f->cores > 0 ? f->cores : 1;
+	*columns = n <= 4 ? n : n <= 16 ? 4 : 8;
+	return (n + *columns - 1) / *columns;
+}
+
+static int cpu_height(struct cpu_flyout *f) {
+	int columns;
+	int rows = cpu_core_rows(f, &columns);
+	return CPU_HEADER + CPU_GRAPH + (f->cores > 1 ? 30 + rows * CPU_CORE_ROW + 6 : 0) +
+		CPU_INFO + 30 + CPU_TOP * CPU_PROC_ROW + 8 + FOOTER;
+}
+
+static void cpu_tick(void *data) {
+	struct cpu_flyout *f = cpu_current;
+	if (!f) {
+		return;
+	}
+	cpu_sample(f);
+	flyout_resize(&f->base, cpu_height(f));
+	f->tick = loop_add_timer(f->base.panel->loop, 1000, cpu_tick, NULL);
+}
+
+static void cpu_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
+		double h, int percent) {
+	percent = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, st->style == PS_CLASSIC ? 0 : h / 2);
+	pd_color(cr, st->track);
+	cairo_fill(cr);
+	if (percent > 0) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x, y, w * percent / 100.0, h, st->style == PS_CLASSIC ? 0 : h / 2);
+		pd_color(cr, st->accent);
+		cairo_fill(cr);
+	}
+}
+
+static void cpu_render(struct popup *p, cairo_t *cr) {
+	struct cpu_flyout *f = p->data;
+	struct fly_style st;
+	fly_style_init(&st, p->panel);
+	int M = popup_shadow_margin(p->panel);
+	int W = p->surface->width, H = p->surface->height;
+	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
+	int y = M;
+	char text[256];
+
+	// header: total usage, model and details
+	snprintf(text, sizeof(text), "%d%%", f->usage);
+	pd_text(cr, st.big, text, x0, y + 12, 86, 36, st.fg, PD_LEFT);
+	pd_text(cr, st.bold, f->model[0] ? f->model : "Processor", x0 + 90, y + 12, cw - 90, 20,
+		st.fg, PD_LEFT);
+	int len = snprintf(text, sizeof(text), "%d %s", f->cores, f->cores == 1 ? "core" : "cores");
+	if (f->mhz > 0 && len < (int)sizeof(text)) {
+		len += snprintf(text + len, sizeof(text) - len, " · %.1f GHz", f->mhz / 1000.0);
+	}
+	if (f->temp >= 0 && len < (int)sizeof(text)) {
+		snprintf(text + len, sizeof(text) - len, " · %d°C", f->temp);
+	}
+	pd_text(cr, st.font, text, x0 + 90, y + 34, cw - 90, 20, st.dim, PD_LEFT);
+	y += CPU_HEADER;
+
+	// usage graph of the last minute
+	struct pbox g = { x0, y, cw, CPU_GRAPH - 26 };
+	cairo_new_path(cr);
+	pd_rounded(cr, g.x, g.y, g.width, g.height, st.style == PS_CLASSIC ? 0 : 6);
+	pd_color(cr, st.button_bg);
+	cairo_fill(cr);
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st.line);
+	}
+	if (f->history_len > 1) {
+		double step = (double)g.width / (CPU_HISTORY_LEN - 1);
+		double first_x = g.x + g.width - (f->history_len - 1) * step;
+		cairo_new_path(cr);
+		cairo_move_to(cr, first_x, g.y + g.height);
+		for (int i = 0; i < f->history_len; i++) {
+			cairo_line_to(cr, first_x + i * step, g.y + g.height - g.height * f->history[i] / 100.0);
+		}
+		cairo_line_to(cr, g.x + g.width, g.y + g.height);
+		cairo_close_path(cr);
+		pd_color(cr, (st.accent & 0xffffff00) | 0x40);
+		cairo_fill(cr);
+		cairo_new_path(cr);
+		for (int i = 0; i < f->history_len; i++) {
+			double px = first_x + i * step;
+			double py = g.y + g.height - g.height * f->history[i] / 100.0;
+			if (i == 0) {
+				cairo_move_to(cr, px, py);
+			} else {
+				cairo_line_to(cr, px, py);
+			}
+		}
+		pd_color(cr, st.accent);
+		cairo_set_line_width(cr, 1.5);
+		cairo_stroke(cr);
+	}
+	pd_text(cr, st.font, "60 seconds", x0, g.y + g.height + 2, cw, 22, st.dim, PD_LEFT);
+	pd_text(cr, st.font, "100%", x0, g.y + g.height + 2, cw, 22, st.dim, PD_RIGHT);
+	y += CPU_GRAPH;
+
+	// cores
+	if (f->cores > 1) {
+		draw_line(cr, &st, p, y);
+		pd_text(cr, st.font, "Cores", x0, y + 6, cw, 20, st.dim, PD_LEFT);
+		y += 30;
+		int columns;
+		int rows = cpu_core_rows(f, &columns);
+		int cell = (cw - (columns - 1) * 10) / columns;
+		for (int i = 0; i < f->cores && i < CPU_MAX_CORES; i++) {
+			int cx = x0 + (i % columns) * (cell + 10), cy = y + (i / columns) * CPU_CORE_ROW;
+			snprintf(text, sizeof(text), "%d", i);
+			pd_text(cr, st.font, text, cx, cy, 20, CPU_CORE_ROW - 4, st.dim, PD_LEFT);
+			cpu_bar(cr, &st, cx + 22, cy + (CPU_CORE_ROW - 4) / 2.0 - 3, cell - 22, 6,
+				f->core_usage[i]);
+		}
+		y += rows * CPU_CORE_ROW + 6;
+	}
+
+	// load, uptime, processes
+	draw_line(cr, &st, p, y);
+	// column widths fit "0.61 0.81 0.72", "3d 10h 14m" and "221"
+	int cols_x[3] = { 0, cw * 43 / 100, cw * 72 / 100 };
+	int cols_w[3] = { cols_x[1] - 6, cols_x[2] - cols_x[1] - 6, cw - cols_x[2] };
+	const char *labels[3] = { "Load", "Up time", "Processes" };
+	char values[3][64];
+	snprintf(values[0], sizeof(values[0]), "%.2f %.2f %.2f", f->load[0], f->load[1], f->load[2]);
+	long days = f->uptime / 86400, hours = f->uptime / 3600 % 24, minutes = f->uptime / 60 % 60;
+	if (days > 0) {
+		snprintf(values[1], sizeof(values[1]), "%ldd %ldh %ldm", days, hours, minutes);
+	} else {
+		snprintf(values[1], sizeof(values[1]), "%ldh %ldm", hours, minutes);
+	}
+	snprintf(values[2], sizeof(values[2]), "%d", f->processes);
+	for (int i = 0; i < 3; i++) {
+		pd_text(cr, st.font, labels[i], x0 + cols_x[i], y + 8, cols_w[i], 20, st.dim, PD_LEFT);
+		pd_text(cr, st.bold, values[i], x0 + cols_x[i], y + 30, cols_w[i], 22, st.fg, PD_LEFT);
+	}
+	y += CPU_INFO;
+
+	// processes using the most CPU
+	draw_line(cr, &st, p, y);
+	pd_text(cr, st.font, "Most CPU", x0, y + 6, cw, 20, st.dim, PD_LEFT);
+	pd_text(cr, st.font, "CPU", x0, y + 6, cw, 20, st.dim, PD_RIGHT);
+	y += 30;
+	if (f->top_count == 0) {
+		pd_text(cr, st.font, f->history_len ? "Nothing is using the CPU" : "Measuring...", x0, y,
+			cw, CPU_PROC_ROW, st.dim, PD_LEFT);
+	}
+	for (int i = 0; i < f->top_count; i++) {
+		struct proc_usage *u = &f->top[i];
+		double share = u->percent > 100 ? 1 : u->percent / 100.0;
+		if (share > 0) {
+			cairo_new_path(cr);
+			pd_rounded(cr, x0 - 4, y + 2, (cw + 8) * share, CPU_PROC_ROW - 4,
+				st.style == PS_CLASSIC ? 0 : 4);
+			pd_color(cr, (st.accent & 0xffffff00) | 0x30);
+			cairo_fill(cr);
+		}
+		if (u->count > 1) {
+			snprintf(text, sizeof(text), "%s (%d)", u->name, u->count);
+		} else {
+			snprintf(text, sizeof(text), "%s", u->name);
+		}
+		pd_text(cr, st.font, text, x0, y, cw - 70, CPU_PROC_ROW, st.fg, PD_LEFT);
+		snprintf(text, sizeof(text), "%.1f%%", u->percent);
+		pd_text(cr, st.font, text, x0, y, cw, CPU_PROC_ROW, st.fg, PD_RIGHT);
+		y += CPU_PROC_ROW;
+	}
+	y = M + cpu_height(f) - FOOTER;
+
+	draw_line(cr, &st, p, y);
+	struct pbox link = { x0, y + 1, cw, FOOTER - 1 };
+	draw_link(cr, &st, &f->base, link, "Open Task Manager", PD_LEFT);
+	psurface_add_hotspot(p->surface, link.x, link.y, cw / 2, link.height, NULL,
+		CPU_HS_TASK_MANAGER, 0, NULL);
+}
+
+static void cpu_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	struct cpu_flyout *f = p->data;
+	if (button != BTN_LEFT || pressed) {
+		return;
+	}
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (hs && hs->kind == CPU_HS_TASK_MANAGER) {
+		run_settings(&f->base);
+	}
+}
+
+static void cpu_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	if (sym == XKB_KEY_Escape) {
+		popup_close_later(p->panel);
+	}
+}
+
+static void cpu_destroy(struct popup *p) {
+	struct cpu_flyout *f = p->data;
+	if (cpu_current == f) {
+		cpu_current = NULL;
+	}
+	if (f->tick) {
+		loop_remove_timer(p->panel->loop, f->tick);
+	}
+	free(f->samples);
+	free(f->base.settings);
+	free(f);
+}
+
+static const struct popup_vtable cpu_vtable = {
+	.render = cpu_render,
+	.motion = flyout_motion,
+	.leave = flyout_leave,
+	.button = cpu_button,
+	.key = cpu_key,
+	.destroy = cpu_destroy,
+};
+
+/* btop, htop or top in the taskbar's terminal. */
+static char *default_task_manager(struct panel *panel) {
+	const char *terminal = panel->config && panel->config->terminal ?
+		panel->config->terminal : "xfce4-terminal -x";
+	static const char *const tools[] = { "btop", "htop" };
+	const char *path = getenv("PATH");
+	for (size_t i = 0; path && i < sizeof(tools) / sizeof(tools[0]); i++) {
+		char *dirs = strdup(path);
+		char *save = NULL;
+		for (char *dir = strtok_r(dirs, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
+			char *candidate = format_str("%s/%s", dir, tools[i]);
+			bool found = access(candidate, X_OK) == 0;
+			free(candidate);
+			if (found) {
+				free(dirs);
+				return format_str("exec %s %s", terminal, tools[i]);
+			}
+		}
+		free(dirs);
+	}
+	return format_str("exec %s top", terminal);
+}
+
+void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager) {
+	if (popup_is_open(panel, POPUP_CPU)) {
+		popup_close_all(panel);
+		return;
+	}
+	struct cpu_flyout *f = calloc(1, sizeof(*f));
+	f->base.panel = panel;
+	f->base.anchor = anchor;
+	f->base.settings = task_manager ? strdup(task_manager) : default_task_manager(panel);
+	cpu_sample(f);
+	if (!flyout_open(&f->base, POPUP_CPU, cpu_height(f), &cpu_vtable, f)) {
+		free(f->samples);
+		free(f->base.settings);
+		free(f);
+		return;
+	}
+	cpu_current = f;
+	// the first measurement needs a second sample
+	f->tick = loop_add_timer(panel->loop, 400, cpu_tick, NULL);
+}

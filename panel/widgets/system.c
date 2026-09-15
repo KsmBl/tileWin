@@ -271,6 +271,17 @@ static void cpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) 
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
+static bool cpu_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	flyout_cpu_toggle(w->panel, anchor, widget_conf(w, "task_manager", NULL));
+	return true;
+}
+
 static char *cpu_tooltip(struct widget *w, struct hotspot *hs) {
 	struct cpu_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("CPU usage: %d%%", s->usage);
@@ -282,6 +293,7 @@ const struct widget_impl widget_cpu = {
 	.destroy = poll_destroy,
 	.measure = cpu_measure,
 	.render = cpu_render,
+	.click = cpu_click,
 	.tooltip = cpu_tooltip,
 	.set_active = poll_set_active,
 };

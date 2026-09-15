@@ -254,7 +254,7 @@ menu taskbar {
 | `volume` | `format "{volume}%"`, `mixer`, `step`, left click opens the volume flyout (`mixer` is its link) |
 | `network` | `interface`, `interval`, `settings` (command of the flyout's settings link), left click opens the Wi-Fi flyout |
 | `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |
-| `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval` |
+| `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval`, `task_manager <command>`; click for a popup with the usage of the last minute, the cores, load, up time and the processes using the most CPU (`panel cpu` opens it too) |
 | `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval` |
 | `brightness` | (none; scroll changes it via brightnessctl) |
 | `keyboard` | (none) |
