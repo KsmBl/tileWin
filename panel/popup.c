@@ -400,9 +400,15 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 			"tileWin"), 0, 0, bh - 12, m->banner_w - 2, 0xc0c0c0ff, PD_LEFT);
 		cairo_restore(cr);
 	}
+	uint32_t menu_bg = tw_theme_color(t, "menu.bg", 0xf0f0f0ff);
+	bool dark_bg = ((menu_bg >> 24 & 0xff) * 299 + (menu_bg >> 16 & 0xff) * 587 +
+		(menu_bg >> 8 & 0xff) * 114) / 1000 < 128;
 	if (style == PS_AERO) {
-		pd_rect(cr, content_x + m->icon_col - 2, M + m->pad, 1, h - 2 * M - 2 * m->pad, 0xe2e3e3ff);
-		pd_rect(cr, content_x + m->icon_col - 1, M + m->pad, 1, h - 2 * M - 2 * m->pad, 0xffffffff);
+		// the engraved line next to the icons, following the menu color
+		pd_rect(cr, content_x + m->icon_col - 2, M + m->pad, 1, h - 2 * M - 2 * m->pad,
+			tw_theme_color(t, "menu.gutter_shadow", dark_bg ? 0x00000066 : 0xe2e3e3ff));
+		pd_rect(cr, content_x + m->icon_col - 1, M + m->pad, 1, h - 2 * M - 2 * m->pad,
+			tw_theme_color(t, "menu.gutter_light", dark_bg ? 0xffffff12 : 0xffffffff));
 	}
 
 	uint32_t fg = tw_theme_color(t, "menu.fg", 0x000000ff);
@@ -425,7 +431,8 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 			} else {
 				pd_rect(cr, content_x + (style == PS_AERO ? m->icon_col : 4), sy,
 					content_w - (style == PS_AERO ? m->icon_col : 8), 1,
-					tw_theme_color(t, "menu.separator", style == PS_AERO ? 0xe0e0e0ff : 0x00000020));
+					tw_theme_color(t, "menu.separator", style == PS_AERO ?
+						(dark_bg ? 0xffffff1f : 0xe0e0e0ff) : 0x00000020));
 			}
 			continue;
 		}
