@@ -404,6 +404,7 @@ enum popup_kind {
 	POPUP_NOTIFICATIONS,
 	POPUP_QUICKSETTINGS,
 	POPUP_BLUETOOTH,
+	POPUP_SNIP,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -453,6 +454,9 @@ void notify_set_dnd(struct panel *panel, bool on);
 /* The bell of the notifications button, crossed out for do not disturb. */
 void notify_draw_bell(cairo_t *cr, double x, double y, double size, uint32_t color,
 	bool crossed);
+
+/* snip.c: the snipping toolbar (Win+Shift+S) */
+void snip_toolbar_toggle(struct panel *panel, struct panel_output *output);
 
 /* quicksettings.c: Wi-Fi, Bluetooth, sound, brightness and more in one flyout */
 void quicksettings_toggle(struct panel *panel, struct popup_anchor anchor);

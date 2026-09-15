@@ -234,13 +234,15 @@ foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme', 't
 	)
 endforeach
 
-# not a configure_file: it uses wpctl/pactl names like @DEFAULT_SINK@
-install_data(
-	'scripts/tilewin-media.in',
-	rename: 'tilewin-media',
-	install_dir: get_option('bindir'),
-	install_mode: 'rwxr-xr-x',
-)
+# not configure_files: they use names like @DEFAULT_SINK@
+foreach script : ['tilewin-media', 'tilewin-snip']
+	install_data(
+		'scripts' / script + '.in',
+		rename: script,
+		install_dir: get_option('bindir'),
+		install_mode: 'rwxr-xr-x',
+	)
+endforeach
 
 install_data(
 	'data/tilewin.desktop',

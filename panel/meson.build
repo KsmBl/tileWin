@@ -40,6 +40,7 @@ executable(
 		'proc.c',
 		'quicksettings.c',
 		'shutdown.c',
+		'snip.c',
 		'startmenu.c',
 		'surface.c',
 		'textfield.c',

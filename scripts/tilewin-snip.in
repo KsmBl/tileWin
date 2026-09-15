@@ -1,0 +1,129 @@
+#!/bin/sh
+# tilewin-snip: screenshots like the Snipping Tool of Windows. Win+Shift+S
+# shows a toolbar that runs it, Print runs "tilewin-snip screen".
+#
+# The picture is copied to the clipboard, saved in ~/Pictures/Screenshots and
+# shown in a notification (click it to open the picture).
+
+usage() {
+	cat <<'USAGE'
+tilewin-snip takes a screenshot.
+
+  tilewin-snip area      select a rectangle with the mouse
+  tilewin-snip window    click a window
+  tilewin-snip screen    all screens
+
+The picture goes to the clipboard and to ~/Pictures/Screenshots.
+USAGE
+}
+
+have() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+notify() {
+	have notify-send && notify-send -a "Snipping Tool" "$@" >/dev/null 2>&1
+}
+
+pictures_dir() {
+	dir=""
+	have xdg-user-dir && dir=$(xdg-user-dir PICTURES 2>/dev/null)
+	if [ -z "$dir" ] || [ "$dir" = "$HOME" ]; then
+		dir="$HOME/Pictures"
+	fi
+	printf '%s\n' "$dir"
+}
+
+# "x,y wxh title" of every visible window, title bar included
+window_boxes() {
+	have tilewinmsg || return 0
+	if have jq; then
+		tilewinmsg -t get_tree 2>/dev/null | jq -r '
+			.. | objects | select(.pid != null and .visible == true) |
+			(if (.deco_rect.height > 0 and .deco_rect.y + .deco_rect.height == .rect.y)
+				then .deco_rect.y else .rect.y end) as $top |
+			"\(.rect.x),\($top) \(.rect.width)x\(.rect.y + .rect.height - $top) \(.name // "")"'
+	elif have python3; then
+		tilewinmsg -t get_tree 2>/dev/null | python3 -c '
+import json, sys
+def walk(n):
+    if isinstance(n, dict):
+        if n.get("pid") is not None and n.get("visible"):
+            r, d = n["rect"], n.get("deco_rect") or {}
+            top = d["y"] if d.get("height", 0) > 0 and d["y"] + d["height"] == r["y"] else r["y"]
+            print("%d,%d %dx%d %s" % (r["x"], top, r["width"], r["y"] + r["height"] - top, n.get("name") or ""))
+        for c in n.get("nodes", []) + n.get("floating_nodes", []):
+            walk(c)
+walk(json.load(sys.stdin))'
+	fi
+}
+
+mode=${1:-area}
+case "$mode" in
+area|window|screen) ;;
+-h|--help|help) usage; exit 0 ;;
+*) usage >&2; exit 1 ;;
+esac
+
+if ! have grim; then
+	notify "Can't take a screenshot" "Please install grim."
+	exit 1
+fi
+if [ "$mode" != screen ] && ! have slurp; then
+	notify "Can't select an area" "Please install slurp."
+	exit 1
+fi
+
+select_area() {
+	slurp -b 00000066 -c 0078d4ff -s 00000000 -B 0078d422 -w 2 "$@"
+}
+
+geometry=""
+case "$mode" in
+area)
+	geometry=$(select_area) || exit 0
+	;;
+window)
+	boxes=$(window_boxes)
+	if [ -n "$boxes" ]; then
+		geometry=$(printf '%s\n' "$boxes" | select_area -r) || exit 0
+	else
+		geometry=$(select_area) || exit 0
+	fi
+	;;
+screen)
+	# let menus and the snipping toolbar close first
+	sleep 0.3
+	;;
+esac
+[ -n "$geometry" ] && sleep 0.1 # the selection overlay has to disappear
+
+dir="$(pictures_dir)/Screenshots"
+mkdir -p "$dir" || exit 1
+file="$dir/Screenshot $(date '+%Y-%m-%d %H%M%S').png"
+if [ -n "$geometry" ]; then
+	grim -g "$geometry" "$file"
+else
+	grim "$file"
+fi || {
+	notify "The screenshot failed" "grim couldn't capture the screen."
+	exit 1
+}
+
+copied="Screenshot saved"
+if have wl-copy; then
+	wl-copy --type image/png < "$file" && copied="Screenshot copied to the clipboard"
+fi
+
+if have notify-send; then
+	(
+		action=$(timeout 900 notify-send -a "Snipping Tool" -i applets-screenshooter \
+			-h "string:image-path:$file" -A "default=Open" -A "folder=Open folder" \
+			"$copied" "Saved to ${file#"$HOME"/}" 2>/dev/null)
+		case "$action" in
+		default) xdg-open "$file" ;;
+		folder) xdg-open "$dir" ;;
+		esac
+	) >/dev/null 2>&1 &
+fi
+printf '%s\n' "$file"

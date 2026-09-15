@@ -74,6 +74,7 @@ struct notification {
 	char *summary, *body;
 	list_t *actions; // struct n_action *
 	cairo_surface_t *image;
+	cairo_surface_t *preview; // a big picture (image-path of a PNG), e.g. a screenshot
 	uint8_t urgency; // 0 low, 1 normal, 2 critical
 	int32_t timeout; // ms; -1 default, 0 never
 	bool transient;
@@ -316,7 +317,58 @@ static void notification_free(struct notification *n) {
 	if (n->image) {
 		cairo_surface_destroy(n->image);
 	}
+	if (n->preview) {
+		cairo_surface_destroy(n->preview);
+	}
 	free(n);
+}
+
+/* Pictures bigger than an icon (screenshots) are shown across the pop-up. */
+static void load_preview(struct notification *n) {
+	if (n->preview) {
+		cairo_surface_destroy(n->preview);
+		n->preview = NULL;
+	}
+	const char *path = n->image_path;
+	if (path && strncmp(path, "file://", 7) == 0) {
+		path += 7;
+	}
+	size_t len = path ? strlen(path) : 0;
+	if (len < 5 || path[0] != '/' || strcasecmp(path + len - 4, ".png") != 0) {
+		return;
+	}
+	cairo_surface_t *s = cairo_image_surface_create_from_png(path);
+	if (cairo_surface_status(s) == CAIRO_STATUS_SUCCESS &&
+			(cairo_image_surface_get_width(s) > 128 || cairo_image_surface_get_height(s) > 128)) {
+		n->preview = s;
+	} else {
+		cairo_surface_destroy(s);
+	}
+}
+
+static int preview_height(struct notification *n, int width, int max) {
+	if (!n->preview) {
+		return 0;
+	}
+	int h = width * cairo_image_surface_get_height(n->preview) /
+		cairo_image_surface_get_width(n->preview);
+	return h > max ? max : h < 40 ? 40 : h;
+}
+
+static void draw_preview(cairo_t *cr, cairo_surface_t *image, double x, double y, double w,
+		double h, double radius) {
+	int iw = cairo_image_surface_get_width(image), ih = cairo_image_surface_get_height(image);
+	double sx = w / iw, sy = h / ih, scale = sx > sy ? sx : sy; // fill the box
+	cairo_save(cr);
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, radius);
+	cairo_clip(cr);
+	cairo_translate(cr, x + (w - iw * scale) / 2, y + (h - ih * scale) / 2);
+	cairo_scale(cr, scale, scale);
+	cairo_set_source_surface(cr, image, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+	cairo_paint(cr);
+	cairo_restore(cr);
 }
 
 static void draw_x(cairo_t *cr, struct pbox b, uint32_t color, double size) {
@@ -618,7 +670,9 @@ static int toast_layout(struct notification *n, cairo_t *cr, int W, bool draw) {
 		}
 		int bh = pd_text_wrapped(cr, font, n->body, pad, y + sh + 6, W - 2 * pad, 5, c.fg,
 			false);
-		int content = y + sh + (bh ? bh + 6 : 0) + pad + (actions ? actions * 20 : 0);
+		int ph = preview_height(n, W - 2 * pad, 120);
+		int content = y + sh + (bh ? bh + 6 : 0) + (ph ? ph + 8 : 0) + pad +
+			(actions ? actions * 20 : 0);
 		int H = content + (top ? 0 : BALLOON_TAIL);
 		if (draw) {
 			double bx = 0.5, by = top + 0.5, bw = W - 1, bhh = content - top - 1;
@@ -659,6 +713,10 @@ static int toast_layout(struct notification *n, cairo_t *cr, int W, bool draw) {
 			draw_x(cr, n->close_box, c.fg, 7);
 			pd_text_wrapped(cr, font, n->body, pad, y + sh + 6, W - 2 * pad, 5, c.fg, true);
 			int ay = y + sh + (bh ? bh + 6 : 0);
+			if (ph) {
+				draw_preview(cr, n->preview, pad, ay + 4, W - 2 * pad, ph, 2);
+				ay += ph + 8;
+			}
 			for (int i = 0; i < actions; i++) {
 				struct n_action *a = visible_action(n, i);
 				int lw = 0;
@@ -674,9 +732,10 @@ static int toast_layout(struct notification *n, cairo_t *cr, int W, bool draw) {
 	}
 
 	int pad = 16, header = 36;
-	bool big = n->image || n->image_path;
+	int ph = preview_height(n, W - 2 * pad, 180);
+	bool big = !ph && (n->image || n->image_path);
 	int tx = pad + (big ? 60 : 0), tw = W - tx - pad;
-	int y = header + 2;
+	int y = header + 2 + (ph ? ph + 10 : 0);
 	int sh = pd_text_wrapped(cr, bold, n->summary, tx, y, tw, 2, c.fg, false);
 	int bh = pd_text_wrapped(cr, font, n->body, tx, y + sh + 2, tw, 4, c.dim, false);
 	int text_bottom = y + sh + (bh ? bh + 2 : 0);
@@ -704,6 +763,9 @@ static int toast_layout(struct notification *n, cairo_t *cr, int W, bool draw) {
 		}
 		if (big) {
 			pd_icon(cr, notification_icon(n, 48, false), pad, y, 48);
+		}
+		if (ph) {
+			draw_preview(cr, n->preview, pad, header + 2, W - 2 * pad, ph, c.radius ? 4 : 0);
 		}
 		pd_text_wrapped(cr, bold, n->summary, tx, y, tw, 2, c.fg, true);
 		pd_text_wrapped(cr, font, n->body, tx, y + sh + 2, tw, 4, c.dim, true);
@@ -977,6 +1039,7 @@ static uint32_t add_notification(uint32_t replaces, struct notification *fields)
 		n->transient = fields->transient;
 		n->time = time(NULL);
 		free(fields);
+		load_preview(n);
 		if (n->toast) {
 			psurface_set_size(n->toast, toast_width(), toast_height(n));
 			psurface_set_dirty(n->toast);
@@ -986,6 +1049,7 @@ static uint32_t add_notification(uint32_t replaces, struct notification *fields)
 		}
 	} else {
 		n = fields;
+		load_preview(n);
 		n->id = ++nt.next_id;
 		if (nt.next_id == 0) {
 			n->id = nt.next_id = 1;

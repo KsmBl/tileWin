@@ -89,7 +89,7 @@ Start tileWin:
 
 **Dependencies:**
 - **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), meson and ninja.
-- **Optional:** pam (the lock screen is skipped without it), gtk4 (the settings app is skipped without it), grim (screenshots), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+- **Optional:** pam (the lock screen is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 ### Updating
 
@@ -137,7 +137,8 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Ctrl+← / → | Previous / next virtual desktop |
 | Super+Ctrl+Shift+← / → | Move window to previous / next desktop |
 | Super+Shift+← / → | Move window to another monitor |
-| Print | Screenshot to ~/Pictures |
+| Print | Screenshot of all screens to the clipboard and ~/Pictures/Screenshots |
+| Win+Shift+S | Snipping tool: rectangle, window or full screen to the clipboard |
 | Super+Shift+W | Switch to tile mode |
 | Super+Shift+C | Reload config |
 | Super+Shift+Ctrl+R | Restart tileWin |

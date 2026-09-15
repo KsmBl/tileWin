@@ -249,6 +249,18 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 			free(cmd);
 		}
 	}
+	// Win+Shift+S: the snipping toolbar
+	bool snip_bound = false;
+	for (int j = 0; j < mode->keysym_bindings->length && !snip_bound; j++) {
+		struct sway_binding *binding = mode->keysym_bindings->items[j];
+		xkb_keysym_t key = binding->keys->length == 1 ?
+			*(xkb_keysym_t *)binding->keys->items[0] : XKB_KEY_NoSymbol;
+		snip_bound = binding->modifiers == (WLR_MODIFIER_LOGO | WLR_MODIFIER_SHIFT) &&
+			(key == XKB_KEY_s || key == XKB_KEY_S);
+	}
+	if (tw_mode == TW_MODE_WINDOW && !snip_bound) {
+		free_cmd_results(config_command("bindsym --no-warn Mod4+Shift+s panel snip", NULL));
+	}
 	// three finger touchpad swipes, unless the config binds one itself
 	bool swipe_bound = false;
 	for (int j = 0; j < mode->gesture_bindings->length && !swipe_bound; j++) {
