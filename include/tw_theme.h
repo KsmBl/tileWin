@@ -48,6 +48,14 @@ bool tw_parse_color(const char *str, uint32_t *color);
 char *tw_theme_find_dir(const char *name);
 /* Sorted list of available theme names (char *). */
 list_t *tw_theme_list(void);
+/*
+ * Window mode and tile mode remember their own theme in
+ * ~/.config/tileWin/theme-window and theme-tile; current-theme holds the
+ * active one. Without a saved theme a mode uses current-theme.
+ */
+char *tw_theme_mode_name(const char *mode);
+/* Saves the theme of a mode ("window" or "tile"); the other mode keeps its theme. */
+bool tw_theme_save_mode(const char *mode, const char *name);
 /* Name stored in ~/.config/tileWin/current-theme, or TW_DEFAULT_THEME. */
 char *tw_theme_current_name(void);
 bool tw_theme_save_current(const char *name);

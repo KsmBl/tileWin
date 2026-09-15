@@ -29,6 +29,7 @@ struct tw_theme *tw_theme = NULL;
 int tw_theme_generation = 1;
 
 static enum tw_mode pending_mode;
+static struct tw_theme *pending_theme; // theme of the mode switched to
 static int wallpaper_generation = 1;
 
 const char *tw_mode_name(enum tw_mode mode) {
@@ -114,9 +115,11 @@ void tw_init(const char *mode_override) {
 	}
 	tw_mode = mode;
 
-	char *name = tw_theme_current_name();
+	char *name = tw_theme_mode_name(tw_mode_name(tw_mode));
 	tw_theme = load_theme_or_fallback(name);
 	free(name);
+	// the taskbar and tools read the active theme from current-theme
+	tw_theme_save_current(tw_theme->name);
 	char *icons = tw_theme_icon_dir(tw_theme);
 	tw_icon_set_theme_dir(icons);
 	free(icons);
@@ -204,6 +207,14 @@ json_object *tw_describe_state(void) {
 	json_object_object_add(obj, "mode", json_object_new_string(tw_mode_name(tw_mode)));
 	json_object_object_add(obj, "theme",
 		json_object_new_string(tw_theme ? tw_theme->name : ""));
+	for (int i = 0; i < 2; i++) {
+		const char *mode = i == 0 ? "window" : "tile";
+		char *name = tw_theme_mode_name(mode);
+		char *key = format_str("theme_%s", mode);
+		json_object_object_add(obj, key, json_object_new_string(name));
+		free(key);
+		free(name);
+	}
 	json_object_object_add(obj, "theme_title",
 		json_object_new_string(tw_theme && tw_theme->title ? tw_theme->title : ""));
 	json_object_object_add(obj, "color_scheme",
@@ -227,38 +238,96 @@ void tw_after_reload(void) {
 	tw_panel_config_reloaded();
 }
 
+static void mark_container_dirty(struct sway_container *con, void *data);
+
+/* Makes theme the active theme; the config has to be reloaded afterwards. */
+static void apply_theme(struct tw_theme *theme) {
+	struct tw_theme *old = tw_theme;
+	tw_theme = theme;
+	if (old != theme) {
+		tw_theme_free(old);
+	}
+	tw_theme_generation++;
+	char *icons = tw_theme_icon_dir(theme);
+	tw_icon_set_theme_dir(icons);
+	free(icons);
+	tw_icon_cache_clear();
+	tw_theme_save_current(theme->name);
+}
+
 static void do_mode_switch(void *data) {
 	enum tw_mode mode = pending_mode;
+	struct tw_theme *theme = pending_theme;
+	pending_theme = NULL;
 	if (mode == tw_mode) {
+		tw_theme_free(theme);
 		return;
 	}
 	tw_mode = mode;
 	save_mode();
+	if (theme) {
+		apply_theme(theme);
+	}
 	reload_config_now();
 	if (mode == TW_MODE_WINDOW) {
 		tw_convert_to_window_mode();
 	} else {
 		tw_convert_to_tile_mode();
 	}
+	if (theme) {
+		root_for_each_container(mark_container_dirty, NULL);
+	}
 	arrange_root();
 	transaction_commit_dirty();
 	emit_state_event("mode");
+	if (theme) {
+		emit_state_event("theme");
+	}
 }
 
 bool tw_request_mode(enum tw_mode mode, char **error) {
 	if (mode == tw_mode) {
 		return true;
 	}
+	// every mode switches to the theme it used last
+	char *name = tw_theme_mode_name(tw_mode_name(mode));
+	struct tw_theme *theme = NULL;
+	if (!tw_theme || strcmp(name, tw_theme->name) != 0) {
+		char *theme_error = NULL;
+		theme = tw_theme_load(name, &theme_error);
+		if (!theme) {
+			sway_log(SWAY_ERROR, "Keeping the theme, cannot load '%s': %s", name,
+				theme_error ? theme_error : "unknown error");
+		}
+		free(theme_error);
+	}
+	free(name);
+
 	const char *path = config->user_config_path ? config->current_config_path : NULL;
 	enum tw_mode old = tw_mode;
+	struct tw_theme *old_theme = tw_theme;
 	tw_mode = mode;
+	if (theme) {
+		tw_theme = theme;
+	}
 	bool valid = load_main_config(path, true, true);
+	if (!valid && theme) {
+		// the mode's config may have errors with that theme: keep the current one
+		tw_theme = old_theme;
+		tw_theme_free(theme);
+		theme = NULL;
+		valid = load_main_config(path, true, true);
+	}
 	tw_mode = old;
+	tw_theme = old_theme;
 	if (!valid) {
+		tw_theme_free(theme);
 		*error = format_str("The %s mode config has errors, not switching",
 			tw_mode_name(mode));
 		return false;
 	}
+	tw_theme_free(pending_theme);
+	pending_theme = theme;
 	pending_mode = mode;
 	wl_event_loop_add_idle(server.wl_event_loop, do_mode_switch, NULL);
 	return true;
@@ -316,14 +385,29 @@ bool tw_request_theme(const char *name, char **error) {
 		*error = strdup("Config has errors with this theme, not switching");
 		return false;
 	}
-	tw_theme_free(old);
-	tw_theme_generation++;
-	char *icons = tw_theme_icon_dir(theme);
-	tw_icon_set_theme_dir(icons);
-	free(icons);
-	tw_icon_cache_clear();
-	tw_theme_save_current(theme->name);
+	tw_theme = old;
+	// save for the mode before current-theme changes, the other mode keeps its theme
+	tw_theme_save_mode(tw_mode_name(tw_mode), theme->name);
+	apply_theme(theme);
 	wl_event_loop_add_idle(server.wl_event_loop, do_theme_switch, NULL);
+	return true;
+}
+
+bool tw_set_mode_theme(enum tw_mode mode, const char *name, char **error) {
+	if (mode == tw_mode) {
+		return tw_request_theme(name, error);
+	}
+	struct tw_theme *theme = tw_theme_load(name, error);
+	if (!theme) {
+		return false;
+	}
+	bool ok = tw_theme_save_mode(tw_mode_name(mode), theme->name);
+	tw_theme_free(theme);
+	if (!ok) {
+		*error = strdup("Cannot save the theme");
+		return false;
+	}
+	emit_state_event("theme");
 	return true;
 }
 

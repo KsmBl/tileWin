@@ -47,9 +47,15 @@ struct cmd_results *cmd_theme(int argc, char **argv) {
 	if ((error = checkarg(argc, "theme", EXPECTED_AT_LEAST, 1))) {
 		return error;
 	}
-	char *name = join_args(argv, argc);
+	// theme <name> [tile|window]
+	enum tw_mode mode = tw_mode;
+	int count = argc;
+	if (argc >= 2 && tw_parse_mode(argv[argc - 1], &mode)) {
+		count--;
+	}
+	char *name = join_args(argv, count);
 	char *err = NULL;
-	bool ok = tw_request_theme(name, &err);
+	bool ok = tw_set_mode_theme(mode, name, &err);
 	free(name);
 	if (!ok) {
 		return result_from_error(err);

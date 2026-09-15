@@ -326,6 +326,50 @@ bool tw_theme_save_current(const char *name) {
 	return ok;
 }
 
+static char *mode_theme_path(const char *mode) {
+	char *config_dir = tw_config_dir();
+	if (!config_dir) {
+		return NULL;
+	}
+	char *path = format_str("%s/theme-%s", config_dir, mode);
+	free(config_dir);
+	return path;
+}
+
+char *tw_theme_mode_name(const char *mode) {
+	char *path = mode_theme_path(mode);
+	char *name = path ? tw_read_first_line(path) : NULL;
+	free(path);
+	if (!name || !*name) {
+		free(name);
+		name = tw_theme_current_name();
+	}
+	return name;
+}
+
+static bool write_name(const char *path, const char *name) {
+	char *content = format_str("%s\n", name);
+	bool ok = tw_write_string(path, content);
+	free(content);
+	return ok;
+}
+
+bool tw_theme_save_mode(const char *mode, const char *name) {
+	const char *other = strcmp(mode, "tile") == 0 ? "window" : "tile";
+	char *other_path = mode_theme_path(other);
+	if (other_path && access(other_path, F_OK) != 0) {
+		// the other mode keeps the theme it used so far
+		char *current = tw_theme_current_name();
+		write_name(other_path, current);
+		free(current);
+	}
+	free(other_path);
+	char *path = mode_theme_path(mode);
+	bool ok = path && write_name(path, name);
+	free(path);
+	return ok;
+}
+
 char *tw_theme_icon_dir(const struct tw_theme *theme) {
 	if (!theme) {
 		return NULL;

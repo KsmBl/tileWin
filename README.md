@@ -280,10 +280,14 @@ The `startmenu { }` block sets pinned apps (`pinned <desktop ids>`), `place "Lab
 ## Themes
 
 ```sh
-tilewin-theme list          # * marks the active theme
-tilewin-theme set win95     # applies immediately when tileWin is running
+tilewin-theme list              # * marks the active theme, [window mode] [tile mode] their themes
+tilewin-theme set win95         # theme of the current mode, applies immediately
+tilewin-theme set win10 tile    # theme of tile mode, used when you switch to it
+tilewin-theme current tile
 tilewin-theme info win7
 ```
+
+Window mode and tile mode each remember their own theme: switching the mode (Super+Shift+W) also switches to the theme that mode used last. Choosing a theme in the taskbar menu or with `theme <name>` changes the theme of the current mode; in tileWin Settings, "Theme for" picks the mode whose theme you change. Over IPC: `theme <name> [window|tile]`.
 
 | Theme | Look |
 |---|---|

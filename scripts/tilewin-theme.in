@@ -12,8 +12,11 @@ Usage: tilewin-theme <command> [theme]
 
 Commands:
   list            List available themes (* marks the active one)
-  current         Print the active theme
-  set <theme>     Switch to a theme (applied live if tileWin is running)
+  current [mode]  Print the active theme, or the theme of a mode (window, tile)
+  set <theme> [mode]
+                  Switch to a theme (applied live if tileWin is running).
+                  Without a mode it is the theme of the current mode; window
+                  mode and tile mode each remember their own theme.
   info <theme>    Show where a theme is installed and its title
   path <theme>    Print the theme directory (to copy and customize it)
   scheme [light|dark|toggle]
@@ -53,6 +56,36 @@ current_theme() {
 	fi
 }
 
+current_mode() {
+	if running; then
+		tilewinmsg -t get_tilewin 2>/dev/null |
+			sed -n 's/.*"mode": "\([^"]*\)".*/\1/p' | head -n 1
+		return
+	fi
+	state="${XDG_STATE_HOME:-$HOME/.local/state}/tileWin/mode"
+	if [ -s "$state" ] && [ "$(head -n 1 "$state")" = tile ]; then
+		echo tile
+	else
+		echo window
+	fi
+}
+
+# Theme of a mode: theme-<mode>, else current-theme, else the default.
+mode_theme() {
+	if running; then
+		tilewinmsg -t get_tilewin 2>/dev/null |
+			sed -n "s/.*\"theme_$1\": \"\([^\"]*\)\".*/\1/p" | head -n 1
+		return
+	fi
+	for file in "$CONFIG_DIR/theme-$1" "$CURRENT_FILE"; do
+		if [ -s "$file" ]; then
+			head -n 1 "$file"
+			return
+		fi
+	done
+	echo "$DEFAULT_THEME"
+}
+
 running() {
 	command -v tilewinmsg >/dev/null 2>&1 &&
 		tilewinmsg -t get_tilewin >/dev/null 2>&1
@@ -60,6 +93,8 @@ running() {
 
 list_themes() {
 	current=$(current_theme)
+	window_theme=$(mode_theme window)
+	tile_theme=$(mode_theme tile)
 	for base in "$CONFIG_DIR/themes" "$DATADIR/themes"; do
 		[ -d "$base" ] || continue
 		for dir in "$base"/*/; do
@@ -70,7 +105,10 @@ list_themes() {
 		dir=$(theme_dir "$name")
 		mark=" "
 		[ "$name" = "$current" ] && mark="*"
-		printf '%s %-10s %s\n' "$mark" "$name" "$(theme_title "$dir")"
+		modes=
+		[ "$name" = "$window_theme" ] && modes=" [window mode]"
+		[ "$name" = "$tile_theme" ] && modes="$modes [tile mode]"
+		printf '%s %-10s %s%s\n' "$mark" "$name" "$(theme_title "$dir")" "$modes"
 	done
 }
 
@@ -79,7 +117,11 @@ list|ls|"")
 	list_themes
 	;;
 current)
-	current_theme
+	case "$2" in
+	"") current_theme ;;
+	window|tile) mode_theme "$2" ;;
+	*) usage >&2; exit 2 ;;
+	esac
 	;;
 set|use)
 	[ -n "$2" ] || { usage >&2; exit 2; }
@@ -89,8 +131,18 @@ set|use)
 		list_themes >&2
 		exit 1
 	fi
+	mode=$3
+	case "$mode" in
+	""|window|tile) ;;
+	*)
+		echo "tilewin-theme: the mode must be 'window' or 'tile'" >&2
+		exit 2
+		;;
+	esac
+	active_mode=$(current_mode)
+	[ -n "$mode" ] || mode=$active_mode
 	if running; then
-		if ! out=$(tilewinmsg theme "$2" 2>&1); then
+		if ! out=$(tilewinmsg theme "$2" "$mode" 2>&1); then
 			echo "tilewin-theme: $out" >&2
 			exit 1
 		fi
@@ -102,9 +154,17 @@ set|use)
 		esac
 	else
 		mkdir -p "$CONFIG_DIR"
-		echo "$2" > "$CURRENT_FILE"
+		other=tile
+		[ "$mode" = tile ] && other=window
+		# the other mode keeps the theme it used so far
+		if [ ! -s "$CONFIG_DIR/theme-$other" ]; then
+			other_theme=$(mode_theme "$other")
+			echo "$other_theme" > "$CONFIG_DIR/theme-$other"
+		fi
+		echo "$2" > "$CONFIG_DIR/theme-$mode"
+		[ "$mode" = "$active_mode" ] && echo "$2" > "$CURRENT_FILE"
 	fi
-	echo "Theme set to $2 ($(theme_title "$dir"))"
+	echo "Theme for $mode mode set to $2 ($(theme_title "$dir"))"
 	;;
 info)
 	[ -n "$2" ] || { usage >&2; exit 2; }

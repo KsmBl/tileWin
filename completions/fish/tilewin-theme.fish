@@ -14,5 +14,7 @@ complete -c tilewin-theme -n "not __fish_seen_subcommand_from $subcommands" -a i
 complete -c tilewin-theme -n "not __fish_seen_subcommand_from $subcommands" -a path -d 'Print the theme directory'
 complete -c tilewin-theme -n "not __fish_seen_subcommand_from $subcommands" -a help -d 'Show help'
 complete -c tilewin-theme -n "__fish_seen_subcommand_from set info path; and test (count (commandline -opc)) -eq 2" -a '(__tilewin_theme_names)'
+complete -c tilewin-theme -n "__fish_seen_subcommand_from set; and test (count (commandline -opc)) -eq 3" -a 'window tile' -d 'Mode that uses the theme'
+complete -c tilewin-theme -n "__fish_seen_subcommand_from current; and test (count (commandline -opc)) -eq 2" -a 'window tile' -d 'Theme of this mode'
 complete -c tilewin-theme -n "not __fish_seen_subcommand_from $subcommands" -a scheme -d 'Show or change the color scheme (dark mode)'
 complete -c tilewin-theme -n "__fish_seen_subcommand_from scheme" -a 'light dark toggle'

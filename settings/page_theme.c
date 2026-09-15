@@ -10,8 +10,70 @@ struct theme_page {
 	bool updating;
 	GtkWidget *flow;
 	GtkWidget *mode_dd;
+	GtkWidget *target_dd; // which mode's theme the cards change
+	GtkWidget *summary;
 	GtkWidget *dark_switch;
 };
+
+static const char *target_mode(struct theme_page *p) {
+	return gtk_drop_down_get_selected(GTK_DROP_DOWN(p->target_dd)) == 1 ? "tile" : "window";
+}
+
+static char *mode_theme(const char *mode) {
+	char *key = g_strdup_printf("theme_%s", mode);
+	char *name = tw_ipc_state(key);
+	g_free(key);
+	if (name && *name) {
+		return name;
+	}
+	g_free(name);
+	char *saved = tw_theme_mode_name(mode);
+	name = g_strdup(saved);
+	free(saved);
+	return name;
+}
+
+static char *theme_title(const char *name) {
+	char *error = NULL;
+	struct tw_theme *theme = tw_theme_load(name, &error);
+	free(error);
+	char *title = g_strdup(theme && theme->title ? theme->title : name);
+	tw_theme_free(theme);
+	return title;
+}
+
+static void update_summary(struct theme_page *p, const char *window_theme,
+		const char *tile_theme) {
+	char *window_title = theme_title(window_theme);
+	char *tile_title = theme_title(tile_theme);
+	char *text = g_strdup_printf("Window mode uses %s, tile mode uses %s. Switching the "
+		"mode also switches to its theme.", window_title, tile_title);
+	gtk_label_set_text(GTK_LABEL(p->summary), text);
+	g_free(text);
+	g_free(window_title);
+	g_free(tile_title);
+}
+
+/* Selects the card of the theme the chosen mode uses. */
+static void select_target_theme(struct theme_page *p) {
+	char *window_theme = mode_theme("window");
+	char *tile_theme = mode_theme("tile");
+	const char *wanted = strcmp(target_mode(p), "tile") == 0 ? tile_theme : window_theme;
+	gtk_flow_box_unselect_all(GTK_FLOW_BOX(p->flow));
+	for (int i = 0;; i++) {
+		GtkFlowBoxChild *child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(p->flow), i);
+		if (!child) {
+			break;
+		}
+		const char *name = g_object_get_data(G_OBJECT(child), "theme");
+		if (name && strcmp(name, wanted) == 0) {
+			gtk_flow_box_select_child(GTK_FLOW_BOX(p->flow), child);
+		}
+	}
+	update_summary(p, window_theme, tile_theme);
+	g_free(window_theme);
+	g_free(tile_theme);
+}
 
 static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data) {
 	struct theme_page *p = data;
@@ -41,13 +103,26 @@ static void on_theme_activated(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointe
 	}
 	const char *name = g_object_get_data(G_OBJECT(child), "theme");
 	const char *title = g_object_get_data(G_OBJECT(child), "title");
+	const char *mode = target_mode(p);
 	if (tw_ipc_available()) {
-		if (settings_command(p->s, "theme %s", name)) {
-			settings_status(p->s, "Theme changed to %s", title);
+		if (settings_command(p->s, "theme %s %s", name, mode)) {
+			settings_status(p->s, "The %s mode theme is now %s", mode, title);
 		}
-	} else if (tw_theme_save_current(name)) {
-		settings_status(p->s, "Theme set to %s; it applies when tileWin starts", title);
+	} else {
+		char *active = settings_current_mode();
+		bool ok = tw_theme_save_mode(mode, name);
+		if (ok && strcmp(active, mode) == 0) {
+			ok = tw_theme_save_current(name);
+		}
+		g_free(active);
+		if (ok) {
+			settings_status(p->s, "The %s mode theme is now %s; it applies when tileWin starts",
+				mode, title);
+		}
 	}
+	p->updating = true;
+	select_target_theme(p);
+	p->updating = false;
 	wallpaper_page_refresh(p->s);
 }
 
@@ -75,6 +150,16 @@ static void on_mode_changed(GObject *dropdown, GParamSpec *pspec, gpointer data)
 	free(dir);
 }
 
+static void on_target_changed(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct theme_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	p->updating = true;
+	select_target_theme(p);
+	p->updating = false;
+}
+
 void theme_page_refresh(struct settings *s) {
 	struct theme_page *p = s->theme_page;
 	if (!p) {
@@ -90,7 +175,6 @@ void theme_page_refresh(struct settings *s) {
 	g_free(scheme);
 
 	gtk_flow_box_remove_all(GTK_FLOW_BOX(p->flow));
-	char *current = settings_current_theme();
 	list_t *names = tw_theme_list();
 	for (int i = 0; names && i < names->length; i++) {
 		const char *name = names->items[i];
@@ -122,9 +206,6 @@ void theme_page_refresh(struct settings *s) {
 		g_object_set_data_full(G_OBJECT(child), "theme", g_strdup(name), g_free);
 		g_object_set_data_full(G_OBJECT(child), "title", g_strdup(title), g_free);
 		gtk_flow_box_append(GTK_FLOW_BOX(p->flow), child);
-		if (strcmp(name, current) == 0) {
-			gtk_flow_box_select_child(GTK_FLOW_BOX(p->flow), GTK_FLOW_BOX_CHILD(child));
-		}
 		if (theme) {
 			tw_theme_free(theme);
 		}
@@ -132,7 +213,7 @@ void theme_page_refresh(struct settings *s) {
 	if (names) {
 		list_free_items_and_destroy(names);
 	}
-	g_free(current);
+	select_target_theme(p);
 	p->updating = false;
 }
 
@@ -158,6 +239,16 @@ GtkWidget *theme_page_new(struct settings *s) {
 		"Dark title bars, taskbar menus and flyouts. GTK, GNOME and KDE apps switch too.",
 		p->dark_switch);
 
+	p->target_dd = gtk_drop_down_new_from_strings((const char *const[]){
+		"Window mode", "Tile mode", NULL });
+	char *active = settings_current_mode();
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->target_dd), strcmp(active, "tile") == 0);
+	g_free(active);
+	ui_row(group, "Theme for",
+		"Window mode and tile mode each have their own theme. Pick a mode, then a theme below.",
+		p->target_dd);
+	g_signal_connect(p->target_dd, "notify::selected", G_CALLBACK(on_target_changed), p);
+
 	GtkWidget *heading = gtk_label_new("Themes");
 	gtk_label_set_xalign(GTK_LABEL(heading), 0);
 	gtk_widget_add_css_class(heading, "tw-heading");
@@ -173,6 +264,10 @@ GtkWidget *theme_page_new(struct settings *s) {
 	gtk_label_set_wrap(GTK_LABEL(hint_label), TRUE);
 	gtk_widget_add_css_class(hint_label, "dim-label");
 	gtk_box_append(GTK_BOX(content), hint_label);
+	p->summary = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(p->summary), 0);
+	gtk_label_set_wrap(GTK_LABEL(p->summary), TRUE);
+	gtk_box_append(GTK_BOX(content), p->summary);
 
 	p->flow = gtk_flow_box_new();
 	gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(p->flow), GTK_SELECTION_SINGLE);

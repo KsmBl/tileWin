@@ -124,6 +124,8 @@ void tw_init(const char *mode_override);
 void tw_fini(void);
 bool tw_request_mode(enum tw_mode mode, char **error);
 bool tw_request_theme(const char *name, char **error);
+/* Sets the theme of a mode; applied now if it is the active mode. */
+bool tw_set_mode_theme(enum tw_mode mode, const char *name, char **error);
 /* Switches between the light and dark variant of the theme and tells apps. */
 bool tw_set_color_scheme(bool dark, char **error);
 void tw_load_theme_tile_config(struct sway_config *config);
