@@ -27,6 +27,7 @@ sway_sources = files(
 	'wm/mode.c',
 	'wm/power.c',
 	'wm/session.c',
+	'wm/stick.c',
 	'wm/styles.c',
 
 	'desktop/idle_inhibit_v1.c',

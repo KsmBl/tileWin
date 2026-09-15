@@ -55,6 +55,12 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	double grow_width = edge & WLR_EDGE_LEFT ? -mouse_move_x : mouse_move_x;
 	double grow_height = edge & WLR_EDGE_TOP ? -mouse_move_y : mouse_move_y;
 
+	if (!e->preserve_ratio) {
+		struct wlr_box ref = { (int)e->ref_con_lx, (int)e->ref_con_ly,
+			(int)e->ref_width, (int)e->ref_height };
+		tw_stick_resize(con, edge, &ref, &grow_width, &grow_height);
+	}
+
 	if (e->preserve_ratio) {
 		double x_multiplier = grow_width / e->ref_width;
 		double y_multiplier = grow_height / e->ref_height;

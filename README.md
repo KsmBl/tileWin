@@ -22,6 +22,8 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
   - `Super+Arrow` snapping.
+  - Moved and resized windows stick to the edges of other windows and of the screen. Hold Shift (`window_group_modifier`) while dragging to move the windows touching it along.
+  - Double-click the left or right side of a window to stretch it to the next window or the screen edge, the top or bottom side to do the same with its height. Double-click again for the old size.
   - Minimize to the taskbar; show desktop; Alt+Tab switcher.
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
   - Arrange windows: cascade, stacked, side by side, optimal grid.
@@ -243,6 +245,9 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
 | `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
 | `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
+| `window_stick enable\|disable` | Moved and resized windows stick to the edges of other windows and of the screen (default enable) |
+| `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |
+| `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 

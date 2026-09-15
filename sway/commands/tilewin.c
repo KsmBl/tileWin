@@ -4,6 +4,7 @@
 #include "sway/commands.h"
 #include "sway/config.h"
 #include "sway/input/input-manager.h"
+#include "sway/input/keyboard.h"
 #include "sway/input/seat.h"
 #include "sway/tilewin.h"
 #include "sway/tree/container.h"
@@ -404,6 +405,56 @@ struct cmd_results *cmd_animation_speed(int argc, char **argv) {
 			"animation_speed needs a factor above 0, e.g. 2 for twice as fast");
 	}
 	config->tw_animation_speed = speed;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_stick(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_stick", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_stick = parse_boolean(argv[0], config->tw_stick);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_stick_distance(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_stick_distance", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	long distance = strtol(argv[0], &end, 10);
+	if (!end || *end || distance < 0 || distance > 200) {
+		return cmd_results_new(CMD_INVALID,
+			"window_stick_distance needs a number of pixels from 0 to 200");
+	}
+	config->tw_stick_distance = distance;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_group_modifier(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_group_modifier", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	uint32_t mask = 0;
+	if (argc != 1 || strcasecmp(argv[0], "none") != 0) {
+		// "Shift", "Ctrl+Alt" or "Ctrl Alt"
+		for (int i = 0; i < argc; i++) {
+			list_t *names = split_string(argv[i], "+");
+			for (int j = 0; j < names->length; j++) {
+				uint32_t mod = get_modifier_mask_by_name(names->items[j]);
+				if (!mod) {
+					list_free_items_and_destroy(names);
+					return cmd_results_new(CMD_INVALID, "Unknown modifier '%s', expected "
+						"none or Shift, Ctrl, Alt, Super (joined with +)", argv[i]);
+				}
+				mask |= mod;
+			}
+			list_free_items_and_destroy(names);
+		}
+	}
+	config->tw_group_modifier = mask;
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

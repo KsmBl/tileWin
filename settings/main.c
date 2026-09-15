@@ -414,7 +414,7 @@ static void build_window(struct settings *s) {
 		{ "menus", "Menus", "start menu right click context pinned", menus_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
-		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
+		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap windows stick snap move together group modifier stretch", mouse_page_new },
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
 	};

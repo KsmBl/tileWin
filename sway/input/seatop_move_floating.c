@@ -13,7 +13,25 @@ struct seatop_move_floating_event {
 	double start_x, start_y;
 	bool restore_on_drag; // maximized or snapped window being dragged
 	struct wlr_box before; // where the window was before the drag
+	double con_x, con_y; // window position at the start
+	list_t *group; // struct group_member: windows touching it at the start
 };
+
+struct group_member {
+	struct sway_container *con;
+	double x, y; // position at the start
+};
+
+static void free_group(struct seatop_move_floating_event *e) {
+	if (e->group) {
+		list_free_items_and_destroy(e->group);
+		e->group = NULL;
+	}
+}
+
+static void handle_end(struct sway_seat *seat) {
+	free_group(seat->seatop_data);
+}
 
 static void finalize_move(struct sway_seat *seat) {
 	struct seatop_move_floating_event *e = seat->seatop_data;
@@ -75,13 +93,47 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 		e->restore_on_drag = false;
 	}
 
-	container_floating_move_to(e->con, cursor->x - e->dx, cursor->y - e->dy);
-	tw_snap_preview_update(e->con, cursor->x, cursor->y);
+	// holding the group modifier moves the windows stuck to it along; letting
+	// go of it leaves them where they were
+	bool together = e->group && tw_stick_group_modifier_held(seat);
+	list_t *exclude = NULL;
+	if (together) {
+		exclude = create_list();
+		for (int i = 0; i < e->group->length; i++) {
+			struct group_member *m = e->group->items[i];
+			list_add(exclude, m->con);
+		}
+	}
+	double x = cursor->x - e->dx, y = cursor->y - e->dy;
+	tw_stick_move(e->con, exclude, &x, &y);
+	list_free(exclude);
+	container_floating_move_to(e->con, x, y);
+	for (int i = 0; e->group && i < e->group->length; i++) {
+		struct group_member *m = e->group->items[i];
+		double mx = together ? m->x + x - e->con_x : m->x;
+		double my = together ? m->y + y - e->con_y : m->y;
+		if (m->con->pending.x != mx || m->con->pending.y != my) {
+			container_floating_move_to(m->con, mx, my);
+		}
+	}
+	if (together) {
+		tw_snap_preview_finish(); // a group is not snapped to the screen edge
+	} else {
+		tw_snap_preview_update(e->con, cursor->x, cursor->y);
+	}
 	transaction_commit_dirty();
 }
 
 static void handle_unref(struct sway_seat *seat, struct sway_container *con) {
 	struct seatop_move_floating_event *e = seat->seatop_data;
+	for (int i = 0; e->group && i < e->group->length; i++) {
+		struct group_member *m = e->group->items[i];
+		if (m->con == con) {
+			free(m);
+			list_del(e->group, i);
+			break;
+		}
+	}
 	if (e->con == con) {
 		tw_snap_preview_finish();
 		tw_session_changed();
@@ -94,6 +146,7 @@ static const struct sway_seatop_impl seatop_impl = {
 	.pointer_motion = handle_pointer_motion,
 	.tablet_tool_tip = handle_tablet_tool_tip,
 	.unref = handle_unref,
+	.end = handle_end,
 };
 
 void seatop_begin_move_floating(struct sway_seat *seat,
@@ -115,7 +168,22 @@ void seatop_begin_move_floating(struct sway_seat *seat,
 	if (!e->restore_on_drag) {
 		e->before = (struct wlr_box){ (int)con->pending.x, (int)con->pending.y,
 			(int)con->pending.width, (int)con->pending.height };
+		list_t *group = tw_stick_group(con);
+		if (group) {
+			e->group = create_list();
+			for (int i = 0; i < group->length; i++) {
+				struct sway_container *other = group->items[i];
+				struct group_member *m = calloc(1, sizeof(*m));
+				if (m) {
+					*m = (struct group_member){ other, other->pending.x, other->pending.y };
+					list_add(e->group, m);
+				}
+			}
+			list_free(group);
+		}
 	}
+	e->con_x = con->pending.x;
+	e->con_y = con->pending.y;
 
 	seat->seatop_impl = &seatop_impl;
 	seat->seatop_data = e;

@@ -8,6 +8,7 @@
 #include <wlr/util/box.h>
 #include <wlr/util/edges.h>
 #include <xkbcommon/xkbcommon.h>
+#include "list.h"
 #include "tw_theme.h"
 
 struct sway_config;
@@ -71,6 +72,9 @@ struct tw_container {
 	struct wlr_box window_geometry;
 	enum tw_snap snap;
 	struct wlr_box restore_box; // geometry before maximize/snap
+	// double-clicking a frame side: the size before, and after stretching
+	int expand_axis; // 0: none, 1: width, 2: height
+	struct wlr_box expand_restore, expanded;
 
 	struct wlr_scene_tree *deco_tree;
 	struct wlr_scene_buffer *strips[TW_STRIP_COUNT];
@@ -262,6 +266,14 @@ void tw_animate_shutdown(void);
 void tw_animate_fini(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);
+
+/* stick.c */
+void tw_stick_move(struct sway_container *con, list_t *exclude, double *x, double *y);
+void tw_stick_resize(struct sway_container *con, enum wlr_edges edges,
+		const struct wlr_box *ref, double *grow_width, double *grow_height);
+list_t *tw_stick_group(struct sway_container *con);
+bool tw_stick_group_modifier_held(struct sway_seat *seat);
+bool tw_expand(struct sway_container *con, enum wlr_edges edge);
 void tw_panel_restart(void);
 void tw_panel_stop(void);
 void tw_panel_config_reloaded(void);

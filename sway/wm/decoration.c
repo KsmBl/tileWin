@@ -29,6 +29,7 @@ static struct sway_container *hover_con = NULL;
 static struct {
 	struct sway_container *con;
 	enum tw_hit hit;
+	enum wlr_edges edges;
 	uint32_t time;
 } last_click;
 
@@ -377,10 +378,26 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 		}
 		return true;
 	case TW_HIT_EDGE:
-		if (button == BTN_LEFT) {
-			cont->tw.snap = TW_SNAP_NONE;
-			seatop_begin_resize_floating(seat, cont, edges);
+		if (button != BTN_LEFT) {
+			return true;
 		}
+		// double-click on a side: stretch the window to the next window or
+		// the screen edge (again: back to its size)
+		if (last_click.con == cont && last_click.hit == hit && last_click.edges == edges &&
+				time_msec - last_click.time < DOUBLE_CLICK_MS) {
+			last_click.con = NULL;
+			if (tw_expand(cont, edges)) {
+				transaction_commit_dirty();
+				return true;
+			}
+		} else {
+			last_click.con = cont;
+			last_click.hit = hit;
+			last_click.edges = edges;
+			last_click.time = time_msec;
+		}
+		cont->tw.snap = TW_SNAP_NONE;
+		seatop_begin_resize_floating(seat, cont, edges);
 		return true;
 	case TW_HIT_TITLE:
 	case TW_HIT_ICON:

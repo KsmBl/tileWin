@@ -7,6 +7,7 @@
  * Mouse & touchpad page: libinput settings in the "input type:pointer" and
  * "input type:touchpad" blocks of common.conf, applied live over IPC, and the
  * cursor theme ("seat * xcursor_theme") which is also given to GTK apps.
+ * Moving windows: the window_stick and window_group_modifier commands.
  */
 
 enum control_kind {
@@ -16,7 +17,7 @@ enum control_kind {
 };
 
 struct control {
-	const char *block, *key, *title, *hint;
+	const char *block, *key, *title, *hint; // block NULL: a top level command
 	enum control_kind kind;
 	const char *on, *off; // switch values
 	bool default_on;
@@ -33,6 +34,9 @@ static const char *const click_labels[] = { "Bottom corners of the touchpad",
 	"Number of fingers (two = right)", NULL };
 static const char *const events_values[] = { "enabled", "disabled_on_external_mouse", "disabled", NULL };
 static const char *const events_labels[] = { "On", "Off while a mouse is connected", "Off", NULL };
+
+static const char *const group_mod_values[] = { "Shift", "Ctrl", "Alt", "Super", "none", NULL };
+static const char *const group_mod_labels[] = { "Shift", "Ctrl", "Alt", "Super", "Off", NULL };
 
 #define POINTER "type:pointer"
 #define TOUCHPAD "type:touchpad"
@@ -63,6 +67,12 @@ static const struct control touchpad_controls[] = {
 	{ 0 },
 };
 
+static const struct control window_controls[] = {
+	{ .key = "window_stick", .title = "Stick windows together", .hint = "Moved and resized windows stick to the edges of other windows and of the screen", .kind = CONTROL_SWITCH, .on = "enable", .off = "disable", .default_on = true },
+	{ .key = "window_group_modifier", .title = "Move stuck windows together", .hint = "Hold this key while dragging a window to take the windows touching it along. Double-clicking a side of a window stretches it to the next window or the screen edge.", .kind = CONTROL_CHOICE, .values = group_mod_values, .labels = group_mod_labels },
+	{ 0 },
+};
+
 static const int cursor_sizes[] = { 16, 24, 32, 48, 64, 96 };
 
 struct mouse_page {
@@ -85,17 +95,22 @@ static struct confdoc *common(struct mouse_page *p) {
 }
 
 static char *control_value(struct mouse_page *p, const struct control *c) {
-	struct cstmt *block = confdoc_block(common(p), "input", c->block, false);
+	struct cstmt *block = c->block ? confdoc_block(common(p), "input", c->block, false) :
+		common(p)->root;
 	const char *value = cstmt_arg(confdoc_child(block, c->key, NULL), 0);
 	return g_strdup(value);
 }
 
 static void apply(struct mouse_page *p, const struct control *c, const char *value) {
 	struct confdoc *d = common(p);
-	struct cstmt *block = confdoc_block(d, "input", c->block, true);
+	struct cstmt *block = c->block ? confdoc_block(d, "input", c->block, true) : d->root;
 	confdoc_set(d, block, c->key, NULL, value);
 	settings_common_changed(p->s, false);
-	settings_command(p->s, "input %s %s %s", c->block, c->key, value);
+	if (c->block) {
+		settings_command(p->s, "input %s %s %s", c->block, c->key, value);
+	} else {
+		settings_command(p->s, "%s %s", c->key, value);
+	}
 }
 
 static gboolean on_switch(GtkSwitch *widget, gboolean active, gpointer data) {
@@ -261,7 +276,7 @@ void mouse_page_refresh(struct settings *s) {
 		case CONTROL_CHOICE:;
 			guint sel = 0;
 			for (guint v = 0; value && c->values[v]; v++) {
-				if (strcmp(value, c->values[v]) == 0) {
+				if (g_ascii_strcasecmp(value, c->values[v]) == 0) {
 					sel = v;
 				}
 			}
@@ -311,6 +326,8 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	GtkWidget *touchpad = ui_group(content, "Touchpad",
 		"Only shown by devices that support a setting; other devices ignore it.");
 	add_controls(p, touchpad, touchpad_controls);
+	GtkWidget *windows = ui_group(content, "Moving windows", "Window mode only.");
+	add_controls(p, windows, window_controls);
 
 	p->cursor_themes = g_ptr_array_new_with_free_func(g_free);
 	char *user_icons = g_build_filename(g_get_user_data_dir(), "icons", NULL);
