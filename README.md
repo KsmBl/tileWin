@@ -258,6 +258,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), pinned apps, places and power entries of the start menu |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
+| Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
+| Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 | Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size |
 

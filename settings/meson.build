@@ -3,6 +3,7 @@ executable(
 		'confdoc.c',
 		'ipc.c',
 		'main.c',
+		'page_bluetooth.c',
 		'page_keyboard.c',
 		'page_launcher.c',
 		'page_menus.c',
