@@ -12,6 +12,7 @@ struct seatop_move_floating_event {
 	double dx, dy; // cursor offset in container
 	double start_x, start_y;
 	bool restore_on_drag; // maximized or snapped window being dragged
+	struct wlr_box before; // where the window was before the drag
 };
 
 static void finalize_move(struct sway_seat *seat) {
@@ -24,6 +25,11 @@ static void finalize_move(struct sway_seat *seat) {
 	enum tw_snap snap = tw_snap_preview_finish();
 	if (snap != TW_SNAP_NONE && !e->restore_on_drag) {
 		tw_snap_to(e->con, snap);
+		// restoring brings the window back to where the drag started, not
+		// to the edge it was dropped at
+		if (e->before.width > 0 && e->before.height > 0) {
+			e->con->tw.restore_box = e->before;
+		}
 	}
 	transaction_commit_dirty();
 
@@ -60,6 +66,7 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 		// Keep the cursor at the same relative spot of the title bar.
 		double frac = e->con->pending.width > 0 ? e->dx / e->con->pending.width : 0.5;
 		tw_restore(e->con);
+		e->before = e->con->tw.restore_box;
 		e->dx = frac * e->con->pending.width;
 		struct tw_insets in = tw_deco_insets(false);
 		if (e->dy > in.top) {
@@ -105,6 +112,10 @@ void seatop_begin_move_floating(struct sway_seat *seat,
 	e->start_x = cursor->cursor->x;
 	e->start_y = cursor->cursor->y;
 	e->restore_on_drag = con->pending.tw_maximized || con->tw.snap != TW_SNAP_NONE;
+	if (!e->restore_on_drag) {
+		e->before = (struct wlr_box){ (int)con->pending.x, (int)con->pending.y,
+			(int)con->pending.width, (int)con->pending.height };
+	}
 
 	seat->seatop_impl = &seatop_impl;
 	seat->seatop_data = e;
