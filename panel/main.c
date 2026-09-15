@@ -310,6 +310,7 @@ int main(int argc, char **argv) {
 	panel_outputs_update_bars(&panel);
 	notify_init(&panel);
 	bt_init(&panel);
+	clipboard_init(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	watch_files(&panel);
@@ -336,6 +337,7 @@ int main(int argc, char **argv) {
 		loop_poll(panel.loop);
 	}
 
+	clipboard_fini(&panel);
 	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);

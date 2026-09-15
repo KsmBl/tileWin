@@ -146,6 +146,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Ctrl+Alt+Del | Shut down dialog: shut down, restart, sleep, lock or log out |
 | Win+Page Up / Win+Page Down | Maximize / minimize the window |
 | Win+A / Win+N | Quick settings / notifications (Action Center) |
+| Win+V | Clipboard history |
 | Three fingers up / down on the touchpad | Task view / show the desktop |
 | Three fingers left / right on the touchpad | Next / previous desktop |
 
@@ -187,6 +188,12 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 `Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness, the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
 
 Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
+
+### Clipboard history
+
+`Win+V` (or `tilewinmsg panel clipboard`) lists the last 25 copied texts and pictures. Click one (or pick it with the arrow keys and Enter) to paste it into the window you were using; tileWin types Ctrl+V for you (Ctrl+Shift+V in terminals). Pin entries to keep them after a restart, × removes one, *Clear all* removes everything that isn't pinned.
+
+Copies that password managers mark as secret are not recorded. In taskbar.conf, `clipboard_history no` turns the history off and `clipboard_paste no` only copies the entry without pasting it.
 
 ### Bluetooth
 

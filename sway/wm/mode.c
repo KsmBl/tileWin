@@ -233,6 +233,7 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 		{ "Next", "minimize enable" },
 		{ "n", "panel notifications" },
 		{ "a", "panel quicksettings" },
+		{ "v", "panel clipboard" },
 	};
 	for (size_t i = 0; tw_mode == TW_MODE_WINDOW && i < sizeof(window_keys) / sizeof(window_keys[0]); i++) {
 		xkb_keysym_t sym = xkb_keysym_from_name(window_keys[i][0], XKB_KEYSYM_NO_FLAGS);

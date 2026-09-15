@@ -13,10 +13,12 @@ protocols = [
 	wl_protocol_dir / 'stable/viewporter/viewporter.xml',
 	wl_protocol_dir / 'unstable/xdg-output/xdg-output-unstable-v1.xml',
 	wl_protocol_dir / 'staging/ext-session-lock/ext-session-lock-v1.xml',
+	wl_protocol_dir / 'staging/ext-data-control/ext-data-control-v1.xml',
 	'wlr-layer-shell-unstable-v1.xml',
 	'wlr-output-power-management-unstable-v1.xml',
 	'wlr-screencopy-unstable-v1.xml',
 	'wlr-gamma-control-unstable-v1.xml',
+	'virtual-keyboard-unstable-v1.xml',
 ]
 
 wl_protos_src = []

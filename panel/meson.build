@@ -27,6 +27,7 @@ executable(
 		'apps.c',
 		'bar.c',
 		'bluetooth.c',
+		'clipboard.c',
 		'config.c',
 		'desktop.c',
 		'draw.c',

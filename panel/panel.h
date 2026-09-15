@@ -7,12 +7,14 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 #include "cursor-shape-v1-client-protocol.h"
+#include "ext-data-control-v1-client-protocol.h"
 #include "list.h"
 #include "loop.h"
 #include "pool-buffer.h"
 #include "tw_theme.h"
 #include "twconf.h"
 #include "viewporter-client-protocol.h"
+#include "virtual-keyboard-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
@@ -307,6 +309,8 @@ struct panel {
 	struct zxdg_output_manager_v1 *xdg_output_manager;
 	struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
 	struct wp_viewporter *viewporter;
+	struct ext_data_control_manager_v1 *data_control;
+	struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard;
 	struct zwlr_screencopy_manager_v1 *screencopy;
 	uint32_t screencopy_version;
 	struct wl_list outputs;  // panel_output::link
@@ -405,6 +409,7 @@ enum popup_kind {
 	POPUP_QUICKSETTINGS,
 	POPUP_BLUETOOTH,
 	POPUP_SNIP,
+	POPUP_CLIPBOARD,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -454,6 +459,11 @@ void notify_set_dnd(struct panel *panel, bool on);
 /* The bell of the notifications button, crossed out for do not disturb. */
 void notify_draw_bell(cairo_t *cr, double x, double y, double size, uint32_t color,
 	bool crossed);
+
+/* clipboard.c: clipboard history (Win+V) */
+void clipboard_init(struct panel *panel);
+void clipboard_fini(struct panel *panel);
+void clipboard_toggle(struct panel *panel, struct panel_output *output);
 
 /* snip.c: the snipping toolbar (Win+Shift+S) */
 void snip_toolbar_toggle(struct panel *panel, struct panel_output *output);
