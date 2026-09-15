@@ -128,6 +128,7 @@ void tw_alttab_step(struct sway_seat *seat, int direction) {
 		state.seat = seat;
 		collect(seat);
 		int n = state.items->length;
+		tw_panel_command("close"); // the start menu and other taskbar popups
 		if (n == 0) {
 			finish();
 			return;

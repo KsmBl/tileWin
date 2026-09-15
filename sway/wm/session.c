@@ -153,6 +153,12 @@ void tw_panel_stop(void) {
 	}
 }
 
+void tw_panel_command(const char *args) {
+	json_object *data = json_object_new_object();
+	json_object_object_add(data, "args", json_object_new_string(args));
+	ipc_event_tilewin("panel", data);
+}
+
 void tw_panel_config_reloaded(void) {
 	const char *cmd = config ? config->tw_panel_command : NULL;
 	bool enabled = panel_command_enabled(cmd);

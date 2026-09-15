@@ -652,6 +652,7 @@ void tw_taskview_open(struct sway_seat *seat) {
 		return;
 	}
 	tw_alttab_cancel();
+	tw_panel_command("close"); // the start menu and other taskbar popups
 	struct sway_workspace *ws = seat_get_focused_workspace(seat);
 	if (!ws || !ws->output) {
 		return;

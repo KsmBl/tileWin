@@ -240,11 +240,9 @@ struct cmd_results *cmd_panel(int argc, char **argv) {
 	if ((error = checkarg(argc, "panel", EXPECTED_AT_LEAST, 1))) {
 		return error;
 	}
-	json_object *data = json_object_new_object();
 	char *args = join_args(argv, argc);
-	json_object_object_add(data, "args", json_object_new_string(args));
+	tw_panel_command(args);
 	free(args);
-	ipc_event_tilewin("panel", data);
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

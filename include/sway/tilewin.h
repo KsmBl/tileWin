@@ -238,6 +238,8 @@ void tw_panel_start(void);
 void tw_panel_restart(void);
 void tw_panel_stop(void);
 void tw_panel_config_reloaded(void);
+/* Sends "panel <args>" to the taskbar, e.g. "close" to close its menus. */
+void tw_panel_command(const char *args);
 pid_t tw_panel_pid(void);
 bool tw_restart(bool relaunch_apps, char **error);
 void tw_session_restore(void);
