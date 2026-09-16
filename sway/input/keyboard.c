@@ -39,6 +39,12 @@ static struct modifier_key {
 	{ "Mod5", WLR_MODIFIER_MOD5 },
 };
 
+static bool release_binding_cancelled;
+
+void tw_cancel_release_binding(void) {
+	release_binding_cancelled = true;
+}
+
 uint32_t get_modifier_mask_by_name(const char *name) {
 	int i;
 	for (i = 0; i < (int)(sizeof(modifiers) / sizeof(struct modifier_key)); ++i) {
@@ -447,6 +453,7 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 
 	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 		cursor_notify_key_press(seat->cursor);
+		release_binding_cancelled = false;
 	}
 
 	// Identify new keycode, raw keysym(s), and translated keysym(s)
@@ -501,11 +508,15 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 			shortcuts_inhibited, device_identifier,
 			exact_identifier, keyboard->effective_layout);
 
-	// Execute stored release binding once no longer active
+	// Execute stored release binding once no longer active, unless the key was
+	// held to drag or click with the mouse (Super+drag must not open the start
+	// menu when Super is let go)
 	if (keyboard->held_binding && binding_released != keyboard->held_binding &&
 			event->state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-		seat_execute_command(seat, keyboard->held_binding);
-		handled = true;
+		if (!release_binding_cancelled) {
+			seat_execute_command(seat, keyboard->held_binding);
+			handled = true;
+		}
 	}
 	if (binding_released != keyboard->held_binding) {
 		keyboard->held_binding = NULL;

@@ -365,6 +365,7 @@ static void handle_pointer_button(struct wl_listener *listener, void *data) {
 
 	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		cursor->pressed_button_count++;
+		tw_cancel_release_binding();
 	} else {
 		if (cursor->pressed_button_count > 0) {
 			cursor->pressed_button_count--;
@@ -384,6 +385,7 @@ void dispatch_cursor_axis(struct sway_cursor *cursor,
 }
 
 static void handle_pointer_axis(struct wl_listener *listener, void *data) {
+	tw_cancel_release_binding();
 	struct sway_cursor *cursor = wl_container_of(listener, cursor, axis);
 	struct wlr_pointer_axis_event *event = data;
 	cursor_handle_activity_from_device(cursor, &event->pointer->base);

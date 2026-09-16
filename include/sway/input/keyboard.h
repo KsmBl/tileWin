@@ -10,6 +10,12 @@
  *
  * Returns the modifier mask or 0 if the name isn't found.
  */
+/*
+ * A key is held while the mouse is used (e.g. Super+drag to move a window):
+ * its --release binding is skipped when it is let go.
+ */
+void tw_cancel_release_binding(void);
+
 uint32_t get_modifier_mask_by_name(const char *name);
 
 /**
