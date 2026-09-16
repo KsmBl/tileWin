@@ -213,6 +213,8 @@ void tw_snap_to(struct sway_container *con, enum tw_snap snap);
  * client commits a smaller size (terminals resize in character cells).
  */
 bool tw_container_fills_slot(struct sway_container *con);
+/* Resizes a floating window to its natural size without moving it away. */
+void tw_floating_resize_in_place(struct sway_container *con);
 /* Positions the content of such a window and fills the rest of the slot. */
 void tw_update_content_fill(struct sway_container *con);
 void tw_place_new_window(struct sway_container *con);

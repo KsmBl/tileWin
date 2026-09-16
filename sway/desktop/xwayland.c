@@ -587,17 +587,26 @@ static void handle_request_configure(struct wl_listener *listener, void *data) {
 			ev->width, ev->height);
 		return;
 	}
-	if (container_is_floating(view->container)) {
+	struct sway_container *con = view->container;
+	if (container_is_floating(con)) {
+		if (tw_container_fills_slot(con)) {
+			// snapped or maximized: the window keeps the size of its slot
+			configure(view, con->current.content_x, con->current.content_y,
+					con->current.content_width, con->current.content_height);
+			return;
+		}
 		// Respect minimum and maximum sizes
 		view->natural_width = ev->width;
 		view->natural_height = ev->height;
-		container_floating_resize_and_center(view->container);
+		if (tw_mode == TW_MODE_WINDOW) {
+			tw_floating_resize_in_place(con);
+		} else {
+			container_floating_resize_and_center(con);
+		}
 
-		configure(view, view->container->pending.content_x,
-				view->container->pending.content_y,
-				view->container->pending.content_width,
-				view->container->pending.content_height);
-		node_set_dirty(&view->container->node);
+		configure(view, con->pending.content_x, con->pending.content_y,
+				con->pending.content_width, con->pending.content_height);
+		node_set_dirty(&con->node);
 	} else {
 		configure(view, view->container->current.content_x,
 				view->container->current.content_y,

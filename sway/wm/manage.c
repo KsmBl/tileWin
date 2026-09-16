@@ -244,6 +244,24 @@ bool tw_container_fills_slot(struct sway_container *con) {
 		(con->pending.tw_maximized || con->tw.snap != TW_SNAP_NONE);
 }
 
+/*
+ * A window that asks for another size on its own (a media player starting the
+ * next video) keeps the corner it is at instead of jumping to the middle of
+ * the screen, and stays on the screen it is on.
+ */
+void tw_floating_resize_in_place(struct sway_container *con) {
+	double x = con->pending.x, y = con->pending.y;
+	container_floating_resize_and_center(con);
+	struct sway_workspace *ws = con->pending.workspace;
+	if (ws) {
+		double max_x = ws->x + ws->width - con->pending.width;
+		double max_y = ws->y + ws->height - con->pending.height;
+		x = fmin(fmax(x, ws->x), fmax(ws->x, max_x));
+		y = fmin(fmax(y, ws->y), fmax(ws->y, max_y));
+	}
+	container_floating_translate(con, x - con->pending.x, y - con->pending.y);
+}
+
 enum fill {
 	FILL_OPAQUE,      // color holds the client's own background color
 	FILL_TRANSLUCENT, // the client is see-through: the desktop stays behind it
