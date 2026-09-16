@@ -543,6 +543,16 @@ static list_t *item_menu(struct desktop_item *item) {
 
 /* ---------- input ---------- */
 
+enum dialog_mode {
+	DIALOG_NEW_FOLDER,
+	DIALOG_NEW_TEXT,
+	DIALOG_NEW_SHORTCUT,
+	DIALOG_RENAME,
+	DIALOG_DELETE, // there is no trash here: delete for good?
+};
+
+static void open_dialog(struct panel *panel, enum dialog_mode mode, struct desktop_item *item);
+
 static int surface_offset_y(struct psurface *s) {
 	struct panel *panel = s->panel;
 	bool bottom = panel->config ? panel->config->layouts[panel->layout].bottom : true;
@@ -567,6 +577,23 @@ static void open_item(struct panel *panel, struct desktop_item *item) {
 	char *quoted = g_shell_quote(item->path);
 	ipc_panel_commandf(panel, "exec xdg-open %s", quoted);
 	g_free(quoted);
+}
+
+/*
+ * Files and folders go to the trash. Some places have none (another mount, a
+ * file system without one), and there the caller asks whether to delete.
+ */
+static bool trash_item(struct desktop_item *item) {
+	GFile *file = g_file_new_for_path(item->path);
+	GError *error = NULL;
+	bool trashed = g_file_trash(file, NULL, &error);
+	if (!trashed) {
+		sway_log(SWAY_INFO, "Could not move %s to the trash: %s", item->path,
+			error ? error->message : "unknown error");
+		g_clear_error(&error);
+	}
+	g_object_unref(file);
+	return trashed;
 }
 
 /* The cell the dragged icon would land in. */
@@ -674,6 +701,25 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 	menu_open(panel, item ? item_menu(item) : background_menu(panel), true, anchor, context);
 }
 
+/* Delete moves the selected icons to the trash. */
+static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
+		uint32_t modifiers) {
+	struct panel *panel = s->panel;
+	struct desktop_item *item = item_at(desktop.selected);
+	if (sym == XKB_KEY_Delete || sym == XKB_KEY_KP_Delete) {
+		if (item && trash_item(item)) {
+			rescan_now(panel);
+		} else if (item) {
+			open_dialog(panel, DIALOG_DELETE, item);
+		}
+	} else if (sym == XKB_KEY_Escape) {
+		desktop.selected = -1;
+		desktop_refresh_surfaces(panel);
+	} else if (sym == XKB_KEY_F5) {
+		rescan_now(panel);
+	}
+}
+
 static void desktop_configured(struct psurface *s) {
 	struct panel_output *output = s->data;
 	if (s == output->desktop) {
@@ -697,12 +743,14 @@ static const struct psurface_impl icons_impl = {
 	.pointer_motion = desktop_motion,
 	.pointer_leave = desktop_leave,
 	.pointer_button = desktop_button,
+	.key = desktop_key,
 	.configured = desktop_configured,
 	.closed = desktop_closed,
 };
 
 static const struct psurface_impl background_impl = {
 	.pointer_button = desktop_button,
+	.key = desktop_key,
 	.closed = desktop_closed,
 };
 
@@ -717,6 +765,9 @@ void desktop_create(struct panel_output *output) {
 	struct psurface *bg = psurface_create(panel, output, &background_impl, output,
 		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "tilewin-desktop");
 	bg->catcher = true; // transparent 1x1 buffer scaled to the whole surface
+	// clicking the desktop gives it the keyboard, for Delete, F2 and Escape
+	zwlr_layer_surface_v1_set_keyboard_interactivity(bg->layer_surface,
+		ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
 	if (panel->viewporter) {
 		bg->viewport = wp_viewporter_get_viewport(panel->viewporter, bg->surface);
 	}
@@ -731,6 +782,8 @@ void desktop_create(struct panel_output *output) {
 	zwlr_layer_surface_v1_set_anchor(icons->layer_surface,
 		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
 		ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+	zwlr_layer_surface_v1_set_keyboard_interactivity(icons->layer_surface,
+		ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
 	output->desktop = icons;
 	icons->req_width = -1;
 	update_icons_size(panel, icons);
@@ -751,13 +804,6 @@ void desktop_destroy(struct panel_output *output) {
 
 /* ---------- name dialog: new folder, document, shortcut and rename ---------- */
 
-enum dialog_mode {
-	DIALOG_NEW_FOLDER,
-	DIALOG_NEW_TEXT,
-	DIALOG_NEW_SHORTCUT,
-	DIALOG_RENAME,
-};
-
 enum {
 	DLG_HS_OK = 1,
 	DLG_HS_CANCEL,
@@ -765,7 +811,7 @@ enum {
 
 struct name_dialog {
 	enum dialog_mode mode;
-	char *path; // item being renamed
+	char *path; // item being renamed or deleted
 	char text[512];
 	struct text_cursor tc;
 	char error[200];
@@ -797,10 +843,11 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 	const char *font = tw_theme_str(t, "menu.font", bar_font(panel));
 
 	static const char *const titles[] = { "New folder", "New text document", "New shortcut",
-		"Rename" };
+		"Rename", "Delete" };
 	static const char *const prompts[] = { "Name of the new folder:",
 		"Name of the new document:",
-		"Type a program, a file or folder, or a web address:", "New name:" };
+		"Type a program, a file or folder, or a web address:", "New name:",
+		"There is no trash for this place. Delete it for good?" };
 	int x0 = M + 18, cw = W - 2 * M - 36, y = M + 14;
 	pd_text(cr, bar_bold_font(panel), titles[d->mode], x0, y, cw, 24, fg, PD_LEFT);
 	y += 34;
@@ -808,7 +855,9 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 	y += 26;
 
 	int fh = 30;
-	if (style == PS_CLASSIC) {
+	if (d->mode == DIALOG_DELETE) {
+		pd_text_wrapped(cr, font, d->text, x0, y, cw, 2, fg, true);
+	} else if (style == PS_CLASSIC) {
 		pd_rect(cr, x0, y, cw, fh, field_bg);
 		pd_bevel(cr, x0, y, cw, fh, true);
 	} else {
@@ -821,9 +870,11 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 		cairo_stroke(cr);
 		pd_rect(cr, x0 + 1, y + fh - 2, cw - 2, 2, accent);
 	}
-	struct text_style ts = { .font = font, .fg = field_fg, .caret = true };
-	text_style_colors(panel, &ts);
-	text_draw(cr, &ts, d->text, &d->tc, x0 + 8, y, cw - 16, fh);
+	if (d->mode != DIALOG_DELETE) {
+		struct text_style ts = { .font = font, .fg = field_fg, .caret = true };
+		text_style_colors(panel, &ts);
+		text_draw(cr, &ts, d->text, &d->tc, x0 + 8, y, cw - 16, fh);
+	}
 	y += fh + 6;
 	if (d->error[0]) {
 		pd_text(cr, font, d->error, x0, y, cw, 20, 0xe04040ff, PD_LEFT);
@@ -837,7 +888,8 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 		bool primary;
 		int kind;
 	} buttons[] = {
-		{ ok_x, d->mode == DIALOG_RENAME ? "Rename" : "Create", true, DLG_HS_OK },
+		{ ok_x, d->mode == DIALOG_RENAME ? "Rename" :
+			d->mode == DIALOG_DELETE ? "Delete" : "Create", true, DLG_HS_OK },
 		{ cancel_x, "Cancel", false, DLG_HS_CANCEL },
 	};
 	for (size_t i = 0; i < 2; i++) {
@@ -862,6 +914,27 @@ static void dialog_render(struct popup *p, cairo_t *cr) {
 		}
 		psurface_add_hotspot(p->surface, bx, by, bw, bh, NULL, buttons[i].kind, 0, NULL);
 	}
+}
+
+/* Deletes a file, or a folder with everything in it (there is no trash here). */
+static bool delete_recursive(GFile *file, GError **error) {
+	GFileEnumerator *dir = g_file_enumerate_children(file, G_FILE_ATTRIBUTE_STANDARD_NAME,
+		G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
+	if (dir) {
+		GFileInfo *info = NULL;
+		while ((info = g_file_enumerator_next_file(dir, NULL, NULL))) {
+			GFile *child = g_file_enumerator_get_child(dir, info);
+			bool gone = delete_recursive(child, error);
+			g_object_unref(child);
+			g_object_unref(info);
+			if (!gone) {
+				g_object_unref(dir);
+				return false;
+			}
+		}
+		g_object_unref(dir);
+	}
+	return g_file_delete(file, NULL, error);
 }
 
 /* Escapes a value for a double-quoted desktop entry Exec argument. */
@@ -950,6 +1023,22 @@ static bool create_shortcut(struct panel *panel, const char *dir, const char *ta
 static void dialog_submit(struct popup *p) {
 	struct name_dialog *d = p->data;
 	struct panel *panel = p->panel;
+	if (d->mode == DIALOG_DELETE) {
+		GFile *file = g_file_new_for_path(d->path);
+		GError *error = NULL;
+		if (!delete_recursive(file, &error)) {
+			snprintf(d->error, sizeof(d->error), "%s",
+				error ? error->message : "Could not delete it");
+			g_clear_error(&error);
+			g_object_unref(file);
+			popup_set_dirty(p);
+			return;
+		}
+		g_object_unref(file);
+		popup_close_later(panel);
+		rescan_now(panel);
+		return;
+	}
 	char *text = g_strstrip(g_strdup(d->text));
 	d->error[0] = '\0';
 	if (!*text) {
@@ -1038,6 +1127,9 @@ static void dialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint
 		dialog_submit(p);
 		return;
 	default:
+		if (d->mode == DIALOG_DELETE) {
+			return;
+		}
 		switch (text_key(d->text, sizeof(d->text), &d->tc, sym, utf8, mods)) {
 		case TEXT_KEY_IGNORED:
 			return;
@@ -1076,7 +1168,10 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 	struct name_dialog *d = calloc(1, sizeof(*d));
 	d->mode = mode;
 	char *dir = desktop_directory();
-	if (item) {
+	if (mode == DIALOG_DELETE && item) {
+		d->path = strdup(item->path);
+		snprintf(d->text, sizeof(d->text), "%s", item->label);
+	} else if (item) {
 		d->path = strdup(item->path);
 		snprintf(d->text, sizeof(d->text), "%s", item->name);
 	} else if (mode == DIALOG_NEW_FOLDER || mode == DIALOG_NEW_TEXT) {
@@ -1151,14 +1246,10 @@ void desktop_handle_command(struct panel *panel, int argc, char **argv) {
 	} else if (strcmp(action, "rename") == 0 && item) {
 		open_dialog(panel, DIALOG_RENAME, item);
 	} else if (strcmp(action, "delete") == 0 && item) {
-		GFile *file = g_file_new_for_path(item->path);
-		GError *error = NULL;
-		if (!g_file_trash(file, NULL, &error)) {
-			sway_log(SWAY_ERROR, "Could not move %s to the trash: %s", item->path,
-				error ? error->message : "unknown error");
-			g_clear_error(&error);
+		if (trash_item(item)) {
+			rescan_now(panel);
+		} else {
+			open_dialog(panel, DIALOG_DELETE, item);
 		}
-		g_object_unref(file);
-		rescan_now(panel);
 	}
 }
