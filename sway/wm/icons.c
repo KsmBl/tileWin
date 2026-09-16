@@ -31,6 +31,9 @@ void tw_icon_cache_clear(void) {
 }
 
 cairo_surface_t *tw_icon_for_view(struct sway_view *view, int size) {
+	if (!view || !view->surface) {
+		return NULL; // a window that is being closed has no icon to look up
+	}
 	const char *app_id = view_get_app_id(view);
 	if (!app_id) {
 		app_id = view_get_class(view);

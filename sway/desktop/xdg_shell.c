@@ -159,7 +159,9 @@ static void get_constraints(struct sway_view *view, double *min_width,
 static const char *get_string_prop(struct sway_view *view,
 		enum sway_view_prop prop) {
 	struct sway_xdg_shell_view *xdg_shell_view = xdg_shell_view_from_view(view);
-	if (xdg_shell_view == NULL) {
+	// the toplevel is gone once the window is destroyed, while the container
+	// may still be arranged one last time
+	if (xdg_shell_view == NULL || view->wlr_xdg_toplevel == NULL) {
 		return NULL;
 	}
 	switch (prop) {

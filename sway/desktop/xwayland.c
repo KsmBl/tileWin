@@ -225,7 +225,7 @@ static struct sway_xwayland_view *xwayland_view_from_view(
 }
 
 static const char *get_string_prop(struct sway_view *view, enum sway_view_prop prop) {
-	if (xwayland_view_from_view(view) == NULL) {
+	if (xwayland_view_from_view(view) == NULL || view->wlr_xwayland_surface == NULL) {
 		return NULL;
 	}
 	switch (prop) {
