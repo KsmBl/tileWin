@@ -1,6 +1,7 @@
 panel_tray_files = have_tray ? files(
 	'tray/host.c',
 	'tray/item.c',
+	'tray/menu.c',
 	'tray/watcher.c',
 ) : []
 

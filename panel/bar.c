@@ -576,6 +576,11 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		return;
 	}
 	const char *cmd = argv[0];
+	if (strcmp(cmd, "tray_event") == 0 && argc > 3) {
+		tray_handle_event_command(panel, argv[1], argv[2], atoi(argv[3]));
+		free_argv(argc, argv);
+		return;
+	}
 	struct panel_output *output = panel_focused_output(panel);
 	if (strcmp(cmd, "startmenu") == 0) {
 		const char *action = argc > 1 ? argv[1] : "toggle";

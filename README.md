@@ -32,7 +32,7 @@ tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are w
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem), clock with calendar, volume, network, battery, CPU, memory, brightness, keyboard layout.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with calendar, volume, network, battery, CPU, memory, brightness, keyboard layout.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -436,7 +436,6 @@ Wallpapers are rendered once per screen size and cached in `~/.cache/tileWin/wal
 - There is no background blur, so the Windows 7 glass is translucent only.
 - Windows 11 rounds only the frame and title bar; window contents keep square corners.
 - Apps that draw their own title bars (GTK4/libadwaita) keep them in window mode.
-- The tray does not render DBusMenu menus yet; right-click on a tray icon asks the app to show its own menu.
 - A compositor restart closes running Wayland apps (`restart relaunch-apps` starts them again).
 
 ## License

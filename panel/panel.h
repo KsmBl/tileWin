@@ -435,6 +435,9 @@ void rundialog_open(struct panel *panel, struct panel_output *output);
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
 void launcher_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
+/* A menu entry of a tray icon was clicked ("panel tray_event <service> <path> <id>"). */
+void tray_handle_event_command(struct panel *panel, const char *service,
+	const char *path, int id);
 
 /* desktop.c */
 char *desktop_directory(void);

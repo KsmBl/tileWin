@@ -12,8 +12,11 @@
 #include "swaybar/tray/icon.h"
 #include "tray/host.h"
 #include "tray/item.h"
+#include "tray/menu.h"
 #include "tray/tray.h"
 #include "tray/watcher.h"
+
+static struct swaybar_tray *active_tray; // for "panel tray_event"
 
 static int handle_lost_watcher(sd_bus_message *msg, void *data, sd_bus_error *error) {
 	char *service, *old_owner, *new_owner;
@@ -97,6 +100,7 @@ static void tray_widget_set_active(struct widget *w, bool active) {
 		struct swaybar_tray *tray = create_tray(w->panel);
 		if (tray) {
 			w->data = tray;
+			active_tray = tray;
 			loop_add_fd(w->panel->loop, tray->fd, POLLIN, tray_in, tray);
 			tray_process(tray);
 		}
@@ -107,6 +111,9 @@ static void tray_widget_destroy(struct widget *w) {
 	struct swaybar_tray *tray = w->data;
 	if (tray) {
 		loop_remove_fd(w->panel->loop, tray->fd);
+		if (active_tray == tray) {
+			active_tray = NULL;
+		}
 		destroy_tray(tray);
 	}
 }
@@ -168,6 +175,13 @@ static bool tray_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 	if (!sni) {
 		return false;
 	}
+	// Most icons publish their menu on the bus and do nothing when they are
+	// clicked: show that menu instead of asking them to.
+	bool wants_menu = button == BTN_RIGHT || (button == BTN_LEFT && sni->item_is_menu);
+	if (wants_menu && sni_has_menu(sni)) {
+		sni_menu_open(sni, popup_anchor_for_bar(s, (int)x, 0));
+		return true;
+	}
 	int gx = (s->output ? s->output->x : 0) + (int)x;
 	int gy = (s->output ? s->output->y : 0) + (int)y;
 	sni_click(sni, gx, gy, button);
@@ -188,6 +202,13 @@ static char *tray_tooltip(struct widget *w, struct hotspot *hs) {
 	return sni && sni->title && *sni->title ? strdup(sni->title) : NULL;
 }
 
+void tray_handle_event_command(struct panel *panel, const char *service,
+		const char *path, int id) {
+	if (active_tray) {
+		sni_menu_event(active_tray, service, path, id);
+	}
+}
+
 const struct widget_impl widget_tray = {
 	.type = "tray",
 	.destroy = tray_widget_destroy,
@@ -203,6 +224,11 @@ const struct widget_impl widget_tray = {
 
 static int tray_measure(struct widget *w, struct render_ctx *ctx) {
 	return 0;
+}
+
+void tray_handle_event_command(struct panel *panel, const char *service,
+		const char *path, int id) {
+	// built without tray support
 }
 
 const struct widget_impl widget_tray = {
