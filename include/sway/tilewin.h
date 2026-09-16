@@ -222,6 +222,8 @@ void tw_convert_to_window_mode(void);
 /* Refits maximized and snapped windows after the output's usable area changed. */
 void tw_workarea_changed(struct sway_output *output);
 void tw_convert_to_tile_mode(void);
+/* Gives every open window the border style of the current mode's config. */
+void tw_reset_borders(void);
 struct sway_container *tw_next_focus_candidate(struct sway_seat *seat,
 		struct sway_workspace *ws, struct sway_container *exclude);
 void tw_view_notify_maximized(struct sway_view *view, bool maximized);

@@ -811,6 +811,33 @@ static void workspace_to_tile_mode(struct sway_workspace *ws) {
 	arrange_workspace(ws);
 }
 
+/*
+ * A window gets its border style when it opens. Switching mode swaps the
+ * config, so windows that were already open would keep the other mode's style
+ * (a tiled window with the title bar of window mode): give them the new one.
+ */
+static void reset_border(struct sway_container *con, void *data) {
+	if (!con->view) {
+		return;
+	}
+	bool floating = container_is_floating(con);
+	enum sway_container_border border = floating ? config->floating_border : config->border;
+	con->saved_border = border;
+	if (con->pending.border == B_CSD) {
+		return; // the client draws its own frame
+	}
+	con->pending.border = border;
+	con->pending.border_thickness = floating ? config->floating_border_thickness :
+		config->border_thickness;
+	tw_container_update_deco_state(con);
+	view_autoconfigure(con->view);
+	node_set_dirty(&con->node);
+}
+
+void tw_reset_borders(void) {
+	root_for_each_container(reset_border, NULL);
+}
+
 static struct timespec window_mode_since;
 
 void tw_convert_to_window_mode(void) {

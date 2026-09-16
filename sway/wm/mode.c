@@ -359,6 +359,7 @@ static void do_mode_switch(void *data) {
 	} else {
 		tw_convert_to_tile_mode();
 	}
+	tw_reset_borders();
 	if (theme) {
 		root_for_each_container(mark_container_dirty, NULL);
 	}
