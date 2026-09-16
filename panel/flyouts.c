@@ -328,6 +328,7 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 #define NET_ROW 48
 #define NET_ROWS 6
 #define NET_EXPAND 42
+#define NET_SECRET 26 // the line showing the password of a saved network
 #define NET_MESSAGE 56
 #define NET_DETAILS 46
 
@@ -340,6 +341,8 @@ enum {
 	NET_HS_SETTINGS,
 	NET_HS_REFRESH,
 	NET_HS_COPY,
+	NET_HS_SECRET,      // show the password of a saved network
+	NET_HS_COPY_SECRET,
 };
 
 struct wifi_net {
@@ -357,6 +360,8 @@ struct net_flyout {
 	bool wired;
 	bool have_nmcli, wifi_enabled, loaded, rescanned;
 	char *expanded; // SSID of the expanded row
+	char *secret_ssid; // saved network whose password was asked for
+	char secret[128];  // its password, empty while NetworkManager is asked
 	bool asking_password;
 	char password[128];
 	struct text_cursor password_cursor;
@@ -382,6 +387,18 @@ static void wifi_net_free(struct wifi_net *n) {
 	free(n->ssid);
 	free(n->security);
 	free(n);
+}
+
+/* Whether the password of a saved network is shown right now. */
+static bool net_secret_shown(struct net_flyout *f) {
+	return f->secret_ssid && f->expanded && strcmp(f->secret_ssid, f->expanded) == 0;
+}
+
+/* Forgets a password that was shown, so it is not kept around. */
+static void net_forget_secret(struct net_flyout *f) {
+	free(f->secret_ssid);
+	f->secret_ssid = NULL;
+	memset(f->secret, 0, sizeof(f->secret));
 }
 
 static void net_clear(struct net_flyout *f) {
@@ -411,7 +428,8 @@ static int net_visible_rows(struct net_flyout *f) {
 static int net_height(struct net_flyout *f) {
 	int h = NET_HEADER + 1 + (f->iface[0] ? NET_DETAILS + 1 : 0);
 	if (net_list_shown(f)) {
-		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0);
+		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
+			(net_secret_shown(f) ? NET_SECRET : 0);
 	} else {
 		h += NET_MESSAGE;
 	}
@@ -592,6 +610,55 @@ static void net_run_action(struct net_flyout *f, const char *command, const char
 	snprintf(f->status, sizeof(f->status), "%s", status);
 	f->status_error = false;
 	proc_run(f->base.panel, command, false, NULL, net_action_done, NULL);
+	net_update(f);
+}
+
+static void net_secret_done(void *data, const char *output) {
+	struct net_flyout *f = net_current;
+	if (!f || !f->secret_ssid) {
+		return;
+	}
+	char *line = strdup(output);
+	line[strcspn(line, "\n")] = '\0';
+	if (strncmp(line, "Error", 5) == 0 || !*line) {
+		snprintf(f->status, sizeof(f->status), "%s", *line ?
+			"NetworkManager did not give the password" :
+			"No saved password, or it may not be read");
+		f->status_error = true;
+		net_forget_secret(f);
+	} else {
+		snprintf(f->secret, sizeof(f->secret), "%s", line);
+		f->status[0] = '\0';
+		f->status_error = false;
+	}
+	memset(line, 0, strlen(line));
+	free(line);
+	net_update(f);
+}
+
+/*
+ * The password of a saved network, from NetworkManager. Reading a secret needs
+ * authorization, so polkit may ask for the password of the computer first.
+ */
+static void net_show_secret(struct net_flyout *f, int index) {
+	if (index < 0 || index >= f->nets->length) {
+		return;
+	}
+	struct wifi_net *n = f->nets->items[index];
+	if (f->secret_ssid && strcmp(f->secret_ssid, n->ssid) == 0) {
+		net_forget_secret(f); // clicking again hides it
+		net_update(f);
+		return;
+	}
+	net_forget_secret(f);
+	f->secret_ssid = strdup(n->ssid);
+	f->status[0] = '\0';
+	char *ssid = shell_quote(n->ssid);
+	char *cmd = format_str("nmcli -s -g 802-11-wireless-security.psk connection show id %s "
+		"2>&1", ssid);
+	proc_run(f->base.panel, cmd, false, NULL, net_secret_done, NULL);
+	free(cmd);
+	free(ssid);
 	net_update(f);
 }
 
@@ -898,7 +965,9 @@ static void net_render(struct popup *p, cairo_t *cr) {
 		for (int i = f->scroll; i < f->nets->length && i < f->scroll + rows; i++) {
 			struct wifi_net *n = f->nets->items[i];
 			bool expanded = f->expanded && strcmp(f->expanded, n->ssid) == 0;
-			struct pbox row = { M + 6, y, W - 2 * M - 12, NET_ROW + (expanded ? NET_EXPAND : 0) };
+			bool shown = expanded && net_secret_shown(f);
+			struct pbox row = { M + 6, y, W - 2 * M - 12, NET_ROW + (expanded ? NET_EXPAND : 0) +
+				(shown ? NET_SECRET : 0) };
 			if (expanded || hovered(&f->base, row)) {
 				fill_hover(cr, &st, row);
 			}
@@ -934,6 +1003,32 @@ static void net_render(struct popup *p, cairo_t *cr) {
 					psurface_add_hotspot(p->surface, button.x, button.y, button.width,
 						button.height, NULL, n->active ? NET_HS_DISCONNECT : NET_HS_CONNECT, i,
 						NULL);
+					bool asked = f->secret_ssid && strcmp(f->secret_ssid, n->ssid) == 0;
+					if (n->known && secured) {
+						struct pbox show = { x0 + cw - 110 - 134, by, 130, bh };
+						draw_button(cr, &st, show, asked ? "Hide password" : "Show password",
+							false, hovered(&f->base, show));
+						psurface_add_hotspot(p->surface, show.x, show.y, show.width,
+							show.height, NULL, NET_HS_SECRET, i, NULL);
+					}
+					if (shown) {
+						// the password on its own line, click it to copy it
+						struct pbox line = { x0 + 34, by + bh, cw - 34, NET_SECRET };
+						if (f->secret[0] && hovered(&f->base, line)) {
+							fill_hover(cr, &st, line);
+						}
+						char text[160];
+						snprintf(text, sizeof(text), f->secret[0] ? "Password: %s" : "%s",
+							f->secret[0] ? f->secret : "Asking NetworkManager...");
+						pd_text(cr, st.font, text, line.x, line.y, line.width - 60, line.height,
+							st.fg, PD_LEFT);
+						if (f->secret[0]) {
+							pd_text(cr, st.font, "Copy", line.x, line.y, line.width,
+								line.height, st.accent, PD_RIGHT);
+							psurface_add_hotspot(p->surface, line.x, line.y, line.width,
+								line.height, NULL, NET_HS_COPY_SECRET, i, NULL);
+						}
+					}
 				}
 			}
 			y += row.height;
@@ -1007,6 +1102,7 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 			free(f->expanded);
 			f->expanded = strdup(n->ssid);
 			f->asking_password = false;
+			net_forget_secret(f);
 			memset(f->password, 0, sizeof(f->password));
 			// keep the expanded row visible
 			if (hs->id >= f->scroll + NET_ROWS - 1 && f->nets->length > NET_ROWS) {
@@ -1017,6 +1113,17 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 		break;
 	case NET_HS_CONNECT:
 		net_connect(f, (int)hs->id);
+		break;
+	case NET_HS_SECRET:
+		net_show_secret(f, (int)hs->id);
+		break;
+	case NET_HS_COPY_SECRET:
+		if (f->secret[0]) {
+			clipboard_copy_text(p->panel, f->secret);
+			snprintf(f->status, sizeof(f->status), "Password copied to the clipboard");
+			f->status_error = false;
+			net_update(f);
+		}
 		break;
 	case NET_HS_DISCONNECT:
 		if (f->wifi_device) {
@@ -1085,6 +1192,7 @@ static void net_destroy(struct popup *p) {
 		loop_remove_timer(p->panel->loop, f->stats_timer);
 	}
 	memset(f->password, 0, sizeof(f->password));
+	net_forget_secret(f);
 	net_clear(f);
 	list_free(f->nets);
 	free(f->expanded);
