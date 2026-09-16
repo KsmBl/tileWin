@@ -244,38 +244,61 @@ bool tw_container_fills_slot(struct sway_container *con) {
 		(con->pending.tw_maximized || con->tw.snap != TW_SNAP_NONE);
 }
 
-/* Color of the client's bottom right pixel, so the fill looks like its background. */
-static bool sample_edge_color(struct sway_view *view, float color[4]) {
+enum fill {
+	FILL_OPAQUE,      // color holds the client's own background color
+	FILL_TRANSLUCENT, // the client is see-through: the desktop stays behind it
+	FILL_UNKNOWN,     // nothing drawn yet: ask again next time
+};
+
+/*
+ * Color for the empty part of the slot of a snapped or maximized window: the
+ * color of the client's bottom right corner, so the fill looks like its
+ * background. A client that is see-through anywhere (a terminal with a
+ * transparent background) gets no fill at all, which would cover the desktop
+ * showing through it.
+ */
+static enum fill fill_color(struct sway_view *view, float color[4]) {
 	struct wlr_texture *texture = view->surface ? wlr_surface_get_texture(view->surface) : NULL;
-	if (!texture) {
-		return false;
+	if (!texture || view->geometry.width < 4 || view->geometry.height < 4) {
+		return FILL_UNKNOWN;
 	}
 	int scale = view->surface->current.scale > 0 ? view->surface->current.scale : 1;
-	int x = (view->geometry.x + view->geometry.width) * scale - 2;
-	int y = (view->geometry.y + view->geometry.height) * scale - 2;
-	if (x < 0 || y < 0 || x >= (int)texture->width || y >= (int)texture->height) {
-		return false;
-	}
-	uint8_t pixel[4];
-	struct wlr_texture_read_pixels_options options = {
-		.data = pixel,
-		.format = DRM_FORMAT_ARGB8888,
-		.stride = 4,
-		.src_box = { x, y, 1, 1 },
+	// the bottom right corner first, then the other corners and the middle;
+	// far enough inside to miss rounded corners
+	static const double points[][2] = {
+		{ 0.94, 0.94 }, { 0.06, 0.06 }, { 0.94, 0.06 }, { 0.06, 0.94 }, { 0.5, 0.5 },
 	};
-	if (!wlr_texture_read_pixels(texture, &options)) {
-		return false;
+	bool found = false;
+	for (size_t i = 0; i < sizeof(points) / sizeof(points[0]); i++) {
+		int x = (int)((view->geometry.x + points[i][0] * view->geometry.width) * scale);
+		int y = (int)((view->geometry.y + points[i][1] * view->geometry.height) * scale);
+		if (x < 0 || y < 0 || x >= (int)texture->width || y >= (int)texture->height) {
+			continue;
+		}
+		uint8_t pixel[4];
+		struct wlr_texture_read_pixels_options options = {
+			.data = pixel,
+			.format = DRM_FORMAT_ARGB8888,
+			.stride = 4,
+			.src_box = { x, y, 1, 1 },
+		};
+		if (!wlr_texture_read_pixels(texture, &options)) {
+			continue;
+		}
+		float alpha = pixel[3] / 255.0f;
+		if (alpha < 0.95f) {
+			return FILL_TRANSLUCENT;
+		}
+		if (!found) {
+			// ARGB8888 is stored as B, G, R, A; the values are premultiplied
+			color[0] = pixel[2] / 255.0f / alpha;
+			color[1] = pixel[1] / 255.0f / alpha;
+			color[2] = pixel[0] / 255.0f / alpha;
+			color[3] = 1.0f;
+			found = true;
+		}
 	}
-	float alpha = pixel[3] / 255.0f;
-	if (alpha < 0.5f) {
-		return false; // transparent edge (CSD shadow): use the theme color
-	}
-	// ARGB8888 is stored as B, G, R, A; the values are premultiplied
-	color[0] = pixel[2] / 255.0f / alpha;
-	color[1] = pixel[1] / 255.0f / alpha;
-	color[2] = pixel[0] / 255.0f / alpha;
-	color[3] = 1.0f;
-	return true;
+	return found ? FILL_OPAQUE : FILL_UNKNOWN;
 }
 
 void tw_update_content_fill(struct sway_container *con) {
@@ -296,36 +319,37 @@ void tw_update_content_fill(struct sway_container *con) {
 		return;
 	}
 	bool gap = view->geometry.width < width || view->geometry.height < height;
-	wlr_scene_node_set_enabled(&bg->node, gap);
-	if (!gap) {
-		return;
-	}
 	// the view tree sits below the title bar inside the content tree; while a
 	// window is still being mapped (e.g. snapped by session restore) it is not
 	// attached there yet, and the fill follows on the next update
 	struct wlr_scene_node *view_node = &view->scene_tree->node;
-	if (view_node->parent != bg->node.parent) {
+	if (!gap || view_node->parent != bg->node.parent) {
 		wlr_scene_node_set_enabled(&bg->node, false);
 		con->tw.content_bg_width = con->tw.content_bg_height = 0;
 		return;
 	}
-	wlr_scene_node_set_position(&bg->node, view_node->x, view_node->y);
-	wlr_scene_node_place_below(&bg->node, view_node);
-	wlr_scene_rect_set_size(bg, width, height);
 	if (con->tw.content_bg_width != view->geometry.width ||
 			con->tw.content_bg_height != view->geometry.height) {
 		float color[4];
-		if (!sample_edge_color(view, color)) {
-			uint32_t c = tw_theme_color(tw_theme, "decoration.active.title_bg", 0xffffffff);
-			color[0] = (c >> 24 & 0xff) / 255.0f;
-			color[1] = (c >> 16 & 0xff) / 255.0f;
-			color[2] = (c >> 8 & 0xff) / 255.0f;
-			color[3] = 1.0f;
+		enum fill fill = fill_color(view, color);
+		con->tw.content_translucent = fill != FILL_OPAQUE;
+		if (fill == FILL_OPAQUE) {
+			wlr_scene_rect_set_color(bg, color);
+			con->tw.content_bg_width = view->geometry.width;
+			con->tw.content_bg_height = view->geometry.height;
+		} else if (fill == FILL_TRANSLUCENT) {
+			con->tw.content_bg_width = view->geometry.width;
+			con->tw.content_bg_height = view->geometry.height;
 		}
-		wlr_scene_rect_set_color(bg, color);
-		con->tw.content_bg_width = view->geometry.width;
-		con->tw.content_bg_height = view->geometry.height;
 	}
+	if (con->tw.content_translucent) {
+		wlr_scene_node_set_enabled(&bg->node, false);
+		return; // the desktop keeps showing through the client
+	}
+	wlr_scene_node_set_enabled(&bg->node, true);
+	wlr_scene_node_set_position(&bg->node, view_node->x, view_node->y);
+	wlr_scene_node_place_below(&bg->node, view_node);
+	wlr_scene_rect_set_size(bg, width, height);
 }
 
 void tw_snap_to(struct sway_container *con, enum tw_snap snap) {

@@ -91,6 +91,7 @@ struct tw_container {
 	// fills the slot of a snapped or maximized window that is smaller than it
 	struct wlr_scene_rect *content_bg;
 	int content_bg_width, content_bg_height; // client size the color was sampled at
+	bool content_translucent; // the client is see-through: it gets no fill
 	enum tw_hit hover, pressed;
 
 	struct {
