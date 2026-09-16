@@ -31,7 +31,7 @@ struct record_list {
 struct menus_page {
 	struct settings *s;
 	bool updating;
-	GtkWidget *menu_dd, *crumb, *back, *list;
+	GtkWidget *menu_dd, *crumb, *back, *list, *layout_dd;
 	GPtrArray *items; // struct mentry *, root level of the selected menu
 	GPtrArray *path;  // struct mentry *, open submenus (borrowed)
 	GPtrArray *trash; // removed entries, kept until the next reload
@@ -401,6 +401,26 @@ static struct cstmt *startmenu_block(struct menus_page *p, bool create) {
 	return confdoc_block(doc(p), "startmenu", NULL, create);
 }
 
+/* The style of the start menu, normally the one the theme asks for. */
+static const char *const layout_names[] = {
+	NULL, "classic", "twocolumn", "list", "tiles", "centered",
+};
+
+static void on_layout_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct menus_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	const char *name = i < G_N_ELEMENTS(layout_names) ? layout_names[i] : NULL;
+	struct cstmt *block = startmenu_block(p, name != NULL);
+	if (!block) {
+		return; // "follow the theme" and nothing written yet
+	}
+	confdoc_set(doc(p), block, "layout", NULL, name);
+	settings_taskbar_changed(p->s);
+}
+
 static void on_pinned_changed(struct app_list *list, gpointer data) {
 	struct menus_page *p = data;
 	GString *args = g_string_new(NULL);
@@ -586,6 +606,16 @@ void menus_page_refresh(struct settings *s) {
 		return;
 	}
 	load_menu(p);
+	p->updating = true;
+	const char *layout = cstmt_arg(confdoc_child(startmenu_block(p, false), "layout", NULL), 0);
+	guint selected = 0;
+	for (guint i = 1; layout && i < G_N_ELEMENTS(layout_names); i++) {
+		if (strcmp(layout, layout_names[i]) == 0) {
+			selected = i;
+		}
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->layout_dd), selected);
+	p->updating = false;
 	struct cstmt *pinned = confdoc_child(startmenu_block(p, false), "pinned", NULL);
 	GPtrArray *ids = g_ptr_array_new_with_free_func(g_free);
 	for (int i = 0; i < cstmt_argc(pinned); i++) {
@@ -640,6 +670,13 @@ GtkWidget *menus_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(content), nav);
 	p->list = ui_group(content, NULL, NULL);
 	g_signal_connect(p->menu_dd, "notify::selected", G_CALLBACK(on_menu_selected), p);
+
+	GtkWidget *start = ui_group(content, "Start menu", NULL);
+	p->layout_dd = gtk_drop_down_new_from_strings((const char *const[]){
+		"From the theme", "Classic (Windows 95)", "Two columns (Windows XP, 7)",
+		"List (Windows 10)", "Tiles (Windows 8)", "Centered (Windows 11)", NULL });
+	ui_row(start, "Style", "How the start menu is laid out", p->layout_dd);
+	g_signal_connect(p->layout_dd, "notify::selected", G_CALLBACK(on_layout_selected), p);
 
 	p->pinned = ui_app_list_new(content, "Start menu: pinned apps", NULL, on_pinned_changed, p);
 	records_init(&p->places, p, content, "Start menu: places",

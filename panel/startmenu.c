@@ -1343,6 +1343,12 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	const char *layout_name = tw_theme_str(panel->theme, "startmenu.layout",
 		style == PS_CLASSIC ? "classic" : style == PS_LUNA || style == PS_AERO ? "twocolumn" :
 		style == PS_FLAT ? "list" : "centered");
+	// taskbar.conf wins over the theme, unless it says "layout theme"
+	const char *chosen = panel->config ?
+		twconf_value(panel->config->startmenu, "layout") : NULL;
+	if (chosen && strcmp(chosen, "theme") != 0) {
+		layout_name = chosen;
+	}
 	enum sm_layout layout = strcmp(layout_name, "classic") == 0 ? SM_CLASSIC :
 		strcmp(layout_name, "twocolumn") == 0 ? SM_TWOCOLUMN :
 		strcmp(layout_name, "list") == 0 ? SM_LIST :
