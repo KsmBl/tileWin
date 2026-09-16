@@ -419,6 +419,7 @@ enum {
 	APP_UP,
 	APP_DOWN,
 	APP_REMOVE,
+	APP_EXTRA,
 };
 
 struct app_action {
@@ -447,6 +448,12 @@ static void app_action(GtkButton *button, gpointer data) {
 	struct app_list *l = a->list;
 	guint i = a->index;
 	if (i >= l->ids->len) {
+		return;
+	}
+	if (a->op == APP_EXTRA) {
+		if (l->extra) {
+			l->extra(l, i, l->data);
+		}
 		return;
 	}
 	gpointer *d = l->ids->pdata;
@@ -506,7 +513,12 @@ static void app_list_rebuild(struct app_list *l) {
 		GtkWidget *row = ui_row(l->list, e ? e->name : id,
 			e ? id : "Not installed, skipped", NULL);
 		GtkWidget *box = ui_row_box(row);
-		gtk_box_prepend(GTK_BOX(box), ui_app_icon(e ? e->icon : NULL, 32));
+		const char *icon = l->row_icon ? l->row_icon(l, i, l->data) : NULL;
+		gtk_box_prepend(GTK_BOX(box), ui_app_icon(icon ? icon : e ? e->icon : NULL, 32));
+		if (l->extra) {
+			add_app_button(l, box, l->extra_icon ? l->extra_icon : "document-edit-symbolic",
+				l->extra_tooltip, true, i, APP_EXTRA);
+		}
 		add_app_button(l, box, "go-up-symbolic", "Move up", i > 0, i, APP_UP);
 		add_app_button(l, box, "go-down-symbolic", "Move down", i + 1 < l->ids->len, i,
 			APP_DOWN);
@@ -523,6 +535,10 @@ struct app_list *ui_app_list_new(GtkWidget *content, const char *title,
 	l->changed = changed;
 	l->data = data;
 	return l;
+}
+
+void ui_app_list_refresh(struct app_list *l) {
+	app_list_schedule(l);
 }
 
 void ui_app_list_set(struct app_list *l, GPtrArray *ids) {

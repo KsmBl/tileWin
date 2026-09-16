@@ -104,10 +104,17 @@ struct app_list {
 	void (*changed)(struct app_list *list, gpointer data);
 	gpointer data;
 	guint rebuild_id;
+	/* Optional button on every row, e.g. to change an entry's icon. */
+	const char *extra_icon, *extra_tooltip;
+	void (*extra)(struct app_list *list, guint index, gpointer data);
+	/* Optional icon shown for a row instead of the app's own one. */
+	const char *(*row_icon)(struct app_list *list, guint index, gpointer data);
 };
 struct app_list *ui_app_list_new(GtkWidget *content, const char *title,
 		const char *description, void (*changed)(struct app_list *, gpointer), gpointer data);
 void ui_app_list_set(struct app_list *list, GPtrArray *ids);
+/* Redraws the rows, e.g. after an entry's icon changed. */
+void ui_app_list_refresh(struct app_list *list);
 
 /* ~/.config/tileWin/wallpapers/<basename>.<ext>, NULL if there is none. */
 char *ui_wallpaper_dropin(const char *basename);
