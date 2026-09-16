@@ -7,9 +7,39 @@ tileWin is a Wayland compositor with two modes you can switch between at any tim
   - floating windows with themed title bars and minimize/maximize/close buttons
   - drag-to-edge snapping, Alt+Tab and Windows keyboard shortcuts
 
-It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are five built-in themes: **Windows 95, XP, 7, 10 and 11**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live from the command line.
+It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are seven built-in themes: **Windows 95, XP, 7, 8, 10, 11** and **sway**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live from the command line.
 
 tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are written in C without GTK/Qt and use no CPU when idle; only the optional settings app uses GTK4 and runs only while it is open.
+
+## Screenshots
+
+Window mode with the Windows 10 theme: floating windows with title bars, the taskbar with tray and clock, desktop icons, and the settings app.
+
+![Window mode](docs/screenshots/window-mode.png)
+
+| Start menu | Task view (Super+Tab) |
+|---|---|
+| ![Start menu](docs/screenshots/start-menu.png) | ![Task view](docs/screenshots/task-view.png) |
+
+Tile mode is sway: the same layouts, the same config, with the theme's tile colors and a status bar.
+
+![Tile mode](docs/screenshots/tile-mode.png)
+
+Every theme brings its own title bars, taskbar, start menu and wallpaper:
+
+| Windows 95 | Windows XP |
+|---|---|
+| ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows XP](docs/screenshots/theme-winxp.png) |
+| **Windows 7** | **Windows 11** |
+| ![Windows 7](docs/screenshots/theme-win7.png) | ![Windows 11](docs/screenshots/theme-win11.png) |
+
+Windows 8 replaces the start menu with a full-screen start screen of colored tiles:
+
+![Windows 8 start screen](docs/screenshots/theme-win8.png)
+
+Windows can be closed with an explosion (`animation close explode`), one of the styles on the Animations page:
+
+![A window closing with the explosion animation](docs/screenshots/explosion.png)
 
 ## Features
 
