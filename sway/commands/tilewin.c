@@ -191,7 +191,7 @@ struct cmd_results *cmd_taskview(int argc, char **argv) {
 
 struct cmd_results *cmd_desktop(int argc, char **argv) {
 	struct cmd_results *error = NULL;
-	if ((error = checkarg(argc, "desktop", EXPECTED_EQUAL_TO, 1))) {
+	if ((error = checkarg(argc, "desktop", EXPECTED_AT_LEAST, 1))) {
 		return error;
 	}
 	if (config->reading) {
@@ -210,8 +210,17 @@ struct cmd_results *cmd_desktop(int argc, char **argv) {
 		if (!ws || !tw_desktop_close(ws)) {
 			return cmd_results_new(CMD_FAILURE, "The last desktop cannot be closed");
 		}
+	} else if (strcasecmp(argv[0], "move") == 0) {
+		int direction = argc < 2 ? 0 : strcasecmp(argv[1], "left") == 0 ? -1 :
+			strcasecmp(argv[1], "right") == 0 ? 1 : 0;
+		if (direction == 0) {
+			return cmd_results_new(CMD_INVALID, "Expected 'desktop move left|right'");
+		}
+		if (!ws || !tw_desktop_move(ws, direction)) {
+			return cmd_results_new(CMD_FAILURE, "The desktop cannot move there");
+		}
 	} else {
-		return cmd_results_new(CMD_INVALID, "Expected 'desktop new|close'");
+		return cmd_results_new(CMD_INVALID, "Expected 'desktop new|close|move left|right'");
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }

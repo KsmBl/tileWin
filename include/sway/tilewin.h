@@ -255,6 +255,8 @@ void tw_taskview_workspace_destroyed(struct sway_workspace *ws);
 struct sway_workspace *tw_desktop_new(struct sway_output *output);
 /* Moves the windows of a desktop to its neighbor and removes it. */
 bool tw_desktop_close(struct sway_workspace *ws);
+/* Moves a desktop one place left (-1) or right (1) in the desktop order. */
+bool tw_desktop_move(struct sway_workspace *ws, int direction);
 
 /* session.c */
 void tw_panel_start(void);

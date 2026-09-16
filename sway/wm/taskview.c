@@ -5,6 +5,7 @@
  * the view), drag windows onto desktops or "New desktop" to move them, close
  * windows and desktops.
  */
+#include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@
 #include "sway/desktop/transaction.h"
 #include "sway/input/cursor.h"
 #include "sway/input/seat.h"
+#include "sway/ipc-server.h"
 #include "sway/output.h"
 #include "sway/server.h"
 #include "sway/tilewin.h"
@@ -617,6 +619,36 @@ struct sway_workspace *tw_desktop_new(struct sway_output *output) {
 		ws->tw_keep = true;
 	}
 	return ws;
+}
+
+/*
+ * Moves a desktop one place to the left or right. Desktops are numbered and
+ * sorted by their number, so the two desktops swap numbers: the windows stay
+ * where they are and the desktop lands in the other place.
+ */
+bool tw_desktop_move(struct sway_workspace *ws, int direction) {
+	struct sway_output *output = ws ? ws->output : NULL;
+	if (!output || direction == 0) {
+		return false;
+	}
+	int index = list_find(output->workspaces, ws);
+	int target = index + (direction < 0 ? -1 : 1);
+	if (index < 0 || target < 0 || target >= output->workspaces->length) {
+		return false;
+	}
+	struct sway_workspace *other = output->workspaces->items[target];
+	if (!isdigit((unsigned char)ws->name[0]) || !isdigit((unsigned char)other->name[0])) {
+		return false; // named workspaces keep their name and their place
+	}
+	char *name = ws->name;
+	ws->name = other->name;
+	other->name = name;
+	wlr_ext_workspace_handle_v1_set_name(ws->ext_workspace, ws->name);
+	wlr_ext_workspace_handle_v1_set_name(other->ext_workspace, other->name);
+	output_sort_workspaces(output);
+	ipc_event_workspace(NULL, ws, "rename");
+	ipc_event_workspace(NULL, other, "rename");
+	return true;
 }
 
 bool tw_desktop_close(struct sway_workspace *ws) {

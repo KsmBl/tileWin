@@ -133,6 +133,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Alt+Tab, Alt+Shift+Tab | Switch windows (release Alt to confirm, Esc to cancel) |
 | Super+Tab | Task view: windows and desktops; drag windows onto another or a new desktop |
 | Super+Ctrl+D, Super+Ctrl+F4 | New desktop, close the current desktop |
+| Super+Alt+← / → | Move the current desktop left / right in the order |
 | Alt+F4 | Close window |
 | Alt+Space | Window menu |
 | Ctrl+Shift+Esc | Task manager |
@@ -234,7 +235,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `showdesktop` | Minimize all windows / restore them |
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
-| `desktop new\|close` | Create a desktop, or close the current one (its windows move to the desktop before it) |
+| `desktop new\|close\|move left\|move right` | Create a desktop, close the current one (its windows move to the desktop before it), or move it one place in the desktop order |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
 | `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `shutdown [logoff]`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |

@@ -280,7 +280,28 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 
 static bool workspaces_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
-	if (button != BTN_LEFT || !hs->str) {
+	if (!hs->str) {
+		return false;
+	}
+	if (button == BTN_RIGHT) {
+		// the entries act on the desktop that was clicked, not the current one
+		list_t *items = create_list();
+		char *cmd = format_str("workspace \"%s\", desktop move left", hs->str);
+		list_add(items, menu_item_new("Move desktop left", cmd));
+		free(cmd);
+		cmd = format_str("workspace \"%s\", desktop move right", hs->str);
+		list_add(items, menu_item_new("Move desktop right", cmd));
+		free(cmd);
+		list_add(items, menu_item_separator());
+		list_add(items, menu_item_new("New desktop", "desktop new"));
+		cmd = format_str("workspace \"%s\", desktop close", hs->str);
+		list_add(items, menu_item_new("Close desktop", cmd));
+		free(cmd);
+		menu_items_default_icons(items);
+		menu_open(w->panel, items, true, popup_anchor_for_bar(s, (int)x, 0), NULL);
+		return true;
+	}
+	if (button != BTN_LEFT) {
 		return false;
 	}
 	ipc_panel_commandf(w->panel, "workspace \"%s\"", hs->str);
