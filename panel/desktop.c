@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <gio/gio.h>
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <pango/pangocairo.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,7 @@
  */
 
 #define ICON_SIZE 48
+#define DRAG_THRESHOLD 6
 #define CELL_W 100
 #define CELL_H 100
 #define GRID_MARGIN 10
@@ -45,13 +47,29 @@ struct desktop_item {
 	char **icons; // icon names to try, NULL-terminated
 	bool dir;
 	struct tw_desktop_entry *entry; // .desktop files
+	int col, row; // cell of the grid it sits in
+};
+
+/* Where the user dragged an icon; kept in the state dir between sessions. */
+struct saved_pos {
+	char *name;
+	int col, row;
 };
 
 static struct {
 	list_t *items; // struct desktop_item *
+	list_t *positions; // struct saved_pos *
 	int selected, hover;
 	int64_t last_click_ms;
 	struct loop_timer *rescan_timer;
+	struct {
+		bool armed, active;
+		int index;
+		double start_x, start_y; // where the button went down
+		double grab_x, grab_y;   // where inside the icon it was grabbed
+		double x, y;             // pointer now
+		int col, row;            // cell it would land in
+	} drag;
 } desktop = { .selected = -1, .hover = -1 };
 
 static int64_t now_ms(void) {
@@ -181,6 +199,90 @@ static struct desktop_item *item_at(int index) {
 		desktop.items->items[index] : NULL;
 }
 
+/* ---------- where the icons sit ---------- */
+
+static char *positions_path(void) {
+	char *dir = tw_state_dir();
+	char *path = dir ? format_str("%s/desktop-icons", dir) : NULL;
+	free(dir);
+	return path;
+}
+
+static void positions_load(void) {
+	if (desktop.positions) {
+		return;
+	}
+	desktop.positions = create_list();
+	char *path = positions_path();
+	FILE *f = path ? fopen(path, "r") : NULL;
+	char line[1024];
+	while (f && fgets(line, sizeof(line), f)) {
+		line[strcspn(line, "\n")] = '\0';
+		int col = 0, row = 0, offset = 0;
+		if (sscanf(line, "%d %d %n", &col, &row, &offset) >= 2 && offset > 0 && line[offset]) {
+			struct saved_pos *pos = calloc(1, sizeof(*pos));
+			pos->name = strdup(line + offset);
+			pos->col = col;
+			pos->row = row;
+			list_add(desktop.positions, pos);
+		}
+	}
+	if (f) {
+		fclose(f);
+	}
+	free(path);
+}
+
+static struct saved_pos *positions_find(const char *name) {
+	for (int i = 0; desktop.positions && i < desktop.positions->length; i++) {
+		struct saved_pos *pos = desktop.positions->items[i];
+		if (strcmp(pos->name, name) == 0) {
+			return pos;
+		}
+	}
+	return NULL;
+}
+
+static void positions_save(void) {
+	char *path = positions_path();
+	if (!path) {
+		return;
+	}
+	char *content = strdup("");
+	for (int i = 0; desktop.positions && i < desktop.positions->length; i++) {
+		struct saved_pos *pos = desktop.positions->items[i];
+		char *next = format_str("%s%d %d %s\n", content, pos->col, pos->row, pos->name);
+		free(content);
+		content = next;
+	}
+	tw_write_string(path, content);
+	free(content);
+	free(path);
+}
+
+static void positions_set(const char *name, int col, int row) {
+	positions_load();
+	struct saved_pos *pos = positions_find(name);
+	if (!pos) {
+		pos = calloc(1, sizeof(*pos));
+		pos->name = strdup(name);
+		list_add(desktop.positions, pos);
+	}
+	pos->col = col;
+	pos->row = row;
+}
+
+static void positions_clear(void) {
+	positions_load();
+	for (int i = 0; i < desktop.positions->length; i++) {
+		struct saved_pos *pos = desktop.positions->items[i];
+		free(pos->name);
+		free(pos);
+	}
+	desktop.positions->length = 0;
+	positions_save();
+}
+
 static struct psurface *primary_icons(struct panel *panel) {
 	struct panel_output *output;
 	wl_list_for_each(output, &panel->outputs, link) {
@@ -196,12 +298,76 @@ static int grid_rows(struct psurface *s) {
 	return rows > 0 ? rows : 1;
 }
 
+static int grid_columns(struct psurface *s) {
+	int width = s->output ? s->output->width : s->width;
+	int columns = (width - 2 * GRID_MARGIN) / CELL_W;
+	return columns > 0 ? columns : 1;
+}
+
+static struct desktop_item *item_in_cell(int col, int row, int except) {
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		if (i != except && item->col == col && item->row == row) {
+			return item;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Gives every icon a cell: the ones the user dragged somewhere keep that place,
+ * the rest fill the free cells column by column. Returns the last used column.
+ */
+static int layout_items(struct psurface *s) {
+	if (!desktop.items) {
+		return 0;
+	}
+	positions_load();
+	int rows = s->configured ? grid_rows(s) : 6;
+	int columns = grid_columns(s);
+	for (int i = 0; i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		item->col = item->row = -1;
+	}
+	for (int i = 0; i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		struct saved_pos *pos = positions_find(item->name);
+		if (pos && pos->col >= 0 && pos->col < columns && pos->row >= 0 && pos->row < rows &&
+				!item_in_cell(pos->col, pos->row, i)) {
+			item->col = pos->col;
+			item->row = pos->row;
+		}
+	}
+	int max_col = 0;
+	for (int i = 0; i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		for (int c = 0; item->col < 0 && c < columns; c++) {
+			for (int r = 0; item->col < 0 && r < rows; r++) {
+				if (!item_in_cell(c, r, i)) {
+					item->col = c;
+					item->row = r;
+				}
+			}
+		}
+		if (item->col < 0) {
+			item->col = columns - 1;
+			item->row = rows - 1;
+		}
+		max_col = item->col > max_col ? item->col : max_col;
+	}
+	return max_col;
+}
+
 /* The icons surface is as wide as the icon columns it shows. */
 static void update_icons_size(struct panel *panel, struct psurface *s) {
-	int count = s == primary_icons(panel) && desktop.items ? desktop.items->length : 0;
-	int rows = s->configured ? grid_rows(s) : 6;
-	int columns = count > 0 ? (count + rows - 1) / rows : 0;
-	int width = columns > 0 ? 2 * GRID_MARGIN + columns * CELL_W : 1;
+	bool primary = s == primary_icons(panel) && desktop.items && desktop.items->length;
+	int width = 1;
+	if (primary) {
+		width = 2 * GRID_MARGIN + (layout_items(s) + 1) * CELL_W;
+	}
+	if (desktop.drag.active && primary && s->output) {
+		width = s->output->width; // room to drag an icon anywhere
+	}
 	if (s->req_width != width) {
 		psurface_set_size(s, width, 0);
 		wl_surface_commit(s->surface);
@@ -261,39 +427,65 @@ static void draw_label(cairo_t *cr, const char *font, const char *text, double x
 	g_object_unref(layout);
 }
 
+static void draw_cell(cairo_t *cr, double x, double y, uint32_t fill, uint32_t border) {
+	cairo_new_path(cr);
+	pd_rounded(cr, x + 2.5, y + 2.5, CELL_W - 5, CELL_H - 5, 3);
+	pd_color(cr, fill);
+	cairo_fill_preserve(cr);
+	pd_color(cr, border);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+}
+
+static void draw_item(struct psurface *s, cairo_t *cr, struct desktop_item *item,
+		double x, double y, bool selected, bool hover, double alpha) {
+	struct panel *panel = s->panel;
+	if (selected || hover) {
+		draw_cell(cr, x, y, selected ? 0x3399ff55 : 0xffffff26,
+			selected ? 0x99ccffb0 : 0xffffff40);
+	}
+	cairo_surface_t *icon = NULL;
+	for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
+		if (tw_icon_theme_has(item->icons[k])) {
+			icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
+		}
+	}
+	for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
+		icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
+	}
+	if (alpha < 1) {
+		cairo_push_group(cr);
+	}
+	pd_icon(cr, icon, x + (CELL_W - ICON_SIZE) / 2.0, y + 8, ICON_SIZE);
+	draw_label(cr, bar_font(panel), item->label, x + 4, y + 12 + ICON_SIZE, CELL_W - 8, selected);
+	if (alpha < 1) {
+		cairo_pop_group_to_source(cr);
+		cairo_paint_with_alpha(cr, alpha);
+	}
+}
+
 static void icons_render(struct psurface *s, cairo_t *cr) {
 	struct panel *panel = s->panel;
 	psurface_add_hotspot(s, 0, 0, s->width, s->height, NULL, DESK_HS_BACKGROUND, -1, NULL);
 	if (s != primary_icons(panel) || !desktop.items) {
 		return;
 	}
-	int rows = grid_rows(s);
-	const char *font = bar_font(panel);
+	layout_items(s);
+	bool dragging = desktop.drag.active;
 	for (int i = 0; i < desktop.items->length; i++) {
 		struct desktop_item *item = desktop.items->items[i];
-		double x = GRID_MARGIN + (i / rows) * CELL_W, y = GRID_MARGIN + (i % rows) * CELL_H;
-		bool selected = i == desktop.selected, hover = i == desktop.hover;
-		if (selected || hover) {
-			cairo_new_path(cr);
-			pd_rounded(cr, x + 2.5, y + 2.5, CELL_W - 5, CELL_H - 5, 3);
-			pd_color(cr, selected ? 0x3399ff55 : 0xffffff26);
-			cairo_fill_preserve(cr);
-			pd_color(cr, selected ? 0x99ccffb0 : 0xffffff40);
-			cairo_set_line_width(cr, 1);
-			cairo_stroke(cr);
+		double x = GRID_MARGIN + item->col * CELL_W, y = GRID_MARGIN + item->row * CELL_H;
+		if (!(dragging && i == desktop.drag.index)) {
+			draw_item(s, cr, item, x, y, i == desktop.selected, i == desktop.hover, 1);
 		}
-		cairo_surface_t *icon = NULL;
-		for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
-			if (tw_icon_theme_has(item->icons[k])) {
-				icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
-			}
-		}
-		for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
-			icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
-		}
-		pd_icon(cr, icon, x + (CELL_W - ICON_SIZE) / 2.0, y + 8, ICON_SIZE);
-		draw_label(cr, font, item->label, x + 4, y + 12 + ICON_SIZE, CELL_W - 8, selected);
 		psurface_add_hotspot(s, x, y, CELL_W, CELL_H, NULL, DESK_HS_ITEM, i, NULL);
+	}
+	struct desktop_item *dragged = dragging ? item_at(desktop.drag.index) : NULL;
+	if (dragged) {
+		draw_cell(cr, GRID_MARGIN + desktop.drag.col * CELL_W,
+			GRID_MARGIN + desktop.drag.row * CELL_H, 0xffffff26, 0xffffff90);
+		draw_item(s, cr, dragged, desktop.drag.x - desktop.drag.grab_x,
+			desktop.drag.y - desktop.drag.grab_y, false, false, 0.75);
 	}
 }
 
@@ -312,6 +504,7 @@ static struct menu_item *add_item(list_t *items, const char *label, const char *
 static list_t *background_menu(struct panel *panel) {
 	list_t *items = create_list();
 	add_item(items, "Refresh", "view-refresh", "panel desktop refresh");
+	add_item(items, "Sort icons", "view-sort-ascending", "panel desktop sort");
 	list_add(items, menu_item_separator());
 	struct menu_item *new_menu = add_item(items, "New", "document-new", NULL);
 	new_menu->children = create_list();
@@ -357,6 +550,16 @@ static int surface_offset_y(struct psurface *s) {
 }
 
 static void open_item(struct panel *panel, struct desktop_item *item) {
+	if (item->entry && item->entry->url && *item->entry->url) {
+		// a shortcut to a place (KDE writes short urls such as trash:/)
+		const char *url = item->entry->url;
+		char *full = strncmp(url, "trash:", 6) == 0 ? strdup("trash:///") : strdup(url);
+		char *quoted = g_shell_quote(full);
+		ipc_panel_commandf(panel, "exec xdg-open %s", quoted);
+		g_free(quoted);
+		free(full);
+		return;
+	}
 	if (item->entry && item->entry->exec) {
 		apps_launch(panel, item->entry);
 		return;
@@ -366,7 +569,47 @@ static void open_item(struct panel *panel, struct desktop_item *item) {
 	g_free(quoted);
 }
 
+/* The cell the dragged icon would land in. */
+static void drag_update_target(struct psurface *s) {
+	double x = desktop.drag.x - desktop.drag.grab_x, y = desktop.drag.y - desktop.drag.grab_y;
+	int columns = grid_columns(s), rows = grid_rows(s);
+	int col = (int)round((x - GRID_MARGIN) / CELL_W);
+	int row = (int)round((y - GRID_MARGIN) / CELL_H);
+	desktop.drag.col = col < 0 ? 0 : col >= columns ? columns - 1 : col;
+	desktop.drag.row = row < 0 ? 0 : row >= rows ? rows - 1 : row;
+}
+
+static void drag_finish(struct psurface *s) {
+	struct desktop_item *item = item_at(desktop.drag.index);
+	if (desktop.drag.active && item) {
+		struct desktop_item *other = item_in_cell(desktop.drag.col, desktop.drag.row,
+			desktop.drag.index);
+		if (other) {
+			positions_set(other->name, item->col, item->row); // they swap places
+		}
+		positions_set(item->name, desktop.drag.col, desktop.drag.row);
+		positions_save();
+	}
+	desktop.drag.armed = desktop.drag.active = false;
+	update_icons_size(s->panel, s);
+	desktop_refresh_surfaces(s->panel);
+}
+
 static void desktop_motion(struct psurface *s, double x, double y) {
+	if (desktop.drag.armed || desktop.drag.active) {
+		desktop.drag.x = x;
+		desktop.drag.y = y;
+		if (!desktop.drag.active && (fabs(x - desktop.drag.start_x) > DRAG_THRESHOLD ||
+				fabs(y - desktop.drag.start_y) > DRAG_THRESHOLD)) {
+			desktop.drag.active = true;
+			update_icons_size(s->panel, s);
+		}
+		if (desktop.drag.active) {
+			drag_update_target(s);
+			psurface_set_dirty(s);
+			return;
+		}
+	}
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	int hover = hs && hs->kind == DESK_HS_ITEM ? (int)hs->id : -1;
 	if (hover != desktop.hover) {
@@ -385,6 +628,12 @@ static void desktop_leave(struct psurface *s) {
 static void desktop_button(struct psurface *s, double x, double y, uint32_t button,
 		bool pressed) {
 	struct panel *panel = s->panel;
+	if (button == BTN_LEFT && !pressed) {
+		if (desktop.drag.armed || desktop.drag.active) {
+			drag_finish(s);
+		}
+		return;
+	}
 	if (!pressed || (button != BTN_LEFT && button != BTN_RIGHT)) {
 		return;
 	}
@@ -399,6 +648,16 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 		}
 		desktop.selected = index;
 		desktop.last_click_ms = now;
+		if (item) {
+			// dragging it to another cell starts once the pointer moves
+			desktop.drag.armed = true;
+			desktop.drag.active = false;
+			desktop.drag.index = index;
+			desktop.drag.start_x = desktop.drag.x = x;
+			desktop.drag.start_y = desktop.drag.y = y;
+			desktop.drag.grab_x = x - (GRID_MARGIN + item->col * CELL_W);
+			desktop.drag.grab_y = y - (GRID_MARGIN + item->row * CELL_H);
+		}
 		desktop_refresh_surfaces(panel);
 		return;
 	}
@@ -863,6 +1122,9 @@ void desktop_handle_command(struct panel *panel, int argc, char **argv) {
 	const char *action = argv[0];
 	struct desktop_item *item = argc > 1 ? item_at(atoi(argv[1])) : NULL;
 	if (strcmp(action, "refresh") == 0) {
+		rescan_now(panel);
+	} else if (strcmp(action, "sort") == 0) {
+		positions_clear(); // back to the order of the names
 		rescan_now(panel);
 	} else if (strcmp(action, "new") == 0 && argc > 1) {
 		if (strcmp(argv[1], "folder") == 0) {

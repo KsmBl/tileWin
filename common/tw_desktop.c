@@ -139,6 +139,7 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 		int *target_score = NULL;
 		if (strcmp(key, "Type") == 0) {
 			is_app = strcmp(value, "Application") == 0;
+			e->link = strcmp(value, "Link") == 0;
 		} else if (strcmp(key, "Name") == 0) {
 			target = &e->name;
 			target_score = &name_score;
@@ -150,6 +151,8 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 			target_score = &comment_score;
 		} else if (strcmp(key, "Exec") == 0 && !bracket) {
 			target = &e->exec;
+		} else if (strcmp(key, "URL") == 0 && !bracket) {
+			target = &e->url;
 		} else if (strcmp(key, "Icon") == 0 && !bracket) {
 			target = &e->icon;
 		} else if (strcmp(key, "Categories") == 0) {
@@ -178,7 +181,7 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 	}
 	free(line);
 	fclose(f);
-	if (!is_app || !e->name) {
+	if ((!is_app && !e->link) || !e->name) {
 		tw_desktop_entry_free(e);
 		return NULL;
 	}
@@ -202,6 +205,7 @@ void tw_desktop_entry_free(struct tw_desktop_entry *e) {
 	free(e->categories);
 	free(e->keywords);
 	free(e->startup_wm_class);
+	free(e->url);
 	free(e);
 }
 
@@ -251,7 +255,9 @@ static void scan_dir(list_t *entries, list_t *seen, const char *dir, const char 
 				if (!has_id(seen, id)) {
 					list_add(seen, strdup(id));
 					struct tw_desktop_entry *e = tw_desktop_load(path, id);
-					if (e) {
+					if (e && e->link) {
+						tw_desktop_entry_free(e); // a place, not an app
+					} else if (e) {
 						list_add(entries, e);
 					}
 				}

@@ -15,6 +15,8 @@ struct tw_desktop_entry {
 	char *categories;
 	char *keywords;
 	char *startup_wm_class;
+	char *url;    // Type=Link shortcuts, e.g. KDE's trash:/ 
+	bool link;    // a shortcut to a place, not an application
 	bool terminal;
 	bool no_display;
 	bool hidden;
