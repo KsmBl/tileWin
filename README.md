@@ -62,7 +62,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with calendar, volume, network, battery, CPU, memory, brightness, keyboard layout.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, volume, network, battery, CPU, memory, brightness, keyboard layout.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -305,6 +305,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
+| Date & time | The clock of the computer: time server on or off, time zone, setting date and time by hand, and the format of the taskbar clock |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 | Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size |
@@ -357,7 +358,7 @@ menu taskbar {
 | `workspaces` | (none) |
 | `title` | `max_width` |
 | `tray` | (none) |
-| `clock` | `format`, `tooltip_format` (strftime) |
+| `clock` | `format`, `tooltip_format` (strftime), `settings` (command of the flyout's "Change date and time" link); click opens the clock flyout: an analog and a digital clock, the calendar (the wheel and ←/→ change the month) and that link |
 | `notifications` | `always yes` shows the button also in the 95/XP/7 themes when there are no new notifications |
 | `volume` | `format "{volume}%"`, `mixer`, `step`, left click opens the volume flyout (`mixer` is its link) |
 | `network` | `interface`, `interval`, `settings` (command of the flyout's settings link), left click opens the Wi-Fi flyout |

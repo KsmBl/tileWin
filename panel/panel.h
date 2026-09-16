@@ -432,7 +432,8 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 /* shutdown.c: the shut down dialog of the theme */
 void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool logoff);
 void rundialog_open(struct panel *panel, struct panel_output *output);
-void calendar_toggle(struct panel *panel, struct popup_anchor anchor);
+/* flyouts.c: the clock and calendar flyout of the clock widget */
+void calendar_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
 void launcher_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
 /* A menu entry of a tray icon was clicked ("panel tray_event <service> <path> <id>"). */
@@ -447,6 +448,7 @@ void desktop_dir_changed(struct panel *panel);
 void desktop_handle_command(struct panel *panel, int argc, char **argv);
 
 /* flyouts.c */
+#define TW_DATETIME_SETTINGS "exec tilewin-settings --page datetime"
 #define TW_NETWORK_SETTINGS "exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"
 /* Anchor at the tray end of the taskbar on an output. */
 struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *output);

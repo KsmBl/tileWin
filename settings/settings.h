@@ -20,6 +20,7 @@ struct apps_page;
 struct account_page;
 struct animations_page;
 struct window_page;
+struct datetime_page;
 
 struct settings {
 	GtkApplication *app;
@@ -46,6 +47,7 @@ struct settings {
 	struct account_page *account_page;
 	struct animations_page *animations_page;
 	struct window_page *window_page;
+	struct datetime_page *datetime_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -151,6 +153,8 @@ void account_page_refresh(struct settings *s);
 GtkWidget *animations_page_new(struct settings *s);
 void animations_page_refresh(struct settings *s);
 GtkWidget *window_page_new(struct settings *s);
+GtkWidget *datetime_page_new(struct settings *s);
+void datetime_page_refresh(struct settings *s);
 void window_page_refresh(struct settings *s);
 
 #endif

@@ -2941,3 +2941,354 @@ void flyout_bluetooth_toggle(struct panel *panel, struct popup_anchor anchor) {
 	bt_current = f;
 	flyout_bluetooth_changed(panel);
 }
+
+/* ================= clock ================= */
+
+/*
+ * The flyout of the clock widget: an analog and a digital clock, the calendar
+ * of a month (the mouse wheel and the arrows walk through the months) and a
+ * link to the date and time settings.
+ */
+
+#define CLOCK_HEADER 108
+#define CLOCK_MONTH 34
+#define CLOCK_WEEKDAYS 22
+#define CLOCK_ROW 34
+#define CLOCK_ROWS 6
+
+struct clock_flyout {
+	struct flyout base;
+	struct loop_timer *tick;
+	int year, month; // the month shown, month 0..11
+	int sel_day;     // day clicked in that month, 0 for none
+};
+
+static struct clock_flyout *clock_current = NULL;
+
+enum {
+	CLOCK_HS_PREV = 1,
+	CLOCK_HS_NEXT,
+	CLOCK_HS_TODAY,
+	CLOCK_HS_SETTINGS,
+	CLOCK_HS_DAY,
+};
+
+static int clock_height(void) {
+	return CLOCK_HEADER + CLOCK_MONTH + CLOCK_WEEKDAYS + CLOCK_ROWS * CLOCK_ROW + FOOTER;
+}
+
+static int days_in_month(int year, int month) {
+	static const int days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	if (month == 1 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)) {
+		return 29;
+	}
+	return days[month];
+}
+
+static void clock_show_today(struct clock_flyout *f) {
+	time_t now = time(NULL);
+	struct tm tm;
+	localtime_r(&now, &tm);
+	f->year = tm.tm_year + 1900;
+	f->month = tm.tm_mon;
+	f->sel_day = 0;
+}
+
+static void clock_shift(struct clock_flyout *f, int months) {
+	f->month += months;
+	while (f->month < 0) {
+		f->month += 12;
+		f->year--;
+	}
+	while (f->month > 11) {
+		f->month -= 12;
+		f->year++;
+	}
+	f->sel_day = 0;
+	popup_set_dirty(f->base.popup);
+}
+
+/* The clock face, with the hands of the given time. */
+static void draw_clock_face(cairo_t *cr, const struct fly_style *st, double cx, double cy,
+		double r, const struct tm *tm) {
+	uint32_t face = st->dark ? 0xffffff14 : 0x00000008;
+	cairo_new_path(cr);
+	cairo_arc(cr, cx, cy, r, 0, 2 * M_PI);
+	pd_color(cr, face);
+	cairo_fill_preserve(cr);
+	pd_color(cr, st->style == PS_CLASSIC ? st->fg : st->line | 0x60);
+	cairo_set_line_width(cr, st->style == PS_CLASSIC ? 2 : 1.5);
+	cairo_stroke(cr);
+
+	for (int i = 0; i < 12; i++) {
+		double a = i * M_PI / 6;
+		double len = i % 3 == 0 ? 6 : 3;
+		cairo_new_path(cr);
+		cairo_move_to(cr, cx + sin(a) * (r - 4), cy - cos(a) * (r - 4));
+		cairo_line_to(cr, cx + sin(a) * (r - 4 - len), cy - cos(a) * (r - 4 - len));
+		pd_color(cr, i % 3 == 0 ? st->fg : st->dim);
+		cairo_set_line_width(cr, i % 3 == 0 ? 2 : 1);
+		cairo_stroke(cr);
+	}
+
+	double hours = (tm->tm_hour % 12) + tm->tm_min / 60.0;
+	double minutes = tm->tm_min + tm->tm_sec / 60.0;
+	const struct { double angle, length, width; uint32_t color; } hands[] = {
+		{ hours * M_PI / 6, r * 0.5, 3.5, st->fg },
+		{ minutes * M_PI / 30, r * 0.74, 2.5, st->fg },
+		{ tm->tm_sec * M_PI / 30, r * 0.8, 1, st->style == PS_CLASSIC ? 0xc00000ff : st->accent },
+	};
+	for (size_t i = 0; i < sizeof(hands) / sizeof(hands[0]); i++) {
+		cairo_new_path(cr);
+		cairo_move_to(cr, cx - sin(hands[i].angle) * 4, cy + cos(hands[i].angle) * 4);
+		cairo_line_to(cr, cx + sin(hands[i].angle) * hands[i].length,
+			cy - cos(hands[i].angle) * hands[i].length);
+		pd_color(cr, hands[i].color);
+		cairo_set_line_width(cr, hands[i].width);
+		cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+		cairo_stroke(cr);
+	}
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+	cairo_new_path(cr);
+	cairo_arc(cr, cx, cy, 3, 0, 2 * M_PI);
+	pd_color(cr, st->fg);
+	cairo_fill(cr);
+}
+
+/* The taskbar clock decides whether the flyout shows a 12- or a 24-hour time. */
+static bool clock_uses_12h(struct panel *panel) {
+	const char *format = NULL;
+	for (int i = 0; panel->config && i < panel->config->widgets->length; i++) {
+		struct widget *w = panel->config->widgets->items[i];
+		if (w->impl == &widget_clock && widget_conf(w, "format", NULL)) {
+			format = widget_conf(w, "format", NULL);
+			break;
+		}
+	}
+	if (!format) {
+		format = tw_theme_str(panel->theme, "clock.format", "%H:%M");
+	}
+	return strstr(format, "%I") || strstr(format, "%p") || strstr(format, "%r");
+}
+
+static void clock_render(struct popup *p, cairo_t *cr) {
+	struct clock_flyout *f = p->data;
+	struct fly_style st;
+	fly_style_init(&st, p->panel);
+	int M = popup_shadow_margin(p->panel);
+	int W = p->surface->width, H = p->surface->height;
+	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
+	int y = M;
+
+	time_t now = time(NULL);
+	struct tm today;
+	localtime_r(&now, &today);
+
+	// header: the clock face, the time and today's date
+	double r = (CLOCK_HEADER - 32) / 2.0;
+	draw_clock_face(cr, &st, x0 + r + 2, y + 16 + r, r, &today);
+	const char *time_format = tw_theme_str(p->panel->theme, "clock.flyout_format",
+		clock_uses_12h(p->panel) ? "%-I:%M:%S %p" : "%H:%M:%S");
+	const char *date_format = tw_theme_str(p->panel->theme, "clock.flyout_date", "%A, %d %B %Y");
+	char big[64], date[128];
+	strftime(big, sizeof(big), time_format, &today);
+	strftime(date, sizeof(date), date_format, &today);
+	int tx = x0 + 2 * (int)r + 20, tw = cw - (tx - x0);
+	pd_text(cr, st.big, big, tx, y + 24, tw, 34, st.fg, PD_LEFT);
+	pd_text(cr, st.font, date, tx, y + 58, tw, 22, st.dim, PD_LEFT);
+	y += CLOCK_HEADER;
+
+	// the month, with an arrow on each side
+	draw_line(cr, &st, p, y);
+	char title[64];
+	struct tm first = { .tm_year = f->year - 1900, .tm_mon = f->month, .tm_mday = 1 };
+	mktime(&first);
+	strftime(title, sizeof(title), "%B %Y", &first);
+	pd_text(cr, st.bold, title, x0 + 28, y, cw - 56, CLOCK_MONTH, st.fg, PD_CENTER);
+	struct pbox prev = { x0, y, 28, CLOCK_MONTH }, next = { x0 + cw - 28, y, 28, CLOCK_MONTH };
+	if (hovered(&f->base, prev)) {
+		fill_hover(cr, &st, prev);
+	}
+	if (hovered(&f->base, next)) {
+		fill_hover(cr, &st, next);
+	}
+	pd_glyph_arrow(cr, prev.x + 7, y + (CLOCK_MONTH - 14) / 2, 14, 2, st.fg);
+	pd_glyph_arrow(cr, next.x + 7, y + (CLOCK_MONTH - 14) / 2, 14, 0, st.fg);
+	psurface_add_hotspot(p->surface, prev.x, prev.y, prev.width, prev.height, NULL,
+		CLOCK_HS_PREV, 0, NULL);
+	psurface_add_hotspot(p->surface, next.x, next.y, next.width, next.height, NULL,
+		CLOCK_HS_NEXT, 0, NULL);
+	y += CLOCK_MONTH;
+
+	static const char *weekdays[] = { "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" };
+	double cell = cw / 7.0;
+	for (int i = 0; i < 7; i++) {
+		pd_text(cr, st.font, weekdays[i], x0 + i * cell, y, cell, CLOCK_WEEKDAYS, st.dim,
+			PD_CENTER);
+	}
+	y += CLOCK_WEEKDAYS;
+
+	int offset = (first.tm_wday + 6) % 7;
+	int days = days_in_month(f->year, f->month);
+	int prev_days = days_in_month(f->month == 0 ? f->year - 1 : f->year,
+		f->month == 0 ? 11 : f->month - 1);
+	for (int i = 0; i < 7 * CLOCK_ROWS; i++) {
+		int day = i - offset + 1;
+		bool other = day < 1 || day > days;
+		int shown = day < 1 ? prev_days + day : day > days ? day - days : day;
+		struct pbox box = { x0 + (i % 7) * cell, y + (i / 7) * CLOCK_ROW, cell, CLOCK_ROW };
+		bool is_today = !other && day == today.tm_mday && f->month == today.tm_mon &&
+			f->year == today.tm_year + 1900;
+		bool selected = !other && day == f->sel_day;
+		uint32_t color = other ? st.dim : st.fg;
+		double cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+		double rr = CLOCK_ROW / 2.0 - 2;
+		if (is_today || selected) {
+			cairo_new_path(cr);
+			if (st.style == PS_CLASSIC || st.style == PS_LUNA) {
+				if (is_today) {
+					pd_rect(cr, cx - rr, cy - rr, 2 * rr, 2 * rr, st.accent);
+				} else {
+					cairo_rectangle(cr, cx - rr + 0.5, cy - rr + 0.5, 2 * rr - 1, 2 * rr - 1);
+					pd_color(cr, st.accent);
+					cairo_set_line_width(cr, 1);
+					cairo_stroke(cr);
+				}
+			} else if (is_today) {
+				cairo_arc(cr, cx, cy, rr, 0, 2 * M_PI);
+				pd_color(cr, st.accent);
+				cairo_fill(cr);
+			} else {
+				cairo_arc(cr, cx, cy, rr - 0.5, 0, 2 * M_PI);
+				pd_color(cr, st.accent);
+				cairo_set_line_width(cr, 1.5);
+				cairo_stroke(cr);
+			}
+			color = is_today ? 0xffffffff : st.fg;
+		} else if (!other && hovered(&f->base, box)) {
+			fill_hover(cr, &st, box);
+		}
+		char num[8];
+		snprintf(num, sizeof(num), "%d", shown);
+		pd_text(cr, is_today || selected ? st.bold : st.font, num, box.x, box.y, box.width,
+			box.height, color, PD_CENTER);
+		if (!other) {
+			psurface_add_hotspot(p->surface, box.x, box.y, box.width, box.height, NULL,
+				CLOCK_HS_DAY, day, NULL);
+		}
+	}
+	y += CLOCK_ROWS * CLOCK_ROW;
+
+	// footer: the settings of the app, and back to this month
+	draw_line(cr, &st, p, y);
+	struct pbox link = { x0, y + 1, cw, FOOTER - 1 };
+	if (f->base.settings) {
+		draw_link(cr, &st, &f->base, link, "Change date and time", PD_LEFT);
+		psurface_add_hotspot(p->surface, link.x, link.y, cw / 2, link.height, NULL,
+			CLOCK_HS_SETTINGS, 0, NULL);
+	}
+	bool is_this_month = f->year == today.tm_year + 1900 && f->month == today.tm_mon;
+	if (!is_this_month || f->sel_day) {
+		draw_link(cr, &st, &f->base, link, "Today", PD_RIGHT);
+		int tw2 = 0;
+		pd_text_size(cr, st.font, "Today", &tw2, NULL);
+		psurface_add_hotspot(p->surface, link.x + link.width - tw2 - 8, link.y, tw2 + 8,
+			link.height, NULL, CLOCK_HS_TODAY, 0, NULL);
+	}
+}
+
+static void clock_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	struct clock_flyout *f = p->data;
+	if (button != BTN_LEFT || pressed) {
+		return;
+	}
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (!hs) {
+		return;
+	}
+	if (hs->kind == CLOCK_HS_PREV) {
+		clock_shift(f, -1);
+	} else if (hs->kind == CLOCK_HS_NEXT) {
+		clock_shift(f, 1);
+	} else if (hs->kind == CLOCK_HS_TODAY) {
+		clock_show_today(f);
+		popup_set_dirty(p);
+	} else if (hs->kind == CLOCK_HS_DAY) {
+		f->sel_day = f->sel_day == (int)hs->id ? 0 : (int)hs->id;
+		popup_set_dirty(p);
+	} else if (hs->kind == CLOCK_HS_SETTINGS) {
+		run_settings(&f->base);
+	}
+}
+
+static void clock_axis(struct popup *p, double x, double y, int direction) {
+	clock_shift(p->data, direction);
+}
+
+static void clock_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	struct clock_flyout *f = p->data;
+	if (sym == XKB_KEY_Escape) {
+		popup_close_later(p->panel);
+	} else if (sym == XKB_KEY_Left || sym == XKB_KEY_Page_Up) {
+		clock_shift(f, -1);
+	} else if (sym == XKB_KEY_Right || sym == XKB_KEY_Page_Down) {
+		clock_shift(f, 1);
+	} else if (sym == XKB_KEY_Home) {
+		clock_show_today(f);
+		popup_set_dirty(p);
+	}
+}
+
+static void clock_flyout_tick(void *data) {
+	struct clock_flyout *f = clock_current;
+	if (!f) {
+		return;
+	}
+	popup_set_dirty(f->base.popup);
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	f->tick = loop_add_timer(f->base.panel->loop, 1000 - ts.tv_nsec / 1000000,
+		clock_flyout_tick, NULL);
+}
+
+static void clock_flyout_destroy(struct popup *p) {
+	struct clock_flyout *f = p->data;
+	if (clock_current == f) {
+		clock_current = NULL;
+	}
+	if (f->tick) {
+		loop_remove_timer(p->panel->loop, f->tick);
+	}
+	free(f->base.settings);
+	free(f);
+}
+
+static const struct popup_vtable clock_vtable = {
+	.render = clock_render,
+	.motion = flyout_motion,
+	.leave = flyout_leave,
+	.button = clock_button,
+	.axis = clock_axis,
+	.key = clock_key,
+	.destroy = clock_flyout_destroy,
+};
+
+void calendar_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings) {
+	if (popup_is_open(panel, POPUP_CALENDAR)) {
+		popup_close_all(panel);
+		return;
+	}
+	struct clock_flyout *f = calloc(1, sizeof(*f));
+	f->base.panel = panel;
+	f->base.anchor = anchor;
+	f->base.settings = strdup(settings && *settings ? settings : TW_DATETIME_SETTINGS);
+	clock_show_today(f);
+	if (!flyout_open(&f->base, POPUP_CALENDAR, clock_height(), &clock_vtable, f)) {
+		free(f->base.settings);
+		free(f);
+		return;
+	}
+	clock_current = f;
+	clock_flyout_tick(NULL);
+}

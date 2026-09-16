@@ -636,7 +636,7 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 	} else if (strcmp(cmd, "calendar") == 0 && output && output->bar) {
 		struct popup_anchor anchor = popup_anchor_for_bar(output->bar, output->width, 0);
 		anchor.right_align = true;
-		calendar_toggle(panel, anchor);
+		calendar_toggle(panel, anchor, NULL);
 	} else if (strcmp(cmd, "clipboard") == 0) {
 		clipboard_toggle(panel, output);
 	} else if (strcmp(cmd, "snip") == 0) {

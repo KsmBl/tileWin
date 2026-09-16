@@ -200,6 +200,7 @@ void settings_refresh(struct settings *s) {
 	window_page_refresh(s);
 	screen_page_refresh(s);
 	sound_page_refresh(s);
+	datetime_page_refresh(s);
 	bluetooth_page_refresh(s);
 	apps_page_refresh(s);
 	account_page_refresh(s);
@@ -414,6 +415,8 @@ static void build_window(struct settings *s) {
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
+		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "
+			"12 24 seconds automatic", datetime_page_new },
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 			bluetooth_page_new },
 		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications", taskbar_page_new },
@@ -506,7 +509,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
+				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
 		}
 	}
 	gtk_window_present(s->window);

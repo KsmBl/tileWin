@@ -139,7 +139,7 @@ static bool clock_click(struct widget *w, struct psurface *s, struct hotspot *hs
 	}
 	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
 	anchor.right_align = true;
-	calendar_toggle(w->panel, anchor);
+	calendar_toggle(w->panel, anchor, widget_conf(w, "settings", NULL));
 	return true;
 }
 
