@@ -13,18 +13,65 @@
 
 static const char *watcher_path = "/StatusNotifierWatcher";
 
-static int cmp_sni_id(const void *item, const void *cmp_to) {
-	const struct swaybar_sni *sni = item;
-	return strcmp(sni->watcher_id, cmp_to);
+/* The service and object path an item id points at. */
+static void split_id(const char *id, char **service, char **path) {
+	const char *slash = strchr(id, '/');
+	if (slash) {
+		*service = strndup(id, slash - id);
+		*path = strdup(slash);
+	} else {
+		*service = strdup(id);
+		*path = strdup("/StatusNotifierItem");
+	}
+}
+
+/* The item of that service and path, -1 if the tray does not have it. */
+static int find_sni(struct swaybar_tray *tray, const char *service, const char *path) {
+	for (int i = 0; i < tray->items->length; i++) {
+		struct swaybar_sni *sni = tray->items->items[i];
+		if (strcmp(sni->service, service) == 0 && strcmp(sni->path, path) == 0) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 static void add_sni(struct swaybar_tray *tray, char *id) {
-	int idx = list_seq_find(tray->items, cmp_sni_id, id);
-	if (idx == -1) {
-		sway_log(SWAY_INFO, "Registering Status Notifier Item '%s'", id);
-		struct swaybar_sni *sni = create_sni(id, tray);
-		if (sni) {
-			list_add(tray->items, sni);
+	char *service, *path;
+	split_id(id, &service, &path);
+	int idx = find_sni(tray, service, path);
+	free(service);
+	free(path);
+	if (idx != -1) {
+		// The same item registered with both watchers, e.g. an item that found
+		// a left over KDE watcher besides ours: one of the two ids names the
+		// item's object path and speaks its interface, the other answers
+		// neither properties nor clicks. Keep the one with the path.
+		struct swaybar_sni *sni = tray->items->items[idx];
+		if (!strchr(id, '/') || strchr(sni->watcher_id, '/')) {
+			return;
+		}
+		sway_log(SWAY_INFO, "Replacing Status Notifier Item '%s' with '%s'",
+			sni->watcher_id, id);
+		destroy_sni(sni);
+		list_del(tray->items, idx);
+	}
+	sway_log(SWAY_INFO, "Registering Status Notifier Item '%s'", id);
+	struct swaybar_sni *sni = create_sni(id, tray);
+	if (sni) {
+		list_add(tray->items, sni);
+		tray_set_dirty(tray);
+	}
+}
+
+void tray_remove_service(struct swaybar_tray *tray, const char *service) {
+	for (int i = tray->items->length - 1; i >= 0; i--) {
+		struct swaybar_sni *sni = tray->items->items[i];
+		if (strcmp(sni->service, service) == 0) {
+			sway_log(SWAY_INFO, "Status Notifier Item '%s' is gone", sni->watcher_id);
+			destroy_sni(sni);
+			list_del(tray->items, i);
+			tray_set_dirty(tray);
 		}
 	}
 }
@@ -52,7 +99,11 @@ static int handle_sni_unregistered(sd_bus_message *msg, void *data,
 	}
 
 	struct swaybar_tray *tray = data;
-	int idx = list_seq_find(tray->items, cmp_sni_id, id);
+	char *service, *path;
+	split_id(id, &service, &path);
+	int idx = find_sni(tray, service, path);
+	free(service);
+	free(path);
 	if (idx != -1) {
 		sway_log(SWAY_INFO, "Unregistering Status Notifier Item '%s'", id);
 		destroy_sni(tray->items->items[idx]);

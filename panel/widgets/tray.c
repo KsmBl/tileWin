@@ -27,6 +27,9 @@ static int handle_lost_watcher(sd_bus_message *msg, void *data, sd_bus_error *er
 			tray->watcher_xdg = create_watcher("freedesktop", tray->bus);
 		} else if (strcmp(service, "org.kde.StatusNotifierWatcher") == 0) {
 			tray->watcher_kde = create_watcher("kde", tray->bus);
+		} else if (service[0] == ':') {
+			// a program with a tray icon exited without unregistering it
+			tray_remove_service(tray, service);
 		}
 	}
 	return 0;

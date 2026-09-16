@@ -12,6 +12,8 @@ struct swaybar_host {
 };
 
 bool init_host(struct swaybar_host *host, char *protocol, struct swaybar_tray *tray);
+/* Removes the items of a service, e.g. when the program owning them is gone. */
+void tray_remove_service(struct swaybar_tray *tray, const char *service);
 void finish_host(struct swaybar_host *host);
 
 #endif
