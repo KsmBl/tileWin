@@ -701,7 +701,7 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 	menu_open(panel, item ? item_menu(item) : background_menu(panel), true, anchor, context);
 }
 
-/* Delete moves the selected icons to the trash. */
+/* Delete moves the selected icons to the trash, F2 renames one. */
 static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 		uint32_t modifiers) {
 	struct panel *panel = s->panel;
@@ -711,6 +711,10 @@ static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 			rescan_now(panel);
 		} else if (item) {
 			open_dialog(panel, DIALOG_DELETE, item);
+		}
+	} else if (sym == XKB_KEY_F2) {
+		if (item) {
+			open_dialog(panel, DIALOG_RENAME, item);
 		}
 	} else if (sym == XKB_KEY_Escape) {
 		desktop.selected = -1;
