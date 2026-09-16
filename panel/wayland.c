@@ -250,6 +250,30 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard, uint32_t seri
 	}
 }
 
+/*
+ * Modifiers for clicks, e.g. Ctrl+click on a desktop icon. They are only known
+ * while one of our surfaces has the keyboard, which it gets when clicked.
+ */
+uint32_t panel_modifiers(struct panel *panel) {
+	struct panel_seat *seat;
+	wl_list_for_each(seat, &panel->seats, link) {
+		if (!seat->keyboard_focus || !seat->xkb_state) {
+			continue;
+		}
+		uint32_t mods = 0;
+		if (xkb_state_mod_name_is_active(seat->xkb_state, XKB_MOD_NAME_CTRL,
+				XKB_STATE_MODS_EFFECTIVE) > 0) {
+			mods |= 1;
+		}
+		if (xkb_state_mod_name_is_active(seat->xkb_state, XKB_MOD_NAME_SHIFT,
+				XKB_STATE_MODS_EFFECTIVE) > 0) {
+			mods |= 2;
+		}
+		return mods;
+	}
+	return 0;
+}
+
 static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard,
 		uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked,
 		uint32_t group) {

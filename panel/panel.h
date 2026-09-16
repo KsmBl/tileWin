@@ -138,6 +138,8 @@ struct panel_seat {
 
 extern const struct wl_seat_listener panel_seat_listener;
 void panel_seat_destroy(struct panel_seat *seat);
+/* Ctrl (1) and Shift (2) of a seat whose keyboard is on one of our surfaces. */
+uint32_t panel_modifiers(struct panel *panel);
 
 /* ---------- compositor state ---------- */
 

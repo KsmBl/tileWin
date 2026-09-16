@@ -46,6 +46,7 @@ struct desktop_item {
 	char *label; // shown name
 	char **icons; // icon names to try, NULL-terminated
 	bool dir;
+	bool selected;
 	struct tw_desktop_entry *entry; // .desktop files
 	int col, row; // cell of the grid it sits in
 };
@@ -59,7 +60,7 @@ struct saved_pos {
 static struct {
 	list_t *items; // struct desktop_item *
 	list_t *positions; // struct saved_pos *
-	int selected, hover;
+	int selected, hover; // the icon clicked last, and the one under the pointer
 	int64_t last_click_ms;
 	struct loop_timer *rescan_timer;
 	struct {
@@ -70,7 +71,31 @@ static struct {
 		double x, y;             // pointer now
 		int col, row;            // cell it would land in
 	} drag;
+	/* Rubber band: dragging on the empty desktop selects the icons it covers. */
+	struct {
+		bool armed, active;
+		double x0, y0, x1, y1;
+	} band;
 } desktop = { .selected = -1, .hover = -1 };
+
+/* ---------- selection ---------- */
+
+static void select_none(void) {
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		item->selected = false;
+	}
+	desktop.selected = -1;
+}
+
+static int selection_count(void) {
+	int count = 0;
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		count += item->selected;
+	}
+	return count;
+}
 
 static int64_t now_ms(void) {
 	struct timespec ts;
@@ -365,8 +390,8 @@ static void update_icons_size(struct panel *panel, struct psurface *s) {
 	if (primary) {
 		width = 2 * GRID_MARGIN + (layout_items(s) + 1) * CELL_W;
 	}
-	if (desktop.drag.active && primary && s->output) {
-		width = s->output->width; // room to drag an icon anywhere
+	if ((desktop.drag.active || desktop.band.active) && primary && s->output) {
+		width = s->output->width; // room to drag an icon or a band anywhere
 	}
 	if (s->req_width != width) {
 		psurface_set_size(s, width, 0);
@@ -476,9 +501,20 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 		struct desktop_item *item = desktop.items->items[i];
 		double x = GRID_MARGIN + item->col * CELL_W, y = GRID_MARGIN + item->row * CELL_H;
 		if (!(dragging && i == desktop.drag.index)) {
-			draw_item(s, cr, item, x, y, i == desktop.selected, i == desktop.hover, 1);
+			draw_item(s, cr, item, x, y, item->selected, i == desktop.hover, 1);
 		}
 		psurface_add_hotspot(s, x, y, CELL_W, CELL_H, NULL, DESK_HS_ITEM, i, NULL);
+	}
+	if (desktop.band.active) {
+		double x = fmin(desktop.band.x0, desktop.band.x1);
+		double y = fmin(desktop.band.y0, desktop.band.y1);
+		double w = fabs(desktop.band.x1 - desktop.band.x0);
+		double h = fabs(desktop.band.y1 - desktop.band.y0);
+		pd_rect(cr, x, y, w, h, 0x3399ff44);
+		cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+		pd_color(cr, 0x99ccffc0);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
 	}
 	struct desktop_item *dragged = dragging ? item_at(desktop.drag.index) : NULL;
 	if (dragged) {
@@ -536,12 +572,32 @@ static list_t *item_menu(struct desktop_item *item) {
 		add_item(items, "Open terminal here", "utilities-terminal", "panel desktop terminal {id}");
 	}
 	list_add(items, menu_item_separator());
-	add_item(items, "Rename", "edit-rename", "panel desktop rename {id}");
-	add_item(items, "Delete", "edit-delete", "panel desktop delete {id}");
+	int selected = selection_count();
+	if (selected < 2) {
+		add_item(items, "Rename", "edit-rename", "panel desktop rename {id}");
+		add_item(items, "Delete", "edit-delete", "panel desktop delete {id}");
+	} else {
+		char *label = format_str("Delete %d items", selected);
+		add_item(items, label, "edit-delete", "panel desktop delete {id}");
+		free(label);
+	}
 	return items;
 }
 
 /* ---------- input ---------- */
+
+/* Selects every icon the rubber band covers. */
+static void band_select(void) {
+	double x0 = fmin(desktop.band.x0, desktop.band.x1);
+	double x1 = fmax(desktop.band.x0, desktop.band.x1);
+	double y0 = fmin(desktop.band.y0, desktop.band.y1);
+	double y1 = fmax(desktop.band.y0, desktop.band.y1);
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		double cx = GRID_MARGIN + item->col * CELL_W, cy = GRID_MARGIN + item->row * CELL_H;
+		item->selected = cx + CELL_W > x0 && cx < x1 && cy + CELL_H > y0 && cy < y1;
+	}
+}
 
 enum dialog_mode {
 	DIALOG_NEW_FOLDER,
@@ -552,6 +608,7 @@ enum dialog_mode {
 };
 
 static void open_dialog(struct panel *panel, enum dialog_mode mode, struct desktop_item *item);
+static void open_delete_dialog(struct panel *panel, list_t *paths);
 
 static int surface_offset_y(struct psurface *s) {
 	struct panel *panel = s->panel;
@@ -637,6 +694,23 @@ static void desktop_motion(struct psurface *s, double x, double y) {
 			return;
 		}
 	}
+	if (desktop.band.armed || desktop.band.active) {
+		desktop.band.x1 = x;
+		desktop.band.y1 = y;
+		if (!desktop.band.active && (fabs(x - desktop.band.x0) > DRAG_THRESHOLD ||
+				fabs(y - desktop.band.y0) > DRAG_THRESHOLD)) {
+			desktop.band.active = true;
+		}
+		if (desktop.band.active) {
+			band_select();
+			struct psurface *icons = primary_icons(s->panel);
+			if (icons) {
+				update_icons_size(s->panel, icons); // room to drag anywhere
+				psurface_set_dirty(icons);
+			}
+			return;
+		}
+	}
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	int hover = hs && hs->kind == DESK_HS_ITEM ? (int)hs->id : -1;
 	if (hover != desktop.hover) {
@@ -659,6 +733,14 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 		if (desktop.drag.armed || desktop.drag.active) {
 			drag_finish(s);
 		}
+		if (desktop.band.armed || desktop.band.active) {
+			desktop.band.armed = desktop.band.active = false;
+			struct psurface *icons = primary_icons(panel);
+			if (icons) {
+				update_icons_size(panel, icons);
+			}
+			desktop_refresh_surfaces(panel);
+		}
 		return;
 	}
 	if (!pressed || (button != BTN_LEFT && button != BTN_RIGHT)) {
@@ -666,6 +748,7 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 	}
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	int index = hs && hs->kind == DESK_HS_ITEM ? (int)hs->id : -1;
+	uint32_t mods = panel_modifiers(panel);
 	if (button == BTN_LEFT) {
 		int64_t now = now_ms();
 		struct desktop_item *item = item_at(index);
@@ -673,8 +756,23 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 			open_item(panel, item);
 			now = 0;
 		}
+		if (mods && item) {
+			item->selected = mods & 1 ? !item->selected : true; // Ctrl toggles
+		} else if (!item || !item->selected) {
+			select_none();
+			if (item) {
+				item->selected = true;
+			}
+		}
 		desktop.selected = index;
 		desktop.last_click_ms = now;
+		if (!item) {
+			// dragging on the empty desktop draws a selection rectangle
+			desktop.band.armed = true;
+			desktop.band.active = false;
+			desktop.band.x0 = desktop.band.x1 = x;
+			desktop.band.y0 = desktop.band.y1 = y;
+		}
 		if (item) {
 			// dragging it to another cell starts once the pointer moves
 			desktop.drag.armed = true;
@@ -688,6 +786,13 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 		desktop_refresh_surfaces(panel);
 		return;
 	}
+	struct desktop_item *clicked = item_at(index);
+	if (!clicked || !clicked->selected) {
+		select_none();
+		if (clicked) {
+			clicked->selected = true;
+		}
+	}
 	desktop.selected = index;
 	desktop_refresh_surfaces(panel);
 	struct popup_anchor anchor = {
@@ -695,10 +800,37 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 		.x = (int)x,
 		.y = (int)y + surface_offset_y(s),
 	};
-	struct desktop_item *item = item_at(index);
+	struct desktop_item *item = clicked;
 	char context[16];
 	snprintf(context, sizeof(context), "%d", index);
 	menu_open(panel, item ? item_menu(item) : background_menu(panel), true, anchor, context);
+}
+
+/*
+ * Moves every selected icon to the trash, or the clicked one when nothing is
+ * selected. What has no trash is collected and the dialog asks about it.
+ */
+static void delete_selection(struct panel *panel, struct desktop_item *clicked) {
+	list_t *left = create_list();
+	bool any = false;
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		if (!item->selected && item != clicked) {
+			continue;
+		}
+		any = true;
+		if (!trash_item(item)) {
+			list_add(left, strdup(item->path));
+		}
+	}
+	if (left->length) {
+		open_delete_dialog(panel, left); // it takes the list
+	} else {
+		list_free(left);
+	}
+	if (any) {
+		rescan_now(panel);
+	}
 }
 
 /* Delete moves the selected icons to the trash, F2 renames one. */
@@ -707,11 +839,7 @@ static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 	struct panel *panel = s->panel;
 	struct desktop_item *item = item_at(desktop.selected);
 	if (sym == XKB_KEY_Delete || sym == XKB_KEY_KP_Delete) {
-		if (item && trash_item(item)) {
-			rescan_now(panel);
-		} else if (item) {
-			open_dialog(panel, DIALOG_DELETE, item);
-		}
+		delete_selection(panel, item);
 	} else if (sym == XKB_KEY_F2) {
 		if (item) {
 			open_dialog(panel, DIALOG_RENAME, item);
@@ -753,6 +881,7 @@ static const struct psurface_impl icons_impl = {
 };
 
 static const struct psurface_impl background_impl = {
+	.pointer_motion = desktop_motion,
 	.pointer_button = desktop_button,
 	.key = desktop_key,
 	.closed = desktop_closed,
@@ -815,7 +944,8 @@ enum {
 
 struct name_dialog {
 	enum dialog_mode mode;
-	char *path; // item being renamed or deleted
+	char *path;    // item being renamed
+	list_t *paths; // char *, items to delete for good
 	char text[512];
 	struct text_cursor tc;
 	char error[200];
@@ -1028,17 +1158,20 @@ static void dialog_submit(struct popup *p) {
 	struct name_dialog *d = p->data;
 	struct panel *panel = p->panel;
 	if (d->mode == DIALOG_DELETE) {
-		GFile *file = g_file_new_for_path(d->path);
-		GError *error = NULL;
-		if (!delete_recursive(file, &error)) {
-			snprintf(d->error, sizeof(d->error), "%s",
-				error ? error->message : "Could not delete it");
-			g_clear_error(&error);
+		for (int i = 0; d->paths && i < d->paths->length; i++) {
+			GFile *file = g_file_new_for_path(d->paths->items[i]);
+			GError *error = NULL;
+			bool gone = delete_recursive(file, &error);
 			g_object_unref(file);
-			popup_set_dirty(p);
-			return;
+			if (!gone) {
+				snprintf(d->error, sizeof(d->error), "%s",
+					error ? error->message : "Could not delete it");
+				g_clear_error(&error);
+				popup_set_dirty(p);
+				rescan_now(panel);
+				return;
+			}
 		}
-		g_object_unref(file);
 		popup_close_later(panel);
 		rescan_now(panel);
 		return;
@@ -1150,6 +1283,9 @@ static void dialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint
 
 static void dialog_destroy(struct popup *p) {
 	struct name_dialog *d = p->data;
+	if (d->paths) {
+		list_free_items_and_destroy(d->paths);
+	}
 	free(d->path);
 	free(d);
 }
@@ -1172,10 +1308,7 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 	struct name_dialog *d = calloc(1, sizeof(*d));
 	d->mode = mode;
 	char *dir = desktop_directory();
-	if (mode == DIALOG_DELETE && item) {
-		d->path = strdup(item->path);
-		snprintf(d->text, sizeof(d->text), "%s", item->label);
-	} else if (item) {
+	if (item) {
 		d->path = strdup(item->path);
 		snprintf(d->text, sizeof(d->text), "%s", item->name);
 	} else if (mode == DIALOG_NEW_FOLDER || mode == DIALOG_NEW_TEXT) {
@@ -1196,6 +1329,25 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 	int width = 460 + 2 * M, height = 210 + 2 * M;
 	popup_create(panel, POPUP_DIALOG, NULL, output, (output->width - width) / 2,
 		(output->height - height) / 3, width, height, &dialog_vtable, d);
+}
+
+/* Asks whether to delete for good what could not go to the trash. */
+static void open_delete_dialog(struct panel *panel, list_t *paths) {
+	open_dialog(panel, DIALOG_DELETE, NULL);
+	struct popup *p = panel->popup;
+	struct name_dialog *d = p && p->kind == POPUP_DIALOG ? p->data : NULL;
+	if (!d) {
+		list_free_items_and_destroy(paths);
+		return;
+	}
+	d->paths = paths;
+	for (int i = 0; i < paths->length; i++) {
+		const char *slash = strrchr(paths->items[i], '/');
+		const char *name = slash ? slash + 1 : paths->items[i];
+		size_t len = strlen(d->text);
+		snprintf(d->text + len, sizeof(d->text) - len, "%s%s", len ? ", " : "", name);
+	}
+	popup_set_dirty(p);
 }
 
 /* ---------- commands (panel desktop ...) ---------- */
@@ -1250,10 +1402,6 @@ void desktop_handle_command(struct panel *panel, int argc, char **argv) {
 	} else if (strcmp(action, "rename") == 0 && item) {
 		open_dialog(panel, DIALOG_RENAME, item);
 	} else if (strcmp(action, "delete") == 0 && item) {
-		if (trash_item(item)) {
-			rescan_now(panel);
-		} else {
-			open_dialog(panel, DIALOG_DELETE, item);
-		}
+		delete_selection(panel, item);
 	}
 }
