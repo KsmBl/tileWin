@@ -249,12 +249,14 @@ static void trail_free_image(void) {
  * The image of the cursor the copies show, from the cursor theme. It is
  * remade when the cursor or the scale of the screen under it changes.
  */
-static bool trail_load_image(struct sway_cursor *cursor, double scale) {
+static bool trail_load_image(struct sway_cursor *cursor, double scale, bool *changed) {
 	const char *name = cursor->image ? cursor->image : "default";
+	*changed = false;
 	if (state.trail_image && state.trail_scale == scale &&
 			strcmp(state.trail_name, name) == 0) {
 		return true;
 	}
+	*changed = true;
 	if (!cursor->xcursor_manager) {
 		return false;
 	}
@@ -343,7 +345,8 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 	struct wlr_output *output = root->output_layout ?
 		wlr_output_layout_output_at(root->output_layout, x, y) : NULL;
 	double scale = output && output->scale > 0 ? output->scale : 1;
-	if (!trail_load_image(cursor, scale)) {
+	bool image_changed = false;
+	if (!trail_load_image(cursor, scale, &image_changed)) {
 		return;
 	}
 	if (!state.trail_tree) {
@@ -352,23 +355,24 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 			return;
 		}
 	}
-	// the newest copy is the one closest to the pointer, so build from the back
-	for (int i = count - 1; i >= 0; i--) {
-		if (state.trail_nodes[i]) {
+	for (int i = TRAIL_MAX - 1; i >= 0; i--) {
+		if (i >= count) {
+			if (state.trail_nodes[i]) {
+				wlr_scene_node_destroy(&state.trail_nodes[i]->node);
+				state.trail_nodes[i] = NULL;
+			}
 			continue;
 		}
-		state.trail_nodes[i] = wlr_scene_buffer_create(state.trail_tree, state.trail_image);
+		// the newest copy has to be on top, so the nodes are made from the back
 		if (!state.trail_nodes[i]) {
-			trail_clear();
-			return;
-		}
-		wlr_scene_buffer_set_filter_mode(state.trail_nodes[i], WLR_SCALE_FILTER_BILINEAR);
-	}
-	for (int i = 0; i < TRAIL_MAX; i++) {
-		if (i >= count && state.trail_nodes[i]) {
-			wlr_scene_node_destroy(&state.trail_nodes[i]->node);
-			state.trail_nodes[i] = NULL;
-		} else if (i < count) {
+			state.trail_nodes[i] = wlr_scene_buffer_create(state.trail_tree, state.trail_image);
+			if (!state.trail_nodes[i]) {
+				trail_clear();
+				return;
+			}
+			wlr_scene_buffer_set_filter_mode(state.trail_nodes[i], WLR_SCALE_FILTER_BILINEAR);
+		} else if (image_changed) {
+			// setting the same buffer again would redraw every copy for nothing
 			wlr_scene_buffer_set_buffer(state.trail_nodes[i], state.trail_image);
 		}
 	}
