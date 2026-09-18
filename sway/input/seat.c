@@ -226,6 +226,11 @@ struct sway_container *seat_get_focus_inactive_view(struct sway_seat *seat,
 	struct sway_seat_node *current;
 	wl_list_for_each(current, &seat->focus_stack, link) {
 		struct sway_node *node = current->node;
+		// a minimized window would be opened again by focusing it, so the
+		// window used before it gets the focus instead
+		if (node->type == N_CONTAINER && node->sway_container->pending.tw_minimized) {
+			continue;
+		}
 		if (node_is_view(node) && node_has_ancestor(node, ancestor)) {
 			return node->sway_container;
 		}
