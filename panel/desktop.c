@@ -845,7 +845,7 @@ static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 			open_dialog(panel, DIALOG_RENAME, item);
 		}
 	} else if (sym == XKB_KEY_Escape) {
-		desktop.selected = -1;
+		select_none(); // also what the rubber band selected
 		desktop_refresh_surfaces(panel);
 	} else if (sym == XKB_KEY_F5) {
 		rescan_now(panel);

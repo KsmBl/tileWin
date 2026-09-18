@@ -134,7 +134,10 @@ void arrange_layers(struct sway_output *output) {
 			seat_set_focus_layer(seat, topmost->layer_surface);
 		} else if (seat->focused_layer &&
 				seat->focused_layer->current.keyboard_interactive
-					!= ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+					== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE) {
+			// a surface that asked for the keyboard on demand keeps it until
+			// something else is focused; layers are arranged whenever any of
+			// them changes its size, which must not take the keyboard away
 			seat_set_focus_layer(seat, NULL);
 		}
 	}
