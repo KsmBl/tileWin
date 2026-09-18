@@ -65,6 +65,7 @@ static struct {
 	struct loop_timer *rescan_timer;
 	struct {
 		bool armed, active;
+		bool group;              // the whole selection moves along
 		int index;
 		double start_x, start_y; // where the button went down
 		double grab_x, grab_y;   // where inside the icon it was grabbed
@@ -313,6 +314,20 @@ static void positions_set(const char *name, int col, int row) {
 	pos->row = row;
 }
 
+/* Forgets where an icon sat, so it flows into a free cell again. */
+static void positions_remove(const char *name) {
+	positions_load();
+	for (int i = 0; i < desktop.positions->length; i++) {
+		struct saved_pos *pos = desktop.positions->items[i];
+		if (strcmp(pos->name, name) == 0) {
+			free(pos->name);
+			free(pos);
+			list_del(desktop.positions, i);
+			return;
+		}
+	}
+}
+
 static void positions_clear(void) {
 	positions_load();
 	for (int i = 0; i < desktop.positions->length; i++) {
@@ -343,6 +358,11 @@ static int grid_columns(struct psurface *s) {
 	int width = s->output ? s->output->width : s->width;
 	int columns = (width - 2 * GRID_MARGIN) / CELL_W;
 	return columns > 0 ? columns : 1;
+}
+
+/* Whether an icon moves with the drag: the grabbed one, or the whole selection. */
+static bool drag_moves(int index, struct desktop_item *item) {
+	return index == desktop.drag.index || (desktop.drag.group && item->selected);
 }
 
 static struct desktop_item *item_in_cell(int col, int row, int except) {
@@ -516,7 +536,7 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 	for (int i = 0; i < desktop.items->length; i++) {
 		struct desktop_item *item = desktop.items->items[i];
 		double x = GRID_MARGIN + item->col * CELL_W, y = GRID_MARGIN + item->row * CELL_H;
-		if (!(dragging && i == desktop.drag.index)) {
+		if (!(dragging && drag_moves(i, item))) {
 			draw_item(s, cr, item, x, y, item->selected, i == desktop.hover, 1);
 		}
 		psurface_add_hotspot(s, x, y, CELL_W, CELL_H, NULL, DESK_HS_ITEM, i, NULL);
@@ -534,10 +554,27 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 	}
 	struct desktop_item *dragged = dragging ? item_at(desktop.drag.index) : NULL;
 	if (dragged) {
-		draw_cell(cr, GRID_MARGIN + desktop.drag.col * CELL_W,
-			GRID_MARGIN + desktop.drag.row * CELL_H, 0xffffff26, 0xffffff90);
-		draw_item(s, cr, dragged, desktop.drag.x - desktop.drag.grab_x,
-			desktop.drag.y - desktop.drag.grab_y, false, false, 0.75);
+		// every icon of the group follows the pointer by the same amount, so
+		// they keep the places they have next to each other
+		int dcol = desktop.drag.col - dragged->col, drow = desktop.drag.row - dragged->row;
+		double dx = desktop.drag.x - desktop.drag.grab_x -
+			(GRID_MARGIN + dragged->col * CELL_W);
+		double dy = desktop.drag.y - desktop.drag.grab_y -
+			(GRID_MARGIN + dragged->row * CELL_H);
+		for (int i = 0; i < desktop.items->length; i++) {
+			struct desktop_item *item = desktop.items->items[i];
+			if (drag_moves(i, item)) {
+				draw_cell(cr, GRID_MARGIN + (item->col + dcol) * CELL_W,
+					GRID_MARGIN + (item->row + drow) * CELL_H, 0xffffff26, 0xffffff90);
+			}
+		}
+		for (int i = 0; i < desktop.items->length; i++) {
+			struct desktop_item *item = desktop.items->items[i];
+			if (drag_moves(i, item)) {
+				draw_item(s, cr, item, GRID_MARGIN + item->col * CELL_W + dx,
+					GRID_MARGIN + item->row * CELL_H + dy, false, false, 0.75);
+			}
+		}
 	}
 }
 
@@ -669,19 +706,73 @@ static bool trash_item(struct desktop_item *item) {
 	return trashed;
 }
 
-/* The cell the dragged icon would land in. */
+/*
+ * The cell the grabbed icon would land in. A group keeps its shape, so the
+ * cell is kept close enough to the grid for every icon of it to fit.
+ */
 static void drag_update_target(struct psurface *s) {
 	double x = desktop.drag.x - desktop.drag.grab_x, y = desktop.drag.y - desktop.drag.grab_y;
 	int columns = grid_columns(s), rows = grid_rows(s);
 	int col = (int)round((x - GRID_MARGIN) / CELL_W);
 	int row = (int)round((y - GRID_MARGIN) / CELL_H);
-	desktop.drag.col = col < 0 ? 0 : col >= columns ? columns - 1 : col;
-	desktop.drag.row = row < 0 ? 0 : row >= rows ? rows - 1 : row;
+	int lo_col = 0, hi_col = columns - 1, lo_row = 0, hi_row = rows - 1;
+	struct desktop_item *grabbed = item_at(desktop.drag.index);
+	if (desktop.drag.group && grabbed) {
+		int min_col = grabbed->col, max_col = grabbed->col;
+		int min_row = grabbed->row, max_row = grabbed->row;
+		for (int i = 0; i < desktop.items->length; i++) {
+			struct desktop_item *item = desktop.items->items[i];
+			if (!drag_moves(i, item)) {
+				continue;
+			}
+			min_col = item->col < min_col ? item->col : min_col;
+			max_col = item->col > max_col ? item->col : max_col;
+			min_row = item->row < min_row ? item->row : min_row;
+			max_row = item->row > max_row ? item->row : max_row;
+		}
+		lo_col = grabbed->col - min_col;
+		hi_col = columns - 1 - (max_col - grabbed->col);
+		lo_row = grabbed->row - min_row;
+		hi_row = rows - 1 - (max_row - grabbed->row);
+	}
+	if (hi_col < lo_col) {
+		hi_col = lo_col;
+	}
+	if (hi_row < lo_row) {
+		hi_row = lo_row;
+	}
+	desktop.drag.col = col < lo_col ? lo_col : col > hi_col ? hi_col : col;
+	desktop.drag.row = row < lo_row ? lo_row : row > hi_row ? hi_row : row;
 }
 
 static void drag_finish(struct psurface *s) {
 	struct desktop_item *item = item_at(desktop.drag.index);
-	if (desktop.drag.active && item) {
+	if (desktop.drag.active && item && desktop.drag.group) {
+		int dcol = desktop.drag.col - item->col, drow = desktop.drag.row - item->row;
+		// an icon that stays behind and sits where the group lands loses its
+		// place and flows into a free cell again
+		for (int i = 0; i < desktop.items->length; i++) {
+			struct desktop_item *other = desktop.items->items[i];
+			if (drag_moves(i, other)) {
+				continue;
+			}
+			for (int j = 0; j < desktop.items->length; j++) {
+				struct desktop_item *moved = desktop.items->items[j];
+				if (drag_moves(j, moved) && other->col == moved->col + dcol &&
+						other->row == moved->row + drow) {
+					positions_remove(other->name);
+					break;
+				}
+			}
+		}
+		for (int i = 0; i < desktop.items->length; i++) {
+			struct desktop_item *moved = desktop.items->items[i];
+			if (drag_moves(i, moved)) {
+				positions_set(moved->name, moved->col + dcol, moved->row + drow);
+			}
+		}
+		positions_save();
+	} else if (desktop.drag.active && item) {
 		struct desktop_item *other = item_in_cell(desktop.drag.col, desktop.drag.row,
 			desktop.drag.index);
 		if (other) {
@@ -690,7 +781,7 @@ static void drag_finish(struct psurface *s) {
 		positions_set(item->name, desktop.drag.col, desktop.drag.row);
 		positions_save();
 	}
-	desktop.drag.armed = desktop.drag.active = false;
+	desktop.drag.armed = desktop.drag.active = desktop.drag.group = false;
 	update_icons_size(s->panel, s);
 	desktop_refresh_surfaces(s->panel);
 }
@@ -790,9 +881,11 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 			desktop.band.y0 = desktop.band.y1 = y;
 		}
 		if (item) {
-			// dragging it to another cell starts once the pointer moves
+			// dragging it to another cell starts once the pointer moves; when
+			// it is one of several selected icons, they all come along
 			desktop.drag.armed = true;
 			desktop.drag.active = false;
+			desktop.drag.group = item->selected && selection_count() > 1;
 			desktop.drag.index = index;
 			desktop.drag.start_x = desktop.drag.x = x;
 			desktop.drag.start_y = desktop.drag.y = y;
