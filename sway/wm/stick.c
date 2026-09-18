@@ -184,7 +184,8 @@ list_t *tw_stick_group(struct sway_container *con) {
 		return NULL;
 	}
 	// windows that touch the window, the windows touching those, and so on;
-	// snapped windows keep their place
+	// windows snapped to an edge or a corner belong to the group as well and
+	// come along in the size they have
 	list_t *group = create_list();
 	list_add(group, con);
 	list_t *floating = con->pending.workspace->floating;
@@ -192,8 +193,8 @@ list_t *tw_stick_group(struct sway_container *con) {
 		struct rect r = rect_of(group->items[i]);
 		for (int j = 0; j < floating->length; j++) {
 			struct sway_container *other = floating->items[j];
-			if (is_target(con, other) && other->tw.snap == TW_SNAP_NONE &&
-					!in_list(group, other) && touching(r, rect_of(other))) {
+			if (is_target(con, other) && !in_list(group, other) &&
+					touching(r, rect_of(other))) {
 				list_add(group, other);
 			}
 		}

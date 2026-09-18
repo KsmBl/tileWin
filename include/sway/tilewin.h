@@ -208,6 +208,8 @@ void tw_minimize(struct sway_container *con, bool enable);
 void tw_restore(struct sway_container *con);
 bool tw_snap(struct sway_container *con, const char *direction, char **error);
 void tw_snap_to(struct sway_container *con, enum tw_snap snap);
+/* Ends the snapped state of a window that was moved away, keeping its size. */
+void tw_unsnap_in_place(struct sway_container *con);
 /*
  * Snapped and maximized windows keep the size of their slot even when the
  * client commits a smaller size (terminals resize in character cells).

@@ -52,7 +52,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
   - `Super+Arrow` snapping.
-  - Moved and resized windows stick to the edges of other windows and of the screen. Hold Shift (`window_group_modifier`) while dragging to move the windows touching it along.
+  - Moved and resized windows stick to the edges of other windows and of the screen. Hold Shift (`window_group_modifier`) while dragging to move the windows touching it along. Windows snapped to an edge or a corner belong to such a group as well: they come along in the size they have, instead of going back to the size they had before they were snapped.
   - Double-click the left or right side of a window to stretch it to the next window or the screen edge, the top or bottom side to do the same with its height. Double-click again for the old size.
   - Minimize to the taskbar; show desktop; Alt+Tab switcher.
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
@@ -281,7 +281,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |
 | `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
 | `window_stretch enable\|disable` | Double-clicking a side of a window stretches it (default enable) |
-| `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
+| `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along, snapped ones in the size they have (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 

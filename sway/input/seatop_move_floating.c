@@ -12,6 +12,7 @@ struct seatop_move_floating_event {
 	double dx, dy; // cursor offset in container
 	double start_x, start_y;
 	bool restore_on_drag; // maximized or snapped window being dragged
+	bool together;       // the group is being carried along right now
 	struct wlr_box before; // where the window was before the drag
 	double con_x, con_y; // window position at the start
 	list_t *group; // struct group_member: windows touching it at the start
@@ -49,6 +50,15 @@ static void finalize_move(struct sway_seat *seat) {
 			e->con->tw.restore_box = e->before;
 		}
 	}
+	if (e->together) {
+		// windows carried along keep their size, but a snapped one is not at
+		// its edge any more
+		tw_unsnap_in_place(e->con);
+		for (int i = 0; e->group && i < e->group->length; i++) {
+			struct group_member *m = e->group->items[i];
+			tw_unsnap_in_place(m->con);
+		}
+	}
 	transaction_commit_dirty();
 
 	tw_session_changed();
@@ -76,7 +86,14 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	struct seatop_move_floating_event *e = seat->seatop_data;
 	struct wlr_cursor *cursor = seat->cursor->cursor;
 
-	if (e->restore_on_drag) {
+	// holding the group modifier moves the windows stuck to it along; letting
+	// go of it leaves them where they were
+	bool together = e->group && tw_stick_group_modifier_held(seat);
+	e->together = together;
+
+	// a snapped window dragged on its own goes back to the size it had before
+	// it was snapped; carried along with its group it keeps the size it has
+	if (e->restore_on_drag && !together) {
 		if (fabs(cursor->x - e->start_x) < RESTORE_DRAG_THRESHOLD &&
 				fabs(cursor->y - e->start_y) < RESTORE_DRAG_THRESHOLD) {
 			return;
@@ -93,9 +110,6 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 		e->restore_on_drag = false;
 	}
 
-	// holding the group modifier moves the windows stuck to it along; letting
-	// go of it leaves them where they were
-	bool together = e->group && tw_stick_group_modifier_held(seat);
 	list_t *exclude = NULL;
 	if (together) {
 		exclude = create_list();
@@ -168,6 +182,10 @@ void seatop_begin_move_floating(struct sway_seat *seat,
 	if (!e->restore_on_drag) {
 		e->before = (struct wlr_box){ (int)con->pending.x, (int)con->pending.y,
 			(int)con->pending.width, (int)con->pending.height };
+	}
+	// a snapped window has a group too, so it can be carried along with the
+	// windows stuck to it; a maximized one has nowhere to go
+	if (!con->pending.tw_maximized) {
 		list_t *group = tw_stick_group(con);
 		if (group) {
 			e->group = create_list();

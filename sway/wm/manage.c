@@ -415,6 +415,21 @@ void tw_restore(struct sway_container *con) {
 	}
 }
 
+/*
+ * A snapped window that was carried somewhere else, e.g. by the stick group,
+ * is no longer at its edge. It keeps the size it has instead of falling back
+ * to the one it had before it was snapped.
+ */
+void tw_unsnap_in_place(struct sway_container *con) {
+	if (!con || !con->view || con->tw.snap == TW_SNAP_NONE) {
+		return;
+	}
+	struct wlr_box box = current_box(con);
+	con->tw.snap = TW_SNAP_NONE;
+	tw_set_box(con, &box);
+	ipc_event_window(con, "restore");
+}
+
 bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	if (!con || !con->view) {
 		*error = strdup("No window to snap");
