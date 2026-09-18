@@ -73,6 +73,10 @@ struct mouse_page {
 	GPtrArray *cursor_themes; // char *
 	GtkWidget *theme_dd, *size_dd, *trail;
 	guint trail_timer;
+	GtkWidget *speed, *test_icon;
+	guint speed_timer;
+	gint64 last_test_click; // milliseconds, 0 when the next click is the first
+	bool test_open;
 };
 
 struct control_binding {
@@ -239,6 +243,48 @@ static void on_cursor_changed(GObject *dropdown, GParamSpec *pspec, gpointer dat
 	g_free(args);
 }
 
+/* ---------- double-click speed ---------- */
+
+static gboolean apply_speed(gpointer data) {
+	struct mouse_page *p = data;
+	p->speed_timer = 0;
+	char value[16];
+	snprintf(value, sizeof(value), "%d",
+		(int)round(gtk_range_get_value(GTK_RANGE(p->speed))));
+	struct confdoc *d = common(p);
+	confdoc_set(d, d->root, "double_click_time", NULL, value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "double_click_time %s", value);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_speed(GtkRange *range, gpointer data) {
+	struct mouse_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	if (p->speed_timer) {
+		g_source_remove(p->speed_timer);
+	}
+	p->speed_timer = g_timeout_add(300, apply_speed, p);
+}
+
+/* The folder opens and closes when two clicks arrive within the set time. */
+static void on_test_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
+		gpointer data) {
+	struct mouse_page *p = data;
+	gint64 now = g_get_monotonic_time() / 1000;
+	gint64 limit = (gint64)round(gtk_range_get_value(GTK_RANGE(p->speed)));
+	if (p->last_test_click && now - p->last_test_click < limit) {
+		p->test_open = !p->test_open;
+		gtk_image_set_from_icon_name(GTK_IMAGE(p->test_icon),
+			p->test_open ? "folder-open" : "folder");
+		p->last_test_click = 0;
+	} else {
+		p->last_test_click = now;
+	}
+}
+
 /* ---------- pointer trail ---------- */
 
 static gboolean apply_trail(gpointer data) {
@@ -324,6 +370,8 @@ void mouse_page_refresh(struct settings *s) {
 	}
 	const char *trail = cstmt_arg(confdoc_child(common(p)->root, "pointer_trail", NULL), 0);
 	gtk_range_set_value(GTK_RANGE(p->trail), trail ? atoi(trail) : 0);
+	const char *speed = cstmt_arg(confdoc_child(common(p)->root, "double_click_time", NULL), 0);
+	gtk_range_set_value(GTK_RANGE(p->speed), speed ? atoi(speed) : 400);
 
 	g_free(gtk_theme);
 	p->updating = false;
@@ -339,6 +387,25 @@ GtkWidget *mouse_page_new(struct settings *s) {
 
 	GtkWidget *mouse = ui_group(content, "Mouse", NULL);
 	add_controls(p, mouse, pointer_controls);
+	GtkWidget *click = ui_group(content, "Double-click", NULL);
+	p->speed = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 200, 900, 25);
+	gtk_widget_set_size_request(p->speed, 260, -1);
+	gtk_scale_set_draw_value(GTK_SCALE(p->speed), TRUE);
+	gtk_scale_set_digits(GTK_SCALE(p->speed), 0);
+	gtk_scale_set_value_pos(GTK_SCALE(p->speed), GTK_POS_LEFT);
+	gtk_scale_add_mark(GTK_SCALE(p->speed), 400, GTK_POS_BOTTOM, NULL);
+	g_signal_connect(p->speed, "value-changed", G_CALLBACK(on_speed), p);
+	ui_row(click, "Double-click speed",
+		"Milliseconds the second click may come after the first, in window title bars "
+		"and on the desktop", p->speed);
+	p->test_icon = gtk_image_new_from_icon_name("folder");
+	gtk_image_set_pixel_size(GTK_IMAGE(p->test_icon), 48);
+	GtkGesture *gesture = gtk_gesture_click_new();
+	g_signal_connect(gesture, "pressed", G_CALLBACK(on_test_pressed), p);
+	gtk_widget_add_controller(p->test_icon, GTK_EVENT_CONTROLLER(gesture));
+	ui_row(click, "Try it out", "Double-click the folder: it opens and closes when the "
+		"two clicks are close enough together", p->test_icon);
+
 	GtkWidget *touchpad = ui_group(content, "Touchpad",
 		"Only shown by devices that support a setting; other devices ignore it.");
 	add_controls(p, touchpad, touchpad_controls);

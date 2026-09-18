@@ -505,6 +505,22 @@ struct cmd_results *cmd_window_stick_distance(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_double_click_time(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "double_click_time", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	long ms = strtol(argv[0], &end, 10);
+	if (!end || *end || ms < 100 || ms > 2000) {
+		return cmd_results_new(CMD_INVALID,
+			"double_click_time needs a number of milliseconds from 100 to 2000");
+	}
+	config->tw_double_click_time = (int)ms;
+	tw_double_click_time_changed();
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "pointer_trail", EXPECTED_EQUAL_TO, 1))) {

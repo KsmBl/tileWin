@@ -170,6 +170,7 @@ struct panel_state {
 	char *focused_workspace;
 	char *keyboard_layout;
 	int64_t focused_window;
+	int double_click_ms; // "double_click_time" of the compositor
 };
 
 /* ---------- config ---------- */

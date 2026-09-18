@@ -15,7 +15,6 @@
 #include "sway/tree/workspace.h"
 #include "log.h"
 
-#define DOUBLE_CLICK_MS 450
 
 // Decoration button currently held down, and the container whose buttons
 // are hovered. Pointers are only compared after destruction checks.
@@ -385,7 +384,7 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 		// the screen edge (again: back to its size)
 		if (config->tw_stretch && last_click.con == cont && last_click.hit == hit &&
 				last_click.edges == edges &&
-				time_msec - last_click.time < DOUBLE_CLICK_MS) {
+				time_msec - last_click.time < (uint32_t)config->tw_double_click_time) {
 			last_click.con = NULL;
 			if (tw_expand(cont, edges)) {
 				transaction_commit_dirty();
@@ -410,7 +409,7 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 			return true;
 		}
 		if (last_click.con == cont && last_click.hit == hit &&
-				time_msec - last_click.time < DOUBLE_CLICK_MS) {
+				time_msec - last_click.time < (uint32_t)config->tw_double_click_time) {
 			last_click.con = NULL;
 			if (hit == TW_HIT_ICON) {
 				view_close(cont->view);

@@ -553,6 +553,7 @@ struct sway_config {
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
 	int tw_pointer_trail; // copies of the pointer that follow it, 0: none
+	int tw_double_click_time; // milliseconds between two clicks of a double-click
 
 	// Flags
 	enum focus_follows_mouse_mode focus_follows_mouse;

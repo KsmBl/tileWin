@@ -275,6 +275,8 @@ static void refresh_mode(struct panel *panel) {
 		panel->state.mode = strdup(mode);
 		panel->layout = strcmp(mode, "tile") == 0 ? LAYOUT_TILE : LAYOUT_WINDOW;
 	}
+	int64_t ms = jint(state, "double_click_time");
+	panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
 	json_object_put(state);
 }
 
@@ -407,6 +409,9 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 			panel_outputs_update_bars(panel);
 		}
 		schedule_tree_refresh(panel);
+	} else if (strcmp(change, "settings") == 0) {
+		int64_t ms = jint(event, "double_click_time");
+		panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
 	} else if (strcmp(change, "theme") == 0) {
 		panel_request_reload(panel);
 	} else if (strcmp(change, "panel") == 0) {

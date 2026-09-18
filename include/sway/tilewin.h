@@ -154,6 +154,8 @@ void tw_load_theme_tile_config(struct sway_config *config);
 /* Binds the volume, brightness and media keys the config leaves unbound. */
 void tw_add_default_bindings(struct sway_config *config);
 void tw_after_reload(void);
+/* Tells the taskbar the new "double_click_time" so it uses it too. */
+void tw_double_click_time_changed(void);
 json_object *tw_describe_state(void);
 void tw_wallpaper_update(struct sway_output *output);
 void tw_wallpaper_invalidate(void);

@@ -310,11 +310,20 @@ json_object *tw_describe_state(void) {
 	json_object_object_add(obj, "data_dir", json_object_new_string(tw_data_dir()));
 	json_object_object_add(obj, "version", json_object_new_string(SWAY_VERSION));
 	json_object_object_add(obj, "panel_pid", json_object_new_int(tw_panel_pid()));
+	json_object_object_add(obj, "double_click_time",
+		json_object_new_int(config ? config->tw_double_click_time : 400));
 	return obj;
 }
 
 static void emit_state_event(const char *change) {
 	ipc_event_tilewin(change, tw_describe_state());
+}
+
+/* The taskbar opens desktop icons with a double-click too, so it is told. */
+void tw_double_click_time_changed(void) {
+	if (config && config->active && !config->reading) {
+		emit_state_event("settings");
+	}
 }
 
 void tw_after_reload(void) {

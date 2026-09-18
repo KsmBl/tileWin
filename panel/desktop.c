@@ -33,7 +33,7 @@
 #define CELL_W 100
 #define CELL_H 100
 #define GRID_MARGIN 10
-#define DOUBLE_CLICK_MS 400
+#define DOUBLE_CLICK_MS 400 // until the compositor says otherwise
 
 enum {
 	DESK_HS_BACKGROUND = 1,
@@ -859,7 +859,9 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 	if (button == BTN_LEFT) {
 		int64_t now = now_ms();
 		struct desktop_item *item = item_at(index);
-		if (item && index == desktop.selected && now - desktop.last_click_ms < DOUBLE_CLICK_MS) {
+		int64_t double_click = panel->state.double_click_ms > 0 ?
+			panel->state.double_click_ms : DOUBLE_CLICK_MS;
+		if (item && index == desktop.selected && now - desktop.last_click_ms < double_click) {
 			open_item(panel, item);
 			now = 0;
 		}
