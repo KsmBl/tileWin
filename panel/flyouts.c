@@ -348,8 +348,15 @@ enum {
 struct wifi_net {
 	char *ssid;
 	char *security;
+	char *uuid; // connection of a saved network, whose name may differ from the SSID
 	int signal;
 	bool active, known;
+};
+
+/* A saved connection of NetworkManager and the SSID it is for. */
+struct saved_net {
+	char *uuid;
+	char *ssid;
 };
 
 struct net_flyout {
@@ -386,7 +393,14 @@ static struct net_flyout *net_current = NULL;
 static void wifi_net_free(struct wifi_net *n) {
 	free(n->ssid);
 	free(n->security);
+	free(n->uuid);
 	free(n);
+}
+
+static void saved_net_free(struct saved_net *s) {
+	free(s->uuid);
+	free(s->ssid);
+	free(s);
 }
 
 /* Whether the password of a saved network is shown right now. */
@@ -513,6 +527,17 @@ static void net_query_done(void *data, const char *output) {
 			f->wifi_enabled = strcmp(line, "enabled") == 0;
 			continue;
 		}
+		if (section == S_KNOWN) {
+			// "<uuid>:<ssid>", written by the query itself, so it is not escaped
+			char *colon = strchr(line, ':');
+			if (colon && colon[1]) {
+				struct saved_net *s = calloc(1, sizeof(*s));
+				s->uuid = strndup(line, colon - line);
+				s->ssid = strdup(colon + 1);
+				list_add(known, s);
+			}
+			continue;
+		}
 		list_t *fields = terse_split(line);
 		char **v = (char **)fields->items;
 		if (section == S_DEVICES && fields->length >= 4) {
@@ -541,20 +566,24 @@ static void net_query_done(void *data, const char *output) {
 				found->signal = atoi(v[1]);
 			}
 			found->active |= strcmp(v[0], "*") == 0;
-		} else if (section == S_KNOWN && fields->length >= 2 &&
-				strcmp(v[1], "802-11-wireless") == 0) {
-			list_add(known, strdup(v[0]));
 		}
 		list_free_items_and_destroy(fields);
 	}
 	free(copy);
 	for (int i = 0; i < f->nets->length; i++) {
 		struct wifi_net *n = f->nets->items[i];
-		for (int j = 0; j < known->length; j++) {
-			n->known |= strcmp(known->items[j], n->ssid) == 0;
+		for (int j = 0; j < known->length && !n->known; j++) {
+			struct saved_net *s = known->items[j];
+			if (strcmp(s->ssid, n->ssid) == 0) {
+				n->known = true;
+				n->uuid = strdup(s->uuid);
+			}
 		}
 	}
-	list_free_items_and_destroy(known);
+	for (int i = 0; i < known->length; i++) {
+		saved_net_free(known->items[i]);
+	}
+	list_free(known);
 	list_qsort(f->nets, wifi_net_cmp);
 	if (f->scroll > f->nets->length - net_visible_rows(f)) {
 		f->scroll = 0;
@@ -572,7 +601,13 @@ static void net_query(struct net_flyout *f, bool rescan) {
 		"nmcli radio wifi 2>/dev/null; echo --dev; "
 		"nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device 2>/dev/null; echo --wifi; "
 		"nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID device wifi list --rescan %s 2>/dev/null; "
-		"echo --known; nmcli -t -f NAME,TYPE connection show 2>/dev/null",
+		// the name of a connection need not be the SSID, so ask every Wi-Fi
+		// connection for the network it is for and remember its uuid
+		"echo --known; nmcli -t -f UUID,TYPE connection show 2>/dev/null | "
+		"while IFS=: read -r uuid type; do "
+		"[ \"$type\" = 802-11-wireless ] || continue; "
+		"ssid=$(nmcli -g 802-11-wireless.ssid connection show uuid \"$uuid\" 2>/dev/null); "
+		"[ -n \"$ssid\" ] && printf '%%s:%%s\\n' \"$uuid\" \"$ssid\"; done",
 		rescan ? "auto" : "no");
 	proc_run(f->base.panel, cmd, false, NULL, net_query_done, NULL);
 	free(cmd);
@@ -637,14 +672,20 @@ static void net_secret_done(void *data, const char *output) {
 }
 
 /*
- * The password of a saved network, from NetworkManager. Reading a secret needs
- * authorization, so polkit may ask for the password of the computer first.
+ * The password of a saved network, from NetworkManager. The connection is
+ * addressed by its uuid, because its name need not be the SSID. WPA keeps the
+ * password in the psk, older networks in a WEP key and 802.1X ones in the
+ * password of the user. Reading a secret needs authorization, so polkit may ask
+ * for the password of the computer first.
  */
 static void net_show_secret(struct net_flyout *f, int index) {
 	if (index < 0 || index >= f->nets->length) {
 		return;
 	}
 	struct wifi_net *n = f->nets->items[index];
+	if (!n->uuid) {
+		return;
+	}
 	if (f->secret_ssid && strcmp(f->secret_ssid, n->ssid) == 0) {
 		net_forget_secret(f); // clicking again hides it
 		net_update(f);
@@ -653,12 +694,18 @@ static void net_show_secret(struct net_flyout *f, int index) {
 	net_forget_secret(f);
 	f->secret_ssid = strdup(n->ssid);
 	f->status[0] = '\0';
-	char *ssid = shell_quote(n->ssid);
-	char *cmd = format_str("nmcli -s -g 802-11-wireless-security.psk connection show id %s "
-		"2>&1", ssid);
+	char *uuid = shell_quote(n->uuid);
+	char *cmd = format_str(
+		"for p in 802-11-wireless-security.psk 802-11-wireless-security.wep-key0 "
+		"802-1x.password; do "
+		"v=$(nmcli -s -g \"$p\" connection show uuid %s 2>/dev/null); "
+		"if [ -n \"$v\" ]; then printf '%%s\\n' \"$v\"; exit 0; fi; done; "
+		// nothing came back: run it once more to show why
+		"nmcli -s -g 802-11-wireless-security.psk connection show uuid %s 2>&1 | head -n 1",
+		uuid, uuid);
 	proc_run(f->base.panel, cmd, false, NULL, net_secret_done, NULL);
 	free(cmd);
-	free(ssid);
+	free(uuid);
 	net_update(f);
 }
 
