@@ -366,6 +366,7 @@ static void handle_pointer_button(struct wl_listener *listener, void *data) {
 	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED) {
 		cursor->pressed_button_count++;
 		tw_cancel_release_binding();
+		tw_pointer_cancel_tap(); // Ctrl+click is not a tap on Ctrl
 	} else {
 		if (cursor->pressed_button_count > 0) {
 			cursor->pressed_button_count--;

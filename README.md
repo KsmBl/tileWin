@@ -438,6 +438,9 @@ To make your own:
 2. Override only the keys you want, e.g. `decoration { active { title_bg #202020; title_fg #ffffff } }`.
 3. Look at the built-in theme files for all available keys.
 
+Keys for the pointer:
+- `pointer { locate yes }` draws gray rings shrinking onto the pointer when Ctrl is tapped on its own, like "Show location of pointer when I press the CTRL key" on Windows. `pointer { locate_color <color> }` colors them. Ctrl held as part of a shortcut or a Ctrl+click does nothing. The Windows XP, 7, 8, 10 and 11 themes turn it on.
+
 Keys for a bar like waybar (see `themes/sway/theme.conf`):
 - `panel { margin 20; margin_side 20 }` keeps the bar away from the screen edges.
 - `panel { groups yes; group_bg <color>; group_border <color>; group_radius 14; group_inset 3; group_padding 6 }` draws a rounded background behind the left, center and right widgets instead of one full bar.

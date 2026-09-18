@@ -135,6 +135,7 @@ void tw_init(const char *mode_override) {
 
 void tw_fini(void) {
 	tw_power_fini();
+	tw_pointer_fini();
 	tw_animate_fini();
 	tw_icon_cache_clear();
 	tw_theme_free(tw_theme);

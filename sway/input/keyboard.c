@@ -464,6 +464,12 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 	// first) and once for the device: react only to the group's copy, or
 	// Win+Tab would open the task view and close it again at once.
 	bool tw_input = !keyboard->wlr->group;
+	if (tw_input && !locked) {
+		for (size_t i = 0; i < keyinfo.raw_keysyms_len; i++) {
+			tw_pointer_key(keyinfo.raw_keysyms[i],
+				event->state == WL_KEYBOARD_KEY_STATE_PRESSED);
+		}
+	}
 	if (tw_input && tw_alttab_active()) {
 		bool consumed = false;
 		for (size_t i = 0; i < keyinfo.translated_keysyms_len; i++) {

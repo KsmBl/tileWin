@@ -262,6 +262,13 @@ bool tw_desktop_close(struct sway_workspace *ws);
 /* Moves a desktop one place left (-1) or right (1) in the desktop order. */
 bool tw_desktop_move(struct sway_workspace *ws, int direction);
 
+/* pointer.c: effects around the mouse pointer */
+/* A key of the keyboard; tapping Ctrl on its own shows where the pointer is. */
+void tw_pointer_key(xkb_keysym_t sym, bool pressed);
+/* A mouse button was pressed, so Ctrl is part of a click and not a tap. */
+void tw_pointer_cancel_tap(void);
+void tw_pointer_fini(void);
+
 /* session.c */
 void tw_panel_start(void);
 /* Starts tilewin-nightlight, which keeps the night light colors. */
