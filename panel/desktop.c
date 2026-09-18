@@ -97,6 +97,22 @@ static int selection_count(void) {
 	return count;
 }
 
+/* The one selected icon, NULL when none or several are selected. */
+static struct desktop_item *only_selected(void) {
+	struct desktop_item *only = NULL;
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		if (!item->selected) {
+			continue;
+		}
+		if (only) {
+			return NULL;
+		}
+		only = item;
+	}
+	return only;
+}
+
 static int64_t now_ms(void) {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -841,8 +857,10 @@ static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 	if (sym == XKB_KEY_Delete || sym == XKB_KEY_KP_Delete) {
 		delete_selection(panel, item);
 	} else if (sym == XKB_KEY_F2) {
-		if (item) {
-			open_dialog(panel, DIALOG_RENAME, item);
+		// the icon clicked last, or the only one a rectangle selected
+		struct desktop_item *one = item ? item : only_selected();
+		if (one) {
+			open_dialog(panel, DIALOG_RENAME, one);
 		}
 	} else if (sym == XKB_KEY_Escape) {
 		select_none(); // also what the rubber band selected
