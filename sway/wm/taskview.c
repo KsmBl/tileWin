@@ -311,49 +311,6 @@ static void render_chrome(void) {
 
 /* ---------- thumbnails ---------- */
 
-struct snapshot {
-	struct wlr_scene_tree *parent;
-	double scale;
-	double x, y; // offset of the copied tree
-};
-
-static void snapshot_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *data) {
-	struct snapshot *s = data;
-	if (!buffer->buffer) {
-		return;
-	}
-	int w = buffer->dst_width > 0 ? buffer->dst_width : buffer->buffer->width;
-	int h = buffer->dst_height > 0 ? buffer->dst_height : buffer->buffer->height;
-	struct wlr_scene_buffer *copy = wlr_scene_buffer_create(s->parent, NULL);
-	if (!copy) {
-		return;
-	}
-	wlr_scene_buffer_set_dest_size(copy, fmax(1, round(w * s->scale)),
-		fmax(1, round(h * s->scale)));
-	wlr_scene_buffer_set_opacity(copy, buffer->opacity);
-	wlr_scene_buffer_set_filter_mode(copy, WLR_SCALE_FILTER_BILINEAR);
-	wlr_scene_buffer_set_transfer_function(copy, buffer->transfer_function);
-	wlr_scene_buffer_set_primaries(copy, buffer->primaries);
-	wlr_scene_buffer_set_source_box(copy, &buffer->src_box);
-	wlr_scene_buffer_set_transform(copy, buffer->transform);
-	wlr_scene_node_set_position(&copy->node, round(s->x + sx * s->scale),
-		round(s->y + sy * s->scale));
-	wlr_scene_buffer_set_buffer(copy, buffer->buffer);
-}
-
-/* Copies the buffers of a view into parent, scaled, with its content origin at x, y. */
-static void snapshot_view(struct wlr_scene_tree *parent, struct sway_view *view,
-		double scale, double x, double y) {
-	struct wlr_scene_tree *source = view->saved_surface_tree ?
-		view->saved_surface_tree : view->content_tree;
-	if (!source) {
-		return;
-	}
-	struct snapshot s = { parent, scale, x, y };
-	// the source tree's own offset is included by the iterator
-	wlr_scene_node_for_each_buffer(&source->node, snapshot_buffer, &s);
-}
-
 static void collect_view(struct sway_container *con, void *data) {
 	list_t *list = data;
 	if (con->view && con->view->surface && !con->node.destroying) {
@@ -457,8 +414,7 @@ static void snapshot_desk(struct tv_desk *d) {
 	wlr_scene_node_set_position(&d->tree->node, d->preview.x, d->preview.y);
 	double s = (double)d->preview.width / tv.output->width;
 	if (tv.output->tw_wallpaper) {
-		struct snapshot snap = { d->tree, s, 0, 0 };
-		wlr_scene_node_for_each_buffer(&tv.output->tw_wallpaper->node, snapshot_buffer, &snap);
+		tw_snapshot_tree(d->tree, &tv.output->tw_wallpaper->node, s, 0, 0);
 	}
 	list_t *cons = create_list();
 	workspace_for_each_container(d->ws, collect_view, cons);
@@ -472,7 +428,7 @@ static void snapshot_desk(struct tv_desk *d) {
 		if (x >= d->preview.width || y >= d->preview.height) {
 			continue;
 		}
-		snapshot_view(d->tree, con->view, s, x, y);
+		tw_snapshot_view(d->tree, con->view, s, s, x, y);
 	}
 	list_free(cons);
 }
@@ -551,7 +507,8 @@ static void rebuild(void) {
 			wlr_scene_node_set_position(&w->tree->node, w->thumb.x, w->thumb.y);
 			double cw, ch;
 			content_size(w->con, &cw, &ch);
-			snapshot_view(w->tree, w->con->view, w->thumb.width / cw, 0, 0);
+			tw_snapshot_view(w->tree, w->con->view, w->thumb.width / cw,
+				w->thumb.width / cw, 0, 0);
 		}
 	}
 	if (tv.hover_index >= (tv.hover == TV_DESK || tv.hover == TV_DESK_CLOSE ?

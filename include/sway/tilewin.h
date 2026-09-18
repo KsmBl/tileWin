@@ -175,12 +175,27 @@ void tw_style_alttab_size(const struct tw_theme *theme, int count, int max_width
 void tw_style_draw_alttab(cairo_t *cairo, const struct tw_theme *theme,
 		const struct tw_alttab_item *items, int count, int selected,
 		int width, int height, int columns);
+/* "alttab { style flip3d }": fly through the windows as a 3D stack. */
+bool tw_style_alttab_flip(const struct tw_theme *theme);
+uint32_t tw_style_alttab_wash(const struct tw_theme *theme);
+void tw_style_draw_alttab_title(cairo_t *cairo, const struct tw_theme *theme,
+		const char *title, int width, int height);
 uint32_t tw_style_snap_color(const struct tw_theme *theme);
 
 /* buffer.c; takes ownership of the surface */
 struct wlr_buffer *tw_buffer_from_surface(cairo_surface_t *surface);
 void tw_scene_buffer_set_surface(struct wlr_scene_buffer *node,
 		cairo_surface_t *surface, int width, int height);
+/*
+ * Copies the buffers of a window into parent, scaled, with its content origin
+ * at x, y. Different scales for the axes squeeze the copy, which is how the
+ * Alt+Tab stack makes a window look tilted.
+ */
+void tw_snapshot_view(struct wlr_scene_tree *parent, struct sway_view *view,
+		double scale_x, double scale_y, double x, double y);
+/* The same for any scene node, e.g. the wallpaper. */
+void tw_snapshot_tree(struct wlr_scene_tree *parent, struct wlr_scene_node *source,
+		double scale, double x, double y);
 
 /* icons.c */
 cairo_surface_t *tw_icon_for_view(struct sway_view *view, int size);

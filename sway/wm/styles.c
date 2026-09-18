@@ -1041,6 +1041,27 @@ void tw_style_draw_alttab(cairo_t *cr, const struct tw_theme *t,
 	}
 }
 
+/* Whether Alt+Tab flies through the windows as a 3D stack, like Flip 3D. */
+bool tw_style_alttab_flip(const struct tw_theme *theme) {
+	return strcmp(tw_theme_str(theme, "alttab.style", "icons"), "flip3d") == 0;
+}
+
+/* What the desktop behind the 3D stack is covered with. */
+uint32_t tw_style_alttab_wash(const struct tw_theme *theme) {
+	return tw_theme_color(theme, "alttab.wash", 0x0a1526c0);
+}
+
+/* The title of the window in front, on a strip as wide as the screen. */
+void tw_style_draw_alttab_title(cairo_t *cr, const struct tw_theme *t,
+		const char *title, int width, int height) {
+	enum style style = get_style(t);
+	bool classic = style == STYLE_WIN95;
+	uint32_t fg = tw_theme_color(t, "alttab.fg", classic ? 0x000000ff : 0xffffffff);
+	const char *font = tw_theme_str(t, "alttab.font",
+		classic ? "Tahoma, Noto Sans 8" : "Segoe UI, Noto Sans 12");
+	draw_text(cr, font, title, 0, 0, width, height, fg, true, TEXT_SHADOW, 0x000000b0);
+}
+
 uint32_t tw_style_snap_color(const struct tw_theme *theme) {
 	return tw_theme_color(theme, "snap.color",
 		get_style(theme) == STYLE_WIN95 ? 0x80808060 : 0xcfe3ff50);

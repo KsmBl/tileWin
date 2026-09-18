@@ -59,11 +59,96 @@ static void finish(void) {
 	}
 }
 
+/* ---------- Flip 3D: the windows themselves, stacked in perspective ---------- */
+
+#define FLIP_CARDS 8     // windows of the stack that are drawn
+#define FLIP_SQUASH 0.76 // how flat a card looks, as if it were tilted back
+#define FLIP_STEP 0.87   // how much smaller each card behind the front one is
+#define FLIP_TITLE 46
+
+static void content_size(struct sway_container *con, double *w, double *h) {
+	*w = con->pending.content_width > 0 ? con->pending.content_width : con->pending.width;
+	*h = con->pending.content_height > 0 ? con->pending.content_height : con->pending.height;
+	*w = *w < 1 ? 1 : *w;
+	*h = *h < 1 ? 1 : *h;
+}
+
+static void color_floats(uint32_t color, float out[4]) {
+	float alpha = (color & 0xff) / 255.0f;
+	// the scene wants the color multiplied by its alpha
+	out[0] = (color >> 24 & 0xff) / 255.0f * alpha;
+	out[1] = (color >> 16 & 0xff) / 255.0f * alpha;
+	out[2] = (color >> 8 & 0xff) / 255.0f * alpha;
+	out[3] = alpha;
+}
+
+static void render_flip(struct sway_output *output, int n) {
+	// the stack is built anew for every step, in the order it is shown in
+	if (state.tree) {
+		wlr_scene_node_destroy(&state.tree->node);
+		state.tree = NULL;
+		state.buffer = NULL;
+	}
+	state.tree = wlr_scene_tree_create(root->layers.seat);
+	if (!state.tree) {
+		return;
+	}
+	wlr_scene_node_set_position(&state.tree->node, output->lx, output->ly);
+
+	float wash[4];
+	color_floats(tw_style_alttab_wash(tw_theme), wash);
+	wlr_scene_rect_create(state.tree, output->width, output->height, wash);
+
+	int shown = n < FLIP_CARDS ? n : FLIP_CARDS;
+	double max_w = output->width * 0.44, max_h = output->height * 0.5;
+	double cx = output->width * 0.40, cy = output->height * 0.52;
+	double dx = output->width * 0.045, dy = output->height * 0.055;
+	float frame[4];
+	color_floats(0xffffff60, frame);
+	for (int j = shown - 1; j >= 0; j--) { // from the back to the front
+		struct sway_container *con = state.items->items[(state.index + j) % n];
+		double w, h;
+		content_size(con, &w, &h);
+		double fit = fmin(max_w / w, max_h / h) * pow(FLIP_STEP, j);
+		double sx = fit, sy = fit * FLIP_SQUASH;
+		double cw = w * sx, ch = h * sy;
+		double x = cx + j * dx - cw / 2, y = cy - j * dy - ch / 2;
+		struct wlr_scene_rect *edge = wlr_scene_rect_create(state.tree,
+			(int)round(cw) + 4, (int)round(ch) + 4, frame);
+		if (edge) {
+			wlr_scene_node_set_position(&edge->node, (int)round(x) - 2, (int)round(y) - 2);
+		}
+		tw_snapshot_view(state.tree, con->view, sx, sy, x, y);
+	}
+
+	struct sway_container *front = state.items->items[state.index];
+	float scale = output->wlr_output->scale;
+	int pw = (int)ceil(output->width * scale), ph = (int)ceil(FLIP_TITLE * scale);
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	tw_style_draw_alttab_title(cr, tw_theme, front->title ? front->title : "",
+		output->width, FLIP_TITLE);
+	cairo_destroy(cr);
+	state.buffer = wlr_scene_buffer_create(state.tree, NULL);
+	if (!state.buffer) {
+		cairo_surface_destroy(surface);
+		return;
+	}
+	tw_scene_buffer_set_surface(state.buffer, surface, output->width, FLIP_TITLE);
+	wlr_scene_node_set_position(&state.buffer->node, 0,
+		(int)(output->height * 0.82));
+}
+
 static void render(void) {
 	int n = state.items->length;
 	struct sway_workspace *ws = seat_get_focused_workspace(state.seat);
 	struct sway_output *output = ws ? ws->output : NULL;
 	if (!output || n == 0) {
+		return;
+	}
+	if (tw_style_alttab_flip(tw_theme)) {
+		render_flip(output, n);
 		return;
 	}
 	float scale = output->wlr_output->scale;
