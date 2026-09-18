@@ -674,13 +674,27 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps) {
-	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !lock.keyboard) {
+	bool has_keyboard = caps & WL_SEAT_CAPABILITY_KEYBOARD;
+	bool has_pointer = caps & WL_SEAT_CAPABILITY_POINTER;
+
+	/* Every input device goes away while another VT is in front, and the seat
+	   loses the capability with them. Let the dead objects go instead of
+	   keeping them, or the devices are never bound again on the way back and
+	   the lock screen stops seeing input. */
+	if (has_keyboard && !lock.keyboard) {
 		lock.keyboard = wl_seat_get_keyboard(seat);
 		wl_keyboard_add_listener(lock.keyboard, &keyboard_listener, NULL);
+	} else if (!has_keyboard && lock.keyboard) {
+		wl_keyboard_release(lock.keyboard);
+		lock.keyboard = NULL;
 	}
-	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !lock.pointer) {
+
+	if (has_pointer && !lock.pointer) {
 		lock.pointer = wl_seat_get_pointer(seat);
 		wl_pointer_add_listener(lock.pointer, &pointer_listener, NULL);
+	} else if (!has_pointer && lock.pointer) {
+		wl_pointer_release(lock.pointer);
+		lock.pointer = NULL;
 	}
 }
 
