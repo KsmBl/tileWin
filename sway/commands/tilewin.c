@@ -505,6 +505,22 @@ struct cmd_results *cmd_window_stick_distance(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pointer_trail", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	long count = strtol(argv[0], &end, 10);
+	if (!end || *end || count < 0 || count > 20) {
+		return cmd_results_new(CMD_INVALID,
+			"pointer_trail needs a number of pointers from 0 to 20 (0 turns it off)");
+	}
+	config->tw_pointer_trail = (int)count;
+	tw_pointer_trail_changed();
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_window_group_modifier(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "window_group_modifier", EXPECTED_AT_LEAST, 1))) {

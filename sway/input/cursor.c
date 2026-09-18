@@ -317,6 +317,7 @@ void pointer_motion(struct sway_cursor *cursor, uint32_t time_msec,
 	}
 
 	wlr_cursor_move(cursor->cursor, device, dx, dy);
+	tw_pointer_moved(cursor);
 
 	seatop_pointer_motion(cursor->seat, time_msec);
 }

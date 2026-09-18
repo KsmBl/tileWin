@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,7 +71,8 @@ struct mouse_page {
 	bool updating;
 	GPtrArray *bindings; // struct control_binding *
 	GPtrArray *cursor_themes; // char *
-	GtkWidget *theme_dd, *size_dd;
+	GtkWidget *theme_dd, *size_dd, *trail;
+	guint trail_timer;
 };
 
 struct control_binding {
@@ -237,6 +239,32 @@ static void on_cursor_changed(GObject *dropdown, GParamSpec *pspec, gpointer dat
 	g_free(args);
 }
 
+/* ---------- pointer trail ---------- */
+
+static gboolean apply_trail(gpointer data) {
+	struct mouse_page *p = data;
+	p->trail_timer = 0;
+	char value[16];
+	snprintf(value, sizeof(value), "%d",
+		(int)round(gtk_range_get_value(GTK_RANGE(p->trail))));
+	struct confdoc *d = common(p);
+	confdoc_set(d, d->root, "pointer_trail", NULL, value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "pointer_trail %s", value);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_trail(GtkRange *range, gpointer data) {
+	struct mouse_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	if (p->trail_timer) {
+		g_source_remove(p->trail_timer);
+	}
+	p->trail_timer = g_timeout_add(300, apply_trail, p);
+}
+
 /* ---------- page ---------- */
 
 void mouse_page_refresh(struct settings *s) {
@@ -294,6 +322,9 @@ void mouse_page_refresh(struct settings *s) {
 			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->size_dd), i);
 		}
 	}
+	const char *trail = cstmt_arg(confdoc_child(common(p)->root, "pointer_trail", NULL), 0);
+	gtk_range_set_value(GTK_RANGE(p->trail), trail ? atoi(trail) : 0);
+
 	g_free(gtk_theme);
 	p->updating = false;
 }
@@ -340,6 +371,17 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	p->size_dd = gtk_drop_down_new(G_LIST_MODEL(size_model), NULL);
 	g_signal_connect(p->size_dd, "notify::selected", G_CALLBACK(on_cursor_changed), p);
 	ui_row(cursor, "Cursor size", "Apps started later use the new cursor", p->size_dd);
+
+	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 20, 1);
+	gtk_widget_set_size_request(p->trail, 260, -1);
+	gtk_scale_set_draw_value(GTK_SCALE(p->trail), TRUE);
+	gtk_scale_set_digits(GTK_SCALE(p->trail), 0);
+	gtk_scale_set_value_pos(GTK_SCALE(p->trail), GTK_POS_LEFT);
+	gtk_scale_add_mark(GTK_SCALE(p->trail), 0, GTK_POS_BOTTOM, NULL);
+	g_signal_connect(p->trail, "value-changed", G_CALLBACK(on_trail), p);
+	ui_row(cursor, "Pointer trail",
+		"How many copies of the pointer follow it while it moves; 0 turns the trail off",
+		p->trail);
 
 	s->mouse_page = p;
 	mouse_page_refresh(s);

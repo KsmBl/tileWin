@@ -88,6 +88,7 @@ static const struct cmd_handler handlers[] = {
 	{ "no_focus", cmd_no_focus },
 	{ "output", cmd_output },
 	{ "panel_command", cmd_panel_command },
+	{ "pointer_trail", cmd_pointer_trail },
 	{ "popup_during_fullscreen", cmd_popup_during_fullscreen },
 	{ "seat", cmd_seat },
 	{ "session_restore", cmd_session_restore },

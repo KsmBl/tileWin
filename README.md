@@ -283,6 +283,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
 | `window_stretch enable\|disable` | Double-clicking a side of a window stretches it (default enable) |
 | `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along, snapped ones in the size they have (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
+| `pointer_trail <count>` | That many copies of the pointer follow it while it moves, like the mouse trails of Windows, 0 to 20 (default 0, off) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 
@@ -309,7 +310,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Date & time | The clock of the computer: time server on or off, time zone, setting date and time by hand, and the format of the taskbar clock |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
-| Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size |
+| Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size, pointer trail |
 | Apps | Default apps (web browser, email, file manager, terminal, text editor, pictures, music, videos, PDF) and startup apps: turn them on or off, add or remove them |
 | Account | Your account picture (`~/.face`, shown on the lock screen and login screens) and name |
 

@@ -13,6 +13,7 @@
 
 struct sway_config;
 struct sway_container;
+struct sway_cursor;
 struct sway_output;
 struct sway_seat;
 struct sway_view;
@@ -282,6 +283,9 @@ bool tw_desktop_move(struct sway_workspace *ws, int direction);
 void tw_pointer_key(xkb_keysym_t sym, bool pressed);
 /* A mouse button was pressed, so Ctrl is part of a click and not a tap. */
 void tw_pointer_cancel_tap(void);
+/* The pointer moved; it leaves copies of itself behind ("pointer_trail"). */
+void tw_pointer_moved(struct sway_cursor *cursor);
+void tw_pointer_trail_changed(void);
 void tw_pointer_fini(void);
 
 /* session.c */

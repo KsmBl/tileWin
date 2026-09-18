@@ -130,6 +130,7 @@ sway_cmd cmd_xdg_autostart;
 sway_cmd cmd_animation;
 sway_cmd cmd_animations;
 sway_cmd cmd_animation_speed;
+sway_cmd cmd_pointer_trail;
 sway_cmd cmd_window_group_modifier;
 sway_cmd cmd_window_snap;
 sway_cmd cmd_window_stick;

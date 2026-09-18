@@ -316,6 +316,7 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_stick = true;
 	config->tw_stick_distance = 12;
 	config->tw_group_modifier = WLR_MODIFIER_SHIFT;
+	config->tw_pointer_trail = 0;
 	config->tw_snap = true;
 	config->tw_stretch = true;
 
