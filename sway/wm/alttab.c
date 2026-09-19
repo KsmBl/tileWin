@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdlib.h>
+#include <time.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
@@ -7,6 +8,7 @@
 #include "sway/desktop/transaction.h"
 #include "sway/input/seat.h"
 #include "sway/output.h"
+#include "sway/server.h"
 #include "sway/tilewin.h"
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
@@ -22,6 +24,10 @@ static struct {
 	uint32_t modifiers;
 	struct wlr_scene_tree *tree;
 	struct wlr_scene_buffer *buffer;
+	/* The 3D stack slides from the old order to the new one. */
+	double offset, offset_start; // cards away from where they belong, towards 0
+	struct timespec stepped;
+	struct wl_event_source *timer;
 } state;
 
 bool tw_alttab_active(void) {
@@ -49,6 +55,10 @@ static void collect(struct sway_seat *seat) {
 
 static void finish(void) {
 	state.active = false;
+	state.offset = 0;
+	if (state.timer) {
+		wl_event_source_timer_update(state.timer, 0);
+	}
 	if (state.items) {
 		list_free(state.items);
 		state.items = NULL;
@@ -106,14 +116,24 @@ static void render_flip(struct sway_output *output, int n) {
 	double dx = output->width * 0.045, dy = output->height * 0.055;
 	float frame[4];
 	color_floats(0xffffff60, frame);
-	for (int j = shown - 1; j >= 0; j--) { // from the back to the front
-		struct sway_container *con = state.items->items[(state.index + j) % n];
+	/*
+	 * A card sits at its place in the stack plus the offset the animation has
+	 * left, so the whole stack slides while the one that was in front flies
+	 * out towards the viewer.
+	 */
+	for (int k = shown - 1; k >= -1; k--) { // from the back to the front
+		double depth = k + state.offset;
+		if (depth < -0.95 || depth > shown - 0.05) {
+			continue;
+		}
+		int index = ((state.index + k) % n + n) % n;
+		struct sway_container *con = state.items->items[index];
 		double w, h;
 		content_size(con, &w, &h);
-		double fit = fmin(max_w / w, max_h / h) * pow(FLIP_STEP, j);
+		double fit = fmin(max_w / w, max_h / h) * pow(FLIP_STEP, depth);
 		double sx = fit, sy = fit * FLIP_SQUASH;
 		double cw = w * sx, ch = h * sy;
-		double x = cx + j * dx - cw / 2, y = cy - j * dy - ch / 2;
+		double x = cx + depth * dx - cw / 2, y = cy - depth * dy - ch / 2;
 		struct wlr_scene_rect *edge = wlr_scene_rect_create(state.tree,
 			(int)round(cw) + 4, (int)round(ch) + 4, frame);
 		if (edge) {
@@ -139,6 +159,59 @@ static void render_flip(struct sway_output *output, int n) {
 	tw_scene_buffer_set_surface(state.buffer, surface, output->width, FLIP_TITLE);
 	wlr_scene_node_set_position(&state.buffer->node, 0,
 		(int)(output->height * 0.82));
+}
+
+static void render(void);
+
+#define FLIP_STEP_MS 160
+
+static double flip_elapsed_ms(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec - state.stepped.tv_sec) * 1000.0 +
+		(now.tv_nsec - state.stepped.tv_nsec) / 1000000.0;
+}
+
+static double flip_duration(void) {
+	double speed = config && config->tw_animation_speed > 0 ? config->tw_animation_speed : 1;
+	return FLIP_STEP_MS / speed;
+}
+
+static int flip_tick(void *data) {
+	if (!state.active) {
+		return 0;
+	}
+	double t = flip_elapsed_ms() / flip_duration();
+	if (t >= 1) {
+		state.offset = 0;
+	} else {
+		// eases out, so the stack settles instead of stopping dead
+		double eased = 1 - pow(1 - t, 3);
+		state.offset = state.offset > 0 ? (1 - eased) * fabs(state.offset_start) :
+			-(1 - eased) * fabs(state.offset_start);
+	}
+	render();
+	if (state.offset != 0 && state.timer) {
+		wl_event_source_timer_update(state.timer, 8);
+	}
+	return 0;
+}
+
+/* Starts the slide after the selection moved by one. */
+static void flip_step_started(int direction) {
+	if (!config || !config->tw_animations) {
+		state.offset = 0;
+		return;
+	}
+	state.offset_start = direction > 0 ? 1.0 : -1.0;
+	state.offset = state.offset_start;
+	clock_gettime(CLOCK_MONOTONIC, &state.stepped);
+	if (!state.timer && server.wl_event_loop) {
+		state.timer = wl_event_loop_add_timer(server.wl_event_loop, flip_tick, NULL);
+	}
+	if (state.timer) {
+		wl_event_source_timer_update(state.timer, 8);
+	}
 }
 
 static void render(void) {
@@ -236,6 +309,9 @@ void tw_alttab_step(struct sway_seat *seat, int direction) {
 	}
 	int n = state.items->length;
 	state.index = ((state.index + direction) % n + n) % n;
+	if (tw_style_alttab_flip(tw_theme) || (config && config->tw_alttab_style == 1)) {
+		flip_step_started(direction);
+	}
 	render();
 }
 
