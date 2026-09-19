@@ -2790,6 +2790,413 @@ void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const ch
 	f->tick = loop_add_timer(panel->loop, 400, cpu_tick, NULL);
 }
 
+/* ================= memory ================= */
+
+/*
+ * Memory flyout: how much RAM is in use over the last minute, what it is made
+ * up of, the swap and the processes holding the most of it. Read from /proc
+ * once a second while the flyout is open.
+ */
+
+#define MEM_HISTORY_LEN 60
+#define MEM_TOP 5
+#define MEM_HEADER 66
+#define MEM_GRAPH 112
+#define MEM_BARS 96
+#define MEM_INFO 60
+#define MEM_PROC_ROW 24
+
+enum mem_hotspot {
+	MEM_HS_TASK_MANAGER = 1,
+};
+
+struct mem_usage {
+	char name[64];
+	double gib;
+	int count;
+};
+
+struct mem_flyout {
+	struct flyout base; // first member
+	// everything in KiB, as /proc/meminfo has it
+	long long total, available, free, buffers, cached, reclaimable;
+	long long swap_total, swap_free;
+	int history[MEM_HISTORY_LEN];
+	int history_len;
+	struct mem_usage top[MEM_TOP];
+	int top_count;
+	struct loop_timer *tick;
+};
+
+static struct mem_flyout *mem_current = NULL;
+
+static long long mem_used(struct mem_flyout *f) {
+	long long used = f->total - f->available;
+	return used > 0 ? used : 0;
+}
+
+static int mem_percent(struct mem_flyout *f) {
+	return f->total > 0 ? (int)(mem_used(f) * 100 / f->total) : 0;
+}
+
+static void mem_read_meminfo(struct mem_flyout *f) {
+	FILE *file = fopen("/proc/meminfo", "r");
+	if (!file) {
+		return;
+	}
+	static const struct {
+		const char *key;
+		size_t offset;
+	} fields[] = {
+		{ "MemTotal:", offsetof(struct mem_flyout, total) },
+		{ "MemFree:", offsetof(struct mem_flyout, free) },
+		{ "MemAvailable:", offsetof(struct mem_flyout, available) },
+		{ "Buffers:", offsetof(struct mem_flyout, buffers) },
+		{ "Cached:", offsetof(struct mem_flyout, cached) },
+		{ "SReclaimable:", offsetof(struct mem_flyout, reclaimable) },
+		{ "SwapTotal:", offsetof(struct mem_flyout, swap_total) },
+		{ "SwapFree:", offsetof(struct mem_flyout, swap_free) },
+	};
+	char line[256];
+	while (fgets(line, sizeof(line), file)) {
+		for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+			size_t len = strlen(fields[i].key);
+			if (strncmp(line, fields[i].key, len) != 0) {
+				continue;
+			}
+			*(long long *)((char *)f + fields[i].offset) = strtoll(line + len, NULL, 10);
+			break;
+		}
+	}
+	fclose(file);
+	// without MemAvailable (very old kernels) fall back to what is reusable
+	if (f->available == 0 && f->total > 0) {
+		f->available = f->free + f->buffers + f->cached + f->reclaimable;
+	}
+}
+
+static int mem_usage_cmp(const void *a, const void *b) {
+	const struct mem_usage *ua = a, *ub = b;
+	return ub->gib > ua->gib ? 1 : ub->gib < ua->gib ? -1 : 0;
+}
+
+/* The processes holding the most memory, several of a name counted together. */
+static void mem_read_processes(struct mem_flyout *f) {
+	long page_kb = sysconf(_SC_PAGESIZE) / 1024;
+	struct mem_usage groups[64];
+	int group_count = 0;
+	DIR *dir = opendir("/proc");
+	struct dirent *entry;
+	while (dir && (entry = readdir(dir))) {
+		if (entry->d_name[0] < '0' || entry->d_name[0] > '9') {
+			continue;
+		}
+		char path[64];
+		snprintf(path, sizeof(path), "/proc/%s/statm", entry->d_name);
+		FILE *file = fopen(path, "r");
+		if (!file) {
+			continue;
+		}
+		long long size = 0, resident = 0, shared = 0;
+		bool ok = fscanf(file, "%lld %lld %lld", &size, &resident, &shared) == 3;
+		fclose(file);
+		// what the process holds on its own, without what it shares
+		long long private_kb = ok ? (resident - shared) * page_kb : 0;
+		if (private_kb <= 0) {
+			continue;
+		}
+		snprintf(path, sizeof(path), "/proc/%s/comm", entry->d_name);
+		file = fopen(path, "r");
+		char name[64] = "";
+		if (file) {
+			if (fgets(name, sizeof(name), file)) {
+				name[strcspn(name, "\n")] = '\0';
+			}
+			fclose(file);
+		}
+		if (!name[0]) {
+			continue;
+		}
+		double gib = private_kb / 1048576.0;
+		int found = -1;
+		for (int i = 0; i < group_count && found < 0; i++) {
+			if (strcmp(groups[i].name, name) == 0) {
+				found = i;
+			}
+		}
+		if (found >= 0) {
+			groups[found].gib += gib;
+			groups[found].count++;
+		} else if (group_count < (int)(sizeof(groups) / sizeof(groups[0]))) {
+			struct mem_usage *u = &groups[group_count++];
+			snprintf(u->name, sizeof(u->name), "%s", name);
+			u->gib = gib;
+			u->count = 1;
+		}
+	}
+	if (dir) {
+		closedir(dir);
+	}
+	qsort(groups, group_count, sizeof(groups[0]), mem_usage_cmp);
+	f->top_count = group_count < MEM_TOP ? group_count : MEM_TOP;
+	for (int i = 0; i < f->top_count; i++) {
+		f->top[i] = groups[i];
+	}
+}
+
+static void mem_sample(struct mem_flyout *f) {
+	mem_read_meminfo(f);
+	mem_read_processes(f);
+	if (f->history_len == MEM_HISTORY_LEN) {
+		memmove(f->history, f->history + 1, (MEM_HISTORY_LEN - 1) * sizeof(int));
+		f->history_len--;
+	}
+	f->history[f->history_len++] = mem_percent(f);
+}
+
+static int mem_height(struct mem_flyout *f) {
+	return MEM_HEADER + MEM_GRAPH + MEM_BARS + MEM_INFO + 30 + MEM_TOP * MEM_PROC_ROW + 8 +
+		FOOTER;
+}
+
+static void mem_tick(void *data) {
+	struct mem_flyout *f = mem_current;
+	if (!f) {
+		return;
+	}
+	mem_sample(f);
+	flyout_resize(&f->base, mem_height(f));
+	f->tick = loop_add_timer(f->base.panel->loop, 1000, mem_tick, NULL);
+}
+
+/* A bar of the breakdown: a share of the whole in its own color. */
+static void mem_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
+		double h, double share, uint32_t color) {
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, st->style == PS_CLASSIC ? 0 : 4);
+	pd_color(cr, st->button_bg);
+	cairo_fill(cr);
+	double filled = share < 0 ? 0 : share > 1 ? 1 : share;
+	if (filled > 0) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x, y, w * filled, h, st->style == PS_CLASSIC ? 0 : 4);
+		pd_color(cr, color);
+		cairo_fill(cr);
+	}
+}
+
+static void mem_format_size(char *buffer, size_t size, long long kib) {
+	if (kib >= 1048576) {
+		snprintf(buffer, size, "%.1f GiB", kib / 1048576.0);
+	} else {
+		snprintf(buffer, size, "%.0f MiB", kib / 1024.0);
+	}
+}
+
+static void mem_render(struct popup *p, cairo_t *cr) {
+	struct mem_flyout *f = p->data;
+	struct fly_style st;
+	fly_style_init(&st, p->panel);
+	int M = popup_shadow_margin(p->panel);
+	int W = p->surface->width, H = p->surface->height;
+	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
+	int y = M;
+	char text[256], value[64], second[64];
+
+	// header: share in use, and how much of how much
+	snprintf(text, sizeof(text), "%d%%", mem_percent(f));
+	pd_text(cr, st.big, text, x0, y + 12, 86, 36, st.fg, PD_LEFT);
+	pd_text(cr, st.bold, "Memory", x0 + 90, y + 12, cw - 90, 20, st.fg, PD_LEFT);
+	mem_format_size(value, sizeof(value), mem_used(f));
+	mem_format_size(second, sizeof(second), f->total);
+	snprintf(text, sizeof(text), "%s of %s in use", value, second);
+	pd_text(cr, st.font, text, x0 + 90, y + 34, cw - 90, 20, st.dim, PD_LEFT);
+	y += MEM_HEADER;
+
+	// how much was in use over the last minute
+	struct pbox g = { x0, y, cw, MEM_GRAPH - 26 };
+	cairo_new_path(cr);
+	pd_rounded(cr, g.x, g.y, g.width, g.height, st.style == PS_CLASSIC ? 0 : 6);
+	pd_color(cr, st.button_bg);
+	cairo_fill(cr);
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st.line);
+	}
+	if (f->history_len > 1) {
+		double step = (double)g.width / (MEM_HISTORY_LEN - 1);
+		double first_x = g.x + g.width - (f->history_len - 1) * step;
+		cairo_new_path(cr);
+		cairo_move_to(cr, first_x, g.y + g.height);
+		for (int i = 0; i < f->history_len; i++) {
+			cairo_line_to(cr, first_x + i * step,
+				g.y + g.height - g.height * f->history[i] / 100.0);
+		}
+		cairo_line_to(cr, g.x + g.width, g.y + g.height);
+		cairo_close_path(cr);
+		pd_color(cr, (st.accent & 0xffffff00) | 0x40);
+		cairo_fill(cr);
+		cairo_new_path(cr);
+		for (int i = 0; i < f->history_len; i++) {
+			double px = first_x + i * step;
+			double py = g.y + g.height - g.height * f->history[i] / 100.0;
+			if (i == 0) {
+				cairo_move_to(cr, px, py);
+			} else {
+				cairo_line_to(cr, px, py);
+			}
+		}
+		pd_color(cr, st.accent);
+		cairo_set_line_width(cr, 1.5);
+		cairo_stroke(cr);
+	}
+	pd_text(cr, st.font, "60 seconds", x0, g.y + g.height + 2, cw, 22, st.dim, PD_LEFT);
+	pd_text(cr, st.font, "100%", x0, g.y + g.height + 2, cw, 22, st.dim, PD_RIGHT);
+	y += MEM_GRAPH;
+
+	// what the memory is made up of, and the swap
+	draw_line(cr, &st, p, y);
+	long long cached = f->cached + f->buffers + f->reclaimable;
+	long long swap_used = f->swap_total - f->swap_free;
+	const struct {
+		const char *label;
+		long long kib, of;
+		uint32_t color;
+	} bars[] = {
+		{ "In use", mem_used(f), f->total, st.accent },
+		{ "Cached", cached, f->total, (st.accent & 0xffffff00) | 0x70 },
+		{ "Swap", swap_used, f->swap_total, st.dim },
+	};
+	y += 6;
+	for (size_t i = 0; i < sizeof(bars) / sizeof(bars[0]); i++) {
+		pd_text(cr, st.font, bars[i].label, x0, y, 70, 18, st.dim, PD_LEFT);
+		if (bars[i].of > 0) {
+			mem_format_size(value, sizeof(value), bars[i].kib);
+		} else {
+			snprintf(value, sizeof(value), "none");
+		}
+		pd_text(cr, st.font, value, x0, y, cw, 18, st.fg, PD_RIGHT);
+		mem_bar(cr, &st, x0 + 74, y + 4, cw - 74 - 90, 10,
+			bars[i].of > 0 ? (double)bars[i].kib / bars[i].of : 0, bars[i].color);
+		y += 30;
+	}
+	y += MEM_BARS - 6 - 3 * 30;
+
+	// available, free and swap left
+	draw_line(cr, &st, p, y);
+	int cols_x[3] = { 0, cw * 36 / 100, cw * 70 / 100 };
+	int cols_w[3] = { cols_x[1] - 6, cols_x[2] - cols_x[1] - 6, cw - cols_x[2] };
+	const char *labels[3] = { "Available", "Free", "Swap free" };
+	char values[3][64];
+	mem_format_size(values[0], sizeof(values[0]), f->available);
+	mem_format_size(values[1], sizeof(values[1]), f->free);
+	if (f->swap_total > 0) {
+		mem_format_size(values[2], sizeof(values[2]), f->swap_free);
+	} else {
+		snprintf(values[2], sizeof(values[2]), "No swap");
+	}
+	for (int i = 0; i < 3; i++) {
+		pd_text(cr, st.font, labels[i], x0 + cols_x[i], y + 8, cols_w[i], 20, st.dim, PD_LEFT);
+		pd_text(cr, st.bold, values[i], x0 + cols_x[i], y + 30, cols_w[i], 22, st.fg, PD_LEFT);
+	}
+	y += MEM_INFO;
+
+	// processes holding the most memory
+	draw_line(cr, &st, p, y);
+	pd_text(cr, st.font, "Most memory", x0, y + 6, cw, 20, st.dim, PD_LEFT);
+	pd_text(cr, st.font, "Private", x0, y + 6, cw, 20, st.dim, PD_RIGHT);
+	y += 30;
+	if (f->top_count == 0) {
+		pd_text(cr, st.font, "Measuring...", x0, y, cw, MEM_PROC_ROW, st.dim, PD_LEFT);
+	}
+	double most = f->top_count > 0 ? f->top[0].gib : 0;
+	for (int i = 0; i < f->top_count; i++) {
+		struct mem_usage *u = &f->top[i];
+		double share = most > 0 ? u->gib / most : 0;
+		if (share > 0) {
+			cairo_new_path(cr);
+			pd_rounded(cr, x0 - 4, y + 2, (cw + 8) * share, MEM_PROC_ROW - 4,
+				st.style == PS_CLASSIC ? 0 : 4);
+			pd_color(cr, (st.accent & 0xffffff00) | 0x30);
+			cairo_fill(cr);
+		}
+		if (u->count > 1) {
+			snprintf(text, sizeof(text), "%s (%d)", u->name, u->count);
+		} else {
+			snprintf(text, sizeof(text), "%s", u->name);
+		}
+		pd_text(cr, st.font, text, x0, y, cw - 80, MEM_PROC_ROW, st.fg, PD_LEFT);
+		mem_format_size(value, sizeof(value), (long long)(u->gib * 1048576));
+		pd_text(cr, st.font, value, x0, y, cw, MEM_PROC_ROW, st.fg, PD_RIGHT);
+		y += MEM_PROC_ROW;
+	}
+	y = M + mem_height(f) - FOOTER;
+
+	draw_line(cr, &st, p, y);
+	struct pbox link = { x0, y + 1, cw, FOOTER - 1 };
+	draw_link(cr, &st, &f->base, link, "Open Task Manager", PD_LEFT);
+	psurface_add_hotspot(p->surface, link.x, link.y, cw / 2, link.height, NULL,
+		MEM_HS_TASK_MANAGER, 0, NULL);
+}
+
+static void mem_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	struct mem_flyout *f = p->data;
+	if (button != BTN_LEFT || pressed) {
+		return;
+	}
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (hs && hs->kind == MEM_HS_TASK_MANAGER) {
+		run_settings(&f->base);
+	}
+}
+
+static void mem_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	if (sym == XKB_KEY_Escape) {
+		popup_close_later(p->panel);
+	}
+}
+
+static void mem_destroy(struct popup *p) {
+	struct mem_flyout *f = p->data;
+	if (mem_current == f) {
+		mem_current = NULL;
+	}
+	if (f->tick) {
+		loop_remove_timer(p->panel->loop, f->tick);
+	}
+	free(f->base.settings);
+	free(f);
+}
+
+static const struct popup_vtable mem_vtable = {
+	.render = mem_render,
+	.motion = flyout_motion,
+	.leave = flyout_leave,
+	.button = mem_button,
+	.key = mem_key,
+	.destroy = mem_destroy,
+};
+
+void flyout_memory_toggle(struct panel *panel, struct popup_anchor anchor,
+		const char *task_manager) {
+	if (popup_is_open(panel, POPUP_MEMORY)) {
+		popup_close_all(panel);
+		return;
+	}
+	struct mem_flyout *f = calloc(1, sizeof(*f));
+	f->base.panel = panel;
+	f->base.anchor = anchor;
+	f->base.settings = task_manager ? strdup(task_manager) : default_task_manager(panel);
+	mem_sample(f);
+	if (!flyout_open(&f->base, POPUP_MEMORY, mem_height(f), &mem_vtable, f)) {
+		free(f->base.settings);
+		free(f);
+		return;
+	}
+	mem_current = f;
+	f->tick = loop_add_timer(panel->loop, 1000, mem_tick, NULL);
+}
+
 /* ================= bluetooth ================= */
 
 #define BT_HEADER 60

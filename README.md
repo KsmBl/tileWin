@@ -268,7 +268,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
 | `desktop new\|close\|move left\|move right` | Create a desktop, close the current one (its windows move to the desktop before it), or move it one place in the desktop order |
 | `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
-| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `shutdown [logoff]`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
+| `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `shutdown [logoff]`, `memory`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
@@ -369,7 +369,7 @@ menu taskbar {
 | `network` | `interface`, `interval`, `settings` (command of the flyout's settings link), left click opens the Wi-Fi flyout (a saved network has a **Show password** button: it finds the saved connection of the network even when the connection was given another name, reads the WPA key, the WEP key or the 802.1X password, NetworkManager may ask for authorization first, and clicking the password copies it) |
 | `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |
 | `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval`, `task_manager <command>`; click for a popup with the usage of the last minute, the cores, load, up time and the processes using the most CPU (`panel cpu` opens it too) |
-| `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval` |
+| `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval`, `task_manager <command>`; click for a flyout with the usage of the last minute, what the memory is made up of, the swap and the processes holding the most of it (`panel memory` opens it too) |
 | `brightness` | (none; scroll changes it via brightnessctl) |
 | `keyboard` | (none) |
 | `modeswitch` | (none) |

@@ -602,6 +602,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		flyout_volume_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "cpu") == 0 && output) {
 		flyout_cpu_toggle(panel, flyout_anchor(panel, output), NULL);
+	} else if (strcmp(cmd, "memory") == 0 && output) {
+		flyout_memory_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "power") == 0 && output) {
 		flyout_power_toggle(panel, flyout_anchor(panel, output), NULL);
 	} else if (strcmp(cmd, "shutdown") == 0) {

@@ -31,7 +31,7 @@ static const struct widget_type widget_types[] = {
 	{ "battery", "Battery", "Charge level" },
 	{ "brightness", "Brightness", "Screen brightness" },
 	{ "cpu", "CPU usage", "Processor load" },
-	{ "memory", "Memory usage", "RAM in use" },
+	{ "memory", "Memory usage", "RAM in use, click for a flyout" },
 	{ "clock", "Clock", "Time and date with a calendar" },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
@@ -71,6 +71,7 @@ static const struct opt opts_cpu[] = {
 static const struct opt opts_memory[] = {
 	{ "interval", "Update interval", "Seconds, default 5", NULL },
 	{ "format", "Format", "{used_percent}, {used} and {total} in GiB", NULL },
+	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
 	{ 0 },
 };
 static const struct opt opts_battery[] = {

@@ -413,6 +413,7 @@ enum popup_kind {
 	POPUP_VOLUME,
 	POPUP_POWER,
 	POPUP_CPU,
+	POPUP_MEMORY,
 	POPUP_DIALOG,
 	POPUP_SHUTDOWN,
 	POPUP_NOTIFICATIONS,
@@ -460,6 +461,8 @@ void flyout_volume_toggle(struct panel *panel, struct popup_anchor anchor, const
 void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
 /* task_manager: command of the footer link, NULL for btop/htop/top in the terminal */
 void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager);
+void flyout_memory_toggle(struct panel *panel, struct popup_anchor anchor,
+		const char *task_manager);
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);
 
