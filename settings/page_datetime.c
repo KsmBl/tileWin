@@ -141,11 +141,6 @@ static const char *const ntp_mode_labels[] = {
 	"The first one that answers, in order",
 	"The one that answers quickest",
 	"The middle of all the answers",
-};
-static const char *const ntp_mode_labels_null[] = {
-	"The first one that answers, in order",
-	"The one that answers quickest",
-	"The middle of all the answers",
 	NULL,
 };
 
@@ -1035,7 +1030,7 @@ GtkWidget *datetime_page_new(struct settings *s) {
 	g_signal_connect(p->ntp_servers, "changed", G_CALLBACK(on_ntp_servers_changed), p);
 	ui_row(servers, "Time servers", "Separated by spaces; all of them are asked at once",
 		p->ntp_servers);
-	p->ntp_mode_dd = gtk_drop_down_new_from_strings(ntp_mode_labels_null);
+	p->ntp_mode_dd = gtk_drop_down_new_from_strings(ntp_mode_labels);
 	g_signal_connect(p->ntp_mode_dd, "notify::selected", G_CALLBACK(on_ntp_mode_changed), p);
 	ui_row(servers, "Which answer to use", NULL, p->ntp_mode_dd);
 	p->ntp_fetch = gtk_button_new_with_label("Get the time now");
