@@ -526,7 +526,8 @@ void panel_config_free(struct panel_config *config) {
 static const struct widget_impl *impls[] = {
 	&widget_start, &widget_taskbar, &widget_quicklaunch, &widget_workspaces,
 	&widget_title, &widget_tray, &widget_clock, &widget_volume, &widget_battery,
-	&widget_network, &widget_cpu, &widget_memory, &widget_disk, &widget_brightness,
+	&widget_network, &widget_cpu, &widget_memory, &widget_disk, &widget_gpu,
+	&widget_net, &widget_storage, &widget_power, &widget_brightness,
 	&widget_keyboard, &widget_modeswitch, &widget_showdesktop, &widget_search,
 	&widget_separator, &widget_spacer, &widget_custom, &widget_notifications,
 };
@@ -673,4 +674,10 @@ int widget_conf_int(struct widget *w, const char *key, int fallback) {
 
 bool widget_conf_bool(struct widget *w, const char *key, bool fallback) {
 	return twconf_parse_bool(widget_conf(w, key, NULL), fallback);
+}
+
+uint32_t widget_conf_color(struct widget *w, const char *key, uint32_t fallback) {
+	uint32_t color;
+	const char *value = widget_conf(w, key, NULL);
+	return value && tw_parse_color(value, &color) ? color : fallback;
 }

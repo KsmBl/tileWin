@@ -64,7 +64,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, volume, network, battery, CPU, memory, disk activity, brightness, keyboard layout.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, volume, network, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -377,7 +377,13 @@ menu taskbar {
 | `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |
 | `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval`, `task_manager <command>`; click for a popup with the usage of the last minute, the cores, load, up time and the processes using the most CPU (`panel cpu` opens it too) |
 | `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval`, `task_manager <command>`; click for a flyout with the usage of the last minute, what the memory is made up of, the swap and the processes holding the most of it (`panel memory` opens it too) |
+| `gpu` | Load of a graphics card: `device card0`, or `command <cmd>` for cards that report nothing in `/sys` (e.g. `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits`), `format "GPU {usage}%"`, `interval` |
+| `net` | What goes through a network interface: `device wlan0` (the busiest one by default), `format "↓ {down} ↑ {up}"` with `{down}`, `{up}`, `{total}` and `{device}`, `max_rate <KiB/s>` for the scale of the chart (default 12500), `interval` |
+| `storage` | How full a file system is: `path /home` (default `/`), `format "{path} {used_percent}%"` with `{used}`, `{free}` and `{total}` in GiB, `interval` |
+| `power` | Watts the computer is drawing: `device BAT0`, `format "{watts} W"`, `max_watts` for the scale (default 60), `interval` |
 | `disk` | A lamp that lights up while the disks are busy, like the drive lamp of a PC: `devices "nvme0n1 sda"` (empty watches every whole disk, no partitions), `threshold <KiB/s>` before it lights up (default 50), `interval` (default 1), `format "{rate}"` (`{rate}` is e.g. `1.2 MB/s`, `{kbps}` the plain number; empty shows only the lamp). Themes color the lit lamp with `disk { active_fg }` |
+
+The usage widgets (`cpu`, `memory`, `gpu`, `net`, `storage`, `power`) all take `style text|graph|bar` (text, a chart of the last measurements, or a bar), `width` for the chart and the bar, `warning` and `critical` levels in percent with `warning_fg` and `critical_fg` colors, and `fg` for the normal color; without them the theme's `<type>.warning`, `<type>.critical` and `<type>.fg` decide. Several of the same kind can be used at once by naming them `gpu:1`, `net:wlan0`, `storage:home` and so on.
 | `brightness` | (none; scroll changes it via brightnessctl) |
 | `keyboard` | (none) |
 | `modeswitch` | (none) |

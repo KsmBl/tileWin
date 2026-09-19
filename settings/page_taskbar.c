@@ -33,6 +33,10 @@ static const struct widget_type widget_types[] = {
 	{ "cpu", "CPU usage", "Processor load" },
 	{ "memory", "Memory usage", "RAM in use, click for a flyout" },
 	{ "disk", "Disk activity", "A lamp that lights up while the disks are busy" },
+	{ "gpu", "GPU usage", "Load of a graphics card" },
+	{ "net", "Network usage", "What goes through an interface" },
+	{ "storage", "Disk space", "How full a file system is" },
+	{ "power", "Power draw", "Watts the computer is drawing" },
 	{ "clock", "Clock", "Time and date with a calendar" },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
@@ -55,7 +59,7 @@ static const char *const choice_yes_no[] = { "yes", "no", NULL };
 static const char *const choice_theme_yes_no[] = { "theme", "yes", "no", NULL };
 static const char *const choice_current_all[] = { "current", "all", NULL };
 static const char *const choice_close_new[] = { "close", "new", NULL };
-static const char *const choice_text_graph[] = { "text", "graph", NULL };
+static const char *const choice_meter[] = { "text", "graph", "bar", NULL };
 
 static const struct opt opts_clock[] = {
 	{ "format", "Format", "strftime format, \\n starts a second line. The theme decides by default.", NULL },
@@ -65,14 +69,82 @@ static const struct opt opts_clock[] = {
 static const struct opt opts_cpu[] = {
 	{ "interval", "Update interval", "Seconds, default 2", NULL },
 	{ "format", "Format", "{usage} is the load in percent", NULL },
-	{ "style", "Style", NULL, choice_text_graph },
-	{ "width", "Graph width", "Pixels", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
+	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
 	{ 0 },
 };
 static const struct opt opts_memory[] = {
 	{ "interval", "Update interval", "Seconds, default 5", NULL },
 	{ "format", "Format", "{used_percent}, {used} and {total} in GiB", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
 	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
+	{ 0 },
+};
+static const struct opt opts_gpu[] = {
+	{ "interval", "Update interval", "Seconds, default 2", NULL },
+	{ "format", "Format", "{usage} is the load in percent", NULL },
+	{ "device", "Card", "e.g. card0; the first one that reports anything by default", NULL },
+	{ "command", "Command", "For cards that report nothing in /sys, e.g. nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
+	{ 0 },
+};
+static const struct opt opts_net[] = {
+	{ "interval", "Update interval", "Seconds, default 2", NULL },
+	{ "format", "Format", "{down}, {up}, {total} and {device}", NULL },
+	{ "device", "Interface", "e.g. wlan0; the busiest one by default", NULL },
+	{ "max_rate", "Full scale", "KiB per second the chart and the bar are drawn against, default 12500", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
+	{ 0 },
+};
+static const struct opt opts_storage[] = {
+	{ "interval", "Update interval", "Seconds, default 30", NULL },
+	{ "path", "Folder", "Any folder of the file system to watch, default /", NULL },
+	{ "format", "Format", "{used_percent}, {used}, {free}, {total} in GiB and {path}", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
+	{ 0 },
+};
+static const struct opt opts_power[] = {
+	{ "interval", "Update interval", "Seconds, default 5", NULL },
+	{ "format", "Format", "{watts} is what is being drawn", NULL },
+	{ "device", "Battery", "Name in /sys/class/power_supply, e.g. BAT0", NULL },
+	{ "max_watts", "Full scale", "Watts the chart and the bar are drawn against, default 60", NULL },
+	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
+	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
+	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
+	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
+	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
 	{ 0 },
 };
 static const struct opt opts_disk[] = {
@@ -80,6 +152,7 @@ static const struct opt opts_disk[] = {
 	{ "threshold", "Threshold", "KiB per second before the lamp lights up, default 50", NULL },
 	{ "interval", "Update interval", "Seconds, default 1", NULL },
 	{ "format", "Format", "{rate} is e.g. 1.2 MB/s, {kbps} the plain number; empty shows only the lamp", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
 	{ 0 },
 };
 static const struct opt opts_battery[] = {
@@ -152,6 +225,10 @@ static const struct {
 	{ "cpu", opts_cpu },
 	{ "memory", opts_memory },
 	{ "disk", opts_disk },
+	{ "gpu", opts_gpu },
+	{ "net", opts_net },
+	{ "storage", opts_storage },
+	{ "power", opts_power },
 	{ "battery", opts_battery },
 	{ "network", opts_network },
 	{ "volume", opts_volume },

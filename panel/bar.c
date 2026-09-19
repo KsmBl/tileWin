@@ -126,7 +126,8 @@ void render_item_bg(struct render_ctx *ctx, struct pbox b, bool active, bool hov
 
 static bool is_system_widget(struct widget *w) {
 	static const char *types[] = { "tray", "clock", "volume", "network", "battery",
-		"keyboard", "cpu", "memory", "disk", "brightness", "custom" };
+		"keyboard", "cpu", "memory", "disk", "gpu", "net", "storage", "power",
+		"brightness", "custom" };
 	for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
 		if (strcmp(w->impl->type, types[i]) == 0) {
 			return true;

@@ -283,6 +283,7 @@ void widget_destroy(struct widget *w);
 const char *widget_conf(struct widget *w, const char *key, const char *fallback);
 int widget_conf_int(struct widget *w, const char *key, int fallback);
 bool widget_conf_bool(struct widget *w, const char *key, bool fallback);
+uint32_t widget_conf_color(struct widget *w, const char *key, uint32_t fallback);
 
 extern const struct widget_impl widget_start;
 extern const struct widget_impl widget_taskbar;
@@ -297,6 +298,10 @@ extern const struct widget_impl widget_network;
 extern const struct widget_impl widget_cpu;
 extern const struct widget_impl widget_memory;
 extern const struct widget_impl widget_disk;
+extern const struct widget_impl widget_gpu;
+extern const struct widget_impl widget_net;
+extern const struct widget_impl widget_storage;
+extern const struct widget_impl widget_power;
 extern const struct widget_impl widget_brightness;
 extern const struct widget_impl widget_keyboard;
 extern const struct widget_impl widget_modeswitch;

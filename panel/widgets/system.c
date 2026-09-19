@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include "draw.h"
 #include "panel.h"
@@ -154,26 +155,6 @@ static bool text_icons(struct widget *w, const char *format) {
 	return has_icon(format) || widget_conf(w, "icons", NULL) != NULL;
 }
 
-/* Text color for "<type>.warning" and "<type>.critical" levels. */
-static uint32_t level_fg(struct widget *w, struct render_ctx *ctx, int value, bool low_is_bad) {
-	const struct tw_theme *t = ctx->panel->theme;
-	const char *type = w->impl->type;
-	char key[64];
-	snprintf(key, sizeof(key), "%s.critical", type);
-	int critical = tw_theme_int(t, key, -1);
-	snprintf(key, sizeof(key), "%s.warning", type);
-	int warning = tw_theme_int(t, key, -1);
-	if (critical >= 0 && (low_is_bad ? value <= critical : value >= critical)) {
-		snprintf(key, sizeof(key), "%s.critical_fg", type);
-		return tw_theme_color(t, key, 0xf87171ff);
-	}
-	if (warning >= 0 && (low_is_bad ? value <= warning : value >= warning)) {
-		snprintf(key, sizeof(key), "%s.warning_fg", type);
-		return tw_theme_color(t, key, 0xfbbf24ff);
-	}
-	return widget_fg(ctx->panel, type);
-}
-
 static int text_item_measure(struct render_ctx *ctx, const char *text, bool glyph) {
 	int width = glyph ? glyph_size(ctx) + 2 * item_padding(ctx) : 2 * item_padding(ctx);
 	if (text && *text) {
@@ -187,6 +168,114 @@ static double render_item_start(struct render_ctx *ctx, struct pbox b) {
 		render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
 	}
 	return b.x + item_padding(ctx);
+}
+
+/* ---------- meters: text, a history chart or a bar ---------- */
+
+#define METER_HISTORY 32
+
+enum meter_style {
+	METER_TEXT,
+	METER_GRAPH,
+	METER_BAR,
+};
+
+/* Percentages of the last measurements, oldest at pos. */
+struct meter_history {
+	int values[METER_HISTORY];
+	int pos;
+};
+
+static void meter_push(struct meter_history *h, int percent) {
+	h->values[h->pos] = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+	h->pos = (h->pos + 1) % METER_HISTORY;
+}
+
+static enum meter_style meter_style_of(struct widget *w) {
+	const char *style = widget_conf(w, "style", "text");
+	if (strcasecmp(style, "graph") == 0) {
+		return METER_GRAPH;
+	}
+	if (strcasecmp(style, "bar") == 0) {
+		return METER_BAR;
+	}
+	return METER_TEXT;
+}
+
+/*
+ * The color of a meter at that percentage. "warning" and "critical" are the
+ * levels it changes at and "warning_fg"/"critical_fg" the colors, from the
+ * widget itself or, where it says nothing, from the theme.
+ */
+static uint32_t meter_fg(struct widget *w, struct render_ctx *ctx, int value, bool low_is_bad) {
+	const struct tw_theme *t = ctx->panel->theme;
+	const char *type = w->impl->type;
+	char key[64];
+	snprintf(key, sizeof(key), "%s.critical", type);
+	int critical = widget_conf_int(w, "critical", tw_theme_int(t, key, -1));
+	snprintf(key, sizeof(key), "%s.warning", type);
+	int warning = widget_conf_int(w, "warning", tw_theme_int(t, key, -1));
+	if (critical >= 0 && (low_is_bad ? value <= critical : value >= critical)) {
+		snprintf(key, sizeof(key), "%s.critical_fg", type);
+		return widget_conf_color(w, "critical_fg", tw_theme_color(t, key, 0xf87171ff));
+	}
+	if (warning >= 0 && (low_is_bad ? value <= warning : value >= warning)) {
+		snprintf(key, sizeof(key), "%s.warning_fg", type);
+		return widget_conf_color(w, "warning_fg", tw_theme_color(t, key, 0xfbbf24ff));
+	}
+	snprintf(key, sizeof(key), "%s.fg", type);
+	return widget_conf_color(w, "fg", widget_fg(ctx->panel, type));
+}
+
+static int meter_measure(struct widget *w, struct render_ctx *ctx, const char *text) {
+	enum meter_style style = meter_style_of(w);
+	if (style == METER_GRAPH) {
+		return widget_conf_int(w, "width", 44);
+	}
+	if (style == METER_BAR) {
+		return widget_conf_int(w, "width", 14) + 2 * item_padding(ctx);
+	}
+	return text_item_measure(ctx, text, false);
+}
+
+/* Draws the meter; text is used by the text style and may be NULL. */
+static void meter_render(struct widget *w, struct render_ctx *ctx, struct pbox b,
+		const char *text, int percent, const struct meter_history *history,
+		bool low_is_bad) {
+	double x = render_item_start(ctx, b);
+	uint32_t fg = meter_fg(w, ctx, percent, low_is_bad);
+	cairo_t *cr = ctx->cairo;
+	switch (meter_style_of(w)) {
+	case METER_GRAPH: {
+		double gh = b.height * 0.6, gy = b.y + (b.height - gh) / 2;
+		double gw = b.width - 8, step = gw / (METER_HISTORY - 1);
+		cairo_new_path(cr);
+		cairo_move_to(cr, x - 2, gy + gh);
+		for (int i = 0; i < METER_HISTORY; i++) {
+			int v = history ? history->values[(history->pos + i) % METER_HISTORY] : 0;
+			cairo_line_to(cr, x - 2 + i * step, gy + gh - gh * v / 100.0);
+		}
+		cairo_line_to(cr, x - 2 + gw, gy + gh);
+		cairo_close_path(cr);
+		pd_color(cr, fg);
+		cairo_fill(cr);
+		break;
+	}
+	case METER_BAR: {
+		double bw = widget_conf_int(w, "width", 14);
+		double bh = b.height * 0.62, by = b.y + (b.height - bh) / 2;
+		double filled = bh * (percent < 0 ? 0 : percent > 100 ? 100 : percent) / 100.0;
+		pd_rect(cr, x, by, bw, bh, (fg & 0xffffff00) | 0x30);
+		pd_rect(cr, x, by + bh - filled, bw, filled, fg);
+		break;
+	}
+	case METER_TEXT:
+		if (text && *text) {
+			pd_text(cr, bar_font(ctx->panel), text, x, b.y, b.width - 12, b.height, fg, PD_LEFT);
+		}
+		break;
+	}
+	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
 /* ================= cpu ================= */
@@ -311,13 +400,10 @@ static void topology_load(struct cpu_topology *t) {
 }
 
 
-#define CPU_HISTORY 32
-
 struct cpu_state {
 	unsigned long long last_total, last_idle;
 	int usage;
-	int history[CPU_HISTORY];
-	int history_pos;
+	struct meter_history history;
 };
 
 static void cpu_update(struct widget *w) {
@@ -342,8 +428,7 @@ static void cpu_update(struct widget *w) {
 	}
 	s->last_total = total;
 	s->last_idle = idle_all;
-	s->history[s->history_pos] = s->usage;
-	s->history_pos = (s->history_pos + 1) % CPU_HISTORY;
+	meter_push(&s->history, s->usage);
 }
 
 static void cpu_init(struct widget *w) {
@@ -358,43 +443,18 @@ static char *cpu_text(struct widget *w) {
 	return format_text(widget_conf(w, "format", "CPU {usage}%"), values);
 }
 
-static bool graph_style(struct widget *w) {
-	return strcasecmp(widget_conf(w, "style", "text"), "graph") == 0;
-}
-
 static int cpu_measure(struct widget *w, struct render_ctx *ctx) {
-	if (graph_style(w)) {
-		return widget_conf_int(w, "width", 44);
-	}
 	char *text = cpu_text(w);
-	int width = text_item_measure(ctx, text, false);
+	int width = meter_measure(w, ctx, text);
 	free(text);
 	return width;
 }
 
 static void cpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct cpu_state *s = ((struct poll_data *)w->data)->state;
-	double x = render_item_start(ctx, b);
-	uint32_t fg = level_fg(w, ctx, s->usage, false);
-	if (graph_style(w)) {
-		double gh = b.height * 0.6, gy = b.y + (b.height - gh) / 2;
-		double gw = b.width - 8, step = gw / (CPU_HISTORY - 1);
-		cairo_t *cr = ctx->cairo;
-		cairo_move_to(cr, x - 2, gy + gh);
-		for (int i = 0; i < CPU_HISTORY; i++) {
-			int v = s->history[(s->history_pos + i) % CPU_HISTORY];
-			cairo_line_to(cr, x - 2 + i * step, gy + gh - gh * v / 100.0);
-		}
-		cairo_line_to(cr, x - 2 + gw, gy + gh);
-		cairo_close_path(cr);
-		pd_color(cr, tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x3aa0ffff));
-		cairo_fill(cr);
-	} else {
-		char *text = cpu_text(w);
-		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.width - 12, b.height, fg, PD_LEFT);
-		free(text);
-	}
-	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+	char *text = cpu_text(w);
+	meter_render(w, ctx, b, text, s->usage, &s->history, false);
+	free(text);
 }
 
 static bool cpu_click(struct widget *w, struct psurface *s, struct hotspot *hs,
@@ -446,6 +506,7 @@ const struct widget_impl widget_cpu = {
 
 struct mem_state {
 	long long total_kb, available_kb;
+	struct meter_history history;
 };
 
 static void memory_update(struct widget *w) {
@@ -460,6 +521,8 @@ static void memory_update(struct widget *w) {
 		sscanf(line, "MemAvailable: %lld kB", &s->available_kb);
 	}
 	fclose(f);
+	long long used = s->total_kb - s->available_kb;
+	meter_push(&s->history, s->total_kb ? (int)(used * 100 / s->total_kb) : 0);
 }
 
 static void memory_init(struct widget *w) {
@@ -479,20 +542,17 @@ static char *memory_text(struct widget *w) {
 
 static int memory_measure(struct widget *w, struct render_ctx *ctx) {
 	char *text = memory_text(w);
-	int width = text_item_measure(ctx, text, false);
+	int width = meter_measure(w, ctx, text);
 	free(text);
 	return width;
 }
 
 static void memory_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct mem_state *s = ((struct poll_data *)w->data)->state;
-	double x = render_item_start(ctx, b);
 	char *text = memory_text(w);
 	int percent = s->total_kb ? (int)((s->total_kb - s->available_kb) * 100 / s->total_kb) : 0;
-	pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.width - 2 * item_padding(ctx),
-		b.height, level_fg(w, ctx, percent, false), PD_LEFT);
+	meter_render(w, ctx, b, text, percent, &s->history, false);
 	free(text);
-	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
 static bool memory_click(struct widget *w, struct psurface *s, struct hotspot *hs,
@@ -710,6 +770,433 @@ const struct widget_impl widget_disk = {
 	.set_active = poll_set_active,
 };
 
+/* ================= gpu ================= */
+
+/*
+ * How busy a graphics card is. AMD and some others report it in sysfs as
+ * gpu_busy_percent; for the rest the widget runs the command in "command"
+ * (e.g. nvidia-smi) and reads a number from its output. "device card1" picks
+ * the card, otherwise the first one that reports anything is taken.
+ */
+
+struct gpu_state {
+	int percent;
+	char card[32];
+	struct meter_history history;
+	struct proc *running;
+	struct widget *widget;
+};
+
+static bool gpu_read_sysfs(const char *card, int *percent) {
+	char path[256], buf[64];
+	snprintf(path, sizeof(path), "/sys/class/drm/%s/device/gpu_busy_percent", card);
+	if (!read_file(path, buf, sizeof(buf))) {
+		return false;
+	}
+	*percent = atoi(buf);
+	return true;
+}
+
+static void gpu_command_done(void *data, const char *output) {
+	struct widget *w = data;
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	s->running = NULL;
+	const char *p = output;
+	while (*p && (*p < '0' || *p > '9')) {
+		p++;
+	}
+	if (*p) {
+		s->percent = atoi(p);
+		s->percent = s->percent < 0 ? 0 : s->percent > 100 ? 100 : s->percent;
+	}
+	meter_push(&s->history, s->percent);
+	panel_set_dirty(w->panel);
+}
+
+static void gpu_update(struct widget *w) {
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	s->widget = w;
+	const char *command = widget_conf(w, "command", NULL);
+	if (command) {
+		if (!s->running) {
+			s->running = proc_run(w->panel, command, false, NULL, gpu_command_done, w);
+		}
+		return;
+	}
+	const char *device = widget_conf(w, "device", NULL);
+	if (device) {
+		snprintf(s->card, sizeof(s->card), "%s", device);
+	} else if (!s->card[0]) {
+		for (int i = 0; i < 8 && !s->card[0]; i++) {
+			char card[32];
+			int percent;
+			snprintf(card, sizeof(card), "card%d", i);
+			if (gpu_read_sysfs(card, &percent)) {
+				snprintf(s->card, sizeof(s->card), "%s", card);
+			}
+		}
+	}
+	if (s->card[0]) {
+		gpu_read_sysfs(s->card, &s->percent);
+	}
+	meter_push(&s->history, s->percent);
+}
+
+static void gpu_init(struct widget *w) {
+	poll_init(w, 2, gpu_update, sizeof(struct gpu_state));
+}
+
+static char *gpu_text(struct widget *w) {
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	char usage[16];
+	snprintf(usage, sizeof(usage), "%d", s->percent);
+	const char *values[] = { "usage", usage, NULL };
+	return format_text(widget_conf(w, "format", "GPU {usage}%"), values);
+}
+
+static int gpu_measure(struct widget *w, struct render_ctx *ctx) {
+	char *text = gpu_text(w);
+	int width = meter_measure(w, ctx, text);
+	free(text);
+	return width;
+}
+
+static void gpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	char *text = gpu_text(w);
+	meter_render(w, ctx, b, text, s->percent, &s->history, false);
+	free(text);
+}
+
+static char *gpu_tooltip(struct widget *w, struct hotspot *hs) {
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	return format_str("Graphics: %d%%%s%s", s->percent, s->card[0] ? " on " : "", s->card);
+}
+
+const struct widget_impl widget_gpu = {
+	.type = "gpu",
+	.init = gpu_init,
+	.destroy = poll_destroy,
+	.measure = gpu_measure,
+	.render = gpu_render,
+	.tooltip = gpu_tooltip,
+	.set_active = poll_set_active,
+};
+
+/* ================= net ================= */
+
+/*
+ * What goes through a network interface. "device wlan0" picks it, otherwise
+ * the busiest one is followed. The graph and the bar are drawn against
+ * "max_rate" (KiB per second) so they have a scale.
+ */
+
+struct nm_state {
+	char device[32];
+	unsigned long long rx, tx;
+	double rx_rate, tx_rate; // KiB per second
+	struct timespec sampled;
+	bool sampled_once;
+	struct meter_history history;
+};
+
+static bool nm_counters(const char *device, unsigned long long *rx, unsigned long long *tx) {
+	char path[256], buf[64];
+	snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/rx_bytes", device);
+	if (!read_file(path, buf, sizeof(buf))) {
+		return false;
+	}
+	*rx = strtoull(buf, NULL, 10);
+	snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/tx_bytes", device);
+	*tx = read_file(path, buf, sizeof(buf)) ? strtoull(buf, NULL, 10) : 0;
+	return true;
+}
+
+/* The interface carrying the most, ignoring loopback and down ones. */
+static void nm_pick_device(struct nm_state *s) {
+	DIR *dir = opendir("/sys/class/net");
+	struct dirent *de;
+	unsigned long long best = 0;
+	while (dir && (de = readdir(dir))) {
+		if (de->d_name[0] == '.' || strcmp(de->d_name, "lo") == 0) {
+			continue;
+		}
+		char path[256], buf[64];
+		snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", de->d_name);
+		if (read_file(path, buf, sizeof(buf)) && strcmp(buf, "up") != 0) {
+			continue;
+		}
+		unsigned long long rx = 0, tx = 0;
+		if (nm_counters(de->d_name, &rx, &tx) && rx + tx >= best) {
+			best = rx + tx;
+			snprintf(s->device, sizeof(s->device), "%s", de->d_name);
+		}
+	}
+	if (dir) {
+		closedir(dir);
+	}
+}
+
+static void nm_update(struct widget *w) {
+	struct nm_state *s = ((struct poll_data *)w->data)->state;
+	const char *device = widget_conf(w, "device", NULL);
+	if (device) {
+		snprintf(s->device, sizeof(s->device), "%s", device);
+	} else {
+		nm_pick_device(s);
+	}
+	unsigned long long rx = 0, tx = 0;
+	if (!s->device[0] || !nm_counters(s->device, &rx, &tx)) {
+		return;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double seconds = s->sampled_once ? (now.tv_sec - s->sampled.tv_sec) +
+		(now.tv_nsec - s->sampled.tv_nsec) / 1e9 : 0;
+	if (seconds > 0 && rx >= s->rx && tx >= s->tx) {
+		s->rx_rate = (rx - s->rx) / 1024.0 / seconds;
+		s->tx_rate = (tx - s->tx) / 1024.0 / seconds;
+	}
+	s->rx = rx;
+	s->tx = tx;
+	s->sampled = now;
+	s->sampled_once = true;
+	int max = widget_conf_int(w, "max_rate", 12500);
+	double total = s->rx_rate + s->tx_rate;
+	meter_push(&s->history, max > 0 ? (int)(total * 100 / max) : 0);
+}
+
+static void nm_init(struct widget *w) {
+	poll_init(w, 2, nm_update, sizeof(struct nm_state));
+}
+
+static void nm_rate_text(double kbps, char *buffer, size_t size) {
+	if (kbps >= 1024) {
+		snprintf(buffer, size, "%.1f MB/s", kbps / 1024);
+	} else {
+		snprintf(buffer, size, "%.0f kB/s", kbps);
+	}
+}
+
+static char *nm_text(struct widget *w) {
+	struct nm_state *s = ((struct poll_data *)w->data)->state;
+	char down[32], up[32], total[32];
+	nm_rate_text(s->rx_rate, down, sizeof(down));
+	nm_rate_text(s->tx_rate, up, sizeof(up));
+	nm_rate_text(s->rx_rate + s->tx_rate, total, sizeof(total));
+	const char *values[] = { "down", down, "up", up, "total", total,
+		"device", s->device, NULL };
+	return format_text(widget_conf(w, "format", "↓ {down} ↑ {up}"), values);
+}
+
+static int nm_measure(struct widget *w, struct render_ctx *ctx) {
+	char *text = nm_text(w);
+	int width = meter_measure(w, ctx, text);
+	free(text);
+	return width;
+}
+
+static void nm_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct nm_state *s = ((struct poll_data *)w->data)->state;
+	char *text = nm_text(w);
+	int max = widget_conf_int(w, "max_rate", 12500);
+	double total = s->rx_rate + s->tx_rate;
+	meter_render(w, ctx, b, text, max > 0 ? (int)(total * 100 / max) : 0, &s->history, false);
+	free(text);
+}
+
+static char *nm_tooltip(struct widget *w, struct hotspot *hs) {
+	struct nm_state *s = ((struct poll_data *)w->data)->state;
+	char down[32], up[32];
+	nm_rate_text(s->rx_rate, down, sizeof(down));
+	nm_rate_text(s->tx_rate, up, sizeof(up));
+	return format_str("%s\nDown %s\nUp %s", s->device[0] ? s->device : "No interface", down, up);
+}
+
+const struct widget_impl widget_net = {
+	.type = "net",
+	.init = nm_init,
+	.destroy = poll_destroy,
+	.measure = nm_measure,
+	.render = nm_render,
+	.tooltip = nm_tooltip,
+	.set_active = poll_set_active,
+};
+
+/* ================= storage ================= */
+
+/* How full a file system is. "path /home" picks it, default is "/". */
+
+struct storage_state {
+	char path[256];
+	int percent;
+	double used_gb, total_gb;
+	struct meter_history history;
+};
+
+static void storage_update(struct widget *w) {
+	struct storage_state *s = ((struct poll_data *)w->data)->state;
+	snprintf(s->path, sizeof(s->path), "%s", widget_conf(w, "path", "/"));
+	struct statvfs st;
+	if (statvfs(s->path, &st) != 0 || st.f_blocks == 0) {
+		return;
+	}
+	double total = (double)st.f_blocks * st.f_frsize;
+	double free_bytes = (double)st.f_bavail * st.f_frsize;
+	s->total_gb = total / (1024.0 * 1024 * 1024);
+	s->used_gb = (total - free_bytes) / (1024.0 * 1024 * 1024);
+	s->percent = total > 0 ? (int)((total - free_bytes) * 100 / total) : 0;
+	meter_push(&s->history, s->percent);
+}
+
+static void storage_init(struct widget *w) {
+	poll_init(w, 30, storage_update, sizeof(struct storage_state));
+}
+
+static char *storage_text(struct widget *w) {
+	struct storage_state *s = ((struct poll_data *)w->data)->state;
+	char percent[16], used[32], total[32], freed[32];
+	snprintf(percent, sizeof(percent), "%d", s->percent);
+	snprintf(used, sizeof(used), "%.1f", s->used_gb);
+	snprintf(total, sizeof(total), "%.1f", s->total_gb);
+	snprintf(freed, sizeof(freed), "%.1f", s->total_gb - s->used_gb);
+	const char *values[] = { "used_percent", percent, "used", used, "total", total,
+		"free", freed, "path", s->path, NULL };
+	return format_text(widget_conf(w, "format", "{path} {used_percent}%"), values);
+}
+
+static int storage_measure(struct widget *w, struct render_ctx *ctx) {
+	char *text = storage_text(w);
+	int width = meter_measure(w, ctx, text);
+	free(text);
+	return width;
+}
+
+static void storage_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct storage_state *s = ((struct poll_data *)w->data)->state;
+	char *text = storage_text(w);
+	meter_render(w, ctx, b, text, s->percent, &s->history, false);
+	free(text);
+}
+
+static char *storage_tooltip(struct widget *w, struct hotspot *hs) {
+	struct storage_state *s = ((struct poll_data *)w->data)->state;
+	return format_str("%s\n%.1f GiB of %.1f GiB used (%d%%)", s->path, s->used_gb,
+		s->total_gb, s->percent);
+}
+
+const struct widget_impl widget_storage = {
+	.type = "storage",
+	.init = storage_init,
+	.destroy = poll_destroy,
+	.measure = storage_measure,
+	.render = storage_render,
+	.tooltip = storage_tooltip,
+	.set_active = poll_set_active,
+};
+
+/* ================= power ================= */
+
+/*
+ * What the computer is drawing, from the battery. Some report the power
+ * straight away, others the current and the voltage it is drawn at.
+ */
+
+struct power_state {
+	char device[32];
+	double watts;
+	bool charging;
+	struct meter_history history;
+};
+
+static void power_update(struct widget *w) {
+	struct power_state *s = ((struct poll_data *)w->data)->state;
+	const char *device = widget_conf(w, "device", NULL);
+	DIR *dir = opendir("/sys/class/power_supply");
+	struct dirent *de;
+	s->watts = 0;
+	while (dir && (de = readdir(dir))) {
+		if (de->d_name[0] == '.' || (device && strcmp(de->d_name, device) != 0)) {
+			continue;
+		}
+		char path[512], buf[64];
+		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/type", de->d_name);
+		if (!read_file(path, buf, sizeof(buf)) || strcmp(buf, "Battery") != 0) {
+			continue;
+		}
+		double micro_watts = 0;
+		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/power_now", de->d_name);
+		if (read_file(path, buf, sizeof(buf))) {
+			micro_watts = atof(buf);
+		} else {
+			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/current_now", de->d_name);
+			double current = read_file(path, buf, sizeof(buf)) ? atof(buf) : 0;
+			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/voltage_now", de->d_name);
+			double voltage = read_file(path, buf, sizeof(buf)) ? atof(buf) : 0;
+			micro_watts = current * voltage / 1e6;
+		}
+		if (micro_watts <= 0) {
+			continue;
+		}
+		s->watts = micro_watts / 1e6;
+		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", de->d_name);
+		s->charging = read_file(path, buf, sizeof(buf)) && strcmp(buf, "Charging") == 0;
+		snprintf(s->device, sizeof(s->device), "%s", de->d_name);
+		break;
+	}
+	if (dir) {
+		closedir(dir);
+	}
+	int max = widget_conf_int(w, "max_watts", 60);
+	meter_push(&s->history, max > 0 ? (int)(s->watts * 100 / max) : 0);
+}
+
+static void power_init(struct widget *w) {
+	poll_init(w, 5, power_update, sizeof(struct power_state));
+}
+
+static char *power_text(struct widget *w) {
+	struct power_state *s = ((struct poll_data *)w->data)->state;
+	char watts[32];
+	snprintf(watts, sizeof(watts), "%.1f", s->watts);
+	const char *values[] = { "watts", watts, NULL };
+	return format_text(widget_conf(w, "format", "{watts} W"), values);
+}
+
+static int power_measure(struct widget *w, struct render_ctx *ctx) {
+	char *text = power_text(w);
+	int width = meter_measure(w, ctx, text);
+	free(text);
+	return width;
+}
+
+static void power_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct power_state *s = ((struct poll_data *)w->data)->state;
+	char *text = power_text(w);
+	int max = widget_conf_int(w, "max_watts", 60);
+	meter_render(w, ctx, b, text, max > 0 ? (int)(s->watts * 100 / max) : 0, &s->history, false);
+	free(text);
+}
+
+static char *power_tooltip(struct widget *w, struct hotspot *hs) {
+	struct power_state *s = ((struct poll_data *)w->data)->state;
+	if (s->watts <= 0) {
+		return format_str("No power reading");
+	}
+	return format_str("%s %.1f W%s", s->charging ? "Charging at" : "Drawing", s->watts,
+		s->device[0] ? "" : "");
+}
+
+const struct widget_impl widget_power = {
+	.type = "power",
+	.init = power_init,
+	.destroy = poll_destroy,
+	.measure = power_measure,
+	.render = power_render,
+	.tooltip = power_tooltip,
+	.set_active = poll_set_active,
+};
+
 /* ================= battery ================= */
 
 struct battery_state {
@@ -798,7 +1285,7 @@ static int battery_measure(struct widget *w, struct render_ctx *ctx) {
 static void battery_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	double x = render_item_start(ctx, b);
-	uint32_t fg = level_fg(w, ctx, s->capacity, true);
+	uint32_t fg = meter_fg(w, ctx, s->capacity, true);
 	bool icons_in_text;
 	char *text = battery_text(w, &icons_in_text);
 	if (!icons_in_text) {
