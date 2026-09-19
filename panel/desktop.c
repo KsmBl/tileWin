@@ -28,11 +28,11 @@
  * icon columns, so the desktop costs almost no memory.
  */
 
-#define ICON_SIZE 48
 #define DRAG_THRESHOLD 6
-#define CELL_W 100
-#define CELL_H 100
-#define GRID_MARGIN 10
+/* Defaults of the grid; taskbar.conf can change all four. */
+#define ICON_SIZE_DEFAULT 48
+#define CELL_DEFAULT 100
+#define MARGIN_DEFAULT 10
 #define DOUBLE_CLICK_MS 400 // until the compositor says otherwise
 
 enum {
@@ -77,7 +77,47 @@ static struct {
 		bool armed, active;
 		double x0, y0, x1, y1;
 	} band;
-} desktop = { .selected = -1, .hover = -1 };
+	/* The grid, from taskbar.conf; refreshed whenever the config is read. */
+	int icon_size, cell_w, cell_h, margin;
+} desktop = {
+	.selected = -1, .hover = -1,
+	.icon_size = ICON_SIZE_DEFAULT, .cell_w = CELL_DEFAULT,
+	.cell_h = CELL_DEFAULT, .margin = MARGIN_DEFAULT,
+};
+
+/* ---------- the size of the grid ---------- */
+
+static struct panel_config *desktop_config(struct panel *panel) {
+	return panel ? panel->config : NULL;
+}
+
+static int icon_size_of(struct panel *panel) {
+	struct panel_config *c = desktop_config(panel);
+	return c && c->desktop_icon_size ? c->desktop_icon_size : ICON_SIZE_DEFAULT;
+}
+
+static int cell_w_of(struct panel *panel) {
+	struct panel_config *c = desktop_config(panel);
+	return c && c->desktop_cell_width ? c->desktop_cell_width : CELL_DEFAULT;
+}
+
+static int cell_h_of(struct panel *panel) {
+	struct panel_config *c = desktop_config(panel);
+	return c && c->desktop_cell_height ? c->desktop_cell_height : CELL_DEFAULT;
+}
+
+static int margin_of(struct panel *panel) {
+	struct panel_config *c = desktop_config(panel);
+	return c ? c->desktop_margin : MARGIN_DEFAULT;
+}
+
+/* Takes the sizes over from the config, e.g. after it was reloaded. */
+static void desktop_sizes_update(struct panel *panel) {
+	desktop.icon_size = icon_size_of(panel);
+	desktop.cell_w = cell_w_of(panel);
+	desktop.cell_h = cell_h_of(panel);
+	desktop.margin = margin_of(panel);
+}
 
 /* ---------- selection ---------- */
 
@@ -350,13 +390,13 @@ static struct psurface *primary_icons(struct panel *panel) {
 }
 
 static int grid_rows(struct psurface *s) {
-	int rows = (s->height - 2 * GRID_MARGIN) / CELL_H;
+	int rows = (s->height - 2 * desktop.margin) / desktop.cell_h;
 	return rows > 0 ? rows : 1;
 }
 
 static int grid_columns(struct psurface *s) {
 	int width = s->output ? s->output->width : s->width;
-	int columns = (width - 2 * GRID_MARGIN) / CELL_W;
+	int columns = (width - 2 * desktop.margin) / desktop.cell_w;
 	return columns > 0 ? columns : 1;
 }
 
@@ -424,7 +464,7 @@ static void update_icons_size(struct panel *panel, struct psurface *s) {
 	bool primary = s == primary_icons(panel) && desktop.items && desktop.items->length;
 	int width = 1;
 	if (primary) {
-		width = 2 * GRID_MARGIN + (layout_items(s) + 1) * CELL_W;
+		width = 2 * desktop.margin + (layout_items(s) + 1) * desktop.cell_w;
 	}
 	if ((desktop.drag.active || desktop.band.active) && primary && s->output) {
 		width = s->output->width; // room to drag an icon or a band anywhere
@@ -436,6 +476,7 @@ static void update_icons_size(struct panel *panel, struct psurface *s) {
 }
 
 static void desktop_refresh_surfaces(struct panel *panel) {
+	desktop_sizes_update(panel);
 	struct panel_output *output;
 	wl_list_for_each(output, &panel->outputs, link) {
 		if (output->desktop) {
@@ -490,7 +531,7 @@ static void draw_label(cairo_t *cr, const char *font, const char *text, double x
 
 static void draw_cell(cairo_t *cr, double x, double y, uint32_t fill, uint32_t border) {
 	cairo_new_path(cr);
-	pd_rounded(cr, x + 2.5, y + 2.5, CELL_W - 5, CELL_H - 5, 3);
+	pd_rounded(cr, x + 2.5, y + 2.5, desktop.cell_w - 5, desktop.cell_h - 5, 3);
 	pd_color(cr, fill);
 	cairo_fill_preserve(cr);
 	pd_color(cr, border);
@@ -508,17 +549,17 @@ static void draw_item(struct psurface *s, cairo_t *cr, struct desktop_item *item
 	cairo_surface_t *icon = NULL;
 	for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
 		if (tw_icon_theme_has(item->icons[k])) {
-			icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
+			icon = apps_icon(panel, item->icons[k], desktop.icon_size * s->scale);
 		}
 	}
 	for (int k = 0; item->icons && item->icons[k] && !icon; k++) {
-		icon = apps_icon(panel, item->icons[k], ICON_SIZE * s->scale);
+		icon = apps_icon(panel, item->icons[k], desktop.icon_size * s->scale);
 	}
 	if (alpha < 1) {
 		cairo_push_group(cr);
 	}
-	pd_icon(cr, icon, x + (CELL_W - ICON_SIZE) / 2.0, y + 8, ICON_SIZE);
-	draw_label(cr, bar_font(panel), item->label, x + 4, y + 12 + ICON_SIZE, CELL_W - 8, selected);
+	pd_icon(cr, icon, x + (desktop.cell_w - desktop.icon_size) / 2.0, y + 8, desktop.icon_size);
+	draw_label(cr, bar_font(panel), item->label, x + 4, y + 12 + desktop.icon_size, desktop.cell_w - 8, selected);
 	if (alpha < 1) {
 		cairo_pop_group_to_source(cr);
 		cairo_paint_with_alpha(cr, alpha);
@@ -535,11 +576,11 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 	bool dragging = desktop.drag.active;
 	for (int i = 0; i < desktop.items->length; i++) {
 		struct desktop_item *item = desktop.items->items[i];
-		double x = GRID_MARGIN + item->col * CELL_W, y = GRID_MARGIN + item->row * CELL_H;
+		double x = desktop.margin + item->col * desktop.cell_w, y = desktop.margin + item->row * desktop.cell_h;
 		if (!(dragging && drag_moves(i, item))) {
 			draw_item(s, cr, item, x, y, item->selected, i == desktop.hover, 1);
 		}
-		psurface_add_hotspot(s, x, y, CELL_W, CELL_H, NULL, DESK_HS_ITEM, i, NULL);
+		psurface_add_hotspot(s, x, y, desktop.cell_w, desktop.cell_h, NULL, DESK_HS_ITEM, i, NULL);
 	}
 	if (desktop.band.active) {
 		double x = fmin(desktop.band.x0, desktop.band.x1);
@@ -558,21 +599,21 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 		// they keep the places they have next to each other
 		int dcol = desktop.drag.col - dragged->col, drow = desktop.drag.row - dragged->row;
 		double dx = desktop.drag.x - desktop.drag.grab_x -
-			(GRID_MARGIN + dragged->col * CELL_W);
+			(desktop.margin + dragged->col * desktop.cell_w);
 		double dy = desktop.drag.y - desktop.drag.grab_y -
-			(GRID_MARGIN + dragged->row * CELL_H);
+			(desktop.margin + dragged->row * desktop.cell_h);
 		for (int i = 0; i < desktop.items->length; i++) {
 			struct desktop_item *item = desktop.items->items[i];
 			if (drag_moves(i, item)) {
-				draw_cell(cr, GRID_MARGIN + (item->col + dcol) * CELL_W,
-					GRID_MARGIN + (item->row + drow) * CELL_H, 0xffffff26, 0xffffff90);
+				draw_cell(cr, desktop.margin + (item->col + dcol) * desktop.cell_w,
+					desktop.margin + (item->row + drow) * desktop.cell_h, 0xffffff26, 0xffffff90);
 			}
 		}
 		for (int i = 0; i < desktop.items->length; i++) {
 			struct desktop_item *item = desktop.items->items[i];
 			if (drag_moves(i, item)) {
-				draw_item(s, cr, item, GRID_MARGIN + item->col * CELL_W + dx,
-					GRID_MARGIN + item->row * CELL_H + dy, false, false, 0.75);
+				draw_item(s, cr, item, desktop.margin + item->col * desktop.cell_w + dx,
+					desktop.margin + item->row * desktop.cell_h + dy, false, false, 0.75);
 			}
 		}
 	}
@@ -647,8 +688,8 @@ static void band_select(void) {
 	double y1 = fmax(desktop.band.y0, desktop.band.y1);
 	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
 		struct desktop_item *item = desktop.items->items[i];
-		double cx = GRID_MARGIN + item->col * CELL_W, cy = GRID_MARGIN + item->row * CELL_H;
-		item->selected = cx + CELL_W > x0 && cx < x1 && cy + CELL_H > y0 && cy < y1;
+		double cx = desktop.margin + item->col * desktop.cell_w, cy = desktop.margin + item->row * desktop.cell_h;
+		item->selected = cx + desktop.cell_w > x0 && cx < x1 && cy + desktop.cell_h > y0 && cy < y1;
 	}
 }
 
@@ -713,8 +754,8 @@ static bool trash_item(struct desktop_item *item) {
 static void drag_update_target(struct psurface *s) {
 	double x = desktop.drag.x - desktop.drag.grab_x, y = desktop.drag.y - desktop.drag.grab_y;
 	int columns = grid_columns(s), rows = grid_rows(s);
-	int col = (int)round((x - GRID_MARGIN) / CELL_W);
-	int row = (int)round((y - GRID_MARGIN) / CELL_H);
+	int col = (int)round((x - desktop.margin) / desktop.cell_w);
+	int row = (int)round((y - desktop.margin) / desktop.cell_h);
 	int lo_col = 0, hi_col = columns - 1, lo_row = 0, hi_row = rows - 1;
 	struct desktop_item *grabbed = item_at(desktop.drag.index);
 	if (desktop.drag.group && grabbed) {
@@ -891,8 +932,8 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 			desktop.drag.index = index;
 			desktop.drag.start_x = desktop.drag.x = x;
 			desktop.drag.start_y = desktop.drag.y = y;
-			desktop.drag.grab_x = x - (GRID_MARGIN + item->col * CELL_W);
-			desktop.drag.grab_y = y - (GRID_MARGIN + item->row * CELL_H);
+			desktop.drag.grab_x = x - (desktop.margin + item->col * desktop.cell_w);
+			desktop.drag.grab_y = y - (desktop.margin + item->row * desktop.cell_h);
 		}
 		desktop_refresh_surfaces(panel);
 		return;
@@ -1005,6 +1046,7 @@ void desktop_create(struct panel_output *output) {
 	if (!output->ready || output->desktop) {
 		return;
 	}
+	desktop_sizes_update(panel);
 	if (!desktop.items) {
 		desktop_scan();
 	}

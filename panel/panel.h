@@ -204,6 +204,8 @@ struct panel_config {
 	struct twconf_node *startmenu;
 	int tooltip_delay;
 	bool desktop_icons;
+	// the desktop grid: the picture, the cell it sits in and the outer margin
+	int desktop_icon_size, desktop_cell_width, desktop_cell_height, desktop_margin;
 };
 
 /* ---------- widgets ---------- */

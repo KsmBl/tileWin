@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -411,6 +412,24 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 	const char *terminal = twconf_value(root, "terminal");
 	config->terminal = strdup(terminal ? terminal : "xfce4-terminal -x");
 	config->desktop_icons = twconf_parse_bool(twconf_value(root, "desktop_icons"), true);
+	static const struct {
+		const char *key;
+		size_t offset;
+		int fallback, low, high;
+	} sizes[] = {
+		{ "desktop_icon_size", offsetof(struct panel_config, desktop_icon_size), 48, 16, 256 },
+		{ "desktop_icon_width", offsetof(struct panel_config, desktop_cell_width), 100, 48, 400 },
+		{ "desktop_icon_height", offsetof(struct panel_config, desktop_cell_height), 100, 48, 400 },
+		{ "desktop_margin", offsetof(struct panel_config, desktop_margin), 10, 0, 200 },
+	};
+	for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+		const char *value = twconf_value(root, sizes[i].key);
+		int number = value ? atoi(value) : sizes[i].fallback;
+		if (number < sizes[i].low || number > sizes[i].high) {
+			number = sizes[i].fallback;
+		}
+		*(int *)((char *)config + sizes[i].offset) = number;
+	}
 	const char *delay = twconf_value(root, "tooltip_delay");
 	if (delay) {
 		config->tooltip_delay = atoi(delay);
