@@ -2746,27 +2746,9 @@ static const struct popup_vtable cpu_vtable = {
 	.destroy = cpu_destroy,
 };
 
-/* btop, htop or top in the taskbar's terminal. */
+/* The task manager of the Default apps page ($taskmanager in common.conf). */
 static char *default_task_manager(struct panel *panel) {
-	const char *terminal = panel->config && panel->config->terminal ?
-		panel->config->terminal : "xfce4-terminal -x";
-	static const char *const tools[] = { "btop", "htop" };
-	const char *path = getenv("PATH");
-	for (size_t i = 0; path && i < sizeof(tools) / sizeof(tools[0]); i++) {
-		char *dirs = strdup(path);
-		char *save = NULL;
-		for (char *dir = strtok_r(dirs, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
-			char *candidate = format_str("%s/%s", dir, tools[i]);
-			bool found = access(candidate, X_OK) == 0;
-			free(candidate);
-			if (found) {
-				free(dirs);
-				return format_str("exec %s %s", terminal, tools[i]);
-			}
-		}
-		free(dirs);
-	}
-	return format_str("exec %s top", terminal);
+	return strdup("exec $taskmanager");
 }
 
 void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager) {

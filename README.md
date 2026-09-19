@@ -314,7 +314,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 | Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size, showing the pointer when Ctrl is tapped, pointer trail lifetime, double-click speed with a folder to try it on |
-| Apps | Default apps (web browser, email, file manager, terminal, text editor, pictures, music, videos, PDF) and startup apps: turn them on or off, add or remove them |
+| Apps | Default apps (web browser, email, file manager, terminal, task manager, text editor, pictures, music, videos, PDF) and startup apps: turn them on or off, add or remove them. The menus, shortcuts and flyouts all use these, so a program is named in one place only |
 | Account | Your account picture (`~/.face`, shown on the lock screen and login screens) and name |
 
 Changes apply immediately (the compositor gets the matching command, the taskbar reloads its config) and are written to `common.conf` and `taskbar.conf`. Only the changed lines are rewritten, so your comments and formatting stay. Open a page directly with `tilewin-settings --page taskbar`. The app only runs while its window is open.

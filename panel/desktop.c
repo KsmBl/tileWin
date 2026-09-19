@@ -1465,18 +1465,14 @@ static void open_delete_dialog(struct panel *panel, list_t *paths) {
 
 /* ---------- commands (panel desktop ...) ---------- */
 
+/*
+ * The terminal of the Default apps page. The command goes through the
+ * compositor, which puts the program behind $term in its place.
+ */
 static void open_terminal(struct panel *panel, const char *dir) {
-	const char *terminal = panel->config && panel->config->terminal ?
-		panel->config->terminal : "xfce4-terminal";
-	char *program = strndup(terminal, strcspn(terminal, " "));
 	char *quoted_dir = g_shell_quote(dir);
-	char *quoted_program = g_shell_quote(program);
-	char *command = format_str("cd %s && exec %s", quoted_dir, quoted_program);
-	proc_spawn(command);
-	free(command);
-	g_free(quoted_program);
+	ipc_panel_commandf(panel, "exec cd %s && exec $term", quoted_dir);
 	g_free(quoted_dir);
-	free(program);
 }
 
 void desktop_handle_command(struct panel *panel, int argc, char **argv) {

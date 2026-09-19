@@ -595,7 +595,7 @@ list_t *start_default_menu(struct panel *panel) {
 	list_t *items = create_list();
 	list_add(items, menu_item_new("Terminal", "exec xfce4-terminal"));
 	list_add(items, menu_item_new("File Explorer", "exec thunar"));
-	list_add(items, menu_item_new("Task Manager", "exec xfce4-terminal -e btop"));
+	list_add(items, menu_item_new("Task Manager", "exec $taskmanager"));
 	list_add(items, menu_item_new("Run...", "panel run"));
 	list_add(items, menu_item_separator());
 	struct menu_item *power = menu_item_new("Shut down or sign out", NULL);

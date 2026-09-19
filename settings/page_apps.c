@@ -7,8 +7,10 @@
 /*
  * Apps page, like "Default apps" and "Startup apps" of Windows:
  *  - default apps for web links, email, folders, text, pictures, music,
- *    videos and PDFs (mimeapps.list), and the terminal and file manager of the
- *    tileWin shortcuts ($term and $filemanager in common.conf)
+ *    videos and PDFs (mimeapps.list), and the terminal, file manager and task
+ *    manager of the tileWin shortcuts and menus ($term, $filemanager and
+ *    $taskmanager in common.conf). Everything else points here instead of
+ *    naming a program of its own.
  *  - startup apps: the XDG autostart entries tileWin starts
  *    (~/.config/autostart and /etc/xdg/autostart). Turning a system entry off
  *    writes a copy with Hidden=true to ~/.config/autostart.
@@ -25,8 +27,12 @@ static const struct category categories[] = {
 	{ "Web browser", NULL,
 		{ "x-scheme-handler/http", "x-scheme-handler/https", "text/html", NULL }, NULL, NULL },
 	{ "Email", NULL, { "x-scheme-handler/mailto", NULL }, NULL, NULL },
-	{ "File manager", "Also opened by Win+E", { "inode/directory", NULL }, "$filemanager", NULL },
-	{ "Terminal", "Opened by Win+Return", { NULL }, "$term", "TerminalEmulator" },
+	{ "File manager", "Win+E, \"File Explorer\" in the start button menu and every folder",
+		{ "inode/directory", NULL }, "$filemanager", NULL },
+	{ "Terminal", "Win+Return, \"Terminal\" in the menus and \"Open terminal here\" on the desktop",
+		{ NULL }, "$term", "TerminalEmulator" },
+	{ "Task manager", "Ctrl+Shift+Esc, \"Task Manager\" in the menus and the link in the "
+		"CPU and memory flyouts", { NULL }, "$taskmanager", "Monitor" },
 	{ "Text editor", NULL, { "text/plain", NULL }, NULL, NULL },
 	{ "Pictures", NULL, { "image/png", "image/jpeg", "image/gif", "image/webp", NULL }, NULL, NULL },
 	{ "Music", NULL, { "audio/mpeg", "audio/flac", "audio/ogg", "audio/x-wav", NULL }, NULL, NULL },
@@ -174,13 +180,23 @@ static void on_default(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	} else {
 		if (c->variable) {
 			char *program = first_word(g_app_info_get_executable(G_APP_INFO(info)));
+			char *wrapped = NULL;
+			if (program && g_desktop_app_info_get_boolean(info, "Terminal")) {
+				// a program that runs inside a terminal, such as btop, needs one
+				const char *term = cstmt_arg(confdoc_child(p->s->taskbar->root,
+					"terminal", NULL), 0);
+				wrapped = g_strdup_printf("%s %s", term && *term ? term : "xfce4-terminal -x",
+					program);
+			}
 			if (program) {
-				char *args = g_strdup_printf("%s %s", c->variable, program);
+				char *args = g_strdup_printf("%s %s", c->variable,
+					wrapped ? wrapped : program);
 				confdoc_set(p->s->common, p->s->common->root, "set", c->variable, args);
 				settings_common_changed(p->s, true);
 				g_free(args);
-				g_free(program);
 			}
+			g_free(wrapped);
+			g_free(program);
 		}
 		settings_status(p->s, "%s: %s", c->title, g_app_info_get_name(G_APP_INFO(info)));
 	}
