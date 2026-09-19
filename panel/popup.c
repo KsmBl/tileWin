@@ -898,6 +898,7 @@ enum {
 	RUN_HS_OK = 1,
 	RUN_HS_CANCEL,
 	RUN_HS_CLOSE,
+	RUN_HS_BROWSE,
 };
 
 static char *history_path(void) {
@@ -1111,12 +1112,50 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 
 	double btn_w = 75, btn_h = style == PS_CLASSIC ? 23 : 26;
 	double btn_y = h - btn_h - 14;
+	double browse_x = w - 16 - 3 * btn_w - 16;
+	draw_dialog_button(panel, cr, browse_x, btn_y, btn_w, btn_h, "Browse...", false);
 	draw_dialog_button(panel, cr, w - 16 - 2 * btn_w - 8, btn_y, btn_w, btn_h, "OK", true);
 	draw_dialog_button(panel, cr, w - 16 - btn_w, btn_y, btn_w, btn_h, "Cancel", false);
+	psurface_add_hotspot(p->surface, M + browse_x, M + btn_y, btn_w, btn_h,
+		NULL, RUN_HS_BROWSE, 0, NULL);
 	psurface_add_hotspot(p->surface, M + w - 16 - 2 * btn_w - 8, M + btn_y, btn_w, btn_h,
 		NULL, RUN_HS_OK, 0, NULL);
 	psurface_add_hotspot(p->surface, M + w - 16 - btn_w, M + btn_y, btn_w, btn_h,
 		NULL, RUN_HS_CANCEL, 0, NULL);
+}
+
+/*
+ * "Browse...": the panel draws its own dialogs and has no file chooser, so it
+ * asks the settings program for one and takes the path from its output. The
+ * path only fills the box, so arguments can still be added before OK.
+ */
+static void run_browse_done(void *data, const char *output) {
+	struct panel *panel = data;
+	char path[1024];
+	snprintf(path, sizeof(path), "%s", output ? output : "");
+	path[strcspn(path, "\n")] = '\0';
+	if (!path[0]) {
+		return; // cancelled
+	}
+	char quoted[1100];
+	if (strpbrk(path, " \t\"'")) {
+		snprintf(quoted, sizeof(quoted), "\"%s\"", path);
+	} else {
+		snprintf(quoted, sizeof(quoted), "%s", path);
+	}
+	if (popup_is_open(panel, POPUP_RUN) && panel->popup) {
+		struct rundialog *rd = panel->popup->data;
+		snprintf(rd->text, sizeof(rd->text), "%s", quoted);
+		text_cursor_end(rd->text, &rd->tc, false);
+		popup_set_dirty(panel->popup);
+	} else {
+		rundialog_open_with(panel, panel_focused_output(panel), quoted);
+	}
+}
+
+static void run_browse(struct panel *panel) {
+	proc_run(panel, "tilewin-settings --pick-file \"Run\"", false, NULL,
+		run_browse_done, panel);
 }
 
 static void rundialog_execute(struct popup *p) {
@@ -1152,6 +1191,8 @@ static void rundialog_button(struct popup *p, double x, double y, uint32_t butto
 	}
 	if (hs->kind == RUN_HS_OK) {
 		rundialog_execute(p);
+	} else if (hs->kind == RUN_HS_BROWSE) {
+		run_browse(p->panel);
 	} else if (hs->kind == RUN_HS_CANCEL || hs->kind == RUN_HS_CLOSE) {
 		popup_close_later(p->panel);
 	}
@@ -1204,19 +1245,32 @@ static const struct popup_vtable rundialog_vtable = {
 	.destroy = rundialog_destroy,
 };
 
-void rundialog_open(struct panel *panel, struct panel_output *output) {
+void rundialog_open_with(struct panel *panel, struct panel_output *output,
+		const char *prefill) {
+	if (!output) {
+		return;
+	}
 	struct rundialog *rd = calloc(1, sizeof(*rd));
 	rd->history = load_history();
-	if (rd->history->length > 0) {
-		snprintf(rd->text, sizeof(rd->text), "%s", (char *)rd->history->items[0]);
-		rd->history_pos = 1;
+	if (prefill && *prefill) {
+		snprintf(rd->text, sizeof(rd->text), "%s", prefill);
+		text_cursor_end(rd->text, &rd->tc, false); // room to add arguments
+	} else {
+		if (rd->history->length > 0) {
+			snprintf(rd->text, sizeof(rd->text), "%s", (char *)rd->history->items[0]);
+			rd->history_pos = 1;
+		}
+		// the last command is selected, so typing replaces it
+		text_cursor_end(rd->text, &rd->tc, true);
 	}
-	// the last command is selected, so typing replaces it
-	text_cursor_end(rd->text, &rd->tc, true);
 	int M = popup_shadow_margin(panel);
 	int width = 420 + 2 * M, height = 200 + 2 * M;
 	bool bottom = panel->config->layouts[panel->layout].bottom;
 	int bar = output->bar ? output->bar->height : 0;
 	int y = bottom ? output->height - bar - height - 8 : bar + 8;
 	popup_create(panel, POPUP_RUN, NULL, output, 8, y, width, height, &rundialog_vtable, rd);
+}
+
+void rundialog_open(struct panel *panel, struct panel_output *output) {
+	rundialog_open_with(panel, output, NULL);
 }

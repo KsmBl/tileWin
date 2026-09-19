@@ -403,8 +403,49 @@ static bool hovered(struct sm_ctx *c, double x, double y, double w, double h) {
 		c->sm->px < x + w && c->sm->py < y + h;
 }
 
-static void draw_avatar(cairo_t *cr, double x, double y, double size, uint32_t bg,
+/*
+ * The account picture the settings write (~/.face), which the lock screen
+ * shows too, or the one the login manager keeps for the user.
+ */
+static cairo_surface_t *user_picture(struct panel *panel, int size) {
+	static char path[512];
+	static bool looked = false;
+	if (!looked) {
+		looked = true;
+		const char *home = getenv("HOME");
+		struct passwd *pw = getpwuid(getuid());
+		const char *name = pw ? pw->pw_name : NULL;
+		char *candidates[] = {
+			home ? format_str("%s/.face", home) : NULL,
+			home ? format_str("%s/.face.icon", home) : NULL,
+			name ? format_str("/var/lib/AccountsService/icons/%s", name) : NULL,
+		};
+		for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+			if (candidates[i] && !path[0] && access(candidates[i], R_OK) == 0) {
+				snprintf(path, sizeof(path), "%s", candidates[i]);
+			}
+			free(candidates[i]);
+		}
+	}
+	return path[0] ? apps_icon(panel, path, size) : NULL;
+}
+
+static void draw_avatar(struct sm_ctx *c, double x, double y, double size, uint32_t bg,
 		uint32_t fg, bool round) {
+	cairo_surface_t *picture = user_picture(c->panel, (int)ceil(size * c->scale));
+	if (picture) {
+		cairo_save(c->cr);
+		if (round) {
+			cairo_arc(c->cr, x + size / 2, y + size / 2, size / 2, 0, 2 * M_PI);
+		} else {
+			pd_rounded(c->cr, x, y, size, size, size * 0.12);
+		}
+		cairo_clip(c->cr);
+		pd_icon(c->cr, picture, x, y, size);
+		cairo_restore(c->cr);
+		return;
+	}
+	cairo_t *cr = c->cr;
 	if (round) {
 		cairo_arc(cr, x + size / 2, y + size / 2, size / 2, 0, 2 * M_PI);
 	} else {
@@ -611,7 +652,7 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		double hh = 64;
 		pd_rounded4(cr, 1, 1, W - 2, hh, r, r, 0, 0);
 		pd_fill(cr, t, "startmenu.header", 1, hh, 0x2468d4ff);
-		draw_avatar(cr, 10, 8, 48, 0xffffffff, 0x5a8ee0ff, false);
+		draw_avatar(&c, 10, 8, 48, 0xffffffff, 0x5a8ee0ff, false);
 		pd_text(cr, "Trebuchet MS, Noto Sans Bold 13", sm->user, 67, 9, W - 80, hh - 16,
 			0x00000060, PD_LEFT);
 		pd_text(cr, "Trebuchet MS, Noto Sans Bold 13", sm->user, 66, 8, W - 80, hh - 16,
@@ -679,7 +720,7 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		rx = lx + lw + 10;
 		ry = 70;
 		rw = W - rx - 8;
-		draw_avatar(cr, rx + (rw - 52) / 2, 10, 52, 0xffffffff, 0x3a6ea5ff, false);
+		draw_avatar(&c, rx + (rw - 52) / 2, 10, 52, 0xffffffff, 0x3a6ea5ff, false);
 		// shut down button
 		double sbw = 100, sbh = 26, sbx = rx + rw - sbw, sby = H - 40;
 		bool hov = hovered(&c, M + sbx, M + sby, sbw, sbh);
@@ -794,7 +835,7 @@ static void render_list(struct popup *p, cairo_t *cr) {
 		if (buttons[i].kind == HS_POWER) {
 			pd_glyph_power(cr, 15, sy + 15, 18, fg);
 		} else if (i == 4) {
-			draw_avatar(cr, 12, sy + 12, 24, 0x5a5a5aff, 0xd0d0d0ff, true);
+			draw_avatar(&c, 12, sy + 12, 24, 0x5a5a5aff, 0xd0d0d0ff, true);
 		} else {
 			struct place *pl = sm->places->items[buttons[i].id];
 			cairo_surface_t *icon = apps_icon(panel, pl->icon, 20 * c.scale);
@@ -929,7 +970,7 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 	pd_color(cr, tw_theme_color(t, "startmenu.footer_bg", 0xe7e7e7f5));
 	cairo_fill(cr);
 	pd_rect(cr, M, fy, W - 2 * M, 1, 0x00000014);
-	draw_avatar(cr, x0 + 16, fy + 16, 32, 0xd0d0d0ff, 0x808080ff, true);
+	draw_avatar(&c, x0 + 16, fy + 16, 32, 0xd0d0d0ff, 0x808080ff, true);
 	pd_text(cr, bar_font(panel), sm->user, x0 + 58, fy, 300, footer_h, fg, PD_LEFT);
 	double pbx = x0 + w0 - 40, pby = fy + 12;
 	if (hovered(&c, pbx, pby, 40, 40)) {
@@ -1045,7 +1086,7 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 	// account and power at the top right, like the Windows 8.1 start screen
 	double avatar = 40, ax = W - 64 - avatar - 8;
 	pd_text(cr, bar_font(panel), sm->user, ax - 208, top + 8, 200, avatar, fg, PD_RIGHT);
-	draw_avatar(cr, ax, top + 8, avatar, 0xffffff40, fg, false);
+	draw_avatar(&c, ax, top + 8, avatar, 0xffffff40, fg, false);
 	double px = W - 64, py = top + 8;
 	if (hovered(&c, px, py, 40, 40)) {
 		pd_rect(cr, px, py, 40, 40, hl_bg);

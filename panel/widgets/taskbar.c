@@ -333,6 +333,32 @@ list_t *taskbar_window_menu(struct panel *panel, struct pwindow *win) {
 	snprintf(cmd, sizeof(cmd), "[con_id=%lld] sticky toggle", (long long)win->id);
 	list_add(items, menu_item_new("Show on all desktops", cmd));
 
+	if (window_mode) {
+		snprintf(cmd, sizeof(cmd), "[con_id=%lld] always_on_top toggle", (long long)win->id);
+		struct menu_item *above = menu_item_new("Always on top", cmd);
+		above->checked = win->above;
+		above->disabled = !win->floating;
+		list_add(items, above);
+	}
+
+	// see-through windows, like the transparency menu of AquaSnap
+	struct menu_item *transparency = menu_item_new("Set transparency", NULL);
+	transparency->children = create_list();
+	for (int percent = 0; percent <= 90; percent += 10) {
+		// written from whole numbers, so no decimal comma can creep in
+		int value = 100 - percent;
+		snprintf(cmd, sizeof(cmd), "[con_id=%lld] opacity %d.%02d", (long long)win->id,
+			value / 100, value % 100);
+		char label[32];
+		if (percent == 0) {
+			snprintf(label, sizeof(label), "Opaque");
+		} else {
+			snprintf(label, sizeof(label), "%d%%", percent);
+		}
+		list_add(transparency->children, menu_item_new(label, cmd));
+	}
+	list_add(items, transparency);
+
 	list_t *extra = panel_named_menu(panel, "window");
 	if (extra) {
 		char id[32];

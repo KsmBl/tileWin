@@ -1658,6 +1658,7 @@ void container_raise_floating(struct sway_container *con) {
 		wlr_scene_node_raise_to_top(&floater->scene_tree->node);
 
 		list_move_to_end(floater->pending.workspace->floating, floater);
+		tw_raise_above_windows(floater->pending.workspace);
 		node_set_dirty(&floater->pending.workspace->node);
 	}
 }

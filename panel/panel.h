@@ -151,7 +151,7 @@ struct pwindow {
 	char *output;
 	char *identifier; // foreign toplevel identifier
 	int pid;
-	bool focused, urgent, minimized, maximized, floating;
+	bool focused, urgent, minimized, maximized, floating, above;
 	int order; // creation order
 };
 
@@ -437,6 +437,9 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 /* shutdown.c: the shut down dialog of the theme */
 void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool logoff);
 void rundialog_open(struct panel *panel, struct panel_output *output);
+/* The same with the box already filled, e.g. with a file that was browsed to. */
+void rundialog_open_with(struct panel *panel, struct panel_output *output,
+		const char *prefill);
 /* flyouts.c: the clock and calendar flyout of the clock widget */
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
 void launcher_toggle(struct panel *panel, struct panel_output *output);

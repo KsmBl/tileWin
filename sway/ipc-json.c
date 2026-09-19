@@ -729,6 +729,7 @@ static void ipc_json_describe_container(struct sway_container *c, json_object *o
 		view_is_urgent(c->view) : container_has_urgent_child(c);
 	json_object_object_add(object, "urgent", json_object_new_boolean(urgent));
 	json_object_object_add(object, "sticky", json_object_new_boolean(c->is_sticky));
+	json_object_object_add(object, "above", json_object_new_boolean(c->tw.above));
 	json_object_object_add(object, "minimized", json_object_new_boolean(c->pending.tw_minimized));
 	json_object_object_add(object, "maximized", json_object_new_boolean(c->pending.tw_maximized));
 

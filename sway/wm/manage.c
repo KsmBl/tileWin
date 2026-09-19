@@ -430,6 +430,41 @@ void tw_unsnap_in_place(struct sway_container *con) {
 	ipc_event_window(con, "restore");
 }
 
+/*
+ * Windows that are always on top go back over the others whenever anything is
+ * raised, keeping the order they have among themselves.
+ */
+void tw_raise_above_windows(struct sway_workspace *ws) {
+	if (!ws || !ws->floating) {
+		return;
+	}
+	bool any = false;
+	for (int i = 0; i < ws->floating->length && !any; i++) {
+		any = ((struct sway_container *)ws->floating->items[i])->tw.above;
+	}
+	if (!any) {
+		return;
+	}
+	list_t *above = create_list();
+	for (int i = 0; i < ws->floating->length;) {
+		struct sway_container *con = ws->floating->items[i];
+		if (con->tw.above) {
+			list_add(above, con);
+			list_del(ws->floating, i);
+		} else {
+			i++;
+		}
+	}
+	for (int i = 0; i < above->length; i++) {
+		struct sway_container *con = above->items[i];
+		list_add(ws->floating, con);
+		if (con->scene_tree) {
+			wlr_scene_node_raise_to_top(&con->scene_tree->node);
+		}
+	}
+	list_free(above);
+}
+
 bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	if (!con || !con->view) {
 		*error = strdup("No window to snap");

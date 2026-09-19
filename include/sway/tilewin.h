@@ -83,6 +83,7 @@ struct tw_container {
 	enum tw_snap window_geometry_snap;
 	struct wlr_box window_geometry;
 	enum tw_snap snap;
+	bool above; // kept over the other floating windows
 	struct wlr_box restore_box; // geometry before maximize/snap
 	// double-clicking a frame side: the size before, and after stretching
 	int expand_axis; // 0: none, 1: width, 2: height
@@ -229,6 +230,8 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error);
 void tw_snap_to(struct sway_container *con, enum tw_snap snap);
 /* Ends the snapped state of a window that was moved away, keeping its size. */
 void tw_unsnap_in_place(struct sway_container *con);
+/* Puts the windows marked "always on top" back over the other floating ones. */
+void tw_raise_above_windows(struct sway_workspace *ws);
 /*
  * Snapped and maximized windows keep the size of their slot even when the
  * client commits a smaller size (terminals resize in character cells).

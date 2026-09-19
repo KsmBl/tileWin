@@ -134,6 +134,7 @@ static const struct cmd_handler config_handlers[] = {
 static const struct cmd_handler command_handlers[] = {
 	{ "allow_tearing", cmd_allow_tearing },
 	{ "alttab", cmd_alttab },
+	{ "always_on_top", cmd_always_on_top },
 	{ "arrange", cmd_arrange },
 	{ "border", cmd_border },
 	{ "color_scheme", cmd_color_scheme },

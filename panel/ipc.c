@@ -70,6 +70,7 @@ static void update_window_from_json(struct pwindow *w, json_object *con) {
 	w->urgent = jbool(con, "urgent");
 	w->minimized = jbool(con, "minimized");
 	w->maximized = jbool(con, "maximized");
+	w->above = jbool(con, "above");
 	w->pid = (int)jint(con, "pid");
 	const char *identifier = jstr(con, "foreign_toplevel_identifier");
 	free(w->identifier);

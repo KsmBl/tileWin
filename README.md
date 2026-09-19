@@ -54,6 +54,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - `Super+Arrow` snapping.
   - Moved and resized windows stick to the edges of other windows and of the screen. Hold Shift (`window_group_modifier`) while dragging to move the windows touching it along. Windows snapped to an edge or a corner belong to such a group as well: they come along in the size they have, instead of going back to the size they had before they were snapped.
   - Double-click the left or right side of a window to stretch it to the next window or the screen edge, the top or bottom side to do the same with its height. Double-click again for the old size.
+  - Keep a window over the others ("Always on top" in its menu, `always_on_top`), and make it see-through from its menu ("Set transparency").
   - Minimize to the taskbar; show desktop; Alt+Tab switcher, as a grid of icons or as a 3D stack of the windows themselves like Flip 3D (`alttab { style flip3d }`, used by the Windows 7 theme).
   - Closing a window gives the focus to the window used before it that is open on the same desktop and not minimized, so a minimized window is not opened again.
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
@@ -264,6 +265,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `snap left\|right\|up\|down\|topleft\|topright\|bottomleft\|bottomright\|restore` | Snap a window |
 | `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
 | `showdesktop` | Minimize all windows / restore them |
+| `always_on_top [enable\|disable\|toggle]` | Keeps a floating window over the other ones; also in the right-click menu of a window |
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
 | `desktop new\|close\|move left\|move right` | Create a desktop, close the current one (its windows move to the desktop before it), or move it one place in the desktop order |

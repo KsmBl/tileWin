@@ -131,6 +131,7 @@ sway_cmd cmd_animation;
 sway_cmd cmd_animations;
 sway_cmd cmd_animation_speed;
 sway_cmd cmd_double_click_time;
+sway_cmd cmd_always_on_top;
 sway_cmd cmd_alttab_style;
 sway_cmd cmd_pointer_locate;
 sway_cmd cmd_pointer_trail;

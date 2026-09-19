@@ -7,6 +7,7 @@
 #include "sway/input/input-manager.h"
 #include "sway/input/keyboard.h"
 #include "sway/input/seat.h"
+#include "sway/ipc-server.h"
 #include "sway/tilewin.h"
 #include "sway/tree/container.h"
 #include "sway/tree/workspace.h"
@@ -518,6 +519,30 @@ struct cmd_results *cmd_double_click_time(int argc, char **argv) {
 	}
 	config->tw_double_click_time = (int)ms;
 	tw_double_click_time_changed();
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_always_on_top(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "always_on_top", EXPECTED_AT_MOST, 1))) {
+		return error;
+	}
+	struct sway_container *con = target_window();
+	if (!con) {
+		return cmd_results_new(CMD_FAILURE, "No window to keep on top");
+	}
+	if (!container_is_floating(con)) {
+		return cmd_results_new(CMD_FAILURE,
+			"always_on_top only works on floating windows (window mode)");
+	}
+	bool enable = argc ? parse_boolean(argv[0], con->tw.above) : !con->tw.above;
+	con->tw.above = enable;
+	if (enable) {
+		container_raise_floating(con);
+	} else {
+		tw_raise_above_windows(con->pending.workspace);
+	}
+	ipc_event_window(con, "above");
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

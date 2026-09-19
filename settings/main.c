@@ -516,7 +516,51 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 	return 0;
 }
 
+/* ---------- --pick-file: a file chooser for the taskbar's Run dialog ---------- */
+
+struct pick_request {
+	GMainLoop *loop;
+	char *path;
+};
+
+static void on_pick_finished(GObject *source, GAsyncResult *result, gpointer data) {
+	struct pick_request *r = data;
+	GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (file) {
+		r->path = g_file_get_path(file);
+		g_object_unref(file);
+	}
+	g_main_loop_quit(r->loop);
+}
+
+/*
+ * The panel has no toolkit of its own, so it asks us for a file and reads the
+ * path from our output. Runs without the application, so it never hands over
+ * to a settings window that is already open.
+ */
+static int pick_file(const char *title) {
+	gtk_init();
+	struct pick_request r = { g_main_loop_new(NULL, FALSE), NULL };
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, title && *title ? title : "Pick a file");
+	gtk_file_dialog_open(dialog, NULL, NULL, on_pick_finished, &r);
+	g_object_unref(dialog);
+	g_main_loop_run(r.loop);
+	g_main_loop_unref(r.loop);
+	if (!r.path) {
+		return 1;
+	}
+	printf("%s\n", r.path);
+	g_free(r.path);
+	return 0;
+}
+
 int main(int argc, char **argv) {
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--pick-file") == 0) {
+			return pick_file(i + 1 < argc ? argv[i + 1] : NULL);
+		}
+	}
 	struct settings *s = &settings;
 	s->common = confdoc_open("common.conf");
 	s->taskbar = confdoc_open("taskbar.conf");

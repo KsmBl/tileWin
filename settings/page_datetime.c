@@ -329,6 +329,16 @@ void datetime_page_refresh(struct settings *s) {
 	}
 }
 
+/* Hours, minutes and seconds are shown with two digits. */
+static gboolean on_spin_leading_zero(GtkSpinButton *spin, gpointer data) {
+	char text[8];
+	snprintf(text, sizeof(text), "%02d", gtk_spin_button_get_value_as_int(spin));
+	if (strcmp(gtk_editable_get_text(GTK_EDITABLE(spin)), text) != 0) {
+		gtk_editable_set_text(GTK_EDITABLE(spin), text);
+	}
+	return TRUE;
+}
+
 GtkWidget *datetime_page_new(struct settings *s) {
 	struct datetime_page *p = g_new0(struct datetime_page, 1);
 	p->s = s;
@@ -388,6 +398,8 @@ GtkWidget *datetime_page_new(struct settings *s) {
 		*spins[i] = gtk_spin_button_new_with_range(0, limits[i], 1);
 		gtk_spin_button_set_wrap(GTK_SPIN_BUTTON(*spins[i]), TRUE);
 		gtk_editable_set_width_chars(GTK_EDITABLE(*spins[i]), 2);
+		// 09:05:03 rather than 9:5:3
+		g_signal_connect(*spins[i], "output", G_CALLBACK(on_spin_leading_zero), NULL);
 		gtk_box_append(GTK_BOX(clock), *spins[i]);
 	}
 	gtk_box_append(GTK_BOX(p->manual), clock);
