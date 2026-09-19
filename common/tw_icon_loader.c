@@ -358,6 +358,20 @@ cairo_surface_t *tw_icon_load_for_app(const char *app_id, int size, const char *
 			surface = tw_icon_load(dot + 1, size, theme);
 		}
 	}
+	if (!surface) {
+		/*
+		 * Apps name their window after the build they are: "vivaldi-stable",
+		 * "google-chrome-beta", "firefox-esr". Drop the trailing parts one by
+		 * one; the plain name usually has an icon.
+		 */
+		char *trimmed = strdup(lower);
+		char *dash;
+		while (!surface && (dash = strrchr(trimmed, '-')) && dash != trimmed) {
+			*dash = '\0';
+			surface = tw_icon_load(trimmed, size, theme);
+		}
+		free(trimmed);
+	}
 	free(lower);
 	return surface;
 }
