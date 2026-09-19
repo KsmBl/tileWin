@@ -49,6 +49,52 @@ static char *unescape(const char *value) {
 	return out;
 }
 
+/*
+ * Puts the value of $VAR and ${VAR} into the text. KDE marks the values that
+ * need it by writing "[$e]" behind the key, e.g. "URL[$e]=$HOME/Documents".
+ */
+static char *expand_variables(const char *value) {
+	size_t size = strlen(value) + 1, length = 0;
+	char *out = malloc(size);
+	for (const char *p = value; *p;) {
+		const char *text = p;
+		size_t text_length = 1;
+		char *name = NULL;
+		if (*p == '$' && p[1] == '{') {
+			size_t n = strcspn(p + 2, "}");
+			if (p[2 + n] == '}') {
+				name = strndup(p + 2, n);
+				p += n + 3;
+			}
+		} else if (*p == '$') {
+			size_t n = 0;
+			while (isalnum((unsigned char)p[1 + n]) || p[1 + n] == '_') {
+				n++;
+			}
+			if (n > 0) {
+				name = strndup(p + 1, n);
+				p += n + 1;
+			}
+		}
+		if (name) {
+			const char *env = getenv(name);
+			text = env ? env : "";
+			text_length = strlen(text);
+		} else {
+			p++;
+		}
+		if (length + text_length + 1 > size) {
+			size = (length + text_length + 1) * 2;
+			out = realloc(out, size);
+		}
+		memcpy(out + length, text, text_length);
+		length += text_length;
+		free(name);
+	}
+	out[length] = '\0';
+	return out;
+}
+
 static bool locale_matches(const char *key_locale, int *score) {
 	static char lang[32];
 	static bool init = false;
@@ -122,6 +168,7 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 		}
 
 		int score = 0;
+		bool expand = false;
 		char *bracket = strchr(key, '[');
 		if (bracket) {
 			char *close = strchr(bracket, ']');
@@ -129,10 +176,17 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 				continue;
 			}
 			*close = '\0';
-			if (!locale_matches(bracket + 1, &score)) {
+			if (strcmp(bracket + 1, "$e") == 0) {
+				// KDE's "[$e]" is not a language, it says that the value has
+				// shell variables in it; the key itself is the plain one
+				expand = true;
+				*bracket = '\0';
+				bracket = NULL;
+			} else if (!locale_matches(bracket + 1, &score)) {
 				continue;
+			} else {
+				*bracket = '\0';
 			}
-			*bracket = '\0';
 		}
 
 		char **target = NULL;
@@ -177,6 +231,11 @@ struct tw_desktop_entry *tw_desktop_load(const char *path, const char *id) {
 			}
 			free(*target);
 			*target = unescape(value);
+			if (expand) {
+				char *filled = expand_variables(*target);
+				free(*target);
+				*target = filled;
+			}
 		}
 	}
 	free(line);
