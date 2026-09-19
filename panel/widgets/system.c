@@ -600,10 +600,13 @@ static void battery_update(struct widget *w) {
 			continue;
 		}
 		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", de->d_name);
-		if (read_file(path, buf, sizeof(buf))) {
-			s->capacity = atoi(buf);
-			s->present = true;
+		if (!read_file(path, buf, sizeof(buf))) {
+			// batteries of wireless mice and keyboards report no percentage;
+			// keep looking, the battery of the computer comes later
+			continue;
 		}
+		s->capacity = atoi(buf);
+		s->present = true;
 		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", de->d_name);
 		if (!read_file(path, s->status, sizeof(s->status))) {
 			s->status[0] = '\0';

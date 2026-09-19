@@ -150,12 +150,15 @@ static void load_config(struct panel *panel, struct startmenu *sm) {
 		}
 	}
 	if (sm->places->length == 0) {
+		// the folders come from xdg-user-dir, so they are found whatever they
+		// are called in your language, and fall back to the home folder
 		static const char *defaults[][3] = {
 			{ "Home", "user-home", "exec xdg-open ~" },
-			{ "Documents", "folder-documents", "exec xdg-open ~/Documents" },
-			{ "Pictures", "folder-pictures", "exec xdg-open ~/Pictures" },
-			{ "Music", "folder-music", "exec xdg-open ~/Music" },
-			{ "Downloads", "folder-download", "exec xdg-open ~/Downloads" },
+			{ "Documents", "folder-documents",
+				"exec xdg-open \"$(xdg-user-dir DOCUMENTS)\"" },
+			{ "Pictures", "folder-pictures", "exec xdg-open \"$(xdg-user-dir PICTURES)\"" },
+			{ "Music", "folder-music", "exec xdg-open \"$(xdg-user-dir MUSIC)\"" },
+			{ "Downloads", "folder-download", "exec xdg-open \"$(xdg-user-dir DOWNLOAD)\"" },
 			{ "Settings", "preferences-system", "exec tilewin-settings" },
 		};
 		for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++) {
