@@ -554,6 +554,7 @@ struct sway_config {
 	bool tw_stretch; // double-clicking a frame side stretches the window
 	int tw_pointer_trail; // how long a copy of the pointer lives in ms, 0: no trail
 	int tw_alttab_style; // -1: as the theme says, 0: icons, 1: flip3d
+	int tw_pointer_locate; // -1: as the theme says, 0: off, 1: Ctrl shows the pointer
 	int tw_double_click_time; // milliseconds between two clicks of a double-click
 
 	// Flags

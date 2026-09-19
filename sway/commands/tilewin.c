@@ -538,6 +538,19 @@ struct cmd_results *cmd_alttab_style(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_pointer_locate(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pointer_locate", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "theme") == 0) {
+		config->tw_pointer_locate = -1;
+	} else {
+		config->tw_pointer_locate = parse_boolean(argv[0], true) ? 1 : 0;
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "pointer_trail", EXPECTED_EQUAL_TO, 1))) {

@@ -73,7 +73,7 @@ struct mouse_page {
 	GPtrArray *cursor_themes; // char *
 	GtkWidget *theme_dd, *size_dd, *trail;
 	guint trail_timer;
-	GtkWidget *speed, *test_icon;
+	GtkWidget *speed, *test_icon, *locate;
 	guint speed_timer;
 	gint64 last_test_click; // milliseconds, 0 when the next click is the first
 	bool test_open;
@@ -285,6 +285,26 @@ static void on_test_pressed(GtkGestureClick *gesture, int n_press, double x, dou
 	}
 }
 
+/* ---------- showing where the pointer is ---------- */
+
+static const char *const locate_values[] = { "theme", "enable", "disable" };
+
+static void on_locate(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct mouse_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->locate));
+	if (sel >= G_N_ELEMENTS(locate_values)) {
+		return;
+	}
+	const char *value = locate_values[sel];
+	struct confdoc *d = common(p);
+	confdoc_set(d, d->root, "pointer_locate", NULL, value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "pointer_locate %s", value);
+}
+
 /* ---------- pointer trail ---------- */
 
 static gboolean apply_trail(gpointer data) {
@@ -370,6 +390,21 @@ void mouse_page_refresh(struct settings *s) {
 	}
 	const char *trail = cstmt_arg(confdoc_child(common(p)->root, "pointer_trail", NULL), 0);
 	gtk_range_set_value(GTK_RANGE(p->trail), trail ? atoi(trail) : 0);
+	const char *locate = cstmt_arg(confdoc_child(common(p)->root, "pointer_locate", NULL), 0);
+	guint locate_sel = 0;
+	for (guint i = 0; locate && i < G_N_ELEMENTS(locate_values); i++) {
+		if (g_ascii_strcasecmp(locate, locate_values[i]) == 0) {
+			locate_sel = i;
+		}
+	}
+	if (locate && locate_sel == 0 && g_ascii_strcasecmp(locate, "theme") != 0) {
+		// yes/no/on/off mean the same as enable/disable
+		locate_sel = (g_ascii_strcasecmp(locate, "yes") == 0 ||
+			g_ascii_strcasecmp(locate, "on") == 0 ||
+			g_ascii_strcasecmp(locate, "true") == 0) ? 1 : 2;
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->locate), locate_sel);
+
 	const char *speed = cstmt_arg(confdoc_child(common(p)->root, "double_click_time", NULL), 0);
 	gtk_range_set_value(GTK_RANGE(p->speed), speed ? atoi(speed) : 400);
 
@@ -438,6 +473,13 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	p->size_dd = gtk_drop_down_new(G_LIST_MODEL(size_model), NULL);
 	g_signal_connect(p->size_dd, "notify::selected", G_CALLBACK(on_cursor_changed), p);
 	ui_row(cursor, "Cursor size", "Apps started later use the new cursor", p->size_dd);
+
+	const char *const locate_labels[] = { "As the theme has it", "On", "Off", NULL };
+	p->locate = gtk_drop_down_new_from_strings(locate_labels);
+	g_signal_connect(p->locate, "notify::selected", G_CALLBACK(on_locate), p);
+	ui_row(cursor, "Show the pointer when Ctrl is tapped",
+		"Rings shrink onto the pointer, like on Windows. Ctrl held as part of a "
+		"shortcut or a Ctrl+click does nothing", p->locate);
 
 	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1000, 25);
 	gtk_widget_set_size_request(p->trail, 260, -1);

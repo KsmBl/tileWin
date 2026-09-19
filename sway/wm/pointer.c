@@ -157,8 +157,14 @@ static int tick(void *data) {
 }
 
 static bool locate_enabled(void) {
-	return tw_theme && tw_theme_bool(tw_theme, "pointer.locate", false) &&
-		server.wl_event_loop && root;
+	if (!server.wl_event_loop || !root) {
+		return false;
+	}
+	// "pointer_locate" wins over the theme when it was set
+	if (config && config->tw_pointer_locate >= 0) {
+		return config->tw_pointer_locate == 1;
+	}
+	return tw_theme && tw_theme_bool(tw_theme, "pointer.locate", false);
 }
 
 /* Starts the rings at the pointer. */
