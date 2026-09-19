@@ -38,6 +38,9 @@ static const char *const move_labels[] = { "Super", "Alt", "Ctrl", "Off", NULL }
 static const char *const follows_values[] = { "no", "yes", "always", NULL };
 static const char *const follows_labels[] = { "Clicking it", "Pointing at it",
 	"Pointing at it, also after switching desktops", NULL };
+static const char *const alttab_values[] = { "theme", "icons", "flip3d", NULL };
+static const char *const alttab_labels[] = { "As the theme has it", "Grid of icons",
+	"3D stack of the windows (Flip 3D)", NULL };
 static const char *const activation_values[] = { "focus", "smart", "urgent", "none", NULL };
 static const char *const activation_labels[] = { "Switch to it",
 	"Switch to it if it is on this desktop", "Highlight its taskbar button", "Nothing", NULL };
@@ -64,6 +67,14 @@ static const struct control move_controls[] = {
 		.hint = "Hold this key and drag a window with the left mouse button to move it, with "
 		"the right one to resize it", .kind = CONTROL_CHOICE, .values = move_values,
 		.labels = move_labels, .suffix = "normal" },
+	{ 0 },
+};
+
+static const struct control switcher_controls[] = {
+	{ .doc = DOC_COMMON, .key = "alttab_style", .title = "Alt+Tab shows",
+		.hint = "The 3D stack flies through copies of the windows themselves; the "
+		"Windows 7 theme uses it by default", .kind = CONTROL_CHOICE,
+		.values = alttab_values, .labels = alttab_labels },
 	{ 0 },
 };
 
@@ -241,6 +252,8 @@ GtkWidget *window_page_new(struct settings *s) {
 		"settings.", &content);
 	GtkWidget *moving = ui_group(content, "Moving and resizing", NULL);
 	add_controls(p, moving, move_controls);
+	GtkWidget *switcher = ui_group(content, "Window switcher", NULL);
+	add_controls(p, switcher, switcher_controls);
 	GtkWidget *focus = ui_group(content, "Focus", NULL);
 	add_controls(p, focus, focus_controls);
 	s->window_page = p;

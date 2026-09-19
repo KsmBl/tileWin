@@ -521,6 +521,23 @@ struct cmd_results *cmd_double_click_time(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_alttab_style(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "alttab_style", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "theme") == 0) {
+		config->tw_alttab_style = -1;
+	} else if (strcasecmp(argv[0], "icons") == 0) {
+		config->tw_alttab_style = 0;
+	} else if (strcasecmp(argv[0], "flip3d") == 0) {
+		config->tw_alttab_style = 1;
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'alttab_style theme|icons|flip3d'");
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "pointer_trail", EXPECTED_EQUAL_TO, 1))) {

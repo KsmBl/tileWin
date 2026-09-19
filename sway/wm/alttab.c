@@ -3,6 +3,7 @@
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
+#include "sway/config.h"
 #include "sway/desktop/transaction.h"
 #include "sway/input/seat.h"
 #include "sway/output.h"
@@ -147,7 +148,10 @@ static void render(void) {
 	if (!output || n == 0) {
 		return;
 	}
-	if (tw_style_alttab_flip(tw_theme)) {
+	// "alttab_style" wins over the theme when it was set
+	bool flip = config && config->tw_alttab_style >= 0 ?
+		config->tw_alttab_style == 1 : tw_style_alttab_flip(tw_theme);
+	if (flip) {
 		render_flip(output, n);
 		return;
 	}

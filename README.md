@@ -283,6 +283,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
 | `window_stretch enable\|disable` | Double-clicking a side of a window stretches it (default enable) |
 | `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along, snapped ones in the size they have (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
+| `alttab_style theme\|icons\|flip3d` | What the Alt+Tab switcher shows: what the theme has (default), a grid of icons, or a 3D stack of the windows themselves |
 | `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off) |
 | `double_click_time <ms>` | How long after the first click the second one still makes a double-click, in title bars, on window frames and on the desktop (default 400) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
@@ -301,7 +302,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 |---|---|
 | Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
 | Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview |
-| Window behavior | Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
+| Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
 | Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps and the icon of each of them |
 | Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), the style of the start menu, pinned apps, places and power entries of the start menu |
