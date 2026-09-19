@@ -191,6 +191,126 @@ static double render_item_start(struct render_ctx *ctx, struct pbox b) {
 
 /* ================= cpu ================= */
 
+/* ---------- what the processor is made of ---------- */
+
+#define CPU_MAX_CPUS 512
+
+struct cpu_topology {
+	bool loaded;
+	int threads, cores;
+	int perf_cores, perf_threads;
+	int eff_cores, eff_threads;
+	bool hybrid, smt;
+};
+
+/* "0-5,8,10-11" */
+static bool cpulist_contains(const char *list, int cpu) {
+	for (const char *p = list; p && *p;) {
+		char *end = NULL;
+		long low = strtol(p, &end, 10);
+		if (end == p) {
+			break;
+		}
+		long high = low;
+		if (*end == '-') {
+			p = end + 1;
+			high = strtol(p, &end, 10);
+		}
+		if (cpu >= low && cpu <= high) {
+			return true;
+		}
+		p = *end == ',' ? end + 1 : "";
+	}
+	return false;
+}
+
+static int cpulist_count(const char *list) {
+	int n = 0;
+	for (const char *p = list; p && *p;) {
+		char *end = NULL;
+		long low = strtol(p, &end, 10);
+		if (end == p) {
+			break;
+		}
+		long high = low;
+		if (*end == '-') {
+			p = end + 1;
+			high = strtol(p, &end, 10);
+		}
+		n += (int)(high - low + 1);
+		p = *end == ',' ? end + 1 : "";
+	}
+	return n;
+}
+
+/*
+ * Reads which logical processors share a core (SMT) and which of them are the
+ * slower efficiency ones, either from the classes the kernel names or, where
+ * it does not, from the capacity it gives each of them.
+ */
+static void topology_load(struct cpu_topology *t) {
+	t->loaded = true;
+	char efficiency[1024] = "";
+	DIR *types = opendir("/sys/devices/system/cpu/types");
+	struct dirent *de;
+	while (types && (de = readdir(types))) {
+		if (de->d_name[0] == '.' || !strstr(de->d_name, "atom")) {
+			continue;
+		}
+		char path[256], buf[1024];
+		snprintf(path, sizeof(path), "/sys/devices/system/cpu/types/%s/cpulist", de->d_name);
+		if (read_file(path, buf, sizeof(buf))) {
+			size_t len = strlen(efficiency);
+			snprintf(efficiency + len, sizeof(efficiency) - len, "%s%s", len ? "," : "", buf);
+		}
+	}
+	if (types) {
+		closedir(types);
+	}
+
+	// without named classes, the capacity tells them apart
+	long capacities[CPU_MAX_CPUS];
+	long best = 0;
+	bool have_capacity = false;
+	for (int cpu = 0; cpu < CPU_MAX_CPUS; cpu++) {
+		char path[256], buf[64];
+		snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpu_capacity", cpu);
+		capacities[cpu] = read_file(path, buf, sizeof(buf)) ? atol(buf) : 0;
+		if (capacities[cpu] > 0) {
+			have_capacity = true;
+			best = capacities[cpu] > best ? capacities[cpu] : best;
+		}
+	}
+
+	for (int cpu = 0; cpu < CPU_MAX_CPUS; cpu++) {
+		char path[256], siblings[256];
+		snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list",
+			cpu);
+		if (!read_file(path, siblings, sizeof(siblings))) {
+			continue;
+		}
+		t->threads++;
+		int count = cpulist_count(siblings);
+		if (count > 1) {
+			t->smt = true;
+		}
+		// the lowest of a group of siblings stands for the core
+		bool primary = strtol(siblings, NULL, 10) == cpu;
+		bool slow = efficiency[0] ? cpulist_contains(efficiency, cpu) :
+			(have_capacity && best > 0 && capacities[cpu] > 0 && capacities[cpu] < best);
+		if (slow) {
+			t->eff_threads++;
+			t->eff_cores += primary;
+		} else {
+			t->perf_threads++;
+			t->perf_cores += primary;
+		}
+		t->cores += primary;
+	}
+	t->hybrid = t->eff_cores > 0 && t->perf_cores > 0;
+}
+
+
 #define CPU_HISTORY 32
 
 struct cpu_state {
@@ -290,6 +410,24 @@ static bool cpu_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 
 static char *cpu_tooltip(struct widget *w, struct hotspot *hs) {
 	struct cpu_state *s = ((struct poll_data *)w->data)->state;
+	static struct cpu_topology topology;
+	if (!topology.loaded) {
+		topology_load(&topology);
+	}
+	if (topology.hybrid) {
+		return format_str("CPU usage: %d%%\n%d performance core%s (%d thread%s)\n"
+			"%d efficiency core%s (%d thread%s)", s->usage,
+			topology.perf_cores, topology.perf_cores == 1 ? "" : "s",
+			topology.perf_threads, topology.perf_threads == 1 ? "" : "s",
+			topology.eff_cores, topology.eff_cores == 1 ? "" : "s",
+			topology.eff_threads, topology.eff_threads == 1 ? "" : "s");
+	}
+	if (topology.cores > 0) {
+		return format_str("CPU usage: %d%%\n%d core%s, %d thread%s%s", s->usage,
+			topology.cores, topology.cores == 1 ? "" : "s",
+			topology.threads, topology.threads == 1 ? "" : "s",
+			topology.smt ? " (two per core)" : "");
+	}
 	return format_str("CPU usage: %d%%", s->usage);
 }
 
