@@ -19,6 +19,7 @@ struct sway_seat;
 struct sway_view;
 struct sway_workspace;
 struct wlr_scene_buffer;
+struct wlr_scene_node;
 struct wlr_scene_tree;
 struct wlr_surface;
 struct wlr_buffer;
