@@ -32,6 +32,7 @@ static const struct widget_type widget_types[] = {
 	{ "brightness", "Brightness", "Screen brightness" },
 	{ "cpu", "CPU usage", "Processor load" },
 	{ "memory", "Memory usage", "RAM in use, click for a flyout" },
+	{ "disk", "Disk activity", "A lamp that lights up while the disks are busy" },
 	{ "clock", "Clock", "Time and date with a calendar" },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
@@ -72,6 +73,13 @@ static const struct opt opts_memory[] = {
 	{ "interval", "Update interval", "Seconds, default 5", NULL },
 	{ "format", "Format", "{used_percent}, {used} and {total} in GiB", NULL },
 	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
+	{ 0 },
+};
+static const struct opt opts_disk[] = {
+	{ "devices", "Disks", "Names from /proc/diskstats separated by spaces, e.g. nvme0n1 sda; empty watches every whole disk", NULL },
+	{ "threshold", "Threshold", "KiB per second before the lamp lights up, default 50", NULL },
+	{ "interval", "Update interval", "Seconds, default 1", NULL },
+	{ "format", "Format", "{rate} is e.g. 1.2 MB/s, {kbps} the plain number; empty shows only the lamp", NULL },
 	{ 0 },
 };
 static const struct opt opts_battery[] = {
@@ -143,6 +151,7 @@ static const struct {
 	{ "clock", opts_clock },
 	{ "cpu", opts_cpu },
 	{ "memory", opts_memory },
+	{ "disk", opts_disk },
 	{ "battery", opts_battery },
 	{ "network", opts_network },
 	{ "volume", opts_volume },

@@ -385,6 +385,193 @@ const struct widget_impl widget_memory = {
 	.set_active = poll_set_active,
 };
 
+/* ================= disk ================= */
+
+/*
+ * Disk activity, like the drive lamp of a PC: the lamp lights up while the
+ * watched disks move more than "threshold" KiB per second. "devices" picks
+ * which disks are watched; without it every whole disk is (no partitions, no
+ * loop or ram devices).
+ */
+
+#define DISK_MAX 16
+#define DISK_DEFAULT_THRESHOLD 50 // KiB per second
+
+struct disk_dev {
+	char name[32];
+	unsigned long long sectors; // read and written together, at the last sample
+};
+
+struct disk_state {
+	struct disk_dev devices[DISK_MAX];
+	int count;
+	double kbps; // read and written together
+	struct timespec sampled;
+	bool sampled_once;
+	bool busy;
+};
+
+/* Whether a name of /proc/diskstats is a whole disk worth watching. */
+static bool disk_is_whole(const char *name) {
+	static const char *const skip[] = { "loop", "ram", "zram", "dm-", "md", "sr", "fd" };
+	for (size_t i = 0; i < sizeof(skip) / sizeof(skip[0]); i++) {
+		if (strncmp(name, skip[i], strlen(skip[i])) == 0) {
+			return false;
+		}
+	}
+	char path[128];
+	snprintf(path, sizeof(path), "/sys/class/block/%s/partition", name);
+	return access(path, F_OK) != 0; // a partition has this file, a disk has not
+}
+
+static bool disk_wanted(struct widget *w, const char *name) {
+	const char *list = widget_conf(w, "devices", NULL);
+	if (!list || !*list) {
+		return disk_is_whole(name);
+	}
+	size_t len = strlen(name);
+	for (const char *p = list; *p;) {
+		size_t n = strcspn(p, " ,\t");
+		if (n == len && strncmp(p, name, n) == 0) {
+			return true;
+		}
+		p += n;
+		p += strspn(p, " ,\t");
+	}
+	return false;
+}
+
+static void disk_update(struct widget *w) {
+	struct disk_state *s = ((struct poll_data *)w->data)->state;
+	FILE *f = fopen("/proc/diskstats", "r");
+	if (!f) {
+		return;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double seconds = s->sampled_once ? (now.tv_sec - s->sampled.tv_sec) +
+		(now.tv_nsec - s->sampled.tv_nsec) / 1e9 : 0;
+	unsigned long long moved = 0; // sectors since the last sample
+	char line[512];
+	while (fgets(line, sizeof(line), f)) {
+		char name[32];
+		unsigned long long reads, rmerged, sread, rms, writes, wmerged, swritten;
+		if (sscanf(line, "%*u %*u %31s %llu %llu %llu %llu %llu %llu %llu", name, &reads,
+				&rmerged, &sread, &rms, &writes, &wmerged, &swritten) != 8) {
+			continue;
+		}
+		if (!disk_wanted(w, name)) {
+			continue;
+		}
+		struct disk_dev *dev = NULL;
+		for (int i = 0; i < s->count && !dev; i++) {
+			if (strcmp(s->devices[i].name, name) == 0) {
+				dev = &s->devices[i];
+			}
+		}
+		if (!dev) {
+			if (s->count == DISK_MAX) {
+				continue;
+			}
+			dev = &s->devices[s->count++];
+			snprintf(dev->name, sizeof(dev->name), "%s", name);
+			dev->sectors = sread + swritten;
+			continue; // the first sample only sets the starting point
+		}
+		unsigned long long sectors = sread + swritten;
+		if (seconds > 0 && sectors >= dev->sectors) {
+			moved += sectors - dev->sectors;
+		}
+		dev->sectors = sectors;
+	}
+	fclose(f);
+	if (seconds > 0) {
+		// a sector is 512 bytes, so two of them make a KiB
+		s->kbps = moved / 2.0 / seconds;
+	}
+	s->sampled = now;
+	s->sampled_once = true;
+	int threshold = widget_conf_int(w, "threshold", DISK_DEFAULT_THRESHOLD);
+	s->busy = s->kbps >= threshold;
+}
+
+static void disk_init(struct widget *w) {
+	poll_init(w, 1, disk_update, sizeof(struct disk_state));
+}
+
+static void disk_rate_text(double kbps, char *buffer, size_t size) {
+	if (kbps >= 1024 * 1024) {
+		snprintf(buffer, size, "%.1f GB/s", kbps / (1024 * 1024));
+	} else if (kbps >= 1024) {
+		snprintf(buffer, size, "%.1f MB/s", kbps / 1024);
+	} else {
+		snprintf(buffer, size, "%.0f kB/s", kbps);
+	}
+}
+
+static char *disk_text(struct widget *w) {
+	struct disk_state *s = ((struct poll_data *)w->data)->state;
+	char rate[32], kb[32];
+	disk_rate_text(s->kbps, rate, sizeof(rate));
+	snprintf(kb, sizeof(kb), "%.0f", s->kbps);
+	const char *values[] = { "rate", rate, "kbps", kb, NULL };
+	return format_text(widget_conf(w, "format", ""), values);
+}
+
+static int disk_measure(struct widget *w, struct render_ctx *ctx) {
+	char *text = disk_text(w);
+	int width = text_item_measure(ctx, text, !text_icons(w, text));
+	free(text);
+	return width;
+}
+
+static void disk_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct disk_state *s = ((struct poll_data *)w->data)->state;
+	double x = render_item_start(ctx, b);
+	char *text = disk_text(w);
+	uint32_t fg = widget_fg(ctx->panel, "disk");
+	if (!text_icons(w, text)) {
+		double size = glyph_size(ctx);
+		// the lamp uses the accent color while the disks are busy
+		uint32_t on = tw_theme_color(ctx->panel->theme, "disk.active_fg",
+			tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff));
+		ti_disk(ctx->panel, ctx->cairo, x, b.y + (b.height - size) / 2, size, s->busy,
+			s->busy ? on : fg);
+		x += size + 4;
+	}
+	if (text && *text) {
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y,
+			b.width - (x - b.x) - item_padding(ctx), b.height, fg, PD_LEFT);
+	}
+	free(text);
+	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+}
+
+static char *disk_tooltip(struct widget *w, struct hotspot *hs) {
+	struct disk_state *s = ((struct poll_data *)w->data)->state;
+	char rate[32];
+	disk_rate_text(s->kbps, rate, sizeof(rate));
+	if (s->count == 0) {
+		return format_str("No disk is being watched");
+	}
+	char names[256] = "";
+	for (int i = 0; i < s->count; i++) {
+		size_t len = strlen(names);
+		snprintf(names + len, sizeof(names) - len, "%s%s", len ? ", " : "", s->devices[i].name);
+	}
+	return format_str("Disk activity: %s (%s)", rate, names);
+}
+
+const struct widget_impl widget_disk = {
+	.type = "disk",
+	.init = disk_init,
+	.destroy = poll_destroy,
+	.measure = disk_measure,
+	.render = disk_render,
+	.tooltip = disk_tooltip,
+	.set_active = poll_set_active,
+};
+
 /* ================= battery ================= */
 
 struct battery_state {

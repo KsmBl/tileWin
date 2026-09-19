@@ -56,6 +56,8 @@ void pd_glyph_tile(cairo_t *cr, double x, double y, double size, uint32_t color)
 void pd_glyph_overlap(cairo_t *cr, double x, double y, double size, uint32_t color);
 void pd_glyph_power(cairo_t *cr, double x, double y, double size, uint32_t color);
 void pd_glyph_brightness(cairo_t *cr, double x, double y, double size, uint32_t color);
+void pd_glyph_disk(cairo_t *cr, double x, double y, double size, bool active,
+	uint32_t color);
 void pd_glyph_generic_app(cairo_t *cr, double x, double y, double size);
 
 #endif

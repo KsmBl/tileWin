@@ -77,3 +77,12 @@ void ti_brightness(struct panel *panel, cairo_t *cr, double x, double y, double 
 		pd_glyph_brightness(cr, x, y, size, color);
 	}
 }
+
+void ti_disk(struct panel *panel, cairo_t *cr, double x, double y, double size,
+		bool active, uint32_t color) {
+	const char *name = active ? "tray-disk-active" : "tray-disk";
+	if (!draw_theme_icon(panel, cr, name, x, y, size, color) &&
+			!draw_theme_icon(panel, cr, "tray-disk", x, y, size, color)) {
+		pd_glyph_disk(cr, x, y, size, active, color);
+	}
+}

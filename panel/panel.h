@@ -294,6 +294,7 @@ extern const struct widget_impl widget_battery;
 extern const struct widget_impl widget_network;
 extern const struct widget_impl widget_cpu;
 extern const struct widget_impl widget_memory;
+extern const struct widget_impl widget_disk;
 extern const struct widget_impl widget_brightness;
 extern const struct widget_impl widget_keyboard;
 extern const struct widget_impl widget_modeswitch;
@@ -559,6 +560,8 @@ void ti_battery(struct panel *panel, cairo_t *cr, double x, double y, double siz
 	int percent, bool charging, uint32_t color);
 void ti_brightness(struct panel *panel, cairo_t *cr, double x, double y, double size,
 	uint32_t color);
+void ti_disk(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	bool active, uint32_t color);
 /* Forgets loaded icons, e.g. after a theme switch. */
 void apps_icon_cache_clear(void);
 const char *apps_display_name(const char *app_id);

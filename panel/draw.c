@@ -425,6 +425,29 @@ void pd_glyph_brightness(cairo_t *cr, double x, double y, double s, uint32_t col
 	cairo_restore(cr);
 }
 
+/* A drive with a lamp that lights up while it is busy. */
+void pd_glyph_disk(cairo_t *cr, double x, double y, double s, bool active, uint32_t color) {
+	cairo_new_path(cr);
+	cairo_save(cr);
+	cairo_set_source_u32(cr, color);
+	cairo_set_line_width(cr, s * 0.08);
+	pd_rounded(cr, x + s * 0.12, y + s * 0.26, s * 0.76, s * 0.48, s * 0.08);
+	cairo_stroke(cr);
+	// the platter
+	cairo_new_path(cr);
+	cairo_arc(cr, x + s * 0.40, y + s * 0.50, s * 0.13, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	// the lamp
+	cairo_new_path(cr);
+	cairo_arc(cr, x + s * 0.72, y + s * 0.50, s * 0.07, 0, 2 * M_PI);
+	if (active) {
+		cairo_fill(cr);
+	} else {
+		cairo_stroke(cr);
+	}
+	cairo_restore(cr);
+}
+
 void pd_glyph_generic_app(cairo_t *cr, double x, double y, double size) {
 	cairo_new_path(cr);
 	double s = size / 16.0;
