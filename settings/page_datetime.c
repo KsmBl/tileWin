@@ -1,5 +1,10 @@
 #include <stdio.h>
 #include <string.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include <time.h>
 #include "settings.h"
 
@@ -20,6 +25,7 @@ struct datetime_page {
 	GtkWidget *now, *ntp_row, *ntp_switch, *zone_dd, *zone_row;
 	GtkWidget *manual, *calendar, *hour, *minute, *second, *apply, *status;
 	GtkWidget *format_dd, *format_entry, *code_popover, *code_list;
+	GtkWidget *ntp_servers, *ntp_mode_dd, *ntp_fetch;
 	GtkStringList *zones;
 	guint timer;
 	char *zone;
@@ -115,6 +121,199 @@ static void on_format_text(GtkEditable *editable, gpointer data) {
 	format_entry_changed(p);
 }
 
+/* ---------- asking time servers what time it is ---------- */
+
+/*
+ * A plain SNTP request to each server at once (RFC 4330): a 48 byte packet
+ * goes out, the reply carries the time it was sent. How the answers are used
+ * is up to the mode: the first server that is set up, the one that answers
+ * quickest, or the middle of all of them.
+ */
+
+#define NTP_PORT "123"
+#define NTP_TIMEOUT_MS 2500
+#define NTP_EPOCH_OFFSET 2208988800ULL // seconds between 1900 and 1970
+#define NTP_MAX_SERVERS 8
+
+static const char *const ntp_mode_values[] = { "first", "fastest", "average" };
+static const char *const ntp_mode_labels[] = {
+	"The first one that answers, in order",
+	"The one that answers quickest",
+	"The middle of all the answers",
+};
+static const char *const ntp_mode_labels_null[] = {
+	"The first one that answers, in order",
+	"The one that answers quickest",
+	"The middle of all the answers",
+	NULL,
+};
+
+struct ntp_answer {
+	char server[128];
+	double unix_time;   // what the server said, in seconds
+	double latency_ms;
+	bool answered;
+};
+
+static double timespec_seconds(const struct timespec *t) {
+	return t->tv_sec + t->tv_nsec / 1e9;
+}
+
+/* Sends the request and remembers when, or reports that it could not. */
+static int ntp_send(const char *server, struct timespec *sent) {
+	struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_DGRAM }, *found = NULL;
+	if (getaddrinfo(server, NTP_PORT, &hints, &found) != 0 || !found) {
+		return -1;
+	}
+	int fd = socket(found->ai_family, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+	if (fd < 0) {
+		freeaddrinfo(found);
+		return -1;
+	}
+	unsigned char packet[48] = { 0 };
+	packet[0] = 0x1b; // no leap warning, version 3, client
+	clock_gettime(CLOCK_REALTIME, sent);
+	ssize_t n = sendto(fd, packet, sizeof(packet), 0, found->ai_addr, found->ai_addrlen);
+	freeaddrinfo(found);
+	if (n != (ssize_t)sizeof(packet)) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static bool ntp_receive(int fd, const struct timespec *sent, struct ntp_answer *answer) {
+	unsigned char packet[48];
+	if (recv(fd, packet, sizeof(packet), 0) != (ssize_t)sizeof(packet)) {
+		return false;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	// the transmit timestamp sits at byte 40: seconds then a fraction
+	unsigned long long seconds = ((unsigned long long)packet[40] << 24) |
+		((unsigned long long)packet[41] << 16) | ((unsigned long long)packet[42] << 8) |
+		packet[43];
+	unsigned long long fraction = ((unsigned long long)packet[44] << 24) |
+		((unsigned long long)packet[45] << 16) | ((unsigned long long)packet[46] << 8) |
+		packet[47];
+	if (seconds < NTP_EPOCH_OFFSET) {
+		return false;
+	}
+	answer->latency_ms = (timespec_seconds(&now) - timespec_seconds(sent)) * 1000;
+	// the reply is that old by the time it arrives, so add half the round trip
+	answer->unix_time = (double)(seconds - NTP_EPOCH_OFFSET) + fraction / 4294967296.0 +
+		answer->latency_ms / 2000.0;
+	answer->answered = true;
+	return true;
+}
+
+/* Asks every server at once and waits for as many answers as come back. */
+static int ntp_ask(char **servers, int count, struct ntp_answer *answers) {
+	int fds[NTP_MAX_SERVERS];
+	struct timespec sent[NTP_MAX_SERVERS];
+	int open_count = 0;
+	for (int i = 0; i < count; i++) {
+		snprintf(answers[i].server, sizeof(answers[i].server), "%s", servers[i]);
+		answers[i].answered = false;
+		fds[i] = ntp_send(servers[i], &sent[i]);
+		open_count += fds[i] >= 0;
+	}
+	struct timespec started;
+	clock_gettime(CLOCK_MONOTONIC, &started);
+	int answered = 0;
+	while (answered < open_count) {
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		double waited = (timespec_seconds(&now) - timespec_seconds(&started)) * 1000;
+		if (waited >= NTP_TIMEOUT_MS) {
+			break;
+		}
+		fd_set set;
+		FD_ZERO(&set);
+		int highest = -1;
+		for (int i = 0; i < count; i++) {
+			if (fds[i] >= 0 && !answers[i].answered) {
+				FD_SET(fds[i], &set);
+				highest = fds[i] > highest ? fds[i] : highest;
+			}
+		}
+		if (highest < 0) {
+			break;
+		}
+		struct timeval left = {
+			.tv_sec = (time_t)((NTP_TIMEOUT_MS - waited) / 1000),
+			.tv_usec = (suseconds_t)(((long)(NTP_TIMEOUT_MS - waited) % 1000) * 1000),
+		};
+		if (select(highest + 1, &set, NULL, NULL, &left) <= 0) {
+			break;
+		}
+		for (int i = 0; i < count; i++) {
+			if (fds[i] >= 0 && !answers[i].answered && FD_ISSET(fds[i], &set) &&
+					ntp_receive(fds[i], &sent[i], &answers[i])) {
+				answered++;
+			}
+		}
+	}
+	for (int i = 0; i < count; i++) {
+		if (fds[i] >= 0) {
+			close(fds[i]);
+		}
+	}
+	return answered;
+}
+
+static int compare_times(const void *a, const void *b) {
+	double x = *(const double *)a, y = *(const double *)b;
+	return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/* Boils the answers down to the one time to set, following the mode. */
+static bool ntp_pick(struct ntp_answer *answers, int count, const char *mode,
+		double *result, char *chosen, size_t chosen_size) {
+	if (strcmp(mode, "fastest") == 0) {
+		int best = -1;
+		for (int i = 0; i < count; i++) {
+			if (answers[i].answered &&
+					(best < 0 || answers[i].latency_ms < answers[best].latency_ms)) {
+				best = i;
+			}
+		}
+		if (best < 0) {
+			return false;
+		}
+		*result = answers[best].unix_time;
+		snprintf(chosen, chosen_size, "%s, %.0f ms", answers[best].server,
+			answers[best].latency_ms);
+		return true;
+	}
+	if (strcmp(mode, "average") == 0) {
+		double times[NTP_MAX_SERVERS];
+		int n = 0;
+		for (int i = 0; i < count; i++) {
+			if (answers[i].answered) {
+				times[n++] = answers[i].unix_time;
+			}
+		}
+		if (n == 0) {
+			return false;
+		}
+		// the middle one, so a single wrong clock cannot drag the result
+		qsort(times, n, sizeof(times[0]), compare_times);
+		*result = n % 2 ? times[n / 2] : (times[n / 2 - 1] + times[n / 2]) / 2;
+		snprintf(chosen, chosen_size, "the middle of %d answers", n);
+		return true;
+	}
+	for (int i = 0; i < count; i++) {
+		if (answers[i].answered) {
+			*result = answers[i].unix_time;
+			snprintf(chosen, chosen_size, "%s, %.0f ms", answers[i].server,
+				answers[i].latency_ms);
+			return true;
+		}
+	}
+	return false;
+}
+
 /* ---------- the system clock ---------- */
 
 static void call_done(GObject *source, GAsyncResult *result, gpointer data) {
@@ -139,6 +338,102 @@ static void call(struct datetime_page *p, const char *method, GVariant *params) 
 	set_status(p, NULL);
 	g_dbus_proxy_call(p->proxy, method, params, G_DBUS_CALL_FLAGS_NONE, 120000, NULL,
 		call_done, p);
+}
+
+
+/* ---------- the "get the time now" button ---------- */
+
+#define NTP_DEFAULT_SERVERS "0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com"
+
+struct ntp_job {
+	char *servers;
+	char *mode;
+	double result;
+	char chosen[160];
+	int answered, asked;
+	bool ok;
+};
+
+static void ntp_job_free(gpointer data) {
+	struct ntp_job *job = data;
+	g_free(job->servers);
+	g_free(job->mode);
+	g_free(job);
+}
+
+/* Runs off the main thread, so the window keeps drawing while it waits. */
+static void ntp_job_run(GTask *task, gpointer source, gpointer data, GCancellable *cancel) {
+	struct ntp_job *job = data;
+	char **list = g_strsplit_set(job->servers, " \t,", -1);
+	char *servers[NTP_MAX_SERVERS];
+	int count = 0;
+	for (int i = 0; list[i] && count < NTP_MAX_SERVERS; i++) {
+		if (*list[i]) {
+			servers[count++] = list[i];
+		}
+	}
+	job->asked = count;
+	struct ntp_answer answers[NTP_MAX_SERVERS];
+	job->answered = count ? ntp_ask(servers, count, answers) : 0;
+	job->ok = job->answered > 0 && ntp_pick(answers, count, job->mode, &job->result,
+		job->chosen, sizeof(job->chosen));
+	g_strfreev(list);
+	g_task_return_boolean(task, TRUE);
+}
+
+static void ntp_job_done(GObject *source, GAsyncResult *result, gpointer data) {
+	struct datetime_page *p = data;
+	struct ntp_job *job = g_task_get_task_data(G_TASK(result));
+	gtk_widget_set_sensitive(p->ntp_fetch, TRUE);
+	if (!job->asked) {
+		set_status(p, "Write at least one time server first.");
+		return;
+	}
+	if (!job->ok) {
+		set_status(p, "No time server answered.");
+		return;
+	}
+	double difference = job->result - (double)time(NULL);
+	call(p, "SetTime", g_variant_new("(xbb)", (gint64)(job->result * 1000000), FALSE, FALSE));
+	settings_status(p->s, "Time from %s, %d of %d answered, this clock was %+.1f s off",
+		job->chosen, job->answered, job->asked, difference);
+}
+
+static void on_ntp_fetch(GtkButton *button, gpointer data) {
+	struct datetime_page *p = data;
+	struct ntp_job *job = g_new0(struct ntp_job, 1);
+	job->servers = g_strdup(gtk_editable_get_text(GTK_EDITABLE(p->ntp_servers)));
+	guint mode = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->ntp_mode_dd));
+	job->mode = g_strdup(mode < G_N_ELEMENTS(ntp_mode_values) ? ntp_mode_values[mode] : "first");
+	gtk_widget_set_sensitive(p->ntp_fetch, FALSE);
+	set_status(p, "Asking the time servers...");
+	GTask *task = g_task_new(NULL, NULL, ntp_job_done, p);
+	g_task_set_task_data(task, job, ntp_job_free);
+	g_task_run_in_thread(task, ntp_job_run);
+	g_object_unref(task);
+}
+
+static void ntp_settings_write(struct datetime_page *p) {
+	if (p->updating) {
+		return;
+	}
+	struct confdoc *d = p->s->taskbar;
+	const char *servers = gtk_editable_get_text(GTK_EDITABLE(p->ntp_servers));
+	char *quoted = conf_quote(servers);
+	confdoc_set(d, d->root, "time_servers", NULL, *servers ? quoted : NULL);
+	g_free(quoted);
+	guint mode = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->ntp_mode_dd));
+	confdoc_set(d, d->root, "time_server_mode", NULL,
+		mode < G_N_ELEMENTS(ntp_mode_values) ? ntp_mode_values[mode] : "first");
+	settings_taskbar_changed(p->s);
+}
+
+static void on_ntp_servers_changed(GtkEditable *editable, gpointer data) {
+	ntp_settings_write(data);
+}
+
+static void on_ntp_mode_changed(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	ntp_settings_write(data);
 }
 
 static bool proxy_bool(struct datetime_page *p, const char *name) {
@@ -182,6 +477,19 @@ static char *system_zone(void) {
 
 static void show_state(struct datetime_page *p) {
 	p->updating = true;
+	if (p->ntp_servers) {
+		struct confdoc *d = p->s->taskbar;
+		const char *list = cstmt_arg(confdoc_child(d->root, "time_servers", NULL), 0);
+		gtk_editable_set_text(GTK_EDITABLE(p->ntp_servers), list ? list : NTP_DEFAULT_SERVERS);
+		const char *mode = cstmt_arg(confdoc_child(d->root, "time_server_mode", NULL), 0);
+		guint selected = 0;
+		for (guint i = 0; mode && i < G_N_ELEMENTS(ntp_mode_values); i++) {
+			if (strcmp(mode, ntp_mode_values[i]) == 0) {
+				selected = i;
+			}
+		}
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->ntp_mode_dd), selected);
+	}
 	bool ntp = proxy_bool(p, "NTP");
 	bool can_ntp = proxy_bool(p, "CanNTP");
 	gtk_switch_set_active(GTK_SWITCH(p->ntp_switch), ntp);
@@ -502,6 +810,22 @@ GtkWidget *datetime_page_new(struct settings *s) {
 	gtk_widget_set_margin_top(p->status, 12);
 	gtk_widget_set_visible(p->status, FALSE);
 	gtk_box_append(GTK_BOX(content), p->status);
+
+	GtkWidget *servers = ui_group(content, "Time from the internet",
+		"Ask these servers what time it is and set the clock to their answer.");
+	p->ntp_servers = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->ntp_servers), NTP_DEFAULT_SERVERS);
+	gtk_widget_set_size_request(p->ntp_servers, 300, -1);
+	g_signal_connect(p->ntp_servers, "changed", G_CALLBACK(on_ntp_servers_changed), p);
+	ui_row(servers, "Time servers", "Separated by spaces; all of them are asked at once",
+		p->ntp_servers);
+	p->ntp_mode_dd = gtk_drop_down_new_from_strings(ntp_mode_labels_null);
+	g_signal_connect(p->ntp_mode_dd, "notify::selected", G_CALLBACK(on_ntp_mode_changed), p);
+	ui_row(servers, "Which answer to use", NULL, p->ntp_mode_dd);
+	p->ntp_fetch = gtk_button_new_with_label("Get the time now");
+	g_signal_connect(p->ntp_fetch, "clicked", G_CALLBACK(on_ntp_fetch), p);
+	ui_row(servers, NULL, "Sets the clock once; the switch above keeps it in step all the time",
+		p->ntp_fetch);
 
 	GtkWidget *set = ui_group(content, "Set the date and time yourself",
 		"Only when the time is not set automatically.");
