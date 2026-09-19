@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <netdb.h>
@@ -25,7 +26,7 @@ struct datetime_page {
 	GtkWidget *now, *ntp_row, *ntp_switch, *zone_dd, *zone_row;
 	GtkWidget *manual, *calendar, *hour, *minute, *second, *apply, *status;
 	GtkWidget *format_dd, *format_entry, *code_popover, *code_list;
-	GtkWidget *ntp_servers, *ntp_mode_dd, *ntp_fetch;
+	GtkWidget *ntp_servers, *ntp_mode_dd, *ntp_fetch, *zone_map;
 	GtkStringList *zones;
 	guint timer;
 	char *zone;
@@ -341,6 +342,206 @@ static void call(struct datetime_page *p, const char *method, GVariant *params) 
 }
 
 
+
+/* ---------- picking the time zone off a map ---------- */
+
+/*
+ * tzdata ships the position of every zone in zone.tab, so the map is drawn
+ * from those: a dot per zone, colored by the part of the world it belongs to,
+ * on an equirectangular grid. Clicking takes the nearest zone. There is no
+ * coastline behind it; the dots follow where people live, which is enough to
+ * find your corner of the world.
+ */
+
+#define TZ_MAP_WIDTH 640
+#define TZ_MAP_HEIGHT 320
+
+struct tz_place {
+	char *zone;
+	double latitude, longitude;
+};
+
+/* "+5230+01322" or "+353916+1394441" (ISO 6709). */
+static bool parse_coordinates(const char *text, double *latitude, double *longitude) {
+	if (!text || (text[0] != '+' && text[0] != '-')) {
+		return false;
+	}
+	const char *split = strpbrk(text + 1, "+-");
+	if (!split) {
+		return false;
+	}
+	size_t lat_digits = split - text - 1;
+	size_t lon_digits = strlen(split) - 1;
+	if ((lat_digits != 4 && lat_digits != 6) || (lon_digits != 5 && lon_digits != 7)) {
+		return false;
+	}
+	char buffer[16];
+	snprintf(buffer, sizeof(buffer), "%.*s", (int)lat_digits, text + 1);
+	double degrees = atof(buffer) / (lat_digits == 4 ? 100 : 10000);
+	double minutes = lat_digits == 4 ? fmod(atof(buffer), 100) :
+		fmod(atof(buffer) / 100, 100);
+	double seconds = lat_digits == 6 ? fmod(atof(buffer), 100) : 0;
+	*latitude = ((int)degrees + minutes / 60 + seconds / 3600) * (text[0] == '-' ? -1 : 1);
+	snprintf(buffer, sizeof(buffer), "%.*s", (int)lon_digits, split + 1);
+	degrees = atof(buffer) / (lon_digits == 5 ? 100 : 10000);
+	minutes = lon_digits == 5 ? fmod(atof(buffer), 100) : fmod(atof(buffer) / 100, 100);
+	seconds = lon_digits == 7 ? fmod(atof(buffer), 100) : 0;
+	*longitude = ((int)degrees + minutes / 60 + seconds / 3600) * (split[0] == '-' ? -1 : 1);
+	return true;
+}
+
+static GPtrArray *tz_places(void) {
+	static GPtrArray *places = NULL;
+	if (places) {
+		return places;
+	}
+	places = g_ptr_array_new();
+	char *text = NULL;
+	if (!g_file_get_contents("/usr/share/zoneinfo/zone.tab", &text, NULL, NULL)) {
+		return places;
+	}
+	char **lines = g_strsplit(text, "\n", -1);
+	for (int i = 0; lines[i]; i++) {
+		if (lines[i][0] == '#' || !lines[i][0]) {
+			continue;
+		}
+		char **fields = g_strsplit(lines[i], "\t", -1);
+		double latitude, longitude;
+		if (fields[0] && fields[1] && fields[2] &&
+				parse_coordinates(fields[1], &latitude, &longitude)) {
+			struct tz_place *place = g_new0(struct tz_place, 1);
+			place->zone = g_strdup(fields[2]);
+			place->latitude = latitude;
+			place->longitude = longitude;
+			g_ptr_array_add(places, place);
+		}
+		g_strfreev(fields);
+	}
+	g_strfreev(lines);
+	g_free(text);
+	return places;
+}
+
+/* A color per part of the world, so the dots read as continents. */
+static void tz_region_color(const char *zone, double *r, double *g, double *b) {
+	static const struct {
+		const char *prefix;
+		double r, g, b;
+	} regions[] = {
+		{ "Europe/", 0.36, 0.66, 0.94 },
+		{ "America/", 0.42, 0.80, 0.52 },
+		{ "Asia/", 0.96, 0.72, 0.34 },
+		{ "Africa/", 0.93, 0.52, 0.42 },
+		{ "Australia/", 0.72, 0.56, 0.92 },
+		{ "Pacific/", 0.40, 0.82, 0.82 },
+		{ "Atlantic/", 0.58, 0.70, 0.88 },
+		{ "Indian/", 0.88, 0.62, 0.76 },
+		{ "Antarctica/", 0.78, 0.82, 0.86 },
+	};
+	for (size_t i = 0; i < G_N_ELEMENTS(regions); i++) {
+		if (g_str_has_prefix(zone, regions[i].prefix)) {
+			*r = regions[i].r;
+			*g = regions[i].g;
+			*b = regions[i].b;
+			return;
+		}
+	}
+	*r = *g = *b = 0.7;
+}
+
+static void tz_to_pixels(double latitude, double longitude, int width, int height,
+		double *x, double *y) {
+	*x = (longitude + 180) / 360.0 * width;
+	*y = (90 - latitude) / 180.0 * height;
+}
+
+static void tz_map_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
+		gpointer data) {
+	struct datetime_page *p = data;
+	cairo_set_source_rgb(cr, 0.12, 0.15, 0.20);
+	cairo_paint(cr);
+	// the grid: every 30 degrees across and 30 down, with the equator picked out
+	cairo_set_line_width(cr, 1);
+	for (int longitude = -180; longitude <= 180; longitude += 30) {
+		double x, y;
+		tz_to_pixels(0, longitude, width, height, &x, &y);
+		cairo_set_source_rgba(cr, 1, 1, 1, longitude == 0 ? 0.22 : 0.09);
+		cairo_move_to(cr, x, 0);
+		cairo_line_to(cr, x, height);
+		cairo_stroke(cr);
+	}
+	for (int latitude = -60; latitude <= 60; latitude += 30) {
+		double x, y;
+		tz_to_pixels(latitude, 0, width, height, &x, &y);
+		cairo_set_source_rgba(cr, 1, 1, 1, latitude == 0 ? 0.22 : 0.09);
+		cairo_move_to(cr, 0, y);
+		cairo_line_to(cr, width, y);
+		cairo_stroke(cr);
+	}
+	GPtrArray *places = tz_places();
+	const char *selected = p->zone;
+	double selected_x = -1, selected_y = -1;
+	for (guint i = 0; i < places->len; i++) {
+		struct tz_place *place = places->pdata[i];
+		double x, y, r, g, b;
+		tz_to_pixels(place->latitude, place->longitude, width, height, &x, &y);
+		tz_region_color(place->zone, &r, &g, &b);
+		bool is_selected = selected && strcmp(place->zone, selected) == 0;
+		if (is_selected) {
+			selected_x = x;
+			selected_y = y;
+			continue; // drawn last, on top
+		}
+		cairo_set_source_rgba(cr, r, g, b, 0.75);
+		cairo_arc(cr, x, y, 2.0, 0, 2 * G_PI);
+		cairo_fill(cr);
+	}
+	if (selected_x >= 0) {
+		cairo_set_source_rgb(cr, 1, 1, 1);
+		cairo_arc(cr, selected_x, selected_y, 5.5, 0, 2 * G_PI);
+		cairo_fill(cr);
+		cairo_set_source_rgb(cr, 0.10, 0.45, 0.85);
+		cairo_arc(cr, selected_x, selected_y, 3.0, 0, 2 * G_PI);
+		cairo_fill(cr);
+	}
+}
+
+/* The zone whose place is nearest to where the map was clicked. */
+static const char *tz_nearest(double x, double y, int width, int height) {
+	GPtrArray *places = tz_places();
+	const char *best = NULL;
+	double best_distance = 0;
+	for (guint i = 0; i < places->len; i++) {
+		struct tz_place *place = places->pdata[i];
+		double px, py;
+		tz_to_pixels(place->latitude, place->longitude, width, height, &px, &py);
+		double distance = (px - x) * (px - x) + (py - y) * (py - y);
+		if (!best || distance < best_distance) {
+			best = place->zone;
+			best_distance = distance;
+		}
+	}
+	return best;
+}
+
+static void on_tz_map_pressed(GtkGestureClick *gesture, int presses, double x, double y,
+		gpointer data) {
+	struct datetime_page *p = data;
+	int width = gtk_widget_get_width(p->zone_map);
+	int height = gtk_widget_get_height(p->zone_map);
+	const char *zone = width > 0 && height > 0 ? tz_nearest(x, y, width, height) : NULL;
+	if (!zone) {
+		return;
+	}
+	for (guint i = 0; i < g_list_model_get_n_items(G_LIST_MODEL(p->zones)); i++) {
+		const char *name = gtk_string_list_get_string(p->zones, i);
+		if (name && strcmp(name, zone) == 0) {
+			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->zone_dd), i);
+			return;
+		}
+	}
+}
+
 /* ---------- the "get the time now" button ---------- */
 
 #define NTP_DEFAULT_SERVERS "0.pool.ntp.org 1.pool.ntp.org time.cloudflare.com"
@@ -510,6 +711,9 @@ static void show_state(struct datetime_page *p) {
 			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->zone_dd), i);
 			break;
 		}
+	}
+	if (p->zone_map) {
+		gtk_widget_queue_draw(p->zone_map);
 	}
 	p->updating = false;
 	show_clock(p);
@@ -801,7 +1005,19 @@ GtkWidget *datetime_page_new(struct settings *s) {
 	gtk_drop_down_set_expression(GTK_DROP_DOWN(p->zone_dd),
 		gtk_property_expression_new(GTK_TYPE_STRING_OBJECT, NULL, "string"));
 	g_signal_connect(p->zone_dd, "notify::selected", G_CALLBACK(on_zone_selected), p);
-	p->zone_row = ui_row(group, "Time zone", "Type to search", p->zone_dd);
+	p->zone_row = ui_row(group, "Time zone", "Type to search, or click the map", p->zone_dd);
+	p->zone_map = gtk_drawing_area_new();
+	gtk_widget_set_size_request(p->zone_map, TZ_MAP_WIDTH, TZ_MAP_HEIGHT);
+	gtk_widget_set_halign(p->zone_map, GTK_ALIGN_CENTER);
+	gtk_widget_set_margin_top(p->zone_map, 4);
+	gtk_widget_set_margin_bottom(p->zone_map, 4);
+	gtk_widget_set_tooltip_text(p->zone_map,
+		"Every zone tzdata knows, where it is on the world; click the nearest one");
+	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(p->zone_map), tz_map_draw, p, NULL);
+	GtkGesture *map_click = gtk_gesture_click_new();
+	g_signal_connect(map_click, "pressed", G_CALLBACK(on_tz_map_pressed), p);
+	gtk_widget_add_controller(p->zone_map, GTK_EVENT_CONTROLLER(map_click));
+	gtk_box_prepend(GTK_BOX(ui_row_box(ui_row(group, NULL, NULL, NULL))), p->zone_map);
 
 	p->status = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(p->status), 0);
