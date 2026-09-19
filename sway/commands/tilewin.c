@@ -527,12 +527,13 @@ struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
 		return error;
 	}
 	char *end = NULL;
-	long count = strtol(argv[0], &end, 10);
-	if (!end || *end || count < 0 || count > 20) {
+	long ms = strtol(argv[0], &end, 10);
+	if (!end || *end || ms < 0 || ms > 2000) {
 		return cmd_results_new(CMD_INVALID,
-			"pointer_trail needs a number of pointers from 0 to 20 (0 turns it off)");
+			"pointer_trail needs a lifetime in milliseconds from 0 to 2000 "
+			"(0 turns it off)");
 	}
-	config->tw_pointer_trail = (int)count;
+	config->tw_pointer_trail = (int)ms;
 	tw_pointer_trail_changed();
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }

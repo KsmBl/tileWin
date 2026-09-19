@@ -3,8 +3,10 @@
  * like "Show location of pointer when I press the CTRL key" on Windows. Themes
  * turn it on with "pointer { locate yes; locate_color <color> }".
  *
- * "pointer_trail <count>" leaves that many copies of the pointer behind it
- * while it moves, like the mouse trails of Windows.
+ * "pointer_trail <milliseconds>" leaves copies of the pointer behind it while
+ * it moves, like the mouse trails of Windows. Each copy has its own countdown
+ * and fades away when it runs out, so a copy lives just as long whether the
+ * pointer raced past or crawled.
  */
 #include <math.h>
 #include <stdlib.h>
@@ -38,12 +40,15 @@
 #define SIZE (2 * (MAX_RADIUS + 6))
 #define LOCATE_MS (RING_MS + (RINGS - 1) * STAGGER_MS)
 
-#define TRAIL_MAX 20
-#define TRAIL_GAP 7.0     // logical pixels between two copies
-#define TRAIL_HOLD_MS 130 // the trail is gone that long after the pointer stops
+#define TRAIL_MAX 64     // copies that can be alive at once
+#define TRAIL_GAP 6.0    // logical pixels the pointer moves between two copies
+#define TRAIL_MIN_MS 12  // and the shortest time between two of them
 
-struct trail_point {
+struct trail_copy {
 	double x, y;
+	struct timespec born;
+	struct wlr_scene_buffer *node;
+	bool alive;
 };
 
 static struct {
@@ -59,11 +64,10 @@ static struct {
 	struct wlr_scene_buffer *buffer;
 	struct wl_event_source *timer;
 
-	// the copies of the pointer that follow it
-	struct trail_point trail[TRAIL_MAX];
-	int trail_length;
+	// the copies of the pointer that follow it, oldest first in the ring
+	struct trail_copy trail[TRAIL_MAX];
+	int trail_head, trail_alive; // next slot to write, copies still alive
 	struct wlr_scene_tree *trail_tree;
-	struct wlr_scene_buffer *trail_nodes[TRAIL_MAX];
 	struct wlr_buffer *trail_image; // the pointer image the copies show
 	char trail_name[64];            // the cursor it was made from
 	double trail_scale;
@@ -221,19 +225,21 @@ void tw_pointer_cancel_tap(void) {
 
 /* ---------- the trail of pointers ---------- */
 
-static int trail_count(void) {
-	int count = config ? config->tw_pointer_trail : 0;
-	return count < 0 ? 0 : count > TRAIL_MAX ? TRAIL_MAX : count;
+/* How long one copy of the pointer lives, in milliseconds; 0 turns it off. */
+static int trail_lifetime(void) {
+	int ms = config ? config->tw_pointer_trail : 0;
+	return ms < 0 ? 0 : ms > 2000 ? 2000 : ms;
 }
 
 static void trail_clear(void) {
-	state.trail_length = 0;
+	state.trail_head = state.trail_alive = 0;
 	if (state.trail_tree) {
 		wlr_scene_node_destroy(&state.trail_tree->node);
 		state.trail_tree = NULL;
 	}
 	for (int i = 0; i < TRAIL_MAX; i++) {
-		state.trail_nodes[i] = NULL;
+		state.trail[i].node = NULL;
+		state.trail[i].alive = false;
 	}
 }
 
@@ -299,42 +305,49 @@ static bool trail_load_image(struct sway_cursor *cursor, double scale, bool *cha
 	return true;
 }
 
-static void trail_place(void) {
-	int count = trail_count();
+/*
+ * Ages every copy: what is past its lifetime goes away, the rest fades as its
+ * countdown runs out. Returns how many are left.
+ */
+static int trail_age(void) {
+	int lifetime = trail_lifetime();
 	double scale = state.trail_scale > 0 ? state.trail_scale : 1;
 	double w = state.image_width / scale, h = state.image_height / scale;
 	double hx = state.image_hotspot_x / scale, hy = state.image_hotspot_y / scale;
-	for (int i = 0; i < count; i++) {
-		struct wlr_scene_buffer *node = state.trail_nodes[i];
-		if (!node) {
+	int alive = 0;
+	for (int i = 0; i < TRAIL_MAX; i++) {
+		struct trail_copy *copy = &state.trail[i];
+		if (!copy->alive || !copy->node) {
 			continue;
 		}
-		bool shown = i < state.trail_length;
-		wlr_scene_node_set_enabled(&node->node, shown);
-		if (!shown) {
+		double left = lifetime > 0 ? 1 - elapsed_ms(&copy->born) / lifetime : 0;
+		if (left <= 0) {
+			copy->alive = false;
+			wlr_scene_node_set_enabled(&copy->node->node, false);
 			continue;
 		}
-		// the copies further behind are fainter, so the trail shows the way
-		float alpha = (float)(0.8 - 0.55 * i / (double)count);
-		wlr_scene_buffer_set_opacity(node, alpha < 0.1f ? 0.1f : alpha);
-		wlr_scene_buffer_set_dest_size(node, (int)round(w), (int)round(h));
-		wlr_scene_node_set_position(&node->node, (int)round(state.trail[i].x - hx),
-			(int)round(state.trail[i].y - hy));
+		alive++;
+		wlr_scene_node_set_enabled(&copy->node->node, true);
+		wlr_scene_buffer_set_opacity(copy->node, (float)(0.85 * left));
+		wlr_scene_buffer_set_dest_size(copy->node, (int)round(w), (int)round(h));
+		wlr_scene_node_set_position(&copy->node->node, (int)round(copy->x - hx),
+			(int)round(copy->y - hy));
 	}
+	state.trail_alive = alive;
+	return alive;
 }
 
-static int trail_expired(void *data) {
-	state.trail_timer = NULL;
-	state.trail_length = 0;
-	trail_place();
+static int trail_tick(void *data) {
+	if (trail_age() > 0) {
+		wl_event_source_timer_update(state.trail_timer, FRAME_MS);
+	}
 	schedule_frames();
 	return 0;
 }
 
 /* Called for every movement of the pointer. */
 void tw_pointer_moved(struct sway_cursor *cursor) {
-	int count = trail_count();
-	if (count == 0 || !cursor || !cursor->cursor || cursor->hidden || !root ||
+	if (trail_lifetime() == 0 || !cursor || !cursor->cursor || cursor->hidden || !root ||
 			server.session_lock.lock) {
 		if (state.trail_tree) {
 			trail_clear();
@@ -355,47 +368,48 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 			return;
 		}
 	}
-	for (int i = TRAIL_MAX - 1; i >= 0; i--) {
-		if (i >= count) {
-			if (state.trail_nodes[i]) {
-				wlr_scene_node_destroy(&state.trail_nodes[i]->node);
-				state.trail_nodes[i] = NULL;
+	if (image_changed) {
+		for (int i = 0; i < TRAIL_MAX; i++) {
+			if (state.trail[i].node) {
+				// setting the same buffer again would redraw every copy for nothing
+				wlr_scene_buffer_set_buffer(state.trail[i].node, state.trail_image);
 			}
-			continue;
 		}
-		// the newest copy has to be on top, so the nodes are made from the back
-		if (!state.trail_nodes[i]) {
-			state.trail_nodes[i] = wlr_scene_buffer_create(state.trail_tree, state.trail_image);
-			if (!state.trail_nodes[i]) {
+	}
+
+	// a new copy once the pointer has come far enough, and not too soon after
+	// the last one, so a fast pointer does not fill the ring in one sweep
+	int newest = (state.trail_head + TRAIL_MAX - 1) % TRAIL_MAX;
+	bool first = !state.trail[newest].alive;
+	double dx = first ? TRAIL_GAP : x - state.trail[newest].x;
+	double dy = first ? TRAIL_GAP : y - state.trail[newest].y;
+	bool far_enough = dx * dx + dy * dy >= TRAIL_GAP * TRAIL_GAP;
+	bool long_enough = first || elapsed_ms(&state.trail[newest].born) >= TRAIL_MIN_MS;
+	if (far_enough && long_enough) {
+		struct trail_copy *copy = &state.trail[state.trail_head];
+		if (!copy->node) {
+			copy->node = wlr_scene_buffer_create(state.trail_tree, state.trail_image);
+			if (!copy->node) {
 				trail_clear();
 				return;
 			}
-			wlr_scene_buffer_set_filter_mode(state.trail_nodes[i], WLR_SCALE_FILTER_BILINEAR);
-		} else if (image_changed) {
-			// setting the same buffer again would redraw every copy for nothing
-			wlr_scene_buffer_set_buffer(state.trail_nodes[i], state.trail_image);
+			wlr_scene_buffer_set_filter_mode(copy->node, WLR_SCALE_FILTER_BILINEAR);
 		}
+		copy->x = x;
+		copy->y = y;
+		copy->alive = true;
+		clock_gettime(CLOCK_MONOTONIC, &copy->born);
+		wlr_scene_node_raise_to_top(&copy->node->node); // the newest one in front
+		state.trail_head = (state.trail_head + 1) % TRAIL_MAX;
 	}
 
-	double dx = state.trail_length ? x - state.trail[0].x : TRAIL_GAP;
-	double dy = state.trail_length ? y - state.trail[0].y : TRAIL_GAP;
-	if (dx * dx + dy * dy >= TRAIL_GAP * TRAIL_GAP) {
-		for (int i = TRAIL_MAX - 1; i > 0; i--) {
-			state.trail[i] = state.trail[i - 1];
-		}
-		state.trail[0] = (struct trail_point){ x, y };
-		if (state.trail_length < count) {
-			state.trail_length++;
-		}
-	}
-	trail_place();
+	trail_age();
 	schedule_frames();
-
 	if (!state.trail_timer && server.wl_event_loop) {
-		state.trail_timer = wl_event_loop_add_timer(server.wl_event_loop, trail_expired, NULL);
+		state.trail_timer = wl_event_loop_add_timer(server.wl_event_loop, trail_tick, NULL);
 	}
 	if (state.trail_timer) {
-		wl_event_source_timer_update(state.trail_timer, TRAIL_HOLD_MS);
+		wl_event_source_timer_update(state.trail_timer, FRAME_MS);
 	}
 }
 

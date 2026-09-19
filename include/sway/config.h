@@ -552,7 +552,7 @@ struct sway_config {
 	uint32_t tw_group_modifier; // held: touching windows move together
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
-	int tw_pointer_trail; // copies of the pointer that follow it, 0: none
+	int tw_pointer_trail; // how long a copy of the pointer lives in ms, 0: no trail
 	int tw_double_click_time; // milliseconds between two clicks of a double-click
 
 	// Flags

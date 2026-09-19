@@ -439,7 +439,7 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	g_signal_connect(p->size_dd, "notify::selected", G_CALLBACK(on_cursor_changed), p);
 	ui_row(cursor, "Cursor size", "Apps started later use the new cursor", p->size_dd);
 
-	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 20, 1);
+	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1000, 25);
 	gtk_widget_set_size_request(p->trail, 260, -1);
 	gtk_scale_set_draw_value(GTK_SCALE(p->trail), TRUE);
 	gtk_scale_set_digits(GTK_SCALE(p->trail), 0);
@@ -447,8 +447,8 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	gtk_scale_add_mark(GTK_SCALE(p->trail), 0, GTK_POS_BOTTOM, NULL);
 	g_signal_connect(p->trail, "value-changed", G_CALLBACK(on_trail), p);
 	ui_row(cursor, "Pointer trail",
-		"How many copies of the pointer follow it while it moves; 0 turns the trail off",
-		p->trail);
+		"Milliseconds a copy of the pointer stays behind it before it fades away; "
+		"0 turns the trail off", p->trail);
 
 	s->mouse_page = p;
 	mouse_page_refresh(s);
