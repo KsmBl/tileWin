@@ -73,6 +73,15 @@ static struct {
 	double trail_scale;
 	int image_width, image_height, image_hotspot_x, image_hotspot_y;
 	struct wl_event_source *trail_timer;
+
+	// shaking the mouse makes the pointer grow
+	double shake_x, shake_y, shake_travel, shake_factor;
+	int shake_direction, shake_count, shake_applied, shake_next;
+	struct timespec shake_reversals[32];
+	struct timespec shake_ticked;
+	struct wl_event_source *shake_timer;
+	struct wlr_xcursor_manager *shake_managers[8];
+	int shake_sizes[8];
 } state;
 
 static double elapsed_ms(struct timespec *since) {
@@ -229,6 +238,162 @@ void tw_pointer_cancel_tap(void) {
 	state.held = 0;
 }
 
+/* ---------- shaking the mouse makes the pointer bigger ---------- */
+
+#define SHAKE_WINDOW_MS 600  // reversals are counted over this long
+#define SHAKE_MIN_TRAVEL 12  // pixels a swing has to cover to count as one
+#define SHAKE_REVERSALS 32
+#define SHAKE_STEP 8         // cursor sizes are rounded to this, so few are built
+#define SHAKE_SIZES 8        // cursor themes kept around at once
+
+static int shake_max_percent(void) {
+	int value = config ? config->tw_shake_max : 300;
+	return value < 100 ? 100 : value > 1000 ? 1000 : value;
+}
+
+static int shake_rate_percent(void) {
+	int value = config ? config->tw_shake_rate : 400;
+	return value < 10 ? 10 : value > 5000 ? 5000 : value;
+}
+
+static int shake_needed(void) {
+	int value = config ? config->tw_shake_shakes : 6;
+	return value < 2 ? 2 : value > 30 ? 30 : value;
+}
+
+static bool shake_enabled(void) {
+	return config && config->tw_shake && server.wl_event_loop && root;
+}
+
+/* A cursor theme at a bigger size than the one the seat normally uses. */
+static struct wlr_xcursor_manager *shake_manager(struct sway_cursor *cursor, int size) {
+	for (int i = 0; i < SHAKE_SIZES; i++) {
+		if (state.shake_sizes[i] == size && state.shake_managers[i]) {
+			return state.shake_managers[i];
+		}
+	}
+	int slot = state.shake_next % SHAKE_SIZES;
+	state.shake_next++;
+	if (state.shake_managers[slot]) {
+		wlr_xcursor_manager_destroy(state.shake_managers[slot]);
+	}
+	const char *name = cursor->xcursor_manager ? cursor->xcursor_manager->name : NULL;
+	state.shake_managers[slot] = wlr_xcursor_manager_create(name, size);
+	state.shake_sizes[slot] = size;
+	if (state.shake_managers[slot]) {
+		wlr_xcursor_manager_load(state.shake_managers[slot], 1);
+		for (int i = 0; root && i < root->outputs->length; i++) {
+			struct sway_output *output = root->outputs->items[i];
+			if (output->wlr_output) {
+				wlr_xcursor_manager_load(state.shake_managers[slot],
+					output->wlr_output->scale);
+			}
+		}
+	}
+	return state.shake_managers[slot];
+}
+
+/* Shows the pointer at the grown size, or back at its own size. */
+static void shake_apply(struct sway_cursor *cursor) {
+	if (!cursor->xcursor_manager || cursor->hidden) {
+		return;
+	}
+	int base = (int)cursor->xcursor_manager->size;
+	int want = (int)round(base * state.shake_factor);
+	want = want / SHAKE_STEP * SHAKE_STEP;
+	if (want <= base) {
+		if (state.shake_applied) {
+			state.shake_applied = 0;
+			wlr_cursor_set_xcursor(cursor->cursor, cursor->xcursor_manager,
+				cursor->image ? cursor->image : "default");
+		}
+		return;
+	}
+	if (state.shake_applied == want) {
+		return;
+	}
+	struct wlr_xcursor_manager *manager = shake_manager(cursor, want);
+	if (!manager) {
+		return;
+	}
+	state.shake_applied = want;
+	wlr_cursor_set_xcursor(cursor->cursor, manager,
+		cursor->image ? cursor->image : "default");
+}
+
+static int shake_tick(void *data) {
+	struct sway_seat *seat = input_manager_current_seat();
+	struct sway_cursor *cursor = seat ? seat->cursor : NULL;
+	double ms = elapsed_ms(&state.shake_ticked);
+	clock_gettime(CLOCK_MONOTONIC, &state.shake_ticked);
+	double step = shake_rate_percent() / 100.0 * ms / 1000.0;
+	double max = shake_max_percent() / 100.0;
+
+	// count the reversals that are still inside the window
+	int recent = 0;
+	for (int i = 0; i < state.shake_count; i++) {
+		if (elapsed_ms(&state.shake_reversals[i]) <= SHAKE_WINDOW_MS) {
+			recent++;
+		}
+	}
+	bool shaking = recent * 1000 / SHAKE_WINDOW_MS >= shake_needed();
+	state.shake_factor += shaking ? step : -step;
+	if (state.shake_factor > max) {
+		state.shake_factor = max;
+	}
+	if (state.shake_factor < 1) {
+		state.shake_factor = 1;
+	}
+	if (cursor) {
+		shake_apply(cursor);
+	}
+	if (state.shake_factor > 1 || shaking) {
+		wl_event_source_timer_update(state.shake_timer, FRAME_MS);
+	} else {
+		state.shake_count = 0;
+	}
+	return 0;
+}
+
+/* Every movement: a change of direction after a decent swing is one shake. */
+static void shake_motion(struct sway_cursor *cursor, double x, double y) {
+	if (!shake_enabled()) {
+		if (state.shake_applied) {
+			state.shake_factor = 1;
+			shake_apply(cursor);
+		}
+		return;
+	}
+	double dx = x - state.shake_x;
+	state.shake_x = x;
+	state.shake_y = y;
+	if (fabs(dx) < 0.5) {
+		return;
+	}
+	int direction = dx > 0 ? 1 : -1;
+	if (direction != state.shake_direction) {
+		if (state.shake_travel >= SHAKE_MIN_TRAVEL && state.shake_direction != 0) {
+			if (state.shake_count == SHAKE_REVERSALS) {
+				memmove(state.shake_reversals, state.shake_reversals + 1,
+					(SHAKE_REVERSALS - 1) * sizeof(state.shake_reversals[0]));
+				state.shake_count--;
+			}
+			clock_gettime(CLOCK_MONOTONIC, &state.shake_reversals[state.shake_count++]);
+		}
+		state.shake_direction = direction;
+		state.shake_travel = 0;
+	}
+	state.shake_travel += fabs(dx);
+
+	if (!state.shake_timer && server.wl_event_loop) {
+		state.shake_timer = wl_event_loop_add_timer(server.wl_event_loop, shake_tick, NULL);
+		clock_gettime(CLOCK_MONOTONIC, &state.shake_ticked);
+	}
+	if (state.shake_timer) {
+		wl_event_source_timer_update(state.shake_timer, FRAME_MS);
+	}
+}
+
 /* ---------- the trail of pointers ---------- */
 
 /* How long one copy of the pointer lives, in milliseconds; 0 turns it off. */
@@ -353,6 +518,9 @@ static int trail_tick(void *data) {
 
 /* Called for every movement of the pointer. */
 void tw_pointer_moved(struct sway_cursor *cursor) {
+	if (cursor && cursor->cursor) {
+		shake_motion(cursor, cursor->cursor->x, cursor->cursor->y);
+	}
 	if (trail_lifetime() == 0 || !cursor || !cursor->cursor || cursor->hidden || !root ||
 			server.session_lock.lock) {
 		if (state.trail_tree) {

@@ -319,6 +319,10 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_pointer_trail = 0;
 	config->tw_alttab_style = -1;
 	config->tw_pointer_locate = -1;
+	config->tw_shake = false;
+	config->tw_shake_max = 300;
+	config->tw_shake_rate = 400;
+	config->tw_shake_shakes = 6;
 	config->tw_double_click_time = 400;
 	config->tw_snap = true;
 	config->tw_stretch = true;

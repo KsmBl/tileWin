@@ -576,6 +576,43 @@ struct cmd_results *cmd_pointer_locate(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+/* Shaking the mouse to find the pointer, like the big cursor of KDE. */
+struct cmd_results *cmd_pointer_shake(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pointer_shake", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_shake = parse_boolean(argv[0], config->tw_shake);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+static struct cmd_results *shake_number(int argc, char **argv, const char *name,
+		int low, int high, int *target) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, name, EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	long value = strtol(argv[0], &end, 10);
+	if (!end || *end || value < low || value > high) {
+		return cmd_results_new(CMD_INVALID, "%s needs a number from %d to %d", name, low, high);
+	}
+	*target = (int)value;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_pointer_shake_max(int argc, char **argv) {
+	return shake_number(argc, argv, "pointer_shake_max", 100, 1000, &config->tw_shake_max);
+}
+
+struct cmd_results *cmd_pointer_shake_rate(int argc, char **argv) {
+	return shake_number(argc, argv, "pointer_shake_rate", 10, 5000, &config->tw_shake_rate);
+}
+
+struct cmd_results *cmd_pointer_shake_shakes(int argc, char **argv) {
+	return shake_number(argc, argv, "pointer_shake_shakes", 2, 30, &config->tw_shake_shakes);
+}
+
 struct cmd_results *cmd_pointer_trail(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "pointer_trail", EXPECTED_EQUAL_TO, 1))) {

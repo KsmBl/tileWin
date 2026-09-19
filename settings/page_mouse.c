@@ -74,6 +74,7 @@ struct mouse_page {
 	GtkWidget *theme_dd, *size_dd, *trail;
 	guint trail_timer;
 	GtkWidget *speed, *test_icon, *locate;
+	GPtrArray *root_settings; // struct root_setting *
 	guint speed_timer;
 	gint64 last_test_click; // milliseconds, 0 when the next click is the first
 	bool test_open;
@@ -285,6 +286,95 @@ static void on_test_pressed(GtkGestureClick *gesture, int n_press, double x, dou
 	}
 }
 
+/* ---------- plain settings of common.conf, written as they are changed ---------- */
+
+struct root_setting {
+	struct mouse_page *p;
+	const char *key;
+	GtkWidget *widget;
+	bool is_switch;
+	int fallback;
+	guint timer;
+};
+
+static void root_setting_write(struct root_setting *r) {
+	char value[32];
+	if (r->is_switch) {
+		snprintf(value, sizeof(value), "%s",
+			gtk_switch_get_active(GTK_SWITCH(r->widget)) ? "enable" : "disable");
+	} else {
+		snprintf(value, sizeof(value), "%d",
+			(int)round(gtk_range_get_value(GTK_RANGE(r->widget))));
+	}
+	struct confdoc *d = common(r->p);
+	confdoc_set(d, d->root, r->key, NULL, value);
+	settings_common_changed(r->p->s, false);
+	settings_command(r->p->s, "%s %s", r->key, value);
+}
+
+static gboolean root_setting_apply(gpointer data) {
+	struct root_setting *r = data;
+	r->timer = 0;
+	root_setting_write(r);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_root_setting(GObject *object, gpointer data) {
+	struct root_setting *r = data;
+	if (r->p->updating) {
+		return;
+	}
+	if (r->is_switch) {
+		root_setting_write(r);
+		return;
+	}
+	if (r->timer) {
+		g_source_remove(r->timer);
+	}
+	r->timer = g_timeout_add(300, root_setting_apply, r);
+}
+
+static struct root_setting *root_setting_new(struct mouse_page *p, GtkWidget *group,
+		const char *key, const char *title, const char *hint, bool is_switch,
+		int min, int max, int step, int fallback) {
+	struct root_setting *r = g_new0(struct root_setting, 1);
+	r->p = p;
+	r->key = key;
+	r->is_switch = is_switch;
+	r->fallback = fallback;
+	if (is_switch) {
+		r->widget = gtk_switch_new();
+		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_setting), r);
+	} else {
+		r->widget = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, min, max, step);
+		gtk_widget_set_size_request(r->widget, 260, -1);
+		gtk_scale_set_draw_value(GTK_SCALE(r->widget), TRUE);
+		gtk_scale_set_digits(GTK_SCALE(r->widget), 0);
+		gtk_scale_set_value_pos(GTK_SCALE(r->widget), GTK_POS_LEFT);
+		gtk_scale_add_mark(GTK_SCALE(r->widget), fallback, GTK_POS_BOTTOM, NULL);
+		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);
+	}
+	ui_row(group, title, hint, r->widget);
+	g_ptr_array_add(p->root_settings, r);
+	return r;
+}
+
+static void root_settings_refresh(struct mouse_page *p) {
+	for (guint i = 0; i < p->root_settings->len; i++) {
+		struct root_setting *r = p->root_settings->pdata[i];
+		const char *value = cstmt_arg(confdoc_child(common(p)->root, r->key, NULL), 0);
+		if (r->is_switch) {
+			gtk_switch_set_active(GTK_SWITCH(r->widget), value ?
+				!(g_ascii_strcasecmp(value, "disable") == 0 ||
+				g_ascii_strcasecmp(value, "no") == 0 ||
+				g_ascii_strcasecmp(value, "off") == 0 ||
+				g_ascii_strcasecmp(value, "false") == 0) : r->fallback != 0);
+		} else {
+			gtk_range_set_value(GTK_RANGE(r->widget), value ? atoi(value) : r->fallback);
+		}
+	}
+}
+
 /* ---------- showing where the pointer is ---------- */
 
 static const char *const locate_values[] = { "theme", "enable", "disable" };
@@ -390,6 +480,7 @@ void mouse_page_refresh(struct settings *s) {
 	}
 	const char *trail = cstmt_arg(confdoc_child(common(p)->root, "pointer_trail", NULL), 0);
 	gtk_range_set_value(GTK_RANGE(p->trail), trail ? atoi(trail) : 0);
+	root_settings_refresh(p);
 	const char *locate = cstmt_arg(confdoc_child(common(p)->root, "pointer_locate", NULL), 0);
 	guint locate_sel = 0;
 	for (guint i = 0; locate && i < G_N_ELEMENTS(locate_values); i++) {
@@ -416,6 +507,7 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	struct mouse_page *p = g_new0(struct mouse_page, 1);
 	p->s = s;
 	p->bindings = g_ptr_array_new_with_free_func(g_free);
+	p->root_settings = g_ptr_array_new_with_free_func(g_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Mouse & touchpad",
 		"Changes apply immediately to all connected mice and touchpads.", &content);
@@ -480,6 +572,17 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	ui_row(cursor, "Show the pointer when Ctrl is tapped",
 		"Rings shrink onto the pointer, like on Windows. Ctrl held as part of a "
 		"shortcut or a Ctrl+click does nothing", p->locate);
+
+	GtkWidget *find = ui_group(content, "Finding the pointer", NULL);
+	root_setting_new(p, find, "pointer_shake", "Grow the pointer when the mouse is shaken",
+		"Shake the mouse quickly back and forth and the pointer swells, like on KDE",
+		true, 0, 0, 0, 0);
+	root_setting_new(p, find, "pointer_shake_max", "Biggest size",
+		"Percent of the normal pointer size", false, 100, 1000, 25, 300);
+	root_setting_new(p, find, "pointer_shake_rate", "How fast it grows",
+		"Percent per second, and how fast it shrinks again", false, 50, 2000, 50, 400);
+	root_setting_new(p, find, "pointer_shake_shakes", "Shakes needed",
+		"Changes of direction per second before it starts growing", false, 2, 30, 1, 6);
 
 	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1000, 25);
 	gtk_widget_set_size_request(p->trail, 260, -1);
