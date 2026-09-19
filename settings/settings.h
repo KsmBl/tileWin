@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "confdoc.h"
+#include "list.h"
 
 struct tw_desktop_entry;
 struct theme_page;
@@ -94,9 +95,19 @@ GtkWidget *ui_icon_button(const char *icon, const char *tooltip, bool sensitive,
 		GCallback callback, gpointer data);
 void ui_closure_free(gpointer data, GClosure *closure);
 GtkWidget *ui_app_icon(const char *icon, int size);
+/* Every installed app that is meant to be shown, cached. Borrowed. */
+list_t *ui_all_apps(void);
 const struct tw_desktop_entry *ui_find_app(const char *id);
 GtkWidget *ui_app_picker(const char *label, void (*callback)(const char *id, gpointer data),
 		gpointer data);
+/*
+ * A small window to pick an icon: a name of the icon theme or an image file,
+ * with a preview. clear_label adds a button that reports no icon (NULL for
+ * none). apply is called with the chosen icon, or NULL when it was cleared.
+ */
+void ui_icon_dialog(GtkWindow *parent, const char *title, const char *description,
+		const char *current, const char *fallback, const char *clear_label,
+		void (*apply)(const char *icon, gpointer data), gpointer data);
 char *ui_display_value(const char *value);
 char *ui_input_value(const char *text);
 

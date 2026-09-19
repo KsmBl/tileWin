@@ -305,6 +305,10 @@ static list_t *get_apps(void) {
 	return apps;
 }
 
+list_t *ui_all_apps(void) {
+	return get_apps();
+}
+
 const struct tw_desktop_entry *ui_find_app(const char *id) {
 	list_t *all = get_apps();
 	char *with_suffix = g_strconcat(id, ".desktop", NULL);
@@ -411,6 +415,142 @@ GtkWidget *ui_app_picker(const char *label, void (*callback)(const char *id, gpo
 	g_signal_connect(p->search, "search-changed", G_CALLBACK(picker_search_changed), p);
 	g_object_set_data_full(G_OBJECT(button), "picker", p, g_free);
 	return button;
+}
+
+/* ---------- picking an icon ---------- */
+
+struct icon_dialog {
+	GtkWidget *window, *entry, *preview;
+	char *fallback;
+	void (*apply)(const char *icon, gpointer data);
+	gpointer data;
+};
+
+static void icon_dialog_closed(GtkWindow *window, gpointer data) {
+	struct icon_dialog *d = data;
+	g_free(d->fallback);
+	g_free(d);
+}
+
+static void icon_preview_update(struct icon_dialog *d) {
+	GtkWidget *old = gtk_widget_get_first_child(d->preview);
+	if (old) {
+		gtk_box_remove(GTK_BOX(d->preview), old);
+	}
+	const char *text = gtk_editable_get_text(GTK_EDITABLE(d->entry));
+	gtk_box_append(GTK_BOX(d->preview), ui_app_icon(text && *text ? text : d->fallback, 48));
+}
+
+static void on_icon_entry_changed(GtkEditable *entry, gpointer data) {
+	icon_preview_update(data);
+}
+
+static void on_icon_file_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+	struct icon_dialog *d = data;
+	GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (file) {
+		char *path = g_file_get_path(file);
+		if (path) {
+			gtk_editable_set_text(GTK_EDITABLE(d->entry), path);
+		}
+		g_free(path);
+		g_object_unref(file);
+	}
+}
+
+static void on_icon_browse(GtkButton *button, gpointer data) {
+	struct icon_dialog *d = data;
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Pick an icon");
+	GtkFileFilter *filter = gtk_file_filter_new();
+	gtk_file_filter_set_name(filter, "Images");
+	gtk_file_filter_add_mime_type(filter, "image/*");
+	GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+	g_list_store_append(filters, filter);
+	gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+	g_object_unref(filters);
+	g_object_unref(filter);
+	gtk_file_dialog_open(dialog, GTK_WINDOW(d->window), NULL, on_icon_file_chosen, d);
+	g_object_unref(dialog);
+}
+
+static void icon_dialog_apply(struct icon_dialog *d, const char *icon) {
+	d->apply(icon && *icon ? icon : NULL, d->data);
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+static void on_icon_set(GtkButton *button, gpointer data) {
+	struct icon_dialog *d = data;
+	icon_dialog_apply(d, gtk_editable_get_text(GTK_EDITABLE(d->entry)));
+}
+
+static void on_icon_default(GtkButton *button, gpointer data) {
+	icon_dialog_apply(data, NULL);
+}
+
+static void on_icon_cancel(GtkButton *button, gpointer data) {
+	struct icon_dialog *d = data;
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+void ui_icon_dialog(GtkWindow *parent, const char *title, const char *description,
+		const char *current, const char *fallback, const char *clear_label,
+		void (*apply)(const char *icon, gpointer data), gpointer data) {
+	struct icon_dialog *d = g_new0(struct icon_dialog, 1);
+	d->fallback = g_strdup(fallback);
+	d->apply = apply;
+	d->data = data;
+
+	d->window = gtk_window_new();
+	gtk_window_set_transient_for(GTK_WINDOW(d->window), parent);
+	gtk_window_set_modal(GTK_WINDOW(d->window), TRUE);
+	gtk_window_set_destroy_with_parent(GTK_WINDOW(d->window), TRUE);
+	gtk_window_set_title(GTK_WINDOW(d->window), "Icon");
+	gtk_window_set_default_size(GTK_WINDOW(d->window), 520, 380);
+	g_signal_connect(d->window, "destroy", G_CALLBACK(icon_dialog_closed), d);
+
+	GtkWidget *content;
+	GtkWidget *page = ui_page(title, description, &content);
+	GtkWidget *group = ui_group(content, NULL, NULL);
+	d->entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(d->entry), fallback ? fallback : "Icon name");
+	gtk_widget_set_size_request(d->entry, 260, -1);
+	if (current) {
+		gtk_editable_set_text(GTK_EDITABLE(d->entry), current);
+	}
+	d->preview = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	icon_preview_update(d);
+	g_signal_connect(d->entry, "changed", G_CALLBACK(on_icon_entry_changed), d);
+	GtkWidget *row = ui_row(group, "Icon", NULL, d->entry);
+	gtk_box_prepend(GTK_BOX(ui_row_box(row)), d->preview);
+	GtkWidget *browse = gtk_button_new_with_label("Pick a file...");
+	g_signal_connect(browse, "clicked", G_CALLBACK(on_icon_browse), d);
+	ui_row(group, "Image file", "PNG or SVG, e.g. from ~/Pictures", browse);
+
+	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+	gtk_widget_set_margin_top(buttons, 12);
+	gtk_widget_set_margin_end(buttons, 12);
+	gtk_widget_set_margin_bottom(buttons, 12);
+	if (clear_label) {
+		GtkWidget *reset = gtk_button_new_with_label(clear_label);
+		g_signal_connect(reset, "clicked", G_CALLBACK(on_icon_default), d);
+		gtk_box_append(GTK_BOX(buttons), reset);
+	}
+	GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+	g_signal_connect(cancel, "clicked", G_CALLBACK(on_icon_cancel), d);
+	GtkWidget *set = gtk_button_new_with_label("Set icon");
+	gtk_widget_add_css_class(set, "suggested-action");
+	g_signal_connect(set, "clicked", G_CALLBACK(on_icon_set), d);
+	gtk_box_append(GTK_BOX(buttons), cancel);
+	gtk_box_append(GTK_BOX(buttons), set);
+
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_vexpand(page, TRUE);
+	gtk_box_append(GTK_BOX(box), page);
+	gtk_box_append(GTK_BOX(box), buttons);
+	gtk_window_set_child(GTK_WINDOW(d->window), box);
+	gtk_window_present(GTK_WINDOW(d->window));
 }
 
 /* ---------- ordered app lists (quick launch, pinned apps) ---------- */

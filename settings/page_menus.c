@@ -1,5 +1,7 @@
+#include <stdlib.h>
 #include <string.h>
 #include "settings.h"
+#include "tw_desktop.h"
 
 enum entry_kind {
 	ENTRY_ITEM,
@@ -26,6 +28,8 @@ struct record_list {
 	GPtrArray *trash;
 	GtkWidget *list;
 	guint rebuild_id;
+	int icon_field;  // field holding an icon name, -1 when there is none
+	bool choosable;  // the last field is a command that can be picked
 };
 
 struct menus_page {
@@ -258,6 +262,216 @@ static void on_menu_action(GtkButton *button, gpointer data) {
 	schedule_menu_rebuild(p);
 }
 
+/* ---------- choosing a command instead of typing one ---------- */
+
+struct choice {
+	const char *label, *icon, *command;
+};
+
+/* What tileWin itself can do. */
+static const struct choice action_choices[] = {
+	{ "Cascade windows", "window-cascade", "arrange cascade" },
+	{ "Show windows stacked", "window-stack", "arrange vertical" },
+	{ "Show windows side by side", "window-side-by-side", "arrange horizontal" },
+	{ "Arrange windows optimally", "window-arrange", "arrange optimal" },
+	{ "Show the desktop", "user-desktop", "showdesktop" },
+	{ "Task view", "window-stack", "taskview" },
+	{ "Switch tile/window mode", "tilewin-mode", "wm_mode toggle" },
+	{ "Start menu", "system-search", "panel startmenu toggle" },
+	{ "Search apps", "system-search", "panel startmenu search" },
+	{ "Run...", "system-run", "panel run" },
+	{ "Notifications", "preferences-system", "panel notifications" },
+	{ "Clipboard history", "edit-paste", "panel clipboard" },
+	{ "Screenshot", "applets-screenshooter", "panel snip" },
+	{ "Refresh the desktop", "view-refresh", "panel desktop refresh" },
+	{ "Reload the taskbar", "view-refresh", "panel reload" },
+	{ "Task manager", "utilities-system-monitor", "exec $taskmanager" },
+	{ "Terminal", "utilities-terminal", "exec $term" },
+	{ "File Explorer", "system-file-manager", "exec $filemanager" },
+	{ "Settings", "preferences-system", "exec tilewin-settings" },
+	{ "Taskbar settings", "preferences-system", "exec tilewin-settings --page taskbar" },
+	{ "Change wallpaper", "preferences-desktop-wallpaper",
+		"exec tilewin-settings --page wallpaper" },
+	{ "Personalize", "preferences-desktop-theme", "exec tilewin-settings --page theme" },
+	{ "Lock the screen", "system-lock-screen", "exec $locker" },
+	{ "Log off", "system-log-out", "panel shutdown logoff" },
+	{ "Shut down or sign out", "system-shutdown", "panel shutdown" },
+	{ "Restart tileWin", "system-reboot", "restart" },
+	{ "Theme: Windows 95", "preferences-desktop-theme", "exec tilewin-theme set win95" },
+	{ "Theme: Windows XP", "preferences-desktop-theme", "exec tilewin-theme set winxp" },
+	{ "Theme: Windows 7", "preferences-desktop-theme", "exec tilewin-theme set win7" },
+	{ "Theme: Windows 8", "preferences-desktop-theme", "exec tilewin-theme set win8" },
+	{ "Theme: Windows 10", "preferences-desktop-theme", "exec tilewin-theme set win10" },
+	{ "Theme: Windows 11", "preferences-desktop-theme", "exec tilewin-theme set win11" },
+};
+
+/* Folders, opened with the file manager of the Default apps page. */
+static const struct choice place_choices[] = {
+	{ "Home", "user-home", "exec xdg-open ~" },
+	{ "Desktop", "user-desktop", "exec xdg-open ~/Desktop" },
+	{ "Documents", "folder-documents", "exec xdg-open ~/Documents" },
+	{ "Downloads", "folder-download", "exec xdg-open ~/Downloads" },
+	{ "Pictures", "folder-pictures", "exec xdg-open ~/Pictures" },
+	{ "Music", "folder-music", "exec xdg-open ~/Music" },
+	{ "Videos", "folder-videos", "exec xdg-open ~/Videos" },
+	{ "Trash", "user-trash", "exec xdg-open trash:///" },
+};
+
+/* Takes over the label, the icon and the command of what was picked. */
+typedef void (*choice_apply)(gpointer target, const char *label, const char *icon,
+	const char *command);
+
+struct choice_picker {
+	struct menus_page *p;
+	choice_apply apply;
+	gpointer target;
+	GtkWidget *popover, *search, *list;
+	bool populated;
+};
+
+/* The command that starts an app, in a terminal when it asks for one. */
+static char *app_command(struct menus_page *p, const struct tw_desktop_entry *e) {
+	char *exec = tw_desktop_exec_command(e);
+	if (!exec) {
+		return NULL;
+	}
+	char *command;
+	if (e->terminal) {
+		const char *term = cstmt_arg(confdoc_child(doc(p)->root, "terminal", NULL), 0);
+		command = g_strdup_printf("exec %s %s", term && *term ? term : "xfce4-terminal -x", exec);
+	} else {
+		command = g_strdup_printf("exec %s", exec);
+	}
+	free(exec);
+	return command;
+}
+
+static gboolean choice_filter(GtkListBoxRow *row, gpointer data) {
+	struct choice_picker *cp = data;
+	const char *query = gtk_editable_get_text(GTK_EDITABLE(cp->search));
+	if (!*query) {
+		return TRUE;
+	}
+	const char *haystack = g_object_get_data(G_OBJECT(row), "haystack");
+	char *needle = g_utf8_casefold(query, -1);
+	gboolean match = haystack && strstr(haystack, needle);
+	g_free(needle);
+	return match;
+}
+
+/* A heading above the first row of every group, following the search. */
+static void choice_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
+	const char *group = g_object_get_data(G_OBJECT(row), "group");
+	const char *previous = before ? g_object_get_data(G_OBJECT(before), "group") : NULL;
+	if (!group || (previous && strcmp(group, previous) == 0)) {
+		gtk_list_box_row_set_header(row, NULL);
+		return;
+	}
+	GtkWidget *label = gtk_label_new(group);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_widget_add_css_class(label, "dim-label");
+	gtk_widget_add_css_class(label, "tw-caption");
+	gtk_widget_set_margin_start(label, 8);
+	gtk_widget_set_margin_top(label, 8);
+	gtk_widget_set_margin_bottom(label, 2);
+	gtk_list_box_row_set_header(row, label);
+}
+
+static void choice_add_row(struct choice_picker *cp, const char *group, const char *label,
+		const char *icon, const char *command) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_margin_start(box, 6);
+	gtk_widget_set_margin_end(box, 6);
+	gtk_widget_set_margin_top(box, 4);
+	gtk_widget_set_margin_bottom(box, 4);
+	gtk_box_append(GTK_BOX(box), ui_app_icon(icon, 24));
+	GtkWidget *text = gtk_label_new(label);
+	gtk_label_set_xalign(GTK_LABEL(text), 0);
+	gtk_label_set_ellipsize(GTK_LABEL(text), PANGO_ELLIPSIZE_END);
+	gtk_box_append(GTK_BOX(box), text);
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+	char *haystack = g_strdup_printf("%s %s %s", label, group, command);
+	g_object_set_data_full(G_OBJECT(row), "haystack", g_utf8_casefold(haystack, -1), g_free);
+	g_free(haystack);
+	g_object_set_data(G_OBJECT(row), "group", (gpointer)group);
+	g_object_set_data_full(G_OBJECT(row), "label", g_strdup(label), g_free);
+	g_object_set_data_full(G_OBJECT(row), "icon", g_strdup(icon), g_free);
+	g_object_set_data_full(G_OBJECT(row), "command", g_strdup(command), g_free);
+	gtk_list_box_append(GTK_LIST_BOX(cp->list), row);
+}
+
+static void choice_show(GtkWidget *popover, gpointer data) {
+	struct choice_picker *cp = data;
+	gtk_editable_set_text(GTK_EDITABLE(cp->search), "");
+	gtk_widget_grab_focus(cp->search);
+	if (cp->populated) {
+		return;
+	}
+	cp->populated = true;
+	for (size_t i = 0; i < G_N_ELEMENTS(action_choices); i++) {
+		choice_add_row(cp, "Actions", action_choices[i].label, action_choices[i].icon,
+			action_choices[i].command);
+	}
+	for (size_t i = 0; i < G_N_ELEMENTS(place_choices); i++) {
+		choice_add_row(cp, "Folders", place_choices[i].label, place_choices[i].icon,
+			place_choices[i].command);
+	}
+	list_t *apps = ui_all_apps();
+	for (int i = 0; i < apps->length; i++) {
+		struct tw_desktop_entry *e = apps->items[i];
+		char *command = app_command(cp->p, e);
+		if (command) {
+			choice_add_row(cp, "Apps", e->name, e->icon, command);
+			g_free(command);
+		}
+	}
+}
+
+static void choice_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+	struct choice_picker *cp = data;
+	gtk_popover_popdown(GTK_POPOVER(cp->popover));
+	cp->apply(cp->target, g_object_get_data(G_OBJECT(row), "label"),
+		g_object_get_data(G_OBJECT(row), "icon"),
+		g_object_get_data(G_OBJECT(row), "command"));
+}
+
+static void choice_search_changed(GtkSearchEntry *entry, gpointer data) {
+	struct choice_picker *cp = data;
+	gtk_list_box_invalidate_filter(GTK_LIST_BOX(cp->list));
+}
+
+/* A button whose popover offers apps, tileWin actions and folders. */
+static GtkWidget *choice_button(struct menus_page *p, choice_apply apply, gpointer target) {
+	struct choice_picker *cp = g_new0(struct choice_picker, 1);
+	cp->p = p;
+	cp->apply = apply;
+	cp->target = target;
+	GtkWidget *button = gtk_menu_button_new();
+	gtk_menu_button_set_label(GTK_MENU_BUTTON(button), "Choose...");
+	gtk_widget_set_tooltip_text(button, "Pick an app, an action of tileWin or a folder");
+	cp->popover = gtk_popover_new();
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+	cp->search = gtk_search_entry_new();
+	gtk_box_append(GTK_BOX(box), cp->search);
+	GtkWidget *scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER,
+		GTK_POLICY_AUTOMATIC);
+	gtk_widget_set_size_request(scroll, 360, 400);
+	cp->list = gtk_list_box_new();
+	gtk_list_box_set_filter_func(GTK_LIST_BOX(cp->list), choice_filter, cp, NULL);
+	gtk_list_box_set_header_func(GTK_LIST_BOX(cp->list), choice_header, NULL, NULL);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), cp->list);
+	gtk_box_append(GTK_BOX(box), scroll);
+	gtk_popover_set_child(GTK_POPOVER(cp->popover), box);
+	gtk_menu_button_set_popover(GTK_MENU_BUTTON(button), cp->popover);
+	g_signal_connect(cp->popover, "show", G_CALLBACK(choice_show), cp);
+	g_signal_connect(cp->list, "row-activated", G_CALLBACK(choice_activated), cp);
+	g_signal_connect(cp->search, "search-changed", G_CALLBACK(choice_search_changed), cp);
+	g_object_set_data_full(G_OBJECT(button), "choice-picker", cp, g_free);
+	return button;
+}
+
 struct entry_binding {
 	struct menus_page *p;
 	struct mentry *entry;
@@ -284,7 +498,7 @@ static GtkWidget *bound_entry(struct menus_page *p, struct mentry *e, bool comma
 		gtk_widget_set_hexpand(entry, TRUE);
 	} else {
 		gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Label");
-		gtk_editable_set_width_chars(GTK_EDITABLE(entry), 22);
+		gtk_editable_set_width_chars(GTK_EDITABLE(entry), 16);
 	}
 	struct entry_binding *b = g_new0(struct entry_binding, 1);
 	b->p = p;
@@ -292,6 +506,99 @@ static GtkWidget *bound_entry(struct menus_page *p, struct mentry *e, bool comma
 	b->command = command;
 	g_signal_connect_data(entry, "changed", G_CALLBACK(on_entry_text), b, ui_closure_free, 0);
 	return entry;
+}
+
+/* A picked app, action or folder fills in the whole entry at once. */
+static void entry_apply_choice(gpointer target, const char *label, const char *icon,
+		const char *command) {
+	struct entry_binding *b = target;
+	struct mentry *e = b->entry;
+	g_free(e->label);
+	e->label = g_strdup(label);
+	g_free(e->icon);
+	e->icon = g_strdup(icon);
+	g_free(e->command);
+	e->command = g_strdup(command);
+	write_menu(b->p);
+	schedule_menu_rebuild(b->p);
+}
+
+static void entry_icon_chosen(const char *icon, gpointer data) {
+	struct entry_binding *b = data;
+	g_free(b->entry->icon);
+	b->entry->icon = g_strdup(icon);
+	write_menu(b->p);
+	schedule_menu_rebuild(b->p);
+}
+
+static void on_entry_icon(GtkButton *button, gpointer data) {
+	struct entry_binding *b = data;
+	ui_icon_dialog(b->p->s->window, b->entry->label && *b->entry->label ? b->entry->label : "Entry",
+		"The icon shown next to the entry: an icon name of your icon theme, e.g. firefox, "
+		"or an image file.", b->entry->icon, NULL, "No icon", entry_icon_chosen, b);
+}
+
+/* A button showing the entry's icon that opens the icon chooser. */
+static GtkWidget *entry_icon_button(struct menus_page *p, struct mentry *e) {
+	GtkWidget *button = gtk_button_new();
+	gtk_widget_add_css_class(button, "flat");
+	gtk_widget_set_tooltip_text(button, "Choose an icon");
+	gtk_button_set_child(GTK_BUTTON(button), ui_app_icon(e->icon ? e->icon :
+		e->kind == ENTRY_SUBMENU ? "folder-symbolic" : "system-run-symbolic", 16));
+	struct entry_binding *b = g_new0(struct entry_binding, 1);
+	b->p = p;
+	b->entry = e;
+	g_signal_connect_data(button, "clicked", G_CALLBACK(on_entry_icon), b, ui_closure_free, 0);
+	return button;
+}
+
+struct flag_binding {
+	struct menus_page *p;
+	struct mentry *entry;
+	int which; // 0 bold, 1 checked, 2 disabled
+};
+
+static void on_flag_toggled(GtkCheckButton *check, gpointer data) {
+	struct flag_binding *f = data;
+	if (f->p->updating) {
+		return;
+	}
+	bool on = gtk_check_button_get_active(check);
+	switch (f->which) {
+	case 0: f->entry->bold = on; break;
+	case 1: f->entry->checked = on; break;
+	default: f->entry->disabled = on; break;
+	}
+	write_menu(f->p);
+}
+
+/* Bold, checked and greyed out, without having to know the keywords. */
+static GtkWidget *entry_flags_button(struct menus_page *p, struct mentry *e) {
+	GtkWidget *button = gtk_menu_button_new();
+	gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(button), "view-more-symbolic");
+	gtk_widget_set_tooltip_text(button, "How the entry looks");
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+	gtk_widget_set_margin_start(box, 6);
+	gtk_widget_set_margin_end(box, 6);
+	gtk_widget_set_margin_top(box, 6);
+	gtk_widget_set_margin_bottom(box, 6);
+	static const char *const labels[] = { "Bold", "Checked", "Greyed out" };
+	const bool values[] = { e->bold, e->checked, e->disabled };
+	for (int i = 0; i < 3; i++) {
+		GtkWidget *check = gtk_check_button_new_with_label(labels[i]);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(check), values[i]);
+		struct flag_binding *f = g_new0(struct flag_binding, 1);
+		f->p = p;
+		f->entry = e;
+		f->which = i;
+		g_signal_connect_data(check, "toggled", G_CALLBACK(on_flag_toggled), f,
+			ui_closure_free, 0);
+		gtk_box_append(GTK_BOX(box), check);
+	}
+	GtkWidget *popover = gtk_popover_new();
+	gtk_popover_set_child(GTK_POPOVER(popover), box);
+	gtk_menu_button_set_popover(GTK_MENU_BUTTON(button), popover);
+	return button;
 }
 
 static void add_menu_button(struct menus_page *p, GtkWidget *box, const char *icon,
@@ -333,8 +640,7 @@ static void rebuild_menu(struct menus_page *p) {
 			gtk_widget_set_hexpand(label, TRUE);
 			gtk_box_append(GTK_BOX(box), label);
 		} else {
-			gtk_box_append(GTK_BOX(box), ui_app_icon(e->kind == ENTRY_SUBMENU ?
-				"folder-symbolic" : (e->icon ? e->icon : "system-run-symbolic"), 16));
+			gtk_box_append(GTK_BOX(box), entry_icon_button(p, e));
 			gtk_box_append(GTK_BOX(box), bound_entry(p, e, false));
 			if (e->kind == ENTRY_SUBMENU) {
 				char *text = g_strdup_printf("%u entries", e->children->len);
@@ -344,9 +650,17 @@ static void rebuild_menu(struct menus_page *p) {
 				gtk_label_set_xalign(GTK_LABEL(label), 0);
 				gtk_widget_set_hexpand(label, TRUE);
 				gtk_box_append(GTK_BOX(box), label);
+				gtk_box_append(GTK_BOX(box), entry_flags_button(p, e));
 				add_menu_button(p, box, "go-next-symbolic", "Open submenu", true, i, MENU_OPEN);
 			} else {
 				gtk_box_append(GTK_BOX(box), bound_entry(p, e, true));
+				struct entry_binding *b = g_new0(struct entry_binding, 1);
+				b->p = p;
+				b->entry = e;
+				GtkWidget *choose = choice_button(p, entry_apply_choice, b);
+				g_object_set_data_full(G_OBJECT(choose), "binding", b, g_free);
+				gtk_box_append(GTK_BOX(box), choose);
+				gtk_box_append(GTK_BOX(box), entry_flags_button(p, e));
 			}
 		}
 		add_menu_button(p, box, "go-up-symbolic", "Move up", i > 0, i, MENU_UP);
@@ -454,6 +768,7 @@ static void records_write(struct record_list *r) {
 }
 
 static void records_rebuild(struct record_list *r);
+static void records_write(struct record_list *r);
 
 static gboolean records_rebuild_idle(gpointer data) {
 	struct record_list *r = data;
@@ -513,6 +828,42 @@ static void on_field_text(GtkEditable *editable, gpointer data) {
 	records_write(b->r);
 }
 
+/* A picked app, action or folder fills the whole record at once. */
+static void record_apply_choice(gpointer target, const char *label, const char *icon,
+		const char *command) {
+	struct field_binding *b = target;
+	struct record_list *r = b->r;
+	g_free(b->fields[0]);
+	b->fields[0] = g_strdup(label);
+	if (r->icon_field >= 0) {
+		g_free(b->fields[r->icon_field]);
+		b->fields[r->icon_field] = g_strdup(icon);
+	}
+	g_free(b->fields[r->fields - 1]);
+	b->fields[r->fields - 1] = g_strdup(command);
+	records_write(r);
+	if (!r->rebuild_id) {
+		r->rebuild_id = g_idle_add(records_rebuild_idle, r);
+	}
+}
+
+static void record_icon_chosen(const char *icon, gpointer data) {
+	struct field_binding *b = data;
+	g_free(b->fields[b->field]);
+	b->fields[b->field] = g_strdup(icon ? icon : "");
+	records_write(b->r);
+	if (!b->r->rebuild_id) {
+		b->r->rebuild_id = g_idle_add(records_rebuild_idle, b->r);
+	}
+}
+
+static void on_record_icon(GtkButton *button, gpointer data) {
+	struct field_binding *b = data;
+	ui_icon_dialog(b->r->p->s->window, b->fields[0] && *b->fields[0] ? b->fields[0] : "Entry",
+		"The icon shown next to the entry: an icon name of your icon theme, e.g. folder-music, "
+		"or an image file.", b->fields[b->field], NULL, "No icon", record_icon_chosen, b);
+}
+
 static void add_record_button(struct record_list *r, GtkWidget *box, const char *icon,
 		const char *tooltip, bool sensitive, guint index, int op) {
 	struct record_action *a = g_new0(struct record_action, 1);
@@ -534,21 +885,41 @@ static void records_rebuild(struct record_list *r) {
 		gtk_widget_set_margin_top(box, 4);
 		gtk_widget_set_margin_bottom(box, 4);
 		for (int f = 0; f < r->fields; f++) {
+			struct field_binding *b = g_new0(struct field_binding, 1);
+			b->r = r;
+			b->fields = fields;
+			b->field = f;
+			if (f == r->icon_field) {
+				GtkWidget *button = gtk_button_new();
+				gtk_widget_add_css_class(button, "flat");
+				gtk_widget_set_tooltip_text(button, "Choose an icon");
+				gtk_button_set_child(GTK_BUTTON(button), ui_app_icon(
+					fields[f] && *fields[f] ? fields[f] : "system-run-symbolic", 16));
+				g_signal_connect_data(button, "clicked", G_CALLBACK(on_record_icon), b,
+					ui_closure_free, 0);
+				gtk_box_prepend(GTK_BOX(box), button); // the icon leads the row
+				continue;
+			}
 			GtkWidget *entry = gtk_entry_new();
 			gtk_editable_set_text(GTK_EDITABLE(entry), fields[f] ? fields[f] : "");
 			gtk_entry_set_placeholder_text(GTK_ENTRY(entry), r->placeholders[f]);
 			if (f == r->fields - 1) {
 				gtk_widget_set_hexpand(entry, TRUE);
 			} else {
-				gtk_editable_set_width_chars(GTK_EDITABLE(entry), f == 0 ? 16 : 18);
+				gtk_editable_set_width_chars(GTK_EDITABLE(entry), 16);
 			}
-			struct field_binding *b = g_new0(struct field_binding, 1);
-			b->r = r;
-			b->fields = fields;
-			b->field = f;
 			g_signal_connect_data(entry, "changed", G_CALLBACK(on_field_text), b,
 				ui_closure_free, 0);
 			gtk_box_append(GTK_BOX(box), entry);
+			if (f == r->fields - 1 && r->choosable) {
+				struct field_binding *c = g_new0(struct field_binding, 1);
+				c->r = r;
+				c->fields = fields;
+				c->field = f;
+				GtkWidget *choose = choice_button(r->p, record_apply_choice, c);
+				g_object_set_data_full(G_OBJECT(choose), "binding", c, g_free);
+				gtk_box_append(GTK_BOX(box), choose);
+			}
 		}
 		add_record_button(r, box, "go-up-symbolic", "Move up", i > 0, i, MENU_UP);
 		add_record_button(r, box, "go-down-symbolic", "Move down", i + 1 < r->records->len, i,
@@ -590,11 +961,13 @@ static void records_read(struct record_list *r) {
 
 static void records_init(struct record_list *r, struct menus_page *p, GtkWidget *content,
 		const char *title, const char *description, const char *statement, int fields,
-		const char *const *placeholders) {
+		const char *const *placeholders, int icon_field, bool choosable) {
 	r->p = p;
 	r->statement = statement;
 	r->fields = fields;
 	r->placeholders = placeholders;
+	r->icon_field = icon_field;
+	r->choosable = choosable;
 	r->records = g_ptr_array_new_with_free_func((GDestroyNotify)g_strfreev);
 	r->trash = g_ptr_array_new_with_free_func((GDestroyNotify)g_strfreev);
 	r->list = ui_group(content, title, description);
@@ -634,7 +1007,10 @@ GtkWidget *menus_page_new(struct settings *s) {
 	p->trash = g_ptr_array_new_with_free_func(mentry_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Menus",
-		"Right-click menus of the taskbar and the contents of the start menu. Commands are tileWin commands such as \"exec firefox\" or \"arrange cascade\".",
+		"Right-click menus of the taskbar and the contents of the start menu. Choose... picks an "
+		"app, an action of tileWin or a folder and fills in the label, the icon and the "
+		"command; the icon button changes the icon and the button beside it makes an entry bold, "
+		"checked or greyed out. Everything can still be typed by hand.",
 		&content);
 
 	GtkWidget *group = ui_group(content, "Right-click menus", NULL);
@@ -680,10 +1056,11 @@ GtkWidget *menus_page_new(struct settings *s) {
 
 	p->pinned = ui_app_list_new(content, "Start menu: pinned apps", NULL, on_pinned_changed, p);
 	records_init(&p->places, p, content, "Start menu: places",
-		"Links shown next to the app list. The icon is an icon name.", "place", 3,
-		(const char *const[]){ "Label", "Icon", "Command" });
+		"Links shown next to the app list. Click the icon to change it, or pick a whole "
+		"entry with Choose.", "place", 3,
+		(const char *const[]){ "Label", "Icon", "Command" }, 1, true);
 	records_init(&p->power, p, content, "Start menu: power menu", NULL, "power", 2,
-		(const char *const[]){ "Label", "Command" });
+		(const char *const[]){ "Label", "Command" }, -1, true);
 
 	s->menus_page = p;
 	menus_page_refresh(s);
