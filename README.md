@@ -284,6 +284,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |
 | `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
 | `window_stretch enable\|disable` | Double-clicking a side of a window stretches it (default enable) |
+| `window_stretch_mode both\|side` | Whether stretching pulls the window out on both sides of that axis or only towards the side that was clicked (default both) |
 | `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along, snapped ones in the size they have (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
 | `alttab_style theme\|icons\|flip3d` | What the Alt+Tab switcher shows: what the theme has (default), a grid of icons, or a 3D stack of the windows themselves |
 | `pointer_shake enable\|disable` | Shaking the mouse quickly back and forth makes the pointer grow, like on KDE (default disable) |

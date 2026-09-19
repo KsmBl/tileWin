@@ -265,6 +265,15 @@ bool tw_expand(struct sway_container *con, enum wlr_edges edge) {
 	}
 	// grow only: a window already past the limit keeps that side
 	double new_start = fmin(start, lo), new_end = fmax(end, hi);
+	if (!config->tw_stretch_both) {
+		// only the side that was double-clicked moves
+		bool towards_start = edge == WLR_EDGE_LEFT || edge == WLR_EDGE_TOP;
+		if (towards_start) {
+			new_end = end;
+		} else {
+			new_start = start;
+		}
+	}
 	struct wlr_box expanded = box;
 	if (horizontal) {
 		expanded.x = (int)round(new_start);

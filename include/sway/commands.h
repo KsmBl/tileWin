@@ -144,6 +144,7 @@ sway_cmd cmd_window_snap;
 sway_cmd cmd_window_stick;
 sway_cmd cmd_window_stick_distance;
 sway_cmd cmd_window_stretch;
+sway_cmd cmd_window_stretch_mode;
 sway_cmd cmd_assign;
 sway_cmd cmd_bar;
 sway_cmd cmd_bindcode;

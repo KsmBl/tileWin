@@ -118,6 +118,7 @@ static const struct cmd_handler handlers[] = {
 	{ "window_stick", cmd_window_stick },
 	{ "window_stick_distance", cmd_window_stick_distance },
 	{ "window_stretch", cmd_window_stretch },
+	{ "window_stretch_mode", cmd_window_stretch_mode },
 	{ "workspace", cmd_workspace },
 	{ "workspace_auto_back_and_forth", cmd_ws_auto_back_and_forth },
 	{ "xdg_autostart", cmd_xdg_autostart },

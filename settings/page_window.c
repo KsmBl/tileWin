@@ -33,6 +33,9 @@ struct control {
 
 static const char *const group_values[] = { "Shift", "Ctrl", "Alt", "Super", "none", NULL };
 static const char *const group_labels[] = { "Shift", "Ctrl", "Alt", "Super", "Off", NULL };
+static const char *const stretch_values[] = { "both", "side", NULL };
+static const char *const stretch_labels[] = { "Both sides at once",
+	"Only the side that was clicked", NULL };
 static const char *const move_values[] = { "Super", "Alt", "Ctrl", "none", NULL };
 static const char *const move_labels[] = { "Super", "Alt", "Ctrl", "Off", NULL };
 static const char *const follows_values[] = { "no", "yes", "always", NULL };
@@ -63,6 +66,10 @@ static const struct control move_controls[] = {
 		.hint = "Left or right side: as wide as there is room up to the next window or the "
 		"screen edge, top or bottom side: as high. Double-click again for the old size",
 		.kind = CONTROL_SWITCH, .default_on = true },
+	{ .doc = DOC_COMMON, .key = "window_stretch_mode", .title = "Stretching grows",
+		.hint = "Whether a double-clicked side pulls the window out on both sides of that "
+		"axis or only on the side you clicked", .kind = CONTROL_CHOICE,
+		.values = stretch_values, .labels = stretch_labels },
 	{ .doc = DOC_WINDOWMODE, .key = "floating_modifier", .title = "Move windows anywhere with",
 		.hint = "Hold this key and drag a window with the left mouse button to move it, with "
 		"the right one to resize it", .kind = CONTROL_CHOICE, .values = move_values,

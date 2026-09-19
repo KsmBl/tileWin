@@ -552,6 +552,7 @@ struct sway_config {
 	uint32_t tw_group_modifier; // held: touching windows move together
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
+	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
 	int tw_pointer_trail; // how long a copy of the pointer lives in ms, 0: no trail
 	int tw_alttab_style; // -1: as the theme says, 0: icons, 1: flip3d
 	int tw_pointer_locate; // -1: as the theme says, 0: off, 1: Ctrl shows the pointer

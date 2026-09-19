@@ -491,6 +491,21 @@ struct cmd_results *cmd_window_stretch(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_window_stretch_mode(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_stretch_mode", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "both") == 0) {
+		config->tw_stretch_both = true;
+	} else if (strcasecmp(argv[0], "side") == 0) {
+		config->tw_stretch_both = false;
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'window_stretch_mode both|side'");
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_window_stick_distance(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "window_stick_distance", EXPECTED_EQUAL_TO, 1))) {
