@@ -19,7 +19,7 @@ struct datetime_page {
 	GDBusProxy *proxy;
 	GtkWidget *now, *ntp_row, *ntp_switch, *zone_dd, *zone_row;
 	GtkWidget *manual, *calendar, *hour, *minute, *second, *apply, *status;
-	GtkWidget *format_dd, *format_entry;
+	GtkWidget *format_dd, *format_entry, *code_popover, *code_list;
 	GtkStringList *zones;
 	guint timer;
 	char *zone;
@@ -102,6 +102,8 @@ static void on_format_selected(GObject *dropdown, GParamSpec *pspec, gpointer da
 	show_format(p);
 }
 
+static void format_entry_changed(struct datetime_page *p);
+
 static void on_format_text(GtkEditable *editable, gpointer data) {
 	struct datetime_page *p = data;
 	if (p->updating) {
@@ -110,6 +112,7 @@ static void on_format_text(GtkEditable *editable, gpointer data) {
 	char *value = ui_input_value(gtk_editable_get_text(editable));
 	write_format(p, *value ? value : NULL);
 	g_free(value);
+	format_entry_changed(p);
 }
 
 /* ---------- the system clock ---------- */
@@ -329,6 +332,125 @@ void datetime_page_refresh(struct settings *s) {
 	}
 }
 
+/* ---------- the codes a clock format can hold ---------- */
+
+static const struct {
+	char code;
+	const char *what;
+} format_codes[] = {
+	{ 'H', "Hour, 00 to 23" },
+	{ 'I', "Hour, 01 to 12" },
+	{ 'M', "Minute, 00 to 59" },
+	{ 'S', "Second, 00 to 59" },
+	{ 'p', "AM or PM" },
+	{ 'P', "am or pm" },
+	{ 'd', "Day of the month, 01 to 31" },
+	{ 'e', "Day of the month, 1 to 31" },
+	{ 'm', "Month, 01 to 12" },
+	{ 'y', "Year, two digits" },
+	{ 'Y', "Year, four digits" },
+	{ 'a', "Weekday, short" },
+	{ 'A', "Weekday, full" },
+	{ 'b', "Month name, short" },
+	{ 'B', "Month name, full" },
+	{ 'j', "Day of the year, 001 to 366" },
+	{ 'V', "Week of the year" },
+	{ 'Z', "Time zone, short" },
+	{ 'z', "Time zone, +0100" },
+	{ 'x', "Date, as your language writes it" },
+	{ 'X', "Time, as your language writes it" },
+	{ 'c', "Date and time together" },
+	{ 's', "Seconds since 1970" },
+	{ '%', "A percent sign" },
+};
+
+/* What every code stands for, and what it looks like right now. */
+static char *format_codes_tooltip(void) {
+	GString *text = g_string_new("Codes you can use, with what they show right now:\n");
+	time_t now = time(NULL);
+	struct tm tm;
+	localtime_r(&now, &tm);
+	for (size_t i = 0; i < G_N_ELEMENTS(format_codes); i++) {
+		char pattern[4] = { '%', format_codes[i].code, '\0' };
+		char rendered[128] = "";
+		strftime(rendered, sizeof(rendered), pattern, &tm);
+		g_string_append_printf(text, "\n%%%c  %-30s %s", format_codes[i].code,
+			format_codes[i].what, rendered);
+	}
+	g_string_append(text, "\n\n\\n starts a second line.");
+	return g_string_free(text, FALSE);
+}
+
+/* Puts the code the row stands for where the cursor is. */
+static void on_code_chosen(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+	struct datetime_page *p = data;
+	const char *code = g_object_get_data(G_OBJECT(row), "code");
+	gtk_popover_popdown(GTK_POPOVER(p->code_popover));
+	if (!code) {
+		return;
+	}
+	int position = gtk_editable_get_position(GTK_EDITABLE(p->format_entry));
+	// the "%" that opened the list is already there, so only the letter follows
+	gtk_editable_insert_text(GTK_EDITABLE(p->format_entry), code, -1, &position);
+	gtk_editable_set_position(GTK_EDITABLE(p->format_entry), position);
+	gtk_widget_grab_focus(p->format_entry);
+}
+
+static void code_popover_build(struct datetime_page *p) {
+	p->code_list = gtk_list_box_new();
+	time_t now = time(NULL);
+	struct tm tm;
+	localtime_r(&now, &tm);
+	for (size_t i = 0; i < G_N_ELEMENTS(format_codes); i++) {
+		char pattern[4] = { '%', format_codes[i].code, '\0' };
+		char rendered[128] = "";
+		strftime(rendered, sizeof(rendered), pattern, &tm);
+		char *label = g_strdup_printf("%%%c   %s", format_codes[i].code, format_codes[i].what);
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+		gtk_widget_set_margin_start(box, 8);
+		gtk_widget_set_margin_end(box, 8);
+		gtk_widget_set_margin_top(box, 3);
+		gtk_widget_set_margin_bottom(box, 3);
+		GtkWidget *left = gtk_label_new(label);
+		gtk_label_set_xalign(GTK_LABEL(left), 0);
+		gtk_widget_set_hexpand(left, TRUE);
+		gtk_box_append(GTK_BOX(box), left);
+		GtkWidget *right = gtk_label_new(rendered);
+		gtk_widget_add_css_class(right, "dim-label");
+		gtk_box_append(GTK_BOX(box), right);
+		g_free(label);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+		char code[2] = { format_codes[i].code, '\0' };
+		g_object_set_data_full(G_OBJECT(row), "code", g_strdup(code), g_free);
+		gtk_list_box_append(GTK_LIST_BOX(p->code_list), row);
+	}
+	g_signal_connect(p->code_list, "row-activated", G_CALLBACK(on_code_chosen), p);
+	GtkWidget *scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER,
+		GTK_POLICY_AUTOMATIC);
+	gtk_widget_set_size_request(scroll, 420, 320);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), p->code_list);
+	p->code_popover = gtk_popover_new();
+	gtk_popover_set_child(GTK_POPOVER(p->code_popover), scroll);
+	gtk_popover_set_autohide(GTK_POPOVER(p->code_popover), FALSE);
+	gtk_widget_set_parent(p->code_popover, p->format_entry);
+	gtk_popover_set_position(GTK_POPOVER(p->code_popover), GTK_POS_BOTTOM);
+}
+
+/* Typing "%" offers the codes right there. */
+static void format_entry_changed(struct datetime_page *p) {
+	const char *text = gtk_editable_get_text(GTK_EDITABLE(p->format_entry));
+	int position = gtk_editable_get_position(GTK_EDITABLE(p->format_entry));
+	bool after_percent = position > 0 && text[position - 1] == '%' &&
+		(position < 2 || text[position - 2] != '%');
+	if (after_percent) {
+		gtk_popover_popup(GTK_POPOVER(p->code_popover));
+	} else {
+		gtk_popover_popdown(GTK_POPOVER(p->code_popover));
+	}
+}
+
 /* Hours, minutes and seconds are shown with two digits. */
 static gboolean on_spin_leading_zero(GtkSpinButton *spin, gpointer data) {
 	char text[8];
@@ -427,7 +549,13 @@ GtkWidget *datetime_page_new(struct settings *s) {
 	gtk_entry_set_placeholder_text(GTK_ENTRY(p->format_entry), "%H:%M");
 	gtk_widget_set_size_request(p->format_entry, 300, -1);
 	g_signal_connect(p->format_entry, "changed", G_CALLBACK(on_format_text), p);
-	ui_row(bar, "Own format", "strftime format, \\n starts a second line", p->format_entry);
+	char *codes = format_codes_tooltip();
+	gtk_widget_set_tooltip_text(p->format_entry, codes);
+	g_free(codes);
+	code_popover_build(p);
+	ui_row(bar, "Own format",
+		"Type % and pick a code from the list; hover the field for all of them",
+		p->format_entry);
 
 	p->updating = true; // filling the list selects its first entry
 	load_zones(p);
