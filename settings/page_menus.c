@@ -442,13 +442,14 @@ static void choice_search_changed(GtkSearchEntry *entry, gpointer data) {
 }
 
 /* A button whose popover offers apps, tileWin actions and folders. */
-static GtkWidget *choice_button(struct menus_page *p, choice_apply apply, gpointer target) {
+static GtkWidget *choice_button(struct menus_page *p, const char *label, choice_apply apply,
+		gpointer target) {
 	struct choice_picker *cp = g_new0(struct choice_picker, 1);
 	cp->p = p;
 	cp->apply = apply;
 	cp->target = target;
 	GtkWidget *button = gtk_menu_button_new();
-	gtk_menu_button_set_label(GTK_MENU_BUTTON(button), "Choose...");
+	gtk_menu_button_set_label(GTK_MENU_BUTTON(button), label);
 	gtk_widget_set_tooltip_text(button, "Pick an app, an action of tileWin or a folder");
 	cp->popover = gtk_popover_new();
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
@@ -657,7 +658,7 @@ static void rebuild_menu(struct menus_page *p) {
 				struct entry_binding *b = g_new0(struct entry_binding, 1);
 				b->p = p;
 				b->entry = e;
-				GtkWidget *choose = choice_button(p, entry_apply_choice, b);
+				GtkWidget *choose = choice_button(p, "Choose...", entry_apply_choice, b);
 				g_object_set_data_full(G_OBJECT(choose), "binding", b, g_free);
 				gtk_box_append(GTK_BOX(box), choose);
 				gtk_box_append(GTK_BOX(box), entry_flags_button(p, e));
@@ -676,6 +677,18 @@ static void rebuild_menu(struct menus_page *p) {
 		ui_row(p->list, NULL, "This menu is empty", NULL);
 	}
 	p->updating = false;
+}
+
+/* "Add item" picks the app, action or folder first, so nothing starts empty. */
+static void add_apply_choice(gpointer target, const char *label, const char *icon,
+		const char *command) {
+	struct menus_page *p = target;
+	struct mentry *e = mentry_new(ENTRY_ITEM, label);
+	e->icon = g_strdup(icon);
+	e->command = g_strdup(command);
+	g_ptr_array_add(current_level(p), e);
+	write_menu(p);
+	schedule_menu_rebuild(p);
 }
 
 static void on_add_entry(GtkButton *button, gpointer data) {
@@ -787,13 +800,7 @@ static void on_record_action(GtkButton *button, gpointer data) {
 	struct record_action *a = data;
 	struct record_list *r = a->r;
 	guint i = a->index;
-	if (a->op == MENU_OPEN) { // add
-		char **fields = g_new0(char *, r->fields + 1);
-		for (int f = 0; f < r->fields; f++) {
-			fields[f] = g_strdup(f == 0 ? "New entry" : "");
-		}
-		g_ptr_array_add(r->records, fields);
-	} else if (i >= r->records->len) {
+	if (i >= r->records->len) {
 		return;
 	} else if (a->op == MENU_REMOVE) {
 		g_ptr_array_add(r->trash, g_ptr_array_steal_index(r->records, i));
@@ -874,6 +881,29 @@ static void add_record_button(struct record_list *r, GtkWidget *box, const char 
 		G_CALLBACK(on_record_action), a));
 }
 
+/* "Add entry" picks first as well, so a new row is complete right away. */
+static void record_add_choice(gpointer target, const char *label, const char *icon,
+		const char *command) {
+	struct record_list *r = target;
+	char **fields = g_new0(char *, r->fields + 1);
+	for (int f = 0; f < r->fields; f++) {
+		fields[f] = g_strdup("");
+	}
+	g_free(fields[0]);
+	fields[0] = g_strdup(label);
+	if (r->icon_field >= 0) {
+		g_free(fields[r->icon_field]);
+		fields[r->icon_field] = g_strdup(icon ? icon : "");
+	}
+	g_free(fields[r->fields - 1]);
+	fields[r->fields - 1] = g_strdup(command);
+	g_ptr_array_add(r->records, fields);
+	records_write(r);
+	if (!r->rebuild_id) {
+		r->rebuild_id = g_idle_add(records_rebuild_idle, r);
+	}
+}
+
 static void records_rebuild(struct record_list *r) {
 	r->p->updating = true;
 	gtk_list_box_remove_all(GTK_LIST_BOX(r->list));
@@ -916,7 +946,7 @@ static void records_rebuild(struct record_list *r) {
 				c->r = r;
 				c->fields = fields;
 				c->field = f;
-				GtkWidget *choose = choice_button(r->p, record_apply_choice, c);
+				GtkWidget *choose = choice_button(r->p, "Choose...", record_apply_choice, c);
 				g_object_set_data_full(G_OBJECT(choose), "binding", c, g_free);
 				gtk_box_append(GTK_BOX(box), choose);
 			}
@@ -930,11 +960,7 @@ static void records_rebuild(struct record_list *r) {
 		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
 		gtk_list_box_append(GTK_LIST_BOX(r->list), row);
 	}
-	GtkWidget *add = gtk_button_new_with_label("Add entry");
-	struct record_action *a = g_new0(struct record_action, 1);
-	a->r = r;
-	a->op = MENU_OPEN;
-	g_signal_connect_data(add, "clicked", G_CALLBACK(on_record_action), a, ui_closure_free, 0);
+	GtkWidget *add = choice_button(r->p, "Add entry...", record_add_choice, r);
 	ui_row(r->list, NULL, r->records->len ? NULL : "No entries: the built-in defaults are used",
 		add);
 	r->p->updating = false;
@@ -1007,10 +1033,11 @@ GtkWidget *menus_page_new(struct settings *s) {
 	p->trash = g_ptr_array_new_with_free_func(mentry_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Menus",
-		"Right-click menus of the taskbar and the contents of the start menu. Choose... picks an "
-		"app, an action of tileWin or a folder and fills in the label, the icon and the "
-		"command; the icon button changes the icon and the button beside it makes an entry bold, "
-		"checked or greyed out. Everything can still be typed by hand.",
+		"Right-click menus of the taskbar and the contents of the start menu. Nothing here has "
+		"to be typed: Add item... and Choose... pick an app, an action of tileWin or a folder "
+		"and fill in the label, the icon and the command, the icon button opens a grid of icons "
+		"to click, and the button beside it makes an entry bold, checked or greyed out. Every "
+		"field can still be edited by hand.",
 		&content);
 
 	GtkWidget *group = ui_group(content, "Right-click menus", NULL);
@@ -1029,11 +1056,11 @@ GtkWidget *menus_page_new(struct settings *s) {
 	gtk_label_set_xalign(GTK_LABEL(p->crumb), 0);
 	gtk_widget_set_hexpand(p->crumb, TRUE);
 	gtk_box_append(GTK_BOX(nav), p->crumb);
+	gtk_box_append(GTK_BOX(nav), choice_button(p, "Add item...", add_apply_choice, p));
 	static const struct {
 		const char *label;
 		int kind;
 	} adds[] = {
-		{ "Add item", ENTRY_ITEM },
 		{ "Add separator", ENTRY_SEPARATOR },
 		{ "Add submenu", ENTRY_SUBMENU },
 	};

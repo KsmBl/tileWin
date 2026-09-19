@@ -420,7 +420,7 @@ GtkWidget *ui_app_picker(const char *label, void (*callback)(const char *id, gpo
 /* ---------- picking an icon ---------- */
 
 struct icon_dialog {
-	GtkWidget *window, *entry, *preview;
+	GtkWidget *window, *entry, *preview, *search, *grid;
 	char *fallback;
 	void (*apply)(const char *icon, gpointer data);
 	gpointer data;
@@ -474,6 +474,136 @@ static void on_icon_browse(GtkButton *button, gpointer data) {
 	g_object_unref(dialog);
 }
 
+/*
+ * The icons offered in the grid: the ones of the installed apps and a set of
+ * common names, kept to those the icon theme can actually draw. Everything
+ * here can be clicked, so an icon never has to be typed.
+ */
+static const char *const common_icons[] = {
+	"folder", "folder-open", "folder-documents", "folder-download", "folder-music",
+	"folder-pictures", "folder-videos", "folder-remote", "folder-new", "user-home",
+	"user-desktop", "user-trash", "user-trash-full", "network-workgroup",
+	"drive-harddisk", "drive-removable-media", "drive-optical", "media-floppy",
+	"computer", "printer", "camera-photo", "phone", "multimedia-player",
+	"system-run", "system-search", "system-file-manager", "system-software-install",
+	"system-shutdown", "system-reboot", "system-log-out", "system-lock-screen",
+	"system-users", "preferences-system", "preferences-desktop-theme",
+	"preferences-desktop-wallpaper", "preferences-desktop-keyboard",
+	"preferences-desktop-display", "preferences-system-network", "preferences-other",
+	"utilities-terminal", "utilities-system-monitor", "accessories-calculator",
+	"accessories-text-editor", "applications-accessories", "applications-development",
+	"applications-games", "applications-graphics", "applications-internet",
+	"applications-multimedia", "applications-office", "applications-science",
+	"applications-system", "applications-other", "application-x-executable",
+	"web-browser", "internet-mail", "help-browser", "text-x-generic", "text-html",
+	"image-x-generic", "audio-x-generic", "video-x-generic", "font-x-generic",
+	"package-x-generic", "x-office-document", "x-office-spreadsheet",
+	"x-office-presentation", "application-pdf",
+	"document-new", "document-open", "document-save", "document-print",
+	"document-properties", "edit-copy", "edit-paste", "edit-delete", "edit-rename",
+	"edit-find", "edit-clear", "view-refresh", "view-fullscreen", "view-sort-ascending",
+	"list-add", "list-remove", "go-home", "go-next", "go-previous", "go-up", "go-down",
+	"window-new", "window-close", "window-maximize", "window-minimize", "window-restore",
+	"emblem-symbolic-link", "emblem-favorite", "emblem-important", "dialog-information",
+	"dialog-warning", "dialog-error", "dialog-question", "help-about",
+	"audio-volume-high", "audio-volume-muted", "network-wireless", "network-wired",
+	"battery", "display-brightness", "weather-clear", "appointment-new",
+	"mail-send", "call-start", "media-playback-start", "media-playback-pause",
+	"media-skip-forward", "media-skip-backward", "media-record",
+	"applets-screenshooter", "start-here",
+};
+
+static void icon_names_add(GPtrArray *names, GHashTable *seen, GtkIconTheme *theme,
+		const char *name) {
+	if (!name || !*name || name[0] == '/' || g_hash_table_contains(seen, name)) {
+		return;
+	}
+	if (!gtk_icon_theme_has_icon(theme, name)) {
+		return;
+	}
+	g_hash_table_add(seen, g_strdup(name));
+	g_ptr_array_add(names, g_strdup(name));
+}
+
+/* Names of every icon that can be offered, once per process. */
+static GPtrArray *icon_names(void) {
+	static GPtrArray *names = NULL;
+	if (names) {
+		return names;
+	}
+	names = g_ptr_array_new_with_free_func(g_free);
+	GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	GtkIconTheme *theme = gtk_icon_theme_get_for_display(gdk_display_get_default());
+	for (size_t i = 0; i < G_N_ELEMENTS(common_icons); i++) {
+		icon_names_add(names, seen, theme, common_icons[i]);
+	}
+	list_t *apps = get_apps();
+	for (int i = 0; i < apps->length; i++) {
+		struct tw_desktop_entry *e = apps->items[i];
+		icon_names_add(names, seen, theme, e->icon);
+	}
+	g_hash_table_destroy(seen);
+	return names;
+}
+
+static gboolean icon_tile_filter(GtkFlowBoxChild *child, gpointer data) {
+	struct icon_dialog *d = data;
+	const char *query = gtk_editable_get_text(GTK_EDITABLE(d->search));
+	if (!*query) {
+		return TRUE;
+	}
+	const char *name = g_object_get_data(G_OBJECT(child), "icon");
+	char *needle = g_utf8_casefold(query, -1);
+	char *haystack = name ? g_utf8_casefold(name, -1) : NULL;
+	gboolean match = haystack && strstr(haystack, needle);
+	g_free(haystack);
+	g_free(needle);
+	return match;
+}
+
+static void on_icon_tile_activated(GtkFlowBox *box, GtkFlowBoxChild *child, gpointer data) {
+	struct icon_dialog *d = data;
+	const char *name = g_object_get_data(G_OBJECT(child), "icon");
+	if (name) {
+		gtk_editable_set_text(GTK_EDITABLE(d->entry), name);
+	}
+}
+
+static void on_icon_search_changed(GtkSearchEntry *entry, gpointer data) {
+	struct icon_dialog *d = data;
+	gtk_flow_box_invalidate_filter(GTK_FLOW_BOX(d->grid));
+}
+
+static GtkWidget *icon_grid(struct icon_dialog *d) {
+	d->grid = gtk_flow_box_new();
+	gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(d->grid), GTK_SELECTION_SINGLE);
+	gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(d->grid), 12);
+	gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(d->grid), TRUE);
+	gtk_flow_box_set_filter_func(GTK_FLOW_BOX(d->grid), icon_tile_filter, d, NULL);
+	GPtrArray *names = icon_names();
+	for (guint i = 0; i < names->len; i++) {
+		const char *name = names->pdata[i];
+		GtkWidget *child = gtk_flow_box_child_new();
+		GtkWidget *image = ui_app_icon(name, 32);
+		gtk_widget_set_margin_start(image, 4);
+		gtk_widget_set_margin_end(image, 4);
+		gtk_widget_set_margin_top(image, 4);
+		gtk_widget_set_margin_bottom(image, 4);
+		gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child), image);
+		gtk_widget_set_tooltip_text(child, name);
+		g_object_set_data_full(G_OBJECT(child), "icon", g_strdup(name), g_free);
+		gtk_flow_box_append(GTK_FLOW_BOX(d->grid), child);
+	}
+	g_signal_connect(d->grid, "child-activated", G_CALLBACK(on_icon_tile_activated), d);
+	GtkWidget *scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER,
+		GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), d->grid);
+	gtk_widget_set_vexpand(scroll, TRUE);
+	gtk_widget_add_css_class(scroll, "frame");
+	return scroll;
+}
+
 static void icon_dialog_apply(struct icon_dialog *d, const char *icon) {
 	d->apply(icon && *icon ? icon : NULL, d->data);
 	gtk_window_destroy(GTK_WINDOW(d->window));
@@ -506,7 +636,7 @@ void ui_icon_dialog(GtkWindow *parent, const char *title, const char *descriptio
 	gtk_window_set_modal(GTK_WINDOW(d->window), TRUE);
 	gtk_window_set_destroy_with_parent(GTK_WINDOW(d->window), TRUE);
 	gtk_window_set_title(GTK_WINDOW(d->window), "Icon");
-	gtk_window_set_default_size(GTK_WINDOW(d->window), 520, 380);
+	gtk_window_set_default_size(GTK_WINDOW(d->window), 620, 560);
 	g_signal_connect(d->window, "destroy", G_CALLBACK(icon_dialog_closed), d);
 
 	GtkWidget *content;
@@ -525,7 +655,16 @@ void ui_icon_dialog(GtkWindow *parent, const char *title, const char *descriptio
 	gtk_box_prepend(GTK_BOX(ui_row_box(row)), d->preview);
 	GtkWidget *browse = gtk_button_new_with_label("Pick a file...");
 	g_signal_connect(browse, "clicked", G_CALLBACK(on_icon_browse), d);
-	ui_row(group, "Image file", "PNG or SVG, e.g. from ~/Pictures", browse);
+	gtk_box_append(GTK_BOX(ui_row_box(row)), browse);
+
+	// the grid of icons to click, with a search over their names
+	d->search = gtk_search_entry_new();
+	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(d->search),
+		"Search the icons, e.g. folder");
+	gtk_widget_set_margin_top(d->search, 8);
+	g_signal_connect(d->search, "search-changed", G_CALLBACK(on_icon_search_changed), d);
+	gtk_box_append(GTK_BOX(content), d->search);
+	gtk_box_append(GTK_BOX(content), icon_grid(d));
 
 	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
 	gtk_widget_set_halign(buttons, GTK_ALIGN_END);
