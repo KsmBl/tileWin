@@ -294,7 +294,63 @@ static gboolean show_found(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+/* ---------- pages are built when they are needed ---------- */
+
+struct lazy_page {
+	struct settings *s;
+	const char *name, *title, *keywords;
+	GtkWidget *(*create)(struct settings *s);
+	GtkWidget *holder;
+	bool built;
+};
+
+static GPtrArray *lazy_pages;
+
+static void lazy_build(struct lazy_page *lp) {
+	if (lp->built) {
+		return;
+	}
+	lp->built = true;
+	ui_index_page(lp->name, lp->title, lp->keywords);
+	gtk_box_append(GTK_BOX(lp->holder), lp->create(lp->s));
+	ui_index_page(NULL, NULL, NULL);
+}
+
+static void lazy_build_named(const char *name) {
+	for (guint i = 0; lazy_pages && name && i < lazy_pages->len; i++) {
+		struct lazy_page *lp = lazy_pages->pdata[i];
+		if (strcmp(lp->name, name) == 0) {
+			lazy_build(lp);
+			return;
+		}
+	}
+}
+
+/* One page per turn of the loop, so the window is up and usable meanwhile. */
+static gboolean lazy_build_next(gpointer data) {
+	for (guint i = 0; lazy_pages && i < lazy_pages->len; i++) {
+		struct lazy_page *lp = lazy_pages->pdata[i];
+		if (!lp->built) {
+			lazy_build(lp);
+			return lazy_pages->len > i + 1 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+		}
+	}
+	return G_SOURCE_REMOVE;
+}
+
+static void on_visible_page(GObject *stack, GParamSpec *pspec, gpointer data) {
+	lazy_build_named(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
+}
+
+/* Everything has to exist before the search can look through it. */
+static void lazy_build_all(void) {
+	for (guint i = 0; lazy_pages && i < lazy_pages->len; i++) {
+		lazy_build(lazy_pages->pdata[i]);
+	}
+}
+
 static void show_entry(struct settings *s, struct ui_search_entry *e) {
+	lazy_build_named(e->page);
 	gtk_stack_set_visible_child_name(s->stack, e->page);
 	if (e->widget) {
 		GtkWidget **widget = g_new(GtkWidget *, 1);
@@ -331,6 +387,7 @@ static void on_search_changed(GtkSearchEntry *entry, gpointer data) {
 	if (!active) {
 		return;
 	}
+	lazy_build_all(); // the search looks through every page
 	GPtrArray *hits = ui_search(text);
 	for (guint i = 0; i < hits->len && i < 60; i++) {
 		struct ui_search_entry *e = hits->pdata[i];
@@ -427,11 +484,23 @@ static void build_window(struct settings *s) {
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
 	};
+	lazy_pages = g_ptr_array_new_with_free_func(g_free);
 	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
-		ui_index_page(pages[i].name, pages[i].title, pages[i].keywords);
-		gtk_stack_add_titled(s->stack, pages[i].create(s), pages[i].name, pages[i].title);
+		struct lazy_page *lp = g_new0(struct lazy_page, 1);
+		lp->s = s;
+		lp->name = pages[i].name;
+		lp->title = pages[i].title;
+		lp->keywords = pages[i].keywords;
+		lp->create = pages[i].create;
+		lp->holder = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		gtk_widget_set_vexpand(lp->holder, TRUE);
+		gtk_stack_add_titled(s->stack, lp->holder, pages[i].name, pages[i].title);
+		g_ptr_array_add(lazy_pages, lp);
 	}
-	ui_index_page(NULL, NULL, NULL);
+	// the one that is shown first, then the rest while the window is already up
+	lazy_build(lazy_pages->pdata[0]);
+	g_signal_connect(s->stack, "notify::visible-child-name", G_CALLBACK(on_visible_page), s);
+	g_idle_add(lazy_build_next, NULL);
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);
@@ -506,6 +575,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 	const char *page = NULL;
 	if (g_variant_dict_lookup(options, "page", "&s", &page)) {
 		if (gtk_stack_get_child_by_name(s->stack, page)) {
+			lazy_build_named(page);
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
