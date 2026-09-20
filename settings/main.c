@@ -481,7 +481,8 @@ static void build_window(struct settings *s) {
 			"12 24 seconds automatic", datetime_page_new },
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 			bluetooth_page_new },
-		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications", taskbar_page_new },
+		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications desktop icons "
+			"grid clipboard history", taskbar_page_new },
 		{ "menus", "Menus", "start menu right click context pinned", menus_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },

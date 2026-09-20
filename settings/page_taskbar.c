@@ -64,6 +64,7 @@ static const char *const choice_meter[] = { "text", "graph", "bar", NULL };
 static const struct opt opts_clock[] = {
 	{ "format", "Format", "strftime format, \\n starts a second line. The theme decides by default.", NULL },
 	{ "tooltip_format", "Tooltip format", "strftime format of the tooltip", NULL },
+	{ "settings", "Settings link", "Opened by the link in the calendar, default exec tilewin-settings --page datetime", NULL },
 	{ 0 },
 };
 static const struct opt opts_cpu[] = {
@@ -158,18 +159,42 @@ static const struct opt opts_disk[] = {
 static const struct opt opts_battery[] = {
 	{ "interval", "Update interval", "Seconds, default 30", NULL },
 	{ "format", "Format", "{capacity} is the charge in percent", NULL },
+	{ "format_charging", "Format while charging", "Used instead of Format while the battery charges", NULL },
+	{ "format_full", "Format when full", "Used instead of Format once the battery is full", NULL },
+	{ "format_plugged", "Format on mains", "Used instead of Format while the charger is plugged in", NULL },
 	{ "device", "Device", "Name in /sys/class/power_supply, e.g. BAT0", NULL },
+	{ "icons", "Icons", "Characters for {icon}, lowest charge first, separated by spaces", NULL },
+	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the battery flyout", choice_yes_no },
+	{ "settings", "Settings link", "Opened by the link in the flyout, e.g. exec tilewin-settings --page screen", NULL },
 	{ 0 },
 };
 static const struct opt opts_network[] = {
 	{ "interval", "Update interval", "Seconds, default 5", NULL },
 	{ "interface", "Interface", "e.g. wlan0; detected automatically if empty", NULL },
+	{ "format", "Format", "{essid}, {quality} and {ifname}", NULL },
+	{ "format_ethernet", "Format on a cable", "Used instead of Format for a wired connection", NULL },
+	{ "format_disconnected", "Format when offline", "Used instead of Format while nothing is connected", NULL },
+	{ "icons", "Icons", "Characters for {icon}, weakest signal first", NULL },
+	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the network flyout", choice_yes_no },
+	{ "settings", "Settings link", "Opened by the link in the flyout, default exec nm-connection-editor", NULL },
 	{ 0 },
 };
 static const struct opt opts_volume[] = {
 	{ "mixer", "Mixer command", "Runs on click, default exec pavucontrol", NULL },
 	{ "step", "Scroll step", "Percent, default 5", NULL },
-	{ "format", "Format", NULL, NULL },
+	{ "format", "Format", "{volume} is the level in percent", NULL },
+	{ "format_muted", "Format when muted", "Used instead of Format while the sound is off", NULL },
+	{ "icons", "Icons", "Characters for {icon}, quietest first", NULL },
+	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the volume flyout", choice_yes_no },
+	{ 0 },
+};
+static const struct opt opts_brightness[] = {
+	{ "format", "Format", "{percent} is the brightness", NULL },
+	{ "icons", "Icons", "Characters for {icon}, darkest first", NULL },
+	{ 0 },
+};
+static const struct opt opts_notifications[] = {
+	{ "always", "Always show the button", "Otherwise it appears only when something is waiting", choice_yes_no },
 	{ 0 },
 };
 static const struct opt opts_taskbar[] = {
@@ -180,6 +205,7 @@ static const struct opt opts_taskbar[] = {
 	{ "middle_click", "Middle click", "Close the window or start a new one", choice_close_new },
 	{ "max_width", "Maximum button width", "Pixels", NULL },
 	{ "button_width", "Button width", "Pixels", NULL },
+	{ "thumbnails", "Preview on hover", "A live picture of the window above the button", choice_yes_no },
 	{ 0 },
 };
 static const struct opt opts_search[] = {
@@ -232,6 +258,8 @@ static const struct {
 	{ "battery", opts_battery },
 	{ "network", opts_network },
 	{ "volume", opts_volume },
+	{ "brightness", opts_brightness },
+	{ "notifications", opts_notifications },
 	{ "taskbar", opts_taskbar },
 	{ "search", opts_search },
 	{ "start", opts_start },
@@ -251,6 +279,7 @@ struct taskbar_page {
 	GtkWidget *custom_entry, *custom_popover;
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
 	struct app_list *quick;
+	GPtrArray *root_settings;
 	GHashTable *quick_icons;
 	guint rebuild_id;
 	char *open_dialog; // widget whose settings open after the next rebuild
@@ -1005,9 +1034,12 @@ static void refresh_general(struct taskbar_page *p) {
 	g_ptr_array_unref(ids);
 }
 
+static void root_settings_refresh(struct taskbar_page *p);
+
 static void rebuild_all(struct taskbar_page *p) {
 	p->updating = true;
 	refresh_layout_controls(p);
+	root_settings_refresh(p);
 	refresh_general(p);
 	p->updating = false;
 	rebuild_sections(p);
@@ -1150,6 +1182,94 @@ static void on_quick_icon(struct app_list *l, guint index, gpointer data) {
 		e ? e->icon : NULL, "Use the app's icon", on_icon_chosen, r);
 }
 
+/* ---------- switches and numbers at the top level of taskbar.conf ---------- */
+
+struct root_setting {
+	struct taskbar_page *p;
+	const char *key;
+	GtkWidget *widget;
+	bool is_switch;
+	int fallback;
+	guint timer;
+};
+
+static bool setting_is_on(const char *value) {
+	return !(g_ascii_strcasecmp(value, "no") == 0 || g_ascii_strcasecmp(value, "off") == 0 ||
+		g_ascii_strcasecmp(value, "false") == 0 || g_ascii_strcasecmp(value, "disable") == 0);
+}
+
+/* The default is written as nothing at all, so the file stays as short as it can. */
+static void root_setting_write(struct root_setting *r) {
+	char number[16];
+	const char *value;
+	if (r->is_switch) {
+		bool on = gtk_switch_get_active(GTK_SWITCH(r->widget));
+		value = on == (r->fallback != 0) ? NULL : on ? "yes" : "no";
+	} else {
+		int size = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(r->widget));
+		snprintf(number, sizeof(number), "%d", size);
+		value = size == r->fallback ? NULL : number;
+	}
+	confdoc_set(doc(r->p), doc(r->p)->root, r->key, NULL, value);
+	settings_taskbar_changed(r->p->s);
+}
+
+static gboolean root_setting_apply(gpointer data) {
+	struct root_setting *r = data;
+	r->timer = 0;
+	root_setting_write(r);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_root_setting(GObject *object, gpointer data) {
+	struct root_setting *r = data;
+	if (r->p->updating) {
+		return;
+	}
+	if (r->is_switch) {
+		root_setting_write(r);
+		return;
+	}
+	// spinning through the numbers must not rewrite the file on every step
+	if (r->timer) {
+		g_source_remove(r->timer);
+	}
+	r->timer = g_timeout_add(300, root_setting_apply, r);
+}
+
+static void root_setting_new(struct taskbar_page *p, GtkWidget *group, const char *key,
+		const char *title, const char *hint, bool is_switch, int low, int high,
+		int fallback) {
+	struct root_setting *r = g_new0(struct root_setting, 1);
+	r->p = p;
+	r->key = key;
+	r->is_switch = is_switch;
+	r->fallback = fallback;
+	if (is_switch) {
+		r->widget = gtk_switch_new();
+		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_setting), r);
+	} else {
+		r->widget = gtk_spin_button_new_with_range(low, high, 1);
+		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);
+	}
+	ui_row(group, title, hint, r->widget);
+	g_ptr_array_add(p->root_settings, r);
+}
+
+static void root_settings_refresh(struct taskbar_page *p) {
+	for (guint i = 0; i < p->root_settings->len; i++) {
+		struct root_setting *r = p->root_settings->pdata[i];
+		const char *value = cstmt_arg(confdoc_child(doc(p)->root, r->key, NULL), 0);
+		if (r->is_switch) {
+			gtk_switch_set_active(GTK_SWITCH(r->widget),
+				value ? setting_is_on(value) : r->fallback != 0);
+		} else {
+			gtk_spin_button_set_value(GTK_SPIN_BUTTON(r->widget),
+				value ? atoi(value) : r->fallback);
+		}
+	}
+}
+
 static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char *placeholder) {
 	GtkWidget *entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
@@ -1162,6 +1282,7 @@ static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char
 GtkWidget *taskbar_page_new(struct settings *s) {
 	struct taskbar_page *p = g_new0(struct taskbar_page, 1);
 	p->s = s;
+	p->root_settings = g_ptr_array_new_with_free_func(g_free);
 	p->quick_icons = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Taskbar",
@@ -1193,6 +1314,27 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->height_spin = gtk_spin_button_new_with_range(0, 200, 1);
 	g_signal_connect(p->height_spin, "value-changed", G_CALLBACK(on_height_changed), p);
 	ui_row(layout, "Height", "Pixels; 0 uses the theme's height", p->height_spin);
+	root_setting_new(p, layout, "theme_layout", "Let the theme bring its own layout",
+		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
+
+	GtkWidget *desktop = ui_group(content, "Desktop",
+		"The icons of ~/Desktop and the grid they sit in.");
+	root_setting_new(p, desktop, "desktop_icons", "Show icons on the desktop", NULL,
+		true, 0, 0, 1);
+	root_setting_new(p, desktop, "desktop_icon_size", "Icon size", "Pixels",
+		false, 16, 256, 48);
+	root_setting_new(p, desktop, "desktop_icon_width", "Cell width",
+		"Pixels of the cell an icon sits in", false, 48, 400, 100);
+	root_setting_new(p, desktop, "desktop_icon_height", "Cell height",
+		"Pixels of the cell an icon sits in", false, 48, 400, 100);
+	root_setting_new(p, desktop, "desktop_margin", "Margin", "Pixels around the whole grid",
+		false, 0, 200, 10);
+
+	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);
+	root_setting_new(p, clipboard, "clipboard_history", "Remember what was copied",
+		"Win+V shows the history; passwords marked as secret are never kept", true, 0, 0, 1);
+	root_setting_new(p, clipboard, "clipboard_paste", "Paste the entry that is picked",
+		"Off only copies it back to the clipboard", true, 0, 0, 1);
 
 	for (int i = 0; i < SECTION_COUNT; i++) {
 		char *title = g_strdup_printf("%s section", section_titles[i]);
