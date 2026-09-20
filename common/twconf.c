@@ -275,7 +275,12 @@ static bool parse_block(struct parser *p, list_t *children, bool top) {
 		for (;;) {
 			struct token a = next_token(p);
 			if (a.type == TOK_WORD) {
-				list_add(args, expand_vars(p, a.text));
+				// the name a "set" gives is the one word that is not looked
+				// up, or "set $termtab $term --tab" would name its variable
+				// after the value of $term
+				bool names_a_variable = args->length == 0 &&
+					strcmp(node->name, "set") == 0;
+				list_add(args, names_a_variable ? a.text : expand_vars(p, a.text));
 			} else if (a.type == TOK_LBRACE) {
 				node->children = create_list();
 				ok = parse_block(p, node->children, false);

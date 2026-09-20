@@ -575,5 +575,16 @@ char *conf_quote_command(const char *command) {
 			bare = false;
 		}
 	}
-	return bare ? g_strdup(command) : conf_quote(command);
+	if (bare) {
+		return g_strdup(command);
+	}
+	char *quoted = conf_quote(command);
+	if (quoted[0] == '"') {
+		return quoted;
+	}
+	// conf_quote leaves a plain word alone, but a reserved one has to be
+	// quoted or the menu reads it as the keyword it looks like
+	char *forced = g_strdup_printf("\"%s\"", quoted);
+	g_free(quoted);
+	return forced;
 }

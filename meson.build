@@ -217,6 +217,8 @@ if gtk4.found()
 	subdir('settings')
 endif
 
+subdir('tests')
+
 # tileWin data files
 install_subdir('themes', install_dir: tilewin_datadir)
 install_subdir('config', install_dir: tilewin_datadir)
