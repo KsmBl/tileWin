@@ -312,7 +312,12 @@ static void lazy_build(struct lazy_page *lp) {
 	}
 	lp->built = true;
 	ui_index_page(lp->name, lp->title, lp->keywords);
-	gtk_box_append(GTK_BOX(lp->holder), lp->create(lp->s));
+	GtkWidget *page = lp->create(lp->s);
+	// the stack used to hand the page the whole area by itself; inside the
+	// box that holds its place it has to ask for the room
+	gtk_widget_set_hexpand(page, TRUE);
+	gtk_widget_set_vexpand(page, TRUE);
+	gtk_box_append(GTK_BOX(lp->holder), page);
 	ui_index_page(NULL, NULL, NULL);
 }
 
