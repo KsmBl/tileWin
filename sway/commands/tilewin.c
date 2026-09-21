@@ -617,7 +617,8 @@ static struct cmd_results *shake_number(int argc, char **argv, const char *name,
 }
 
 struct cmd_results *cmd_pointer_shake_max(int argc, char **argv) {
-	return shake_number(argc, argv, "pointer_shake_max", 100, 1000, &config->tw_shake_max);
+	return shake_number(argc, argv, "pointer_shake_max", 100, TW_SHAKE_MAX_LIMIT,
+		&config->tw_shake_max);
 }
 
 struct cmd_results *cmd_pointer_shake_rate(int argc, char **argv) {

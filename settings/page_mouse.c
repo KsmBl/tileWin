@@ -288,21 +288,34 @@ static void on_test_pressed(GtkGestureClick *gesture, int n_press, double x, dou
 
 /* ---------- plain settings of common.conf, written as they are changed ---------- */
 
+// how a plain setting of common.conf is offered
+enum root_kind {
+	ROOT_SWITCH,
+	ROOT_SLIDER,
+	ROOT_NUMBER, // a box to type in, for ranges too wide to drag through
+};
+
 struct root_setting {
 	struct mouse_page *p;
 	const char *key;
 	GtkWidget *widget;
-	bool is_switch;
+	enum root_kind kind;
 	int fallback;
 	guint timer;
 };
 
 static void root_setting_write(struct root_setting *r) {
 	char value[32];
-	if (r->is_switch) {
+	switch (r->kind) {
+	case ROOT_SWITCH:
 		snprintf(value, sizeof(value), "%s",
 			gtk_switch_get_active(GTK_SWITCH(r->widget)) ? "enable" : "disable");
-	} else {
+		break;
+	case ROOT_NUMBER:
+		snprintf(value, sizeof(value), "%d",
+			gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(r->widget)));
+		break;
+	default:
 		snprintf(value, sizeof(value), "%d",
 			(int)round(gtk_range_get_value(GTK_RANGE(r->widget))));
 	}
@@ -324,7 +337,7 @@ static void on_root_setting(GObject *object, gpointer data) {
 	if (r->p->updating) {
 		return;
 	}
-	if (r->is_switch) {
+	if (r->kind == ROOT_SWITCH) {
 		root_setting_write(r);
 		return;
 	}
@@ -340,16 +353,20 @@ static void on_root_switch(GObject *object, GParamSpec *pspec, gpointer data) {
 }
 
 static struct root_setting *root_setting_new(struct mouse_page *p, GtkWidget *group,
-		const char *key, const char *title, const char *hint, bool is_switch,
+		const char *key, const char *title, const char *hint, enum root_kind kind,
 		int min, int max, int step, int fallback) {
 	struct root_setting *r = g_new0(struct root_setting, 1);
 	r->p = p;
 	r->key = key;
-	r->is_switch = is_switch;
+	r->kind = kind;
 	r->fallback = fallback;
-	if (is_switch) {
+	if (kind == ROOT_SWITCH) {
 		r->widget = gtk_switch_new();
 		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_switch), r);
+	} else if (kind == ROOT_NUMBER) {
+		r->widget = gtk_spin_button_new_with_range(min, max, step);
+		gtk_spin_button_set_increments(GTK_SPIN_BUTTON(r->widget), step, step * 10);
+		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);
 	} else {
 		r->widget = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, min, max, step);
 		gtk_widget_set_size_request(r->widget, 260, -1);
@@ -368,12 +385,15 @@ static void root_settings_refresh(struct mouse_page *p) {
 	for (guint i = 0; i < p->root_settings->len; i++) {
 		struct root_setting *r = p->root_settings->pdata[i];
 		const char *value = cstmt_arg(confdoc_child(common(p)->root, r->key, NULL), 0);
-		if (r->is_switch) {
+		if (r->kind == ROOT_SWITCH) {
 			gtk_switch_set_active(GTK_SWITCH(r->widget), value ?
 				!(g_ascii_strcasecmp(value, "disable") == 0 ||
 				g_ascii_strcasecmp(value, "no") == 0 ||
 				g_ascii_strcasecmp(value, "off") == 0 ||
 				g_ascii_strcasecmp(value, "false") == 0) : r->fallback != 0);
+		} else if (r->kind == ROOT_NUMBER) {
+			gtk_spin_button_set_value(GTK_SPIN_BUTTON(r->widget),
+				value ? atoi(value) : r->fallback);
 		} else {
 			gtk_range_set_value(GTK_RANGE(r->widget), value ? atoi(value) : r->fallback);
 		}
@@ -581,13 +601,14 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	GtkWidget *find = ui_group(content, "Finding the pointer", NULL);
 	root_setting_new(p, find, "pointer_shake", "Grow the pointer when the mouse is shaken",
 		"Shake the mouse quickly back and forth and the pointer swells, like on KDE",
-		true, 0, 0, 0, 0);
+		ROOT_SWITCH, 0, 0, 0, 0);
 	root_setting_new(p, find, "pointer_shake_max", "Biggest size",
-		"Percent of the normal pointer size", false, 100, 1000, 25, 300);
+		"Percent of the normal pointer size, up to 100000", ROOT_NUMBER,
+		100, 100000, 100, 5000);
 	root_setting_new(p, find, "pointer_shake_rate", "How fast it grows",
-		"Percent per second, and how fast it shrinks again", false, 50, 2000, 50, 400);
+		"Percent per second, and how fast it shrinks again", ROOT_SLIDER, 50, 5000, 50, 400);
 	root_setting_new(p, find, "pointer_shake_shakes", "Shakes needed",
-		"Changes of direction per second before it starts growing", false, 2, 30, 1, 6);
+		"Changes of direction per second before it starts growing", ROOT_SLIDER, 2, 30, 1, 6);
 
 	p->trail = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 1000, 25);
 	gtk_widget_set_size_request(p->trail, 260, -1);

@@ -75,14 +75,18 @@ static struct {
 	struct wl_event_source *trail_timer;
 
 	// shaking the mouse makes the pointer grow
-	double shake_x, shake_y, shake_travel, shake_factor;
-	int shake_direction, shake_count, shake_applied, shake_next;
+	double shake_x, shake_y, shake_travel, shake_factor, shake_shown;
+	int shake_direction, shake_count;
 	struct timespec shake_reversals[32];
 	struct timespec shake_ticked;
 	struct wl_event_source *shake_timer;
-	bool shake_ticking;
-	struct wlr_xcursor_manager *shake_managers[8];
-	int shake_sizes[8];
+	struct timespec shake_drawn;
+	bool shake_ticking, shake_applied;
+	// one pointer image, drawn at whatever size the shaking asks for
+	struct wlr_xcursor_manager *shake_source;
+	struct wlr_buffer *shake_image;
+	char shake_image_name[64];
+	int shake_image_width, shake_image_hotspot_x, shake_image_hotspot_y;
 } state;
 
 static double elapsed_ms(struct timespec *since) {
@@ -239,17 +243,39 @@ void tw_pointer_cancel_tap(void) {
 	state.held = 0;
 }
 
+/* ---------- the pointer image as a buffer ---------- */
+
+/* Copies one picture of a cursor theme into a buffer that can be drawn. */
+static struct wlr_buffer *image_to_buffer(struct wlr_xcursor_image *image) {
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+		image->width, image->height);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
+	// both are premultiplied ARGB8888, but the strides need not match
+	unsigned char *dst = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (uint32_t row = 0; row < image->height; row++) {
+		memcpy(dst + (size_t)row * stride, image->buffer + (size_t)row * image->width * 4,
+			(size_t)image->width * 4);
+	}
+	cairo_surface_mark_dirty(surface);
+	return tw_buffer_from_surface(surface); // takes the surface
+}
+
 /* ---------- shaking the mouse makes the pointer bigger ---------- */
 
 #define SHAKE_WINDOW_MS 600  // reversals are counted over this long
 #define SHAKE_MIN_TRAVEL 12  // pixels a swing has to cover to count as one
 #define SHAKE_REVERSALS 32
-#define SHAKE_STEP 8         // cursor sizes are rounded to this, so few are built
-#define SHAKE_SIZES 8        // cursor themes kept around at once
+#define SHAKE_IMAGE_SIZE 256 // the pointer is drawn from one picture this big
+#define SHAKE_MIN_CHANGE 0.01 // redraw only when the size really moved
+#define SHAKE_DRAW_MS 16      // and no oftener than this, the pointer is not a film
 
 static int shake_max_percent(void) {
-	int value = config ? config->tw_shake_max : 300;
-	return value < 100 ? 100 : value > 1000 ? 1000 : value;
+	int value = config ? config->tw_shake_max : TW_SHAKE_MAX_DEFAULT;
+	return value < 100 ? 100 : value > TW_SHAKE_MAX_LIMIT ? TW_SHAKE_MAX_LIMIT : value;
 }
 
 static int shake_rate_percent(void) {
@@ -266,60 +292,77 @@ static bool shake_enabled(void) {
 	return config && config->tw_shake && server.wl_event_loop && root;
 }
 
-/* A cursor theme at a bigger size than the one the seat normally uses. */
-static struct wlr_xcursor_manager *shake_manager(struct sway_cursor *cursor, int size) {
-	for (int i = 0; i < SHAKE_SIZES; i++) {
-		if (state.shake_sizes[i] == size && state.shake_managers[i]) {
-			return state.shake_managers[i];
+/*
+ * The picture the grown pointer is drawn from. Building a cursor theme costs
+ * tens of milliseconds, so one picture is built at a size big enough to be
+ * scaled up from and then used for every size the shaking asks for.
+ */
+static bool shake_load_image(struct sway_cursor *cursor) {
+	const char *name = cursor->image ? cursor->image : "default";
+	if (state.shake_image && strcmp(state.shake_image_name, name) == 0) {
+		return true;
+	}
+	if (!state.shake_source) {
+		const char *theme = cursor->xcursor_manager ? cursor->xcursor_manager->name : NULL;
+		state.shake_source = wlr_xcursor_manager_create(theme, SHAKE_IMAGE_SIZE);
+		if (!state.shake_source) {
+			return false;
 		}
+		wlr_xcursor_manager_load(state.shake_source, 1);
 	}
-	int slot = state.shake_next % SHAKE_SIZES;
-	state.shake_next++;
-	if (state.shake_managers[slot]) {
-		wlr_xcursor_manager_destroy(state.shake_managers[slot]);
+	struct wlr_xcursor *xcursor =
+		wlr_xcursor_manager_get_xcursor(state.shake_source, name, 1);
+	if (!xcursor && strcmp(name, "default") != 0) {
+		xcursor = wlr_xcursor_manager_get_xcursor(state.shake_source, "default", 1);
 	}
-	const char *name = cursor->xcursor_manager ? cursor->xcursor_manager->name : NULL;
-	state.shake_managers[slot] = wlr_xcursor_manager_create(name, size);
-	state.shake_sizes[slot] = size;
-	if (state.shake_managers[slot]) {
-		wlr_xcursor_manager_load(state.shake_managers[slot], 1);
-		for (int i = 0; root && i < root->outputs->length; i++) {
-			struct sway_output *output = root->outputs->items[i];
-			if (output->wlr_output) {
-				wlr_xcursor_manager_load(state.shake_managers[slot],
-					output->wlr_output->scale);
-			}
-		}
+	if (!xcursor || xcursor->image_count == 0) {
+		return false;
 	}
-	return state.shake_managers[slot];
+	struct wlr_buffer *buffer = image_to_buffer(xcursor->images[0]);
+	if (!buffer) {
+		return false;
+	}
+	if (state.shake_image) {
+		wlr_buffer_drop(state.shake_image);
+	}
+	state.shake_image = buffer;
+	snprintf(state.shake_image_name, sizeof(state.shake_image_name), "%s", name);
+	state.shake_image_width = xcursor->images[0]->width;
+	state.shake_image_hotspot_x = xcursor->images[0]->hotspot_x;
+	state.shake_image_hotspot_y = xcursor->images[0]->hotspot_y;
+	return true;
 }
 
-/* Shows the pointer at the grown size, or back at its own size. */
+/* Shows the pointer at the grown size, or hands it back to the seat. */
 static void shake_apply(struct sway_cursor *cursor) {
 	if (!cursor->xcursor_manager || cursor->hidden) {
 		return;
 	}
-	int base = (int)cursor->xcursor_manager->size;
-	int want = (int)round(base * state.shake_factor);
-	want = want / SHAKE_STEP * SHAKE_STEP;
-	if (want <= base) {
+	if (state.shake_factor <= 1 + SHAKE_MIN_CHANGE) {
 		if (state.shake_applied) {
-			state.shake_applied = 0;
+			state.shake_applied = false;
 			wlr_cursor_set_xcursor(cursor->cursor, cursor->xcursor_manager,
 				cursor->image ? cursor->image : "default");
 		}
 		return;
 	}
-	if (state.shake_applied == want) {
+	if (state.shake_applied &&
+			(fabs(state.shake_shown - state.shake_factor) < SHAKE_MIN_CHANGE ||
+			elapsed_ms(&state.shake_drawn) < SHAKE_DRAW_MS)) {
 		return;
 	}
-	struct wlr_xcursor_manager *manager = shake_manager(cursor, want);
-	if (!manager) {
+	if (!shake_load_image(cursor)) {
 		return;
 	}
-	state.shake_applied = want;
-	wlr_cursor_set_xcursor(cursor->cursor, manager,
-		cursor->image ? cursor->image : "default");
+	// the buffer covers width/scale logical pixels, so ask for the size we want
+	double want = cursor->xcursor_manager->size * state.shake_factor;
+	float scale = (float)(state.shake_image_width / want);
+	wlr_cursor_set_buffer(cursor->cursor, state.shake_image,
+		(int)round(state.shake_image_hotspot_x / scale),
+		(int)round(state.shake_image_hotspot_y / scale), scale);
+	state.shake_applied = true;
+	state.shake_shown = state.shake_factor;
+	clock_gettime(CLOCK_MONOTONIC, &state.shake_drawn);
 }
 
 static int shake_tick(void *data) {
@@ -459,26 +502,12 @@ static bool trail_load_image(struct sway_cursor *cursor, double scale, bool *cha
 		return false;
 	}
 	struct wlr_xcursor_image *image = xcursor->images[0];
-	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-		image->width, image->height);
-	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(surface);
+	struct wlr_buffer *buffer = image_to_buffer(image);
+	if (!buffer) {
 		return false;
 	}
-	// both are premultiplied ARGB8888, but the strides need not match
-	unsigned char *dst = cairo_image_surface_get_data(surface);
-	int stride = cairo_image_surface_get_stride(surface);
-	for (uint32_t row = 0; row < image->height; row++) {
-		memcpy(dst + (size_t)row * stride, image->buffer + (size_t)row * image->width * 4,
-			(size_t)image->width * 4);
-	}
-	cairo_surface_mark_dirty(surface);
-
 	trail_free_image();
-	state.trail_image = tw_buffer_from_surface(surface); // takes the surface
-	if (!state.trail_image) {
-		return false;
-	}
+	state.trail_image = buffer;
 	snprintf(state.trail_name, sizeof(state.trail_name), "%s", name);
 	state.trail_scale = scale;
 	state.image_width = image->width;

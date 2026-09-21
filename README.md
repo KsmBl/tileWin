@@ -300,8 +300,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `window_group_modifier <key>\|none` | Held while dragging a window, the windows touching it move along, snapped ones in the size they have (default `Shift`; e.g. `Alt`, `Ctrl+Alt`) |
 | `alttab_style theme\|icons\|flip3d` | What the Alt+Tab switcher shows: what the theme has (default), a grid of icons, or a 3D stack of the windows themselves |
 | `pointer_shake enable\|disable` | Shaking the mouse quickly back and forth makes the pointer grow, like on KDE (default disable) |
-| `pointer_shake_max <percent>` | How big it gets, in percent of the normal pointer (default 300) |
-| `pointer_shake_rate <percent>` | How fast it grows and shrinks again, in percent per second (default 400) |
+| `pointer_shake_max <percent>` | How big it gets, in percent of the normal pointer, 100 to 100000 (default 5000) |
+| `pointer_shake_rate <percent>` | How fast it grows and shrinks again, in percent per second, 10 to 5000 (default 400) |
 | `pointer_shake_shakes <count>` | Changes of direction per second before it starts growing (default 6) |
 | `pointer_locate theme\|enable\|disable` | Tapping Ctrl on its own draws rings that shrink onto the pointer; `theme` (default) leaves it to `pointer { locate }` of the theme |
 | `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off) |

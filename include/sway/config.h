@@ -428,6 +428,10 @@ struct tray_binding {
 };
 #endif
 
+/* How big a shaken pointer may get, in percent of its normal size. */
+#define TW_SHAKE_MAX_DEFAULT 5000
+#define TW_SHAKE_MAX_LIMIT 100000
+
 struct border_colors {
 	float border[4];
 	float background[4];
@@ -557,7 +561,7 @@ struct sway_config {
 	int tw_alttab_style; // -1: as the theme says, 0: icons, 1: flip3d
 	int tw_pointer_locate; // -1: as the theme says, 0: off, 1: Ctrl shows the pointer
 	bool tw_shake;      // shaking the mouse makes the pointer grow
-	int tw_shake_max;   // biggest size in percent of the normal one
+	int tw_shake_max;   // biggest size in percent of the normal one (see below)
 	int tw_shake_rate;  // how fast it grows, in percent per second
 	int tw_shake_shakes; // changes of direction per second that start it
 	int tw_double_click_time; // milliseconds between two clicks of a double-click
