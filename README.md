@@ -130,13 +130,15 @@ Start tileWin:
 
 ```sh
 meson test -C build-release --suite unit   # the config parser, the config editor and the settings coverage
-meson test -C build-release --suite gui    # opens every settings page in a nested tileWin and looks at it
+meson test -C build-release --suite gui    # drives the settings app in a nested tileWin and looks at it
 ```
 
 The coverage test walks the sources and fails when the taskbar or the
 compositor reads a setting that no page of the settings app offers, so nothing
-ends up settable only by hand. The `gui` suite needs `grim` and skips itself
-where it cannot run.
+ends up settable only by hand. The `gui` suite opens every page and counts the
+pixels it drew, and clicks a switch with a pointer of its own to check that it
+really saves what it was set to; it needs `grim` and skips itself where it
+cannot run.
 
 ### Updating
 
