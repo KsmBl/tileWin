@@ -1237,6 +1237,11 @@ static void on_root_setting(GObject *object, gpointer data) {
 	r->timer = g_timeout_add(300, root_setting_apply, r);
 }
 
+/* "notify::..." hands the handler the property before the data. */
+static void on_root_switch(GObject *object, GParamSpec *pspec, gpointer data) {
+	on_root_setting(object, data);
+}
+
 static void root_setting_new(struct taskbar_page *p, GtkWidget *group, const char *key,
 		const char *title, const char *hint, bool is_switch, int low, int high,
 		int fallback) {
@@ -1247,7 +1252,7 @@ static void root_setting_new(struct taskbar_page *p, GtkWidget *group, const cha
 	r->fallback = fallback;
 	if (is_switch) {
 		r->widget = gtk_switch_new();
-		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_setting), r);
+		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_switch), r);
 	} else {
 		r->widget = gtk_spin_button_new_with_range(low, high, 1);
 		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);

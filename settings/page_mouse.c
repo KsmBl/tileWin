@@ -334,6 +334,11 @@ static void on_root_setting(GObject *object, gpointer data) {
 	r->timer = g_timeout_add(300, root_setting_apply, r);
 }
 
+/* "notify::..." hands the handler the property before the data. */
+static void on_root_switch(GObject *object, GParamSpec *pspec, gpointer data) {
+	on_root_setting(object, data);
+}
+
 static struct root_setting *root_setting_new(struct mouse_page *p, GtkWidget *group,
 		const char *key, const char *title, const char *hint, bool is_switch,
 		int min, int max, int step, int fallback) {
@@ -344,7 +349,7 @@ static struct root_setting *root_setting_new(struct mouse_page *p, GtkWidget *gr
 	r->fallback = fallback;
 	if (is_switch) {
 		r->widget = gtk_switch_new();
-		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_setting), r);
+		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_switch), r);
 	} else {
 		r->widget = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, min, max, step);
 		gtk_widget_set_size_request(r->widget, 260, -1);
