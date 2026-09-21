@@ -80,6 +80,7 @@ static struct {
 	struct timespec shake_reversals[32];
 	struct timespec shake_ticked;
 	struct wl_event_source *shake_timer;
+	bool shake_ticking;
 	struct wlr_xcursor_manager *shake_managers[8];
 	int shake_sizes[8];
 } state;
@@ -329,13 +330,16 @@ static int shake_tick(void *data) {
 	double step = shake_rate_percent() / 100.0 * ms / 1000.0;
 	double max = shake_max_percent() / 100.0;
 
-	// count the reversals that are still inside the window
+	// Drop the reversals that have fallen out of the window and keep the rest.
+	// Throwing the whole history away whenever the pointer is not growing yet
+	// would clear it faster than the shaking can fill it.
 	int recent = 0;
 	for (int i = 0; i < state.shake_count; i++) {
 		if (elapsed_ms(&state.shake_reversals[i]) <= SHAKE_WINDOW_MS) {
-			recent++;
+			state.shake_reversals[recent++] = state.shake_reversals[i];
 		}
 	}
+	state.shake_count = recent;
 	bool shaking = recent * 1000 / SHAKE_WINDOW_MS >= shake_needed();
 	state.shake_factor += shaking ? step : -step;
 	if (state.shake_factor > max) {
@@ -347,10 +351,12 @@ static int shake_tick(void *data) {
 	if (cursor) {
 		shake_apply(cursor);
 	}
-	if (state.shake_factor > 1 || shaking) {
+	// keep ticking while the pointer is still bigger than normal or while
+	// there is anything left to count; a movement starts it again
+	if (state.shake_factor > 1 || state.shake_count > 0) {
 		wl_event_source_timer_update(state.shake_timer, FRAME_MS);
 	} else {
-		state.shake_count = 0;
+		state.shake_ticking = false;
 	}
 	return 0;
 }
@@ -387,9 +393,15 @@ static void shake_motion(struct sway_cursor *cursor, double x, double y) {
 
 	if (!state.shake_timer && server.wl_event_loop) {
 		state.shake_timer = wl_event_loop_add_timer(server.wl_event_loop, shake_tick, NULL);
-		clock_gettime(CLOCK_MONOTONIC, &state.shake_ticked);
+		state.shake_factor = 1;
 	}
-	if (state.shake_timer) {
+	// Only start the tick when it is not already running. Asking for it again
+	// on every movement would push it back by another frame each time, and a
+	// mouse reports oftener than that, so it would never come round while the
+	// mouse is being shaken.
+	if (state.shake_timer && !state.shake_ticking) {
+		state.shake_ticking = true;
+		clock_gettime(CLOCK_MONOTONIC, &state.shake_ticked);
 		wl_event_source_timer_update(state.shake_timer, FRAME_MS);
 	}
 }
