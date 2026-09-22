@@ -27,6 +27,7 @@ struct control {
 	enum control_kind kind;
 	bool default_on; // switch: writes enable / disable
 	double min, max, step, default_value; // scale
+	int digits;                           // scale: decimals shown and written
 	const char *const *values, *const *labels; // choice, the first one is the default
 	const char *suffix; // written after a choice, e.g. floating_modifier's "normal"
 };
@@ -74,6 +75,26 @@ static const struct control move_controls[] = {
 		.hint = "Hold this key and drag a window with the left mouse button to move it, with "
 		"the right one to resize it", .kind = CONTROL_CHOICE, .values = move_values,
 		.labels = move_labels, .suffix = "normal" },
+	{ 0 },
+};
+
+/*
+ * Gravity mode. There is no pull downwards in it: a window let go of while it
+ * is still moving keeps going the way a flat thing pushed across a table does,
+ * slowing by its drag and coming back off the edges of the screen.
+ */
+static const struct control gravity_controls[] = {
+	{ .doc = DOC_COMMON, .key = "window_gravity", .title = "Gravity mode",
+		.hint = "Let go of a window while it is still moving and it carries on sliding, "
+		"bouncing off the edges of the screen", .kind = CONTROL_SWITCH, .default_on = false },
+	{ .doc = DOC_COMMON, .key = "window_gravity_drag", .title = "Drag",
+		.hint = "How quickly a sliding window comes to rest: to the left it glides a long "
+		"way, to the right it stops almost at once", .kind = CONTROL_SCALE,
+		.min = 0.5, .max = 10, .step = 0.1, .default_value = 3, .digits = 1 },
+	{ .doc = DOC_COMMON, .key = "window_gravity_bounce", .title = "Bounce",
+		.hint = "How much speed a window keeps when it meets the edge of the screen: 0 stops "
+		"it dead, 1 sends it back as fast as it came", .kind = CONTROL_SCALE,
+		.min = 0, .max = 1, .step = 0.05, .default_value = 0.5, .digits = 2 },
 	{ 0 },
 };
 
@@ -157,7 +178,12 @@ static gboolean apply_scale(gpointer data) {
 	struct binding *b = data;
 	b->timer = 0;
 	char value[32];
-	snprintf(value, sizeof(value), "%d", (int)round(gtk_range_get_value(GTK_RANGE(b->widget))));
+	double v = gtk_range_get_value(GTK_RANGE(b->widget));
+	if (b->control->digits > 0) {
+		g_ascii_formatd(value, sizeof(value), "%.2f", v); // a factor, not a count of pixels
+	} else {
+		snprintf(value, sizeof(value), "%d", (int)round(v));
+	}
 	apply(b->p, b->control, value);
 	return G_SOURCE_REMOVE;
 }
@@ -196,7 +222,7 @@ static void add_controls(struct window_page *p, GtkWidget *group, const struct c
 				c->step);
 			gtk_widget_set_size_request(b->widget, 260, -1);
 			gtk_scale_set_draw_value(GTK_SCALE(b->widget), TRUE);
-			gtk_scale_set_digits(GTK_SCALE(b->widget), 0);
+			gtk_scale_set_digits(GTK_SCALE(b->widget), c->digits);
 			gtk_scale_set_value_pos(GTK_SCALE(b->widget), GTK_POS_LEFT);
 			gtk_scale_add_mark(GTK_SCALE(b->widget), c->default_value, GTK_POS_BOTTOM, NULL);
 			g_signal_connect(b->widget, "value-changed", G_CALLBACK(on_scale), b);
@@ -259,6 +285,10 @@ GtkWidget *window_page_new(struct settings *s) {
 		"settings.", &content);
 	GtkWidget *moving = ui_group(content, "Moving and resizing", NULL);
 	add_controls(p, moving, move_controls);
+	GtkWidget *gravity = ui_group(content, "Gravity mode",
+		"Not a pull downwards: a window behaves like a flat thing pushed across a table.");
+	add_controls(p, gravity, gravity_controls);
+
 	GtkWidget *switcher = ui_group(content, "Window switcher", NULL);
 	add_controls(p, switcher, switcher_controls);
 	GtkWidget *focus = ui_group(content, "Focus", NULL);

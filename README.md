@@ -59,6 +59,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Closing a window gives the focus to the window used before it that is open on the same desktop and not minimized, so a minimized window is not opened again.
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
   - Arrange windows: cascade, stacked, side by side, optimal grid.
+  - **Gravity mode** (off by default): let go of a window while it is still moving and it carries on sliding, bouncing off the edges of the screen until it comes to rest. There is no pull downwards — a window behaves like a flat thing pushed across a table. The **drag** says how quickly it stops and the **bounce** how much speed an edge gives back; both are on the Window behavior page. A window put down without moving stays where it is put.
 - **Tile mode:** everything sway does.
 - **Taskbar:**
   - Separate layouts for window mode and tile mode.
@@ -157,7 +158,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
 - opens a terminal in a repository of its own and checks the git widget puts
   the branch on the bar, and keeps it there once the window has gone;
 - names a desktop and checks the name stays with it when it is moved, while
-  the number still says where it sits.
+  the number still says where it sits;
+- throws a window with a pointer of its own and checks it slides on past the
+  throw, is still going a second later, and does neither when it was put down
+  gently or when gravity mode is off.
 
 It needs `grim`, `wl-copy`, `python3` and `dbus-run-session`, and skips itself
 where it cannot run.
@@ -334,6 +338,9 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
 | `expensive_calculations on` | While a window is snapped, maximized or resized, lay it out again for every frame instead of stretching a picture of it: never the wrong shape, at the cost of a redraw per frame |
 | `animation open\|close\|minimize\|maximize\|desktop <style> [enable\|disable]` | Style of one animation, or turn it off. open: `rise` (default), `fade`, `zoom`, `pop`, `drop`; close: `shrink`, `fade`, `grow`, `drop`, `explode` (shatters with fire, smoke, sparks and a shock wave); minimize: `taskbar`, `fade`, `shrink`, `drop`; maximize (also snapping): `morph`, `bounce`, `fade`; desktop: `slide`, `vertical`, `fade`, `zoom` |
+| `window_gravity enable\|disable` | Gravity mode: a window let go of while it is still moving carries on sliding and comes back off the edges of the screen. Not a pull downwards; it behaves like a flat thing pushed across a table (default disable) |
+| `window_gravity_drag <factor>` | How quickly a sliding window comes to rest, 0.5 to 10 (default 3) |
+| `window_gravity_bounce <factor>` | How much speed it keeps at an edge, 0 to 1 (default 0.5) |
 | `window_stick enable\|disable` | Moved and resized windows stick to the edges of other windows and of the screen (default enable) |
 | `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |
 | `window_snap enable\|disable` | Dragging a window to a screen edge or corner snaps it (default enable) |
@@ -365,7 +372,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
 | Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview. **Expensive calculations** lays a window out again for every frame while it is snapped, maximized or resized, instead of stretching a picture of it |
-| Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
+| Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention, and **Gravity mode** with its drag and bounce |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |

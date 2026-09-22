@@ -67,6 +67,16 @@ pointer_tool = executable(
 )
 
 test(
+	'gravity-mode',
+	find_program('gravity_mode.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'named-desktops',
 	find_program('named_desktops.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

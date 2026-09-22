@@ -310,6 +310,9 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_animations = true;
 	config->tw_animation_speed = 1.0f;
 	config->tw_animation_expensive = false;
+	config->tw_gravity = false;
+	config->tw_gravity_drag = 3.0f;
+	config->tw_gravity_bounce = 0.5f;
 	for (int i = 0; i < 5; i++) {
 		config->tw_animation_on[i] = true;
 		config->tw_animation_style[i] = 0;

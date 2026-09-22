@@ -310,6 +310,8 @@ void tw_animate_close(struct sway_container *con);
 void tw_animate_minimize(struct sway_container *con, bool minimize);
 /* After the pending geometry of a floating window changed (maximize, snap). */
 void tw_animate_resize(struct sway_container *con);
+/* Sets a window sliding on after it was let go of while still moving. */
+void tw_animate_glide(struct sway_container *con, double vx, double vy);
 /* Before switching to the workspace: slides the old one out and the new one in. */
 void tw_animate_workspace_switch(struct sway_workspace *ws);
 float tw_animate_container_alpha(struct sway_container *con);

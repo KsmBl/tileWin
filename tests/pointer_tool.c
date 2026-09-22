@@ -9,6 +9,8 @@
  *   click <x> <y>                 put it there and press the left button
  *   scroll <x> <y> <notches>      put it there and turn the wheel
  *   shake <swings> <steps> <px> <ms>   swing it back and forth
+ *   throw <x1> <y1> <x2> <y2>     press at the first point, sweep to the second
+ *                                 and let go while still moving
  *
  * The width and height are those of the screen the coordinates are in.
  */
@@ -86,6 +88,29 @@ static void scroll(int notches) {
 	rest(600);
 }
 
+/* Press, sweep, and release without stopping: what a thrown window needs. */
+static void throw_window(int x1, int y1, int x2, int y2) {
+	move(x1, y1); // move() rests long enough for the first report to be taken
+	move(x1, y1);
+	zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+		WL_POINTER_BUTTON_STATE_PRESSED);
+	zwlr_virtual_pointer_v1_frame(pointer);
+	wl_display_flush(display);
+	rest(100);
+	for (int i = 1; i <= 8; i++) {
+		zwlr_virtual_pointer_v1_motion_absolute(pointer, now_ms(),
+			x1 + (x2 - x1) * i / 8, y1 + (y2 - y1) * i / 8, width, height);
+		zwlr_virtual_pointer_v1_frame(pointer);
+		wl_display_flush(display);
+		rest(25);
+	}
+	zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+		WL_POINTER_BUTTON_STATE_RELEASED);
+	zwlr_virtual_pointer_v1_frame(pointer);
+	wl_display_flush(display);
+	rest(200);
+}
+
 static void shake(int swings, int steps, int pixels, int ms) {
 	for (int swing = 0; swing < swings; swing++) {
 		int direction = swing % 2 ? -1 : 1;
@@ -134,6 +159,10 @@ int main(int argc, char **argv) {
 			move(atoi(argv[i + 1]), atoi(argv[i + 2]));
 			scroll(atoi(argv[i + 3]));
 			i += 4;
+		} else if (strcmp(argv[i], "throw") == 0 && i + 4 < argc) {
+			throw_window(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]),
+				atoi(argv[i + 4]));
+			i += 5;
 		} else if (strcmp(argv[i], "shake") == 0 && i + 4 < argc) {
 			shake(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]),
 				atoi(argv[i + 4]));

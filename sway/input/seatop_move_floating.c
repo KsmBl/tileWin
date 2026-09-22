@@ -16,6 +16,11 @@ struct seatop_move_floating_event {
 	struct wlr_box before; // where the window was before the drag
 	double con_x, con_y; // window position at the start
 	list_t *group; // struct group_member: windows touching it at the start
+	// how fast the pointer was going last, for letting go of a window while it
+	// is still moving: smoothed, so one jittery report cannot fling it
+	double vx, vy;
+	uint32_t last_msec;
+	double last_x, last_y;
 };
 
 struct group_member {
@@ -34,7 +39,7 @@ static void handle_end(struct sway_seat *seat) {
 	free_group(seat->seatop_data);
 }
 
-static void finalize_move(struct sway_seat *seat) {
+static void finalize_move(struct sway_seat *seat, uint32_t time_msec) {
 	struct seatop_move_floating_event *e = seat->seatop_data;
 
 	// We "move" the container to its own location
@@ -42,6 +47,13 @@ static void finalize_move(struct sway_seat *seat) {
 	container_floating_move_to(e->con, e->con->pending.x, e->con->pending.y);
 
 	enum tw_snap snap = tw_snap_preview_finish();
+	// only a window let go of while it is still moving carries on: stopping
+	// first and then letting go puts it down where it is
+	bool still_moving = e->last_msec && time_msec >= e->last_msec &&
+		time_msec - e->last_msec < 80;
+	if (snap == TW_SNAP_NONE && !e->together && still_moving) {
+		tw_animate_glide(e->con, e->vx, e->vy);
+	}
 	if (snap != TW_SNAP_NONE && !e->restore_on_drag) {
 		tw_snap_to(e->con, snap);
 		// restoring brings the window back to where the drag started, not
@@ -70,7 +82,7 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
 		struct wlr_input_device *device, uint32_t button,
 		enum wl_pointer_button_state state) {
 	if (seat->cursor->pressed_button_count == 0) {
-		finalize_move(seat);
+		finalize_move(seat, time_msec);
 	}
 }
 
@@ -78,7 +90,7 @@ static void handle_tablet_tool_tip(struct sway_seat *seat,
 		struct sway_tablet_tool *tool, uint32_t time_msec,
 		enum wlr_tablet_tool_tip_state state) {
 	if (state == WLR_TABLET_TOOL_TIP_UP) {
-		finalize_move(seat);
+		finalize_move(seat, time_msec);
 	}
 }
 
@@ -118,6 +130,22 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 			list_add(exclude, m->con);
 		}
 	}
+	if (e->last_msec && time_msec > e->last_msec) {
+		double dt = time_msec - e->last_msec;
+		if (dt < 100) { // a longer gap says the pointer stopped, not that it flew
+			double vx = (cursor->x - e->last_x) / dt;
+			double vy = (cursor->y - e->last_y) / dt;
+			// most of the newest reading, a little of what came before
+			e->vx = e->vx * 0.3 + vx * 0.7;
+			e->vy = e->vy * 0.3 + vy * 0.7;
+		} else {
+			e->vx = e->vy = 0;
+		}
+	}
+	e->last_msec = time_msec;
+	e->last_x = cursor->x;
+	e->last_y = cursor->y;
+
 	double x = cursor->x - e->dx, y = cursor->y - e->dy;
 	tw_stick_move(e->con, exclude, &x, &y);
 	list_free(exclude);

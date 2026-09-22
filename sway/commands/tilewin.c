@@ -495,6 +495,42 @@ struct cmd_results *cmd_window_stick(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_window_gravity(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "window_gravity", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_gravity = parse_boolean(argv[0], config->tw_gravity);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* How quickly a window let go of comes to rest, and how much an edge gives back. */
+static struct cmd_results *gravity_factor(int argc, char **argv, const char *name,
+		float *out, double low, double high) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, name, EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *end = NULL;
+	double value = strtod(argv[0], &end);
+	if (!end || *end || value < low || value > high) {
+		return cmd_results_new(CMD_INVALID, "%s needs a number between %g and %g", name,
+			low, high);
+	}
+	*out = value;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_window_gravity_drag(int argc, char **argv) {
+	return gravity_factor(argc, argv, "window_gravity_drag", &config->tw_gravity_drag,
+		0.2, 20);
+}
+
+struct cmd_results *cmd_window_gravity_bounce(int argc, char **argv) {
+	return gravity_factor(argc, argv, "window_gravity_bounce", &config->tw_gravity_bounce,
+		0, 1);
+}
+
 struct cmd_results *cmd_window_snap(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "window_snap", EXPECTED_EQUAL_TO, 1))) {

@@ -41,6 +41,7 @@
 #define CLOSE_MS 160
 #define MINIMIZE_MS 240
 #define RESIZE_MS 180
+#define GLIDE_STOP 0.02 // pixels per millisecond, about twenty a second
 #define BOUNCE_MS 320
 #define SLIDE_MS 280
 #define FADE_MS 220
@@ -82,6 +83,7 @@ enum kind {
 	ANIM_DESKTOP,  // desktop switch: a copy of the old desktop, the new one offset
 	ANIM_EXPLODE,  // a closing window blowing up (explode.c)
 	ANIM_RESIZE,   // the window itself is given a new size every frame
+	ANIM_GLIDE,    // a window let go of while moving slides on and bounces
 };
 
 struct piece {
@@ -110,6 +112,9 @@ struct anim {
 	float alpha;                // read by output_configure_scene
 	double dx0, dy0, dx, dy;    // offset of the incoming desktop, or ANIM_LIVE's rise
 	double scale0;              // ANIM_GROW: size of the first frame at the start
+	double vx, vy;              // ANIM_GLIDE: pixels per millisecond
+	double gx, gy;              // ANIM_GLIDE: where it is, before rounding
+	double last_ms;             // ANIM_GLIDE: when the last step was taken
 	bool has_frame;             // ANIM_GROW: the first frame was captured
 	bool reveal;                // show con again at the end
 	struct tw_explosion *explosion;
@@ -467,6 +472,50 @@ static void capture_first_frame(struct anim *a) {
 	apply_copy(a, 0);
 }
 
+/*
+ * A window let go of while it is still moving carries on by itself. There is no
+ * pull downwards: it behaves like a flat thing pushed across a table, slowing
+ * by its drag alone and coming back off the edges of the screen with whatever
+ * the bounce leaves it.
+ */
+static void glide_step(struct anim *a, double ms) {
+	struct sway_container *con = a->con;
+	double dt = ms - a->last_ms;
+	a->last_ms = ms;
+	if (dt <= 0 || dt > 200) {
+		return; // the first step, or the loop was held up: do not leap
+	}
+	struct wlr_box area = tw_workarea(con->pending.workspace);
+	double width = con->pending.width, height = con->pending.height;
+	a->gx += a->vx * dt;
+	a->gy += a->vy * dt;
+
+	double bounce = config->tw_gravity_bounce;
+	if (a->gx < area.x) {
+		a->gx = area.x;
+		a->vx = -a->vx * bounce;
+	} else if (a->gx + width > area.x + area.width) {
+		a->gx = area.x + area.width - width;
+		a->vx = -a->vx * bounce;
+	}
+	if (a->gy < area.y) {
+		a->gy = area.y;
+		a->vy = -a->vy * bounce;
+	} else if (a->gy + height > area.y + area.height) {
+		a->gy = area.y + area.height - height;
+		a->vy = -a->vy * bounce;
+	}
+
+	// the drag is given per second, so it bites the same however often a frame
+	// happens to come round
+	double keep = exp(-config->tw_gravity_drag * dt / 1000.0);
+	a->vx *= keep;
+	a->vy *= keep;
+
+	container_floating_move_to(con, round(a->gx), round(a->gy));
+	transaction_commit_dirty();
+}
+
 static int tick(void *data) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -525,11 +574,19 @@ static int tick(void *data) {
 				transaction_commit_dirty();
 			}
 			break;
+		case ANIM_GLIDE:
+			if (a->con) {
+				glide_step(a, ms);
+			}
+			break;
 		case ANIM_EXPLODE:
 			break; // handled above
 		}
-		if (t >= 1 || ((a->kind == ANIM_LIVE || a->kind == ANIM_GROW ||
-				a->kind == ANIM_RESIZE) && !a->con)) {
+		bool glide_over = a->kind == ANIM_GLIDE &&
+			(!a->con || (fabs(a->vx) < GLIDE_STOP && fabs(a->vy) < GLIDE_STOP));
+		if (glide_over || (a->kind != ANIM_GLIDE && (t >= 1 ||
+				((a->kind == ANIM_LIVE || a->kind == ANIM_GROW ||
+				a->kind == ANIM_RESIZE) && !a->con)))) {
 			list_del(anims, i);
 			finish(a);
 		}
@@ -777,6 +834,34 @@ void tw_animate_resize(struct sway_container *con) {
 	con->tw.anim.hidden = true;
 	wlr_scene_node_set_enabled(&con->scene_tree->node, false);
 	apply_copy(a, 0);
+}
+
+/*
+ * Sets a window sliding from where it is at the speed it was let go of at.
+ * A speed too small to see is ignored, so an ordinary drop stays put.
+ */
+void tw_animate_glide(struct sway_container *con, double vx, double vy) {
+	if (!config->tw_gravity || !con || !floating_shown(con) ||
+			con->pending.tw_maximized || con->tw.snap != TW_SNAP_NONE) {
+		return;
+	}
+	if (fabs(vx) < GLIDE_STOP && fabs(vy) < GLIDE_STOP) {
+		return;
+	}
+	cancel_for(con);
+	struct anim *a = anim_new(ANIM_GLIDE, 0, EASE_OUT);
+	if (!a) {
+		return;
+	}
+	a->con = con;
+	a->vx = vx;
+	a->vy = vy;
+	a->gx = con->pending.x;
+	a->gy = con->pending.y;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	a->last_ms = (now.tv_sec - a->start.tv_sec) * 1000.0 +
+		(now.tv_nsec - a->start.tv_nsec) / 1e6;
 }
 
 void tw_animate_workspace_switch(struct sway_workspace *ws) {

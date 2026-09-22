@@ -559,6 +559,15 @@ struct sway_config {
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
 	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
+	/*
+	 * Gravity mode: a window let go of while it is still moving carries on
+	 * sliding, the way a flat thing pushed across a table does. There is no pull
+	 * downwards; the drag is what brings it to rest and the bounce is how much
+	 * speed it keeps when it meets an edge of the screen.
+	 */
+	bool tw_gravity;
+	float tw_gravity_drag;   // how quickly it slows, per second
+	float tw_gravity_bounce; // 0 stops dead at an edge, 1 comes back as fast
 	int tw_pointer_trail; // how long a copy of the pointer lives in ms, 0: no trail
 	int tw_alttab_style; // -1: as the theme says, 0: icons, 1: flip3d
 	int tw_pointer_locate; // -1: as the theme says, 0: off, 1: Ctrl shows the pointer
