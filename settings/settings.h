@@ -38,6 +38,7 @@ struct settings {
 	struct wallpaper_page *wallpaper_page;
 	struct taskbar_page *taskbar_page;
 	struct menus_page *menus_page;
+	struct about_page *about_page;
 	struct launcher_page *launcher_page;
 	struct keyboard_page *keyboard_page;
 	struct mouse_page *mouse_page;
@@ -163,6 +164,7 @@ void taskbar_page_refresh(struct settings *s);
 /* The right-click menus of the taskbar, put at the end of the Taskbar page. */
 void menus_section_attach(struct settings *s, GtkWidget *content);
 GtkWidget *startmenu_page_new(struct settings *s);
+GtkWidget *about_page_new(struct settings *s);
 void menus_page_refresh(struct settings *s);
 GtkWidget *launcher_page_new(struct settings *s);
 void launcher_page_refresh(struct settings *s);

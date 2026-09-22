@@ -17,7 +17,8 @@ static const char css[] =
 	"flowboxchild.tw-card:selected { background: alpha(@theme_selected_bg_color, 0.3); }\n"
 	".tw-status { padding: 6px 12px; }\n"
 	"image.tw-avatar { border-radius: 9999px; }\n"
-	".tw-found { background-color: alpha(@theme_selected_bg_color, 0.28); }\n";
+	".tw-found { background-color: alpha(@theme_selected_bg_color, 0.28); }\n"
+	".tw-logo { font-size: 0.8em; line-height: 0.95; color: @theme_selected_bg_color; }\n";
 
 static struct settings settings;
 
@@ -511,6 +512,7 @@ static void build_window(struct settings *s) {
 		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
+		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
 	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
@@ -607,7 +609,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account)\n", page);
+				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -667,7 +669,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps or account", "PAGE");
+		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

@@ -3,6 +3,7 @@ executable(
 		'confdoc.c',
 		'ipc.c',
 		'main.c',
+		'page_about.c',
 		'page_account.c',
 		'page_animations.c',
 		'page_apps.c',

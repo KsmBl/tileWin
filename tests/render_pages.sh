@@ -28,7 +28,7 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 	exit 77
 fi
 
-pages="theme wallpaper animations windows screen sound datetime bluetooth taskbar startmenu launcher keyboard mouse apps account"
+pages="theme wallpaper animations windows screen sound datetime bluetooth taskbar startmenu launcher keyboard mouse apps account about"
 
 work=$(mktemp -d)
 # killing the shell that starts the compositor does not kill the compositor, and
@@ -54,6 +54,7 @@ cat > "$work/tilewin.conf" <<EOF
 wallpaper solid #008080
 session_restore no
 exec "$settings" --page=PAGE
+exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 EOF
 
 # The page sits right of the list of pages and below the heading. The area is
@@ -71,7 +72,7 @@ least_content=1500
 failures=0
 for page in $pages; do
 	sed "s|--page=PAGE|--page=$page|" "$work/tilewin.conf" > "$work/$page.conf"
-	before=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
+	rm -f "$work/display"
 	shot=$work/$page.png
 	log=$work/$page.log
 	env -u WAYLAND_DISPLAY -u DISPLAY \
@@ -80,14 +81,12 @@ for page in $pages; do
 		dbus-run-session -- "$compositor" -c "$work/$page.conf" > "$log" 2>&1 &
 	starter=$!
 
-	display=
 	attempt=0
-	while [ -z "$display" ] && [ $attempt -lt 40 ]; do
+	while [ ! -s "$work/display" ] && [ $attempt -lt 60 ]; do
 		sleep 0.5
 		attempt=$((attempt + 1))
-		after=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
-		display=$(echo "$after" | grep -vxF "$before" | head -n 1)
 	done
+	display=$(cat "$work/display" 2>/dev/null)
 	if [ -z "$display" ]; then
 		echo "$page: the nested compositor never came up"
 		tail -n 2 "$log"
