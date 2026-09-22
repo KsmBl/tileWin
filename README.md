@@ -64,7 +64,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, volume, network, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -130,15 +130,26 @@ Start tileWin:
 
 ```sh
 meson test -C build-release --suite unit   # the config parser, the config editor and the settings coverage
-meson test -C build-release --suite gui    # drives the settings app in a nested tileWin and looks at it
+meson test -C build-release --suite gui    # drives a nested tileWin and looks at what it does
 ```
 
 The coverage test walks the sources and fails when the taskbar or the
 compositor reads a setting that no page of the settings app offers, so nothing
-ends up settable only by hand. The `gui` suite opens every page and counts the
-pixels it drew, and clicks a switch with a pointer of its own to check that it
-really saves what it was set to; it needs `grim` and skips itself where it
-cannot run.
+ends up settable only by hand. The `gui` suite starts a nested tileWin and:
+
+- opens every page of the settings app and counts the pixels it drew, so a page
+  that lays itself out to nothing cannot pass unnoticed;
+- clicks a switch with a pointer of its own and reads the config file back, to
+  check that it really saves what it was set to;
+- copies texts and pictures and reads the clipboard history back over the
+  socket of `tilewin-clipboard`, then weighs both processes to check that a
+  copied picture is held by that program and not by the taskbar;
+- checks that a `$taskmanager` nobody has installed is replaced by one that is,
+  and that `expensive_calculations on` makes a window being maximized pass
+  through sizes on the way instead of jumping to the end.
+
+It needs `grim`, `wl-copy`, `python3` and `dbus-run-session`, and skips itself
+where it cannot run.
 
 ### Updating
 
@@ -175,7 +186,8 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Return | Terminal |
 | Super+D, Super+M | Show desktop |
 | Super+L | Lock |
-| Super+↑ / ↓ / ← / → | Maximize / restore or minimize / snap left / snap right |
+| Super+← / → | Snap the window to the left or right half; pressing the other way unsnaps it again |
+| Super+↑ / ↓ | Up maximizes, or lifts a half to the quarter above it; down takes that back, restores a snapped window and minimizes one that is not snapped |
 | Alt+Tab, Alt+Shift+Tab | Switch windows (release Alt to confirm, Esc to cancel) |
 | Super+Tab | Task view: windows and desktops; drag windows onto another or a new desktop |
 | Super+Ctrl+D, Super+Ctrl+F4 | New desktop, close the current desktop |
@@ -326,20 +338,22 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Page | What you can change |
 |---|---|
 | Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
-| Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview |
-| Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
-| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps and the icon of each of them |
-| Menus | Right-click menus of the taskbar, taskbar buttons and start button (with submenus), the style of the start menu, pinned apps, places and power entries of the start menu. Nothing has to be typed: **Add item...** and **Choose...** pick an installed app, one of tileWin's own actions (arrange windows, show the desktop, task view, run, lock, shut down, switch theme, ...) or a folder and fill in the label, icon and command, the icon button opens a grid of the icons of your icon theme and of the installed apps, and a second button makes an entry bold, checked or greyed out |
-| Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
+| Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview. **Expensive calculations** lays a window out again for every frame while it is snapped, maximized or resized, instead of stretching a picture of it |
+| Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
+| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
+| Start menu | The style of the start menu, its pinned apps, its places and its power entries |
+| Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
 | Mouse & touchpad | Pointer speed and acceleration, scrolling speed and direction, left-handed buttons, tap to click, tap and drag, disable while typing, touchpad scroll and click methods, cursor theme and size, showing the pointer when Ctrl is tapped, growing it when the mouse is shaken, pointer trail lifetime, double-click speed with a folder to try it on |
-| Apps | Default apps (web browser, email, file manager, terminal, task manager, text editor, pictures, music, videos, PDF) and startup apps: turn them on or off, add or remove them. The menus, shortcuts and flyouts all use these, so a program is named in one place only |
+| Apps | Default apps (web browser, email, file manager, terminal, task manager, text editor, pictures, music, videos, PDF) and startup apps: turn them on or off, add or remove them. The menus, shortcuts and flyouts all use these, so a program is named in one place only. A task manager that is not installed opens whichever one the machine does have, or the terminal running btop, htop or top, instead of nothing at all |
 | Account | Your account picture (`~/.face`, shown on the lock screen and login screens) and name |
+
+Neither the menus nor the start menu has to be typed: on both pages **Add item...** and **Choose...** pick an installed app, one of tileWin's own actions (arrange windows, show the desktop, task view, run, lock, shut down, switch theme, ...) or a folder and fill in the label, icon and command, the icon button opens a grid of the icons of your icon theme and of the installed apps, and a second button makes an entry bold, checked or greyed out.
 
 Changes apply immediately (the compositor gets the matching command, the taskbar reloads its config) and are written to `common.conf` and `taskbar.conf`. Only the changed lines are rewritten, so your comments and formatting stay. Open a page directly with `tilewin-settings --page taskbar`. The app only runs while its window is open.
 
