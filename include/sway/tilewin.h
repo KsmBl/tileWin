@@ -155,6 +155,8 @@ bool tw_set_color_scheme(bool dark, char **error);
 void tw_load_theme_tile_config(struct sway_config *config);
 /* Binds the volume, brightness and media keys the config leaves unbound. */
 void tw_add_default_bindings(struct sway_config *config);
+/* Points $taskmanager at a task manager that is actually installed. */
+void tw_fix_task_manager(struct sway_config *config);
 void tw_after_reload(void);
 /* Tells the taskbar the new "double_click_time" so it uses it too. */
 void tw_double_click_time_changed(void);

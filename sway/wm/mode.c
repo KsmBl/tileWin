@@ -153,6 +153,97 @@ void tw_load_theme_tile_config(struct sway_config *cfg) {
 	free(path);
 }
 
+/*
+ * The taskbar menu, Ctrl+Shift+Escape and the CPU flyout all open $taskmanager.
+ * When it names a program nobody has installed, all three do nothing at all and
+ * say nothing either, so a name that is not in PATH is swapped for the best one
+ * that is: a task manager with a window of its own, or else one in a terminal.
+ */
+static char *first_word(const char *value) {
+	if (!value) {
+		return NULL;
+	}
+	while (*value == ' ' || *value == '\t') {
+		value++;
+	}
+	size_t n = strcspn(value, " \t");
+	return n ? strndup(value, n) : NULL;
+}
+
+static const char *first_in_path(const char *const *names, size_t count) {
+	for (size_t i = 0; i < count; i++) {
+		if (tw_in_path(names[i])) {
+			return names[i];
+		}
+	}
+	return NULL;
+}
+
+void tw_fix_task_manager(struct sway_config *cfg) {
+	if (!cfg || !cfg->symbols) {
+		return;
+	}
+	struct sway_variable *task = NULL, *term = NULL;
+	for (int i = 0; i < cfg->symbols->length; i++) {
+		struct sway_variable *var = cfg->symbols->items[i];
+		if (strcmp(var->name, "$taskmanager") == 0) {
+			task = var;
+		} else if (strcmp(var->name, "$term") == 0) {
+			term = var;
+		}
+	}
+	if (!task || !task->value) {
+		return;
+	}
+	char *program = first_word(task->value);
+	bool installed = program && tw_in_path(program);
+	free(program);
+	if (installed) {
+		return;
+	}
+
+	static const char *const windowed[] = {
+		"plasma-systemmonitor", "gnome-system-monitor", "xfce4-taskmanager",
+		"mate-system-monitor", "lxqt-taskmanager", "lxtask",
+	};
+	static const char *const in_terminal[] = { "btop", "htop", "top" };
+	const char *found = first_in_path(windowed, sizeof(windowed) / sizeof(windowed[0]));
+	char *replacement = NULL;
+	if (found) {
+		replacement = strdup(found);
+	} else {
+		const char *monitor =
+			first_in_path(in_terminal, sizeof(in_terminal) / sizeof(in_terminal[0]));
+		char *terminal = term ? first_word(term->value) : NULL;
+		if (monitor && terminal && tw_in_path(terminal)) {
+			replacement = format_str("%s -e %s", term->value, monitor);
+		}
+		free(terminal);
+	}
+	if (!replacement) {
+		return;
+	}
+	sway_log(SWAY_INFO, "$taskmanager '%s' is not installed: opening '%s' instead",
+		task->value, replacement);
+	// bindings had the old name put in when the config was read
+	char *was = format_str("exec %s", task->value);
+	char *now = format_str("exec %s", replacement);
+	for (int m = 0; m < cfg->modes->length; m++) {
+		struct sway_mode *mode = cfg->modes->items[m];
+		for (int i = 0; i < mode->keysym_bindings->length; i++) {
+			struct sway_binding *binding = mode->keysym_bindings->items[i];
+			if (binding->command && strcmp(binding->command, was) == 0) {
+				free(binding->command);
+				binding->command = strdup(now);
+			}
+		}
+	}
+	free(was);
+	free(now);
+	free(task->value);
+	task->value = replacement;
+}
+
 void tw_add_default_bindings(struct sway_config *cfg) {
 	static const char *defaults[][2] = {
 		{ "XF86AudioRaiseVolume", "volume-up" },

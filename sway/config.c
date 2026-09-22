@@ -309,6 +309,7 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_xdg_autostart = true;
 	config->tw_animations = true;
 	config->tw_animation_speed = 1.0f;
+	config->tw_animation_expensive = false;
 	for (int i = 0; i < 5; i++) {
 		config->tw_animation_on[i] = true;
 		config->tw_animation_style[i] = 0;
@@ -513,6 +514,7 @@ bool load_main_config(const char *file, bool is_active, bool validating) {
 
 	tw_load_theme_tile_config(config);
 	bool success = load_config(path, config, &config->swaynag_config_errors);
+	tw_fix_task_manager(config);
 	tw_add_default_bindings(config);
 
 	if (validating) {
