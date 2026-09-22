@@ -28,7 +28,7 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 	exit 77
 fi
 
-pages="theme wallpaper animations windows screen sound datetime bluetooth taskbar menus launcher keyboard mouse apps account"
+pages="theme wallpaper animations windows screen sound datetime bluetooth taskbar startmenu launcher keyboard mouse apps account"
 
 work=$(mktemp -d)
 # killing the shell that starts the compositor does not kill the compositor, and

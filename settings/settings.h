@@ -155,7 +155,9 @@ GtkWidget *wallpaper_page_new(struct settings *s);
 void wallpaper_page_refresh(struct settings *s);
 GtkWidget *taskbar_page_new(struct settings *s);
 void taskbar_page_refresh(struct settings *s);
-GtkWidget *menus_page_new(struct settings *s);
+/* The right-click menus of the taskbar, put at the end of the Taskbar page. */
+void menus_section_attach(struct settings *s, GtkWidget *content);
+GtkWidget *startmenu_page_new(struct settings *s);
 void menus_page_refresh(struct settings *s);
 GtkWidget *launcher_page_new(struct settings *s);
 void launcher_page_refresh(struct settings *s);

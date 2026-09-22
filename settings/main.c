@@ -504,8 +504,8 @@ static void build_window(struct settings *s) {
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 			bluetooth_page_new },
 		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications desktop icons "
-			"grid clipboard history", taskbar_page_new },
-		{ "menus", "Menus", "start menu right click context pinned", menus_page_new },
+			"grid clipboard history right click context menu", taskbar_page_new },
+		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
 		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
@@ -607,7 +607,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps, account)\n", page);
+				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -667,7 +667,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, menus, launcher, keyboard, mouse, apps or account", "PAGE");
+		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps or account", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

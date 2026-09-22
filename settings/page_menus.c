@@ -48,6 +48,7 @@ static struct confdoc *doc(struct menus_page *p) {
 	return p->s->taskbar;
 }
 
+
 static void mentry_free(gpointer data) {
 	struct mentry *e = data;
 	g_free(e->label);
@@ -57,6 +58,23 @@ static void mentry_free(gpointer data) {
 		g_ptr_array_unref(e->children);
 	}
 	g_free(e);
+}
+
+/*
+ * The right-click menus sit on the Taskbar page and the start menu has a page
+ * of its own, but both are the same config file and share the picker that fills
+ * a label, an icon and a command in. They therefore share one structure, made
+ * by whichever page is built first.
+ */
+static struct menus_page *page_get(struct settings *s) {
+	if (!s->menus_page) {
+		struct menus_page *p = g_new0(struct menus_page, 1);
+		p->s = s;
+		p->path = g_ptr_array_new();
+		p->trash = g_ptr_array_new_with_free_func(mentry_free);
+		s->menus_page = p;
+	}
+	return s->menus_page;
 }
 
 static struct mentry *mentry_new(enum entry_kind kind, const char *label) {
@@ -1004,7 +1022,12 @@ void menus_page_refresh(struct settings *s) {
 	if (!p) {
 		return;
 	}
-	load_menu(p);
+	if (p->list) {
+		load_menu(p);
+	}
+	if (!p->layout_dd) {
+		return; // the start menu page has not been built yet
+	}
 	p->updating = true;
 	const char *layout = cstmt_arg(confdoc_child(startmenu_block(p, false), "layout", NULL), 0);
 	guint selected = 0;
@@ -1026,21 +1049,18 @@ void menus_page_refresh(struct settings *s) {
 	records_read(&p->power);
 }
 
-GtkWidget *menus_page_new(struct settings *s) {
-	struct menus_page *p = g_new0(struct menus_page, 1);
-	p->s = s;
-	p->path = g_ptr_array_new();
-	p->trash = g_ptr_array_new_with_free_func(mentry_free);
-	GtkWidget *content;
-	GtkWidget *page = ui_page("Menus",
-		"Right-click menus of the taskbar and the contents of the start menu. Nothing here has "
-		"to be typed: Add item... and Choose... pick an app, an action of tileWin or a folder "
-		"and fill in the label, the icon and the command, the icon button opens a grid of icons "
-		"to click, and the button beside it makes an entry bold, checked or greyed out. Every "
-		"field can still be edited by hand.",
-		&content);
+/*
+ * The right-click menus of the taskbar, put at the end of the Taskbar page.
+ */
+void menus_section_attach(struct settings *s, GtkWidget *content) {
+	struct menus_page *p = page_get(s);
 
-	GtkWidget *group = ui_group(content, "Right-click menus", NULL);
+	GtkWidget *group = ui_group(content, "Right-click menus",
+		"What the menus of the taskbar hold. Nothing here has to be typed: Add item... and "
+		"Choose... pick an app, an action of tileWin or a folder and fill in the label, the "
+		"icon and the command, the icon button opens a grid of icons to click, and the button "
+		"beside it makes an entry bold, checked or greyed out. Every field can still be edited "
+		"by hand.");
 	p->menu_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"Empty area of the taskbar", "Taskbar buttons (extra entries)", "Start button", NULL });
 	ui_row(group, "Menu", NULL, p->menu_dd);
@@ -1073,23 +1093,33 @@ GtkWidget *menus_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(content), nav);
 	p->list = ui_group(content, NULL, NULL);
 	g_signal_connect(p->menu_dd, "notify::selected", G_CALLBACK(on_menu_selected), p);
+	load_menu(p);
+}
 
-	GtkWidget *start = ui_group(content, "Start menu", NULL);
+GtkWidget *startmenu_page_new(struct settings *s) {
+	struct menus_page *p = page_get(s);
+	GtkWidget *content;
+	GtkWidget *page = ui_page("Start menu",
+		"How the start menu is laid out and what it holds. Choose... picks an app, an action "
+		"of tileWin or a folder and fills the label, the icon and the command in; every field "
+		"can still be edited by hand.",
+		&content);
+
+	GtkWidget *start = ui_group(content, "Style", NULL);
 	p->layout_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"From the theme", "Classic (Windows 95)", "Two columns (Windows XP, 7)",
 		"List (Windows 10)", "Tiles (Windows 8)", "Centered (Windows 11)", NULL });
 	ui_row(start, "Style", "How the start menu is laid out", p->layout_dd);
 	g_signal_connect(p->layout_dd, "notify::selected", G_CALLBACK(on_layout_selected), p);
 
-	p->pinned = ui_app_list_new(content, "Start menu: pinned apps", NULL, on_pinned_changed, p);
-	records_init(&p->places, p, content, "Start menu: places",
+	p->pinned = ui_app_list_new(content, "Pinned apps", NULL, on_pinned_changed, p);
+	records_init(&p->places, p, content, "Places",
 		"Links shown next to the app list. Click the icon to change it, or pick a whole "
 		"entry with Choose.", "place", 3,
 		(const char *const[]){ "Label", "Icon", "Command" }, 1, true);
-	records_init(&p->power, p, content, "Start menu: power menu", NULL, "power", 2,
+	records_init(&p->power, p, content, "Power menu", NULL, "power", 2,
 		(const char *const[]){ "Label", "Command" }, -1, true);
 
-	s->menus_page = p;
 	menus_page_refresh(s);
 	return page;
 }

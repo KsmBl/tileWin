@@ -1391,6 +1391,8 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->quick->extra_tooltip = "Change the icon";
 	p->quick->row_icon = quick_row_icon;
 
+	menus_section_attach(s, content);
+
 	s->taskbar_page = p;
 	rebuild_all(p);
 	return page;

@@ -30,8 +30,8 @@ WIDGET_TYPES_NOT_IN_THE_LIST = {
 TASKBAR_KEYS_WITHOUT_A_CONTROL = {
     "outputs": "which monitors carry a taskbar; the Screen page owns the monitors",
     "layout": "the sections are edited as a whole on the Taskbar page",
-    "menu": "edited on the Menus page",
-    "startmenu": "edited on the Menus page",
+    "menu": "edited in the Right-click menus group of the Taskbar page",
+    "startmenu": "edited on the Start menu page",
     "position": "inside a layout block, edited on the Taskbar page",
     "height": "inside a layout block, edited on the Taskbar page",
     "left": "a section of a layout block",
