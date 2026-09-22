@@ -133,6 +133,18 @@ void ui_app_list_refresh(struct app_list *list);
 char *ui_wallpaper_dropin(const char *basename);
 void ui_wallpaper_remove_dropins(const char *basename);
 /* Renders a `wallpaper` value, or the theme's wallpaper if it is NULL or "theme". */
+/* Below the redraw, so a window that is waiting to be painted is painted first;
+ * the pages that are not on screen yet come after the pictures of the one that
+ * is. */
+#define UI_PRIORITY_WALLPAPER (G_PRIORITY_DEFAULT_IDLE)
+#define UI_PRIORITY_LAZY_PAGE (G_PRIORITY_DEFAULT_IDLE + 10)
+
+/* Puts the wallpaper of a theme into an empty picture once the window is up. */
+void ui_wallpaper_picture_fill(GtkWidget *picture, const char *wallpaper, const char *theme,
+	int width, int height);
+/* Lets the queue above run: called after the window has been painted once. */
+void ui_wallpaper_fills_start(void);
+
 GdkTexture *ui_wallpaper_texture(const char *wallpaper, const char *theme, int width,
 		int height);
 

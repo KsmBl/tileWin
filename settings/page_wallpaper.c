@@ -67,9 +67,7 @@ static void update_preview(struct wallpaper_page *p) {
 	char *theme = settings_current_theme();
 	struct cstmt *st = confdoc_child(p->s->common->root, "wallpaper", NULL);
 	char *args = cstmt_raw_args(p->s->common, st);
-	GdkTexture *texture = ui_wallpaper_texture(args, theme, 384, 240);
-	gtk_picture_set_paintable(GTK_PICTURE(p->preview), GDK_PAINTABLE(texture));
-	g_object_unref(texture);
+	ui_wallpaper_picture_fill(p->preview, args, theme, 384, 240);
 	char *caption = g_strdup_printf("Preview with the current theme (%s)", theme);
 	gtk_label_set_text(GTK_LABEL(p->preview_caption), caption);
 	g_free(caption);
@@ -305,9 +303,8 @@ static void rebuild_theme_rows(struct wallpaper_page *p) {
 
 		GtkWidget *row = ui_row(p->themes_list, theme && theme->title ? theme->title : name,
 			subtitle, buttons);
-		GdkTexture *texture = ui_wallpaper_texture(NULL, name, 112, 70);
-		GtkWidget *picture = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
-		g_object_unref(texture);
+		GtkWidget *picture = gtk_picture_new();
+		ui_wallpaper_picture_fill(picture, NULL, name, 112, 70);
 		gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_COVER);
 		gtk_widget_set_size_request(picture, 112, 70);
 		gtk_widget_set_overflow(picture, GTK_OVERFLOW_HIDDEN);

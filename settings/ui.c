@@ -868,8 +868,137 @@ static void source_color(cairo_t *cr, uint32_t c) {
 		(c >> 8 & 0xff) / 255.0, (c & 0xff) / 255.0);
 }
 
+/* ---------- thumbnails kept on disk ---------- */
+
+/*
+ * A wallpaper of a few thousand pixels a side takes a fifth of a second to read
+ * and scale down, and the theme and wallpaper pages ask for one per theme. The
+ * thumbnail that comes out is a few kilobytes, so it is written to the cache
+ * directory and read again the next time the settings are opened. Its name
+ * carries everything it was made from, so a picture that was replaced, or a
+ * theme that now names another one, gives a name nobody has written yet instead
+ * of showing the picture of before.
+ */
+#define THUMB_KEEP 64 // at most this many, so trying out pictures cannot pile up
+
+static char *thumb_dir(void) {
+	char *cache = tw_cache_dir();
+	if (!cache) {
+		return NULL;
+	}
+	char *dir = g_build_filename(cache, "wallpapers", NULL);
+	free(cache);
+	if (!tw_mkdir_p(dir)) {
+		g_free(dir);
+		return NULL;
+	}
+	return dir;
+}
+
+static char *thumb_path(const char *image, uint32_t color, int width, int height) {
+	GStatBuf st;
+	if (g_stat(image, &st) != 0) {
+		return NULL;
+	}
+	char *dir = thumb_dir();
+	if (!dir) {
+		return NULL;
+	}
+	char *key = g_strdup_printf("%s|%lld|%lld|%08x|%dx%d", image, (long long)st.st_mtime,
+		(long long)st.st_size, color, width, height);
+	char *sum = g_compute_checksum_for_string(G_CHECKSUM_SHA256, key, -1);
+	g_free(key);
+	char *name = g_strconcat(sum, ".png", NULL);
+	g_free(sum);
+	char *path = g_build_filename(dir, name, NULL);
+	g_free(name);
+	g_free(dir);
+	return path;
+}
+
+static int thumb_older(gconstpointer a, gconstpointer b) {
+	GStatBuf sa, sb;
+	time_t ta = g_stat(*(const char *const *)a, &sa) == 0 ? sa.st_mtime : 0;
+	time_t tb = g_stat(*(const char *const *)b, &sb) == 0 ? sb.st_mtime : 0;
+	return ta < tb ? -1 : ta > tb ? 1 : 0;
+}
+
+/* Throws the least recently written ones away once there are too many. */
+static void thumb_prune(void) {
+	char *dir = thumb_dir();
+	GDir *d = dir ? g_dir_open(dir, 0, NULL) : NULL;
+	if (!d) {
+		g_free(dir);
+		return;
+	}
+	GPtrArray *files = g_ptr_array_new_with_free_func(g_free);
+	const char *name;
+	while ((name = g_dir_read_name(d))) {
+		g_ptr_array_add(files, g_build_filename(dir, name, NULL));
+	}
+	g_dir_close(d);
+	if (files->len > THUMB_KEEP) {
+		g_ptr_array_sort(files, thumb_older);
+		for (guint i = 0; i + THUMB_KEEP < files->len; i++) {
+			g_unlink(files->pdata[i]);
+		}
+	}
+	g_ptr_array_free(files, TRUE);
+	g_free(dir);
+}
+
+static GdkTexture *texture_from_surface(cairo_surface_t *surface) {
+	if (!surface || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		return NULL;
+	}
+	cairo_surface_flush(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	int height = cairo_image_surface_get_height(surface);
+	GBytes *bytes = g_bytes_new(cairo_image_surface_get_data(surface), (gsize)stride * height);
+	GdkTexture *texture = gdk_memory_texture_new(cairo_image_surface_get_width(surface), height,
+		GDK_MEMORY_DEFAULT, bytes, stride);
+	g_bytes_unref(bytes);
+	return texture;
+}
+
+/*
+ * A picture that came out without transparency is written as one, and the byte
+ * where the texture wants its alpha would then be read as nothing at all, so it
+ * is painted onto a surface that has one. A file of the wrong size is one that
+ * was written by an older tileWin or never written to the end: it is passed
+ * over, and made again.
+ */
+static GdkTexture *thumb_read(const char *path, int width, int height) {
+	cairo_surface_t *png = cairo_image_surface_create_from_png(path);
+	if (cairo_surface_status(png) != CAIRO_STATUS_SUCCESS ||
+			cairo_image_surface_get_width(png) != width ||
+			cairo_image_surface_get_height(png) != height) {
+		cairo_surface_destroy(png);
+		return NULL;
+	}
+	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(out);
+	cairo_set_source_surface(cr, png, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(png);
+	GdkTexture *texture = texture_from_surface(out);
+	cairo_surface_destroy(out);
+	return texture;
+}
+
 static GdkTexture *render_wallpaper(const char *type, uint32_t color1, uint32_t color2,
 		bool vertical, const char *image, int width, int height) {
+	// only a picture read from a file is slow enough to be worth keeping
+	bool from_file = image && g_ascii_strcasecmp(type, "image") == 0;
+	char *kept = from_file ? thumb_path(image, color1, width, height) : NULL;
+	if (kept) {
+		GdkTexture *texture = thumb_read(kept, width, height);
+		if (texture) {
+			g_free(kept);
+			return texture;
+		}
+	}
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	cairo_t *cr = cairo_create(surface);
 	if (g_ascii_strcasecmp(type, "gradient") == 0) {
@@ -904,13 +1033,103 @@ static GdkTexture *render_wallpaper(const char *type, uint32_t color1, uint32_t 
 		}
 	}
 	cairo_destroy(cr);
-	cairo_surface_flush(surface);
-	int stride = cairo_image_surface_get_stride(surface);
-	GBytes *bytes = g_bytes_new(cairo_image_surface_get_data(surface), (gsize)stride * height);
-	GdkTexture *texture = gdk_memory_texture_new(width, height, GDK_MEMORY_DEFAULT, bytes, stride);
-	g_bytes_unref(bytes);
+	if (kept) {
+		cairo_surface_flush(surface);
+		if (cairo_surface_write_to_png(surface, kept) == CAIRO_STATUS_SUCCESS) {
+			thumb_prune();
+		}
+		g_free(kept);
+	}
+	GdkTexture *texture = texture_from_surface(surface);
 	cairo_surface_destroy(surface);
 	return texture;
+}
+
+/* ---------- wallpaper pictures, read once the window is up ---------- */
+
+/*
+ * Reading a wallpaper and scaling it down to a thumbnail is slow enough to be
+ * seen: a photograph of a few thousand pixels a side takes a fifth of a second,
+ * and the theme and wallpaper pages ask for one per theme. The pages therefore
+ * put up empty pictures and leave them to this queue, which fills one per turn
+ * of the loop, and only after the window has been painted once.
+ */
+struct wallpaper_fill {
+	GtkWidget *picture; // held
+	char *wallpaper, *theme;
+	int width, height;
+};
+
+static GQueue *wallpaper_fills;
+static guint wallpaper_fill_source;
+static bool wallpaper_fills_allowed;
+
+static void wallpaper_fill_free(struct wallpaper_fill *f) {
+	g_object_unref(f->picture);
+	g_free(f->wallpaper);
+	g_free(f->theme);
+	g_free(f);
+}
+
+static gboolean wallpaper_fill_next(gpointer data) {
+	struct wallpaper_fill *f = wallpaper_fills ? g_queue_pop_head(wallpaper_fills) : NULL;
+	if (!f) {
+		wallpaper_fill_source = 0;
+		return G_SOURCE_REMOVE;
+	}
+	// a page that was rebuilt meanwhile left its old pictures without a window
+	if (gtk_widget_get_root(f->picture)) {
+		GdkTexture *texture = ui_wallpaper_texture(f->wallpaper, f->theme, f->width, f->height);
+		gtk_picture_set_paintable(GTK_PICTURE(f->picture), GDK_PAINTABLE(texture));
+		g_clear_object(&texture);
+	}
+	wallpaper_fill_free(f);
+	if (!g_queue_is_empty(wallpaper_fills)) {
+		return G_SOURCE_CONTINUE;
+	}
+	wallpaper_fill_source = 0;
+	return G_SOURCE_REMOVE;
+}
+
+static void wallpaper_fills_schedule(void) {
+	if (wallpaper_fills_allowed && !wallpaper_fill_source && wallpaper_fills &&
+			!g_queue_is_empty(wallpaper_fills)) {
+		wallpaper_fill_source = g_idle_add_full(UI_PRIORITY_WALLPAPER, wallpaper_fill_next,
+			NULL, NULL);
+	}
+}
+
+void ui_wallpaper_fills_start(void) {
+	wallpaper_fills_allowed = true;
+	wallpaper_fills_schedule();
+}
+
+void ui_wallpaper_picture_fill(GtkWidget *picture, const char *wallpaper, const char *theme,
+		int width, int height) {
+	if (!GTK_IS_PICTURE(picture)) {
+		return;
+	}
+	if (!wallpaper_fills) {
+		wallpaper_fills = g_queue_new();
+	}
+	// an older request for the same picture would only overwrite the new one
+	GList *next;
+	for (GList *l = wallpaper_fills->head; l; l = next) {
+		next = l->next;
+		struct wallpaper_fill *old = l->data;
+		if (old->picture == picture) {
+			g_queue_delete_link(wallpaper_fills, l);
+			wallpaper_fill_free(old);
+		}
+	}
+	struct wallpaper_fill *f = g_new0(struct wallpaper_fill, 1);
+	f->picture = g_object_ref(picture);
+	f->wallpaper = g_strdup(wallpaper);
+	f->theme = g_strdup(theme);
+	f->width = width;
+	f->height = height;
+	g_queue_push_tail(wallpaper_fills, f);
+	wallpaper_fills_schedule();
 }
 
 GdkTexture *ui_wallpaper_texture(const char *wallpaper, const char *theme, int width,

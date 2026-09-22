@@ -343,6 +343,28 @@ static gboolean lazy_build_next(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+/*
+ * An idle of its own would run while the window is still waiting for the frame
+ * it was painted in, so the work of the pages nobody has asked for yet would
+ * hold up the very first picture of the window. It waits for that picture.
+ */
+static void after_first_paint(GdkFrameClock *clock, gpointer data) {
+	if (clock) {
+		g_signal_handlers_disconnect_by_func(clock, G_CALLBACK(after_first_paint), data);
+	}
+	ui_wallpaper_fills_start();
+	g_idle_add_full(UI_PRIORITY_LAZY_PAGE, lazy_build_next, NULL, NULL);
+}
+
+static void on_window_mapped(GtkWidget *window, gpointer data) {
+	GdkFrameClock *clock = gtk_widget_get_frame_clock(window);
+	if (clock) {
+		g_signal_connect(clock, "after-paint", G_CALLBACK(after_first_paint), NULL);
+	} else {
+		after_first_paint(NULL, NULL);
+	}
+}
+
 static void on_visible_page(GObject *stack, GParamSpec *pspec, gpointer data) {
 	lazy_build_named(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
 }
@@ -503,10 +525,10 @@ static void build_window(struct settings *s) {
 		gtk_stack_add_titled(s->stack, lp->holder, pages[i].name, pages[i].title);
 		g_ptr_array_add(lazy_pages, lp);
 	}
-	// the one that is shown first, then the rest while the window is already up
+	// the one that is shown first, the rest once the window is really on screen
 	lazy_build(lazy_pages->pdata[0]);
 	g_signal_connect(s->stack, "notify::visible-child-name", G_CALLBACK(on_visible_page), s);
-	g_idle_add(lazy_build_next, NULL);
+	g_signal_connect(window, "map", G_CALLBACK(on_window_mapped), NULL);
 
 	GtkWidget *sidebar = gtk_stack_sidebar_new();
 	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);

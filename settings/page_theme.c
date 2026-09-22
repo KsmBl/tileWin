@@ -225,9 +225,8 @@ void theme_page_refresh(struct settings *s) {
 		const char *title = theme && theme->title ? theme->title : name;
 
 		GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-		GdkTexture *texture = ui_wallpaper_texture(NULL, name, 240, 150);
-		GtkWidget *picture = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
-		g_object_unref(texture);
+		GtkWidget *picture = gtk_picture_new();
+		ui_wallpaper_picture_fill(picture, NULL, name, 240, 150);
 		gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_COVER);
 		gtk_widget_set_size_request(picture, 240, 150);
 		gtk_widget_set_overflow(picture, GTK_OVERFLOW_HIDDEN);
