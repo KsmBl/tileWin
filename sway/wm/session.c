@@ -768,7 +768,71 @@ void tw_session_shutdown(void) {
 	tw_session_freeze();
 }
 
-bool tw_restart(bool relaunch_apps, char **error) {
+/* ---------- restarting without letting go of the windows ---------- */
+
+/*
+ * Wayland has no way for a client to survive the compositor it is talking to:
+ * when the display socket goes, every window goes with it, and no toolkit knows
+ * how to reconnect. Restarting the process therefore always costs the windows.
+ *
+ * Most restarts do not need the process to go, though. A new taskbar, a changed
+ * config or a new theme are all picked up while the compositor keeps running,
+ * and then the windows stay exactly where they were. Only a new compositor
+ * binary really has to be executed, so that is the only case that still ends
+ * the session; tileWin notices it by watching the file it was started from.
+ */
+static struct {
+	char path[PATH_MAX];
+	struct stat st;
+	bool known;
+} started_from;
+
+void tw_record_binary(void) {
+	ssize_t n = readlink("/proc/self/exe", started_from.path, sizeof(started_from.path) - 1);
+	if (n <= 0) {
+		return;
+	}
+	started_from.path[n] = '\0';
+	// a binary replaced before we looked has " (deleted)" put after its name
+	char *deleted = strstr(started_from.path, " (deleted)");
+	if (deleted) {
+		*deleted = '\0';
+	}
+	started_from.known = stat(started_from.path, &started_from.st) == 0;
+}
+
+static bool binary_changed(void) {
+	struct stat now;
+	if (!started_from.known) {
+		return true; // cannot tell, so take the safe way round
+	}
+	if (stat(started_from.path, &now) != 0) {
+		return true;
+	}
+	return now.st_ino != started_from.st.st_ino || now.st_dev != started_from.st.st_dev ||
+		now.st_size != started_from.st.st_size ||
+		now.st_mtime != started_from.st.st_mtime;
+}
+
+/* Everything a restart does except leaving the windows behind. */
+static void do_restart_in_place(void *data) {
+	sway_log(SWAY_INFO, "Restarting tileWin without ending the session: the windows stay open");
+	tw_panel_restart();   // a taskbar that was replaced on disk is replaced here
+	reload_config_now();  // config, theme, decorations, wallpaper, bindings
+	tw_session_export_environment();
+}
+
+static void restart_in_place(void) {
+	// reloading frees the config the command being run came from, so it waits
+	// until the command is finished with, the way the reload command does
+	wl_event_loop_add_idle(server.wl_event_loop, do_restart_in_place, NULL);
+}
+
+bool tw_restart(bool relaunch_apps, bool force_exec, char **error) {
+	if (!relaunch_apps && !force_exec && !binary_changed()) {
+		restart_in_place();
+		return true;
+	}
 	char *marker = state_file("restart");
 	if (!marker || !tw_write_string(marker, relaunch_apps ? "relaunch\n" : "plain\n")) {
 		*error = format_str("Cannot write %s", marker ? marker : "the state directory");

@@ -385,6 +385,7 @@ int main(int argc, char **argv) {
 	tw_power_config_changed();
 	force_modeset();
 	load_swaybars();
+	tw_record_binary();
 	tw_session_export_environment();
 	tw_panel_start();
 	tw_nightlight_start();

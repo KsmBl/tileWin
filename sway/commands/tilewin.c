@@ -237,11 +237,14 @@ struct cmd_results *cmd_restart(int argc, char **argv) {
 	}
 	bool relaunch = argc == 1 && (strcmp(argv[0], "--relaunch-apps") == 0 ||
 		strcmp(argv[0], "relaunch-apps") == 0);
-	if (argc == 1 && !relaunch) {
-		return cmd_results_new(CMD_INVALID, "Expected 'restart [panel|relaunch-apps]'");
+	// "restart session" ends the session even when nothing was replaced
+	bool force = argc == 1 && strcasecmp(argv[0], "session") == 0;
+	if (argc == 1 && !relaunch && !force) {
+		return cmd_results_new(CMD_INVALID,
+			"Expected 'restart [panel|session|relaunch-apps]'");
 	}
 	char *err = NULL;
-	if (!tw_restart(relaunch, &err)) {
+	if (!tw_restart(relaunch, force, &err)) {
 		return result_from_error(err);
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);

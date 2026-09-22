@@ -88,7 +88,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Reload without logging out:**
   - `reload`: config.
   - `restart panel`: taskbar only.
-  - `restart`: the whole compositor, e.g. after an update. The session stays open, and `relaunch-apps` starts your apps again.
+  - `restart`: everything else. It keeps the session and every window open, unless the compositor binary itself has been replaced, which is the one thing that cannot be done without ending the session. `restart session` ends it anyway, and `restart relaunch-apps` starts your apps again afterwards.
 - **Settings app** (`tilewin-settings`, GTK4, Super+I): theme and mode, wallpaper per theme or for all themes, taskbar layout and widgets, right-click and start menus, application launcher and default programs.
 - **Fish completions** for `tilewinmsg` (including all tileWin commands and theme names), `tilewin`, `tilewin-theme`, `tilewin-panel` and `tilewin-settings`.
 - **Low resource use:**
@@ -146,7 +146,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   copied picture is held by that program and not by the taskbar;
 - checks that a `$taskmanager` nobody has installed is replaced by one that is,
   and that `expensive_calculations on` makes a window being maximized pass
-  through sizes on the way instead of jumping to the end.
+  through sizes on the way instead of jumping to the end;
+- opens a window, restarts, and checks that the very same window is still
+  there and the compositor never went, then replaces the binary on disk and
+  checks that a restart does end the session.
 
 It needs `grim`, `wl-copy`, `python3` and `dbus-run-session`, and skips itself
 where it cannot run.
@@ -157,7 +160,7 @@ where it cannot run.
 git pull && ./install.sh --no-deps && tilewinmsg restart
 ```
 
-`restart` replaces the running compositor with the newly installed one without ending your session. Wayland apps cannot survive a compositor restart, so use `tilewinmsg restart relaunch-apps` to have your apps started again and placed where they were. If only the taskbar changed, `tilewinmsg restart panel` is enough.
+`restart` picks the cheapest way to apply what was installed. When the compositor binary is the same one that is running, it keeps the session: the config, the theme and the taskbar are all started afresh while the windows stay open and untouched. When the compositor itself has been replaced it has to be executed, and that ends the session — a Wayland app has no way to survive the compositor it is talking to, because the display socket goes with it and no toolkit knows how to reconnect. For that case `tilewinmsg restart relaunch-apps` starts your apps again and puts them back where they were, and `tilewinmsg restart session` forces the same thing when nothing was replaced. If only the taskbar changed, `tilewinmsg restart panel` is enough.
 
 ## Configuration
 
@@ -297,7 +300,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
 | `desktop new\|close\|move left\|move right` | Create a desktop, close the current one (its windows move to the desktop before it), or move it one place in the desktop order |
-| `restart [panel\|relaunch-apps]` | Restart the compositor or the taskbar |
+| `restart [panel\|session\|relaunch-apps]` | Restart the taskbar, or tileWin. Plain `restart` keeps the session and the windows open unless the compositor binary has been replaced; `session` ends the session either way and `relaunch-apps` starts the apps again afterwards |
 | `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `shutdown [logoff]`, `memory`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |

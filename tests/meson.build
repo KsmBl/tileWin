@@ -46,6 +46,15 @@ pointer_tool = executable(
 )
 
 test(
+	'restart-keeps-windows',
+	find_program('restart_keeps_windows.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'compositor-options',
 	find_program('compositor_options.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

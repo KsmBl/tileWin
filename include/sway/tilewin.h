@@ -354,7 +354,14 @@ void tw_panel_config_reloaded(void);
 /* Sends "panel <args>" to the taskbar, e.g. "close" to close its menus. */
 void tw_panel_command(const char *args);
 pid_t tw_panel_pid(void);
-bool tw_restart(bool relaunch_apps, char **error);
+/*
+ * Restarts tileWin. Unless the compositor binary itself has changed (or
+ * force_exec asks for it), this keeps the session and every window open and
+ * only starts the taskbar and the config afresh.
+ */
+bool tw_restart(bool relaunch_apps, bool force_exec, char **error);
+/* Remembers the file tileWin was started from, to notice a new one later. */
+void tw_record_binary(void);
 void tw_session_restore(void);
 void tw_session_apply_placement(struct sway_container *con);
 /* Windows changed; the session is saved shortly afterwards. */
