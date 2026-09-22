@@ -296,7 +296,12 @@ static void render_chrome(void) {
 			cairo_stroke(cr);
 		}
 		char label[64];
-		snprintf(label, sizeof(label), "Desktop %d", number);
+		const char *given = tw_desktop_label(d->ws);
+		if (given) {
+			snprintf(label, sizeof(label), "%s", given);
+		} else {
+			snprintf(label, sizeof(label), "Desktop %d", number);
+		}
 		draw_label(cr, label, p.x, p.y + p.height, p.width, LABEL_H, fg, true);
 		if (hot && !tv.press.dragging && tv.desks->length > 2) {
 			rounded(cr, d->close.x, d->close.y, d->close.width, d->close.height, 4);
@@ -560,6 +565,51 @@ static void move_to_workspace(struct sway_container *con, struct sway_workspace 
 	free(cmd);
 }
 
+/*
+ * A desktop keeps its place by its number, so a name given to one is kept
+ * beside that number as "2:Work". Everything that sorts, moves or switches
+ * desktops goes on reading the number; only what is shown to the user reads
+ * the part after the colon.
+ */
+const char *tw_desktop_label(struct sway_workspace *ws) {
+	const char *colon = ws && ws->name ? strchr(ws->name, ':') : NULL;
+	return colon && colon[1] ? colon + 1 : NULL;
+}
+
+bool tw_desktop_rename(struct sway_workspace *ws, const char *label) {
+	if (!ws || !ws->name || !isdigit((unsigned char)ws->name[0])) {
+		return false; // a workspace named by hand keeps the name it was given
+	}
+	int number = (int)strtol(ws->name, NULL, 10);
+	char *trimmed = label ? strdup(label) : NULL;
+	if (trimmed) {
+		for (char *c = trimmed; *c; c++) {
+			if (*c == ':' || *c == '\n') {
+				*c = ' '; // a colon would look like another number
+			}
+		}
+		while (*trimmed == ' ') {
+			memmove(trimmed, trimmed + 1, strlen(trimmed));
+		}
+		for (size_t n = strlen(trimmed); n > 0 && trimmed[n - 1] == ' '; n--) {
+			trimmed[n - 1] = '\0';
+		}
+	}
+	char *name = trimmed && *trimmed ? format_str("%d:%s", number, trimmed) :
+		format_str("%d", number);
+	free(trimmed);
+	if (!name) {
+		return false;
+	}
+	free(ws->name);
+	ws->name = name;
+	if (ws->ext_workspace) {
+		wlr_ext_workspace_handle_v1_set_name(ws->ext_workspace, ws->name);
+	}
+	ipc_event_workspace(NULL, ws, "rename");
+	return true;
+}
+
 struct sway_workspace *tw_desktop_new(struct sway_output *output) {
 	if (!output) {
 		return NULL;
@@ -597,9 +647,20 @@ bool tw_desktop_move(struct sway_workspace *ws, int direction) {
 	if (!isdigit((unsigned char)ws->name[0]) || !isdigit((unsigned char)other->name[0])) {
 		return false; // named workspaces keep their name and their place
 	}
-	char *name = ws->name;
-	ws->name = other->name;
-	other->name = name;
+	// only the numbers change places: a name stays with the desktop it was
+	// given to, the way it does on Windows
+	int number = (int)strtol(ws->name, NULL, 10);
+	int other_number = (int)strtol(other->name, NULL, 10);
+	const char *label = tw_desktop_label(ws);
+	const char *other_label = tw_desktop_label(other);
+	char *name = label ? format_str("%d:%s", other_number, label) :
+		format_str("%d", other_number);
+	char *other_name = other_label ? format_str("%d:%s", number, other_label) :
+		format_str("%d", number);
+	free(ws->name);
+	free(other->name);
+	ws->name = name;
+	other->name = other_name;
 	wlr_ext_workspace_handle_v1_set_name(ws->ext_workspace, ws->name);
 	wlr_ext_workspace_handle_v1_set_name(other->ext_workspace, other->name);
 	output_sort_workspaces(output);

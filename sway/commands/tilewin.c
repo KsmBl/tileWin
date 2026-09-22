@@ -220,8 +220,17 @@ struct cmd_results *cmd_desktop(int argc, char **argv) {
 		if (!ws || !tw_desktop_move(ws, direction)) {
 			return cmd_results_new(CMD_FAILURE, "The desktop cannot move there");
 		}
+	} else if (strcasecmp(argv[0], "rename") == 0) {
+		char *label = argc > 1 ? join_args(argv + 1, argc - 1) : NULL;
+		bool ok = ws && tw_desktop_rename(ws, label);
+		free(label);
+		if (!ok) {
+			return cmd_results_new(CMD_FAILURE,
+				"This desktop cannot be renamed: it was given a name of its own in the config");
+		}
 	} else {
-		return cmd_results_new(CMD_INVALID, "Expected 'desktop new|close|move left|right'");
+		return cmd_results_new(CMD_INVALID,
+			"Expected 'desktop new|close|rename [name]|move left|right'");
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }

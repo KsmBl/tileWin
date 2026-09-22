@@ -203,7 +203,11 @@ static const char *workspace_label(struct render_ctx *ctx, struct pworkspace *ws
 	}
 	char key[256];
 	snprintf(key, sizeof(key), "workspaces.icon.%s", ws->name);
-	return tw_theme_str(t, key, ws->name);
+	// a desktop given a name is called "2:Work": the number keeps its place in
+	// the order, the button shows what it was called
+	const char *colon = strchr(ws->name, ':');
+	const char *shown = colon && colon[1] ? colon + 1 : ws->name;
+	return tw_theme_str(t, key, shown);
 }
 
 static int workspace_button_width(struct render_ctx *ctx, struct pworkspace *ws) {
