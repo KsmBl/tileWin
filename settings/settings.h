@@ -105,6 +105,11 @@ GtkWidget *ui_app_picker(const char *label, void (*callback)(const char *id, gpo
  * with a preview. clear_label adds a button that reports no icon (NULL for
  * none). apply is called with the chosen icon, or NULL when it was cleared.
  */
+/* Asks for a program: a command to type, or an executable picked from disk. */
+void ui_command_dialog(GtkWindow *parent, const char *title, const char *description,
+	const char *current, void (*apply)(const char *command, gpointer data),
+	gpointer data);
+
 void ui_icon_dialog(GtkWindow *parent, const char *title, const char *description,
 		const char *current, const char *fallback, const char *clear_label,
 		void (*apply)(const char *icon, gpointer data), gpointer data);

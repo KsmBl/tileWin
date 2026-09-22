@@ -47,6 +47,7 @@ struct apps_page {
 	struct settings *s;
 	bool updating;
 	GtkWidget *dropdowns[CATEGORY_COUNT];
+	GtkWidget *custom[CATEGORY_COUNT];
 	GPtrArray *ids[CATEGORY_COUNT]; // char *, "" for "not set"
 	GtkWidget *startup_group, *startup_empty;
 	GPtrArray *startup_rows; // GtkWidget *
@@ -136,16 +137,23 @@ static void fill_category(struct apps_page *p, guint index) {
 		}
 	}
 	if (selected == GTK_INVALID_LIST_POSITION) {
+		// a command set with Other... belongs to no app entry, so it would read
+		// "Not set" although it is exactly what is being used: show it instead
+		char *custom = c->variable ? variable_value(p->s, c->variable) : NULL;
+		char *label = custom && *custom ? g_strdup_printf("%s (chosen by hand)", custom) : NULL;
 		g_ptr_array_insert(ids, 0, g_strdup(""));
-		gtk_string_list_splice(names, 0, 0, (const char *const[]){ ids->len > 1 ?
-			"Not set" : "No app installed", NULL });
+		gtk_string_list_splice(names, 0, 0, (const char *const[]){ label ? label :
+			ids->len > 1 ? "Not set" : "No app installed", NULL });
 		selected = 0;
+		g_free(label);
+		g_free(custom);
 	}
 	g_free(current);
 	p->updating = true;
 	gtk_drop_down_set_model(GTK_DROP_DOWN(p->dropdowns[index]), G_LIST_MODEL(names));
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dropdowns[index]), selected);
 	gtk_widget_set_sensitive(p->dropdowns[index], ids->len > 1 || *(char *)ids->pdata[0]);
+	gtk_widget_set_sensitive(p->custom[index], TRUE); // a program can always be named
 	p->updating = false;
 	g_object_unref(names);
 	if (p->ids[index]) {
@@ -201,6 +209,70 @@ static void on_default(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 		settings_status(p->s, "%s: %s", c->title, g_app_info_get_name(G_APP_INFO(info)));
 	}
 	g_object_unref(info);
+}
+
+/*
+ * A program of one's own, for the cases the list cannot cover: something
+ * without a desktop entry, a wrapper script, a flatpak run line. For the
+ * categories that follow a variable in common.conf the command is written
+ * there; for the ones that answer a kind of file, GIO is asked to remember it
+ * as an app of its own, which is what a desktop entry in the user's data
+ * directory is for.
+ */
+static void apply_custom(const char *command, gpointer data) {
+	struct apps_page *p = g_object_get_data(G_OBJECT(data), "page");
+	guint index = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(data), "category"));
+	const struct category *c = &categories[index];
+	if (c->variable) {
+		char *args = g_strdup_printf("%s %s", c->variable, command);
+		confdoc_set(p->s->common, p->s->common->root, "set", c->variable, args);
+		settings_common_changed(p->s, true);
+		g_free(args);
+	}
+	if (c->types[0]) {
+		GError *error = NULL;
+		char *name = first_word(command);
+		GAppInfo *info = g_app_info_create_from_commandline(command,
+			name && *name ? name : command, G_APP_INFO_CREATE_NONE, &error);
+		g_free(name);
+		for (int i = 0; info && c->types[i] && !error; i++) {
+			g_app_info_set_as_default_for_type(info, c->types[i], &error);
+		}
+		if (info) {
+			g_object_unref(info);
+		}
+		if (error) {
+			settings_status(p->s, "Couldn't use %s for %s: %s", command, c->title,
+				error->message);
+			g_error_free(error);
+			return;
+		}
+	}
+	settings_status(p->s, "%s: %s", c->title, command);
+	fill_category(p, index);
+}
+
+static void on_custom(GtkButton *button, gpointer data) {
+	struct apps_page *p = data;
+	guint index = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(button), "category"));
+	const struct category *c = &categories[index];
+	char *current = c->variable ? variable_value(p->s, c->variable) : NULL;
+	if (!current && c->types[0]) {
+		GAppInfo *def = g_app_info_get_default_for_type(c->types[0], FALSE);
+		if (def) {
+			const char *line = g_app_info_get_commandline(def);
+			current = g_strdup(line ? line : "");
+			g_object_unref(def);
+		}
+	}
+	g_object_set_data(G_OBJECT(button), "page", p);
+	char *description = g_strdup_printf(
+		"The program to use as the %s. Anything that can be run works, not only the apps with "
+		"an entry of their own: a path, a script, or a command with arguments.",
+		c->title);
+	ui_command_dialog(p->s->window, c->title, description, current, apply_custom, button);
+	g_free(description);
+	g_free(current);
 }
 
 /* ---------- startup apps ---------- */
@@ -432,7 +504,13 @@ GtkWidget *apps_page_new(struct settings *s) {
 		gtk_widget_set_size_request(p->dropdowns[i], 280, -1);
 		g_object_set_data(G_OBJECT(p->dropdowns[i]), "category", GUINT_TO_POINTER(i));
 		g_signal_connect(p->dropdowns[i], "notify::selected", G_CALLBACK(on_default), p);
-		ui_row(defaults, categories[i].title, categories[i].subtitle, p->dropdowns[i]);
+		GtkWidget *row = ui_row(defaults, categories[i].title, categories[i].subtitle,
+			p->dropdowns[i]);
+		p->custom[i] = gtk_button_new_with_label("Other...");
+		gtk_widget_set_tooltip_text(p->custom[i], "Use a program that is not in the list");
+		g_object_set_data(G_OBJECT(p->custom[i]), "category", GUINT_TO_POINTER(i));
+		g_signal_connect(p->custom[i], "clicked", G_CALLBACK(on_custom), p);
+		gtk_box_append(GTK_BOX(ui_row_box(row)), p->custom[i]);
 	}
 
 	p->startup_group = ui_group(content, "Startup apps",

@@ -623,6 +623,117 @@ static void on_icon_cancel(GtkButton *button, gpointer data) {
 	gtk_window_destroy(GTK_WINDOW(d->window));
 }
 
+/* ---------- picking a program that is not in the app list ---------- */
+
+/*
+ * Not every program has a desktop entry, and the one that should open a kind of
+ * file is not always among the ones offered. This asks for a command instead:
+ * it can be typed, or the executable picked out of the file system.
+ */
+struct command_dialog {
+	GtkWidget *window, *entry;
+	void (*apply)(const char *command, gpointer data);
+	gpointer data;
+};
+
+static void command_dialog_closed(GtkWidget *widget, gpointer data) {
+	g_free(data);
+}
+
+static void on_command_file_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+	struct command_dialog *d = data;
+	GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (!file) {
+		return;
+	}
+	char *path = g_file_get_path(file);
+	if (path) {
+		gtk_editable_set_text(GTK_EDITABLE(d->entry), path);
+	}
+	g_free(path);
+	g_object_unref(file);
+}
+
+static void on_command_browse(GtkButton *button, gpointer data) {
+	struct command_dialog *d = data;
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Pick a program");
+	GFile *bin = g_file_new_for_path("/usr/bin");
+	gtk_file_dialog_set_initial_folder(dialog, bin);
+	g_object_unref(bin);
+	gtk_file_dialog_open(dialog, GTK_WINDOW(d->window), NULL, on_command_file_chosen, d);
+	g_object_unref(dialog);
+}
+
+static void on_command_set(GtkButton *button, gpointer data) {
+	struct command_dialog *d = data;
+	const char *text = gtk_editable_get_text(GTK_EDITABLE(d->entry));
+	char *command = g_strstrip(g_strdup(text ? text : ""));
+	if (*command && d->apply) {
+		d->apply(command, d->data);
+	}
+	g_free(command);
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+static void on_command_cancel(GtkButton *button, gpointer data) {
+	struct command_dialog *d = data;
+	gtk_window_destroy(GTK_WINDOW(d->window));
+}
+
+static void on_command_activate(GtkEntry *entry, gpointer data) {
+	on_command_set(NULL, data);
+}
+
+void ui_command_dialog(GtkWindow *parent, const char *title, const char *description,
+		const char *current, void (*apply)(const char *command, gpointer data),
+		gpointer data) {
+	struct command_dialog *d = g_new0(struct command_dialog, 1);
+	d->apply = apply;
+	d->data = data;
+
+	d->window = gtk_window_new();
+	gtk_window_set_transient_for(GTK_WINDOW(d->window), parent);
+	gtk_window_set_modal(GTK_WINDOW(d->window), TRUE);
+	gtk_window_set_destroy_with_parent(GTK_WINDOW(d->window), TRUE);
+	gtk_window_set_title(GTK_WINDOW(d->window), "Program");
+	// the page puts its content in a scroller, which asks for no height of its own
+	gtk_window_set_default_size(GTK_WINDOW(d->window), 620, 320);
+	g_signal_connect(d->window, "destroy", G_CALLBACK(command_dialog_closed), d);
+
+	GtkWidget *content;
+	GtkWidget *page = ui_page(title, description, &content);
+	GtkWidget *group = ui_group(content, NULL, NULL);
+	d->entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(d->entry), "e.g. /usr/bin/firefox or foot -e btop");
+	gtk_widget_set_hexpand(d->entry, TRUE);
+	gtk_widget_set_size_request(d->entry, 260, -1);
+	if (current && *current) {
+		gtk_editable_set_text(GTK_EDITABLE(d->entry), current);
+	}
+	g_signal_connect(d->entry, "activate", G_CALLBACK(on_command_activate), d);
+	GtkWidget *row = ui_row(group, "Command", NULL, d->entry);
+	GtkWidget *browse = gtk_button_new_with_label("Pick a file...");
+	g_signal_connect(browse, "clicked", G_CALLBACK(on_command_browse), d);
+	gtk_box_append(GTK_BOX(ui_row_box(row)), browse);
+
+	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+	gtk_widget_set_margin_top(buttons, 12);
+	GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+	g_signal_connect(cancel, "clicked", G_CALLBACK(on_command_cancel), d);
+	gtk_box_append(GTK_BOX(buttons), cancel);
+	GtkWidget *set = gtk_button_new_with_label("Use this program");
+	gtk_widget_add_css_class(set, "suggested-action");
+	g_signal_connect(set, "clicked", G_CALLBACK(on_command_set), d);
+	gtk_box_append(GTK_BOX(buttons), set);
+	gtk_box_append(GTK_BOX(content), buttons);
+
+	gtk_window_set_child(GTK_WINDOW(d->window), page);
+	gtk_window_present(GTK_WINDOW(d->window));
+	gtk_widget_grab_focus(d->entry); // the command can be typed straight away
+}
+
 void ui_icon_dialog(GtkWindow *parent, const char *title, const char *description,
 		const char *current, const char *fallback, const char *clear_label,
 		void (*apply)(const char *icon, gpointer data), gpointer data) {

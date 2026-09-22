@@ -24,6 +24,27 @@ test(
 	suite: 'unit',
 )
 
+virtual_keyboard_xml = '../protocols/virtual-keyboard-unstable-v1.xml'
+keyboard_tool = executable(
+	'keyboard-tool',
+	[
+		'keyboard_tool.c',
+		custom_target(
+			'virtual_keyboard_client_h',
+			input: virtual_keyboard_xml,
+			output: '@BASENAME@-client-protocol.h',
+			command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+		),
+		custom_target(
+			'virtual_keyboard_c',
+			input: virtual_keyboard_xml,
+			output: '@BASENAME@-protocol.c',
+			command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+		),
+	],
+	dependencies: [wayland_client, xkbcommon],
+)
+
 virtual_pointer_xml = '../protocols/wlr-virtual-pointer-unstable-v1.xml'
 pointer_tool = executable(
 	'pointer-tool',
@@ -74,6 +95,16 @@ test(
 
 # works the settings app, so it needs a compositor to drive:
 #   meson test -C build --suite gui
+test(
+	'settings-custom-app',
+	find_program('settings_custom_app.sh'),
+	args: [meson.project_build_root()],
+	depends: [pointer_tool, keyboard_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
 test(
 	'settings-switches-save',
 	find_program('settings_switches.sh'),
