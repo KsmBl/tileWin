@@ -1,573 +1,338 @@
 /*
- * Clipboard history, like on Windows (Win+V or "panel clipboard"): the last
- * copied texts and pictures.
+ * The clipboard history list (Win+V or "panel clipboard").
  *
- * The panel watches the clipboard with ext-data-control. Choosing an entry
- * puts it on the clipboard again and pastes it into the focused window with a
- * virtual keyboard (Ctrl+V, Ctrl+Shift+V in terminals). Pinned entries are
- * kept in ~/.local/state/tileWin/clipboard/, everything else is forgotten when
- * the panel quits. Copies that password managers mark as secret are never
- * recorded; "clipboard_history no" in taskbar.conf turns recording off and
- * "clipboard_paste no" only copies.
+ * The history itself lives in tilewin-clipboard, a program of its own, because
+ * a single copied picture can be sixteen megabytes and inside the taskbar that
+ * looked like the taskbar growing for no reason. This file only draws the list
+ * and asks that program over a socket in $XDG_RUNTIME_DIR: it holds a
+ * thumbnail and the first few hundred bytes of each text, never the copied
+ * data. The taskbar starts the program if nobody else has, and leaves it
+ * running when it restarts itself, so the history survives a restart.
  */
 #define _GNU_SOURCE
-#include <dirent.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <fcntl.h>
-#include <json.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/mman.h>
-#include <time.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include "draw.h"
 #include "flyout.h"
 #include "log.h"
 #include "popup.h"
+#include "stringop.h"
 #include "tw_paths.h"
 
-#define MAX_ENTRIES 25
-#define MAX_TEXT (1024 * 1024)
-#define MAX_IMAGE (16 * 1024 * 1024)
-#define THUMB_W 300
-#define THUMB_H 120
 #define VIEW_W 360
 #define VIEW_MAX_H 480
 #define HEADER 56
 #define EMPTY_H 90
 #define CARD_PAD 12
 #define CARD_GAP 8
+#define VIEW_ROWS_MAX 128
+#define REPLY_MAX (8 * 1024 * 1024)
 
-static const char *const text_mimes[] = {
-	"text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "TEXT", "STRING",
-};
-
-struct clip {
-	bool image;
-	char *data; // text (NUL terminated) or PNG bytes
-	size_t len;
+/* What the list needs to draw one entry. The copied data stays where it is. */
+struct entry {
+	uint64_t id;
+	bool image, pinned;
+	char *preview; // the first lines of a text, NUL terminated
 	cairo_surface_t *thumb;
-	bool pinned;
-	char *file; // PNG file of a pinned picture
-};
-
-struct offer {
-	struct ext_data_control_offer_v1 *offer;
-	int text_rank; // index into text_mimes, -1 if no text
-	bool png, secret;
-};
-
-struct source {
-	struct ext_data_control_source_v1 *source;
-	char *data;
-	size_t len;
-};
-
-struct writer {
-	int fd;
-	char *data;
-	size_t len, done;
 };
 
 static struct {
 	struct panel *panel;
-	struct ext_data_control_device_v1 *device;
-	struct offer *pending;
-	list_t *entries; // struct clip *, newest first
-	int read_fd;
-	bool read_image;
-	char *buf;
-	size_t len, cap;
-	struct zwp_virtual_keyboard_v1 *keyboard;
-	uint32_t ctrl_mask, shift_mask;
-	struct loop_timer *paste_timer;
-	bool paste_shift;
-} cb = { .read_fd = -1 };
+	list_t *entries; // struct entry *, newest first
+	int watch_fd;
+	struct loop_timer *connect_timer;
+	int connect_tries;
+	bool connected;
+} cb = { .watch_fd = -1 };
 
 static void view_changed(void);
 
-/* ---------- entries ---------- */
+/* ---------- talking to tilewin-clipboard ---------- */
 
-static void clip_free(struct clip *c) {
-	if (c->thumb) {
-		cairo_surface_destroy(c->thumb);
-	}
-	free(c->data);
-	free(c->file);
-	free(c);
-}
-
-struct png_reader {
-	const unsigned char *data;
-	size_t len, pos;
-};
-
-static cairo_status_t png_read(void *closure, unsigned char *out, unsigned int length) {
-	struct png_reader *r = closure;
-	if (r->pos + length > r->len) {
-		return CAIRO_STATUS_READ_ERROR;
-	}
-	memcpy(out, r->data + r->pos, length);
-	r->pos += length;
-	return CAIRO_STATUS_SUCCESS;
-}
-
-static cairo_surface_t *make_thumb(const char *data, size_t len) {
-	if (len < 8 || memcmp(data, "\x89PNG\r\n\x1a\n", 8) != 0) {
+static char *socket_path(void) {
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	const char *display = getenv("WAYLAND_DISPLAY");
+	if (!runtime) {
 		return NULL;
 	}
-	struct png_reader reader = { (const unsigned char *)data, len, 0 };
-	cairo_surface_t *full = cairo_image_surface_create_from_png_stream(png_read, &reader);
-	if (cairo_surface_status(full) != CAIRO_STATUS_SUCCESS) {
-		cairo_surface_destroy(full);
-		return NULL;
-	}
-	int w = cairo_image_surface_get_width(full), h = cairo_image_surface_get_height(full);
-	double scale = 1;
-	if (w > THUMB_W) {
-		scale = (double)THUMB_W / w;
-	}
-	if (h * scale > THUMB_H) {
-		scale = (double)THUMB_H / h;
-	}
-	int tw = w * scale < 1 ? 1 : (int)(w * scale), th = h * scale < 1 ? 1 : (int)(h * scale);
-	cairo_surface_t *thumb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
-	cairo_t *cr = cairo_create(thumb);
-	cairo_scale(cr, scale, scale);
-	cairo_set_source_surface(cr, full, 0, 0);
-	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_destroy(full);
-	return thumb;
+	return format_str("%s/tilewin-clipboard-%s.sock", runtime,
+		display && !strchr(display, '/') ? display : "wayland");
 }
 
-static char *clip_dir(void) {
-	char *dir = tw_state_dir();
-	if (!dir) {
-		return NULL;
+static int clip_connect(void) {
+	char *path = socket_path();
+	if (!path) {
+		return -1;
 	}
-	char *path = malloc(strlen(dir) + 16);
-	sprintf(path, "%s/clipboard", dir);
-	free(dir);
-	return path;
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	if (strlen(path) >= sizeof(addr.sun_path)) {
+		free(path);
+		return -1;
+	}
+	strcpy(addr.sun_path, path);
+	free(path);
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		return -1;
+	}
+	struct timeval tv = { .tv_sec = 2 };
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
 }
 
-static bool write_file(const char *path, const char *data, size_t len) {
-	FILE *f = fopen(path, "wb");
-	if (!f) {
-		return false;
-	}
-	bool ok = fwrite(data, 1, len, f) == len;
-	return fclose(f) == 0 && ok;
-}
-
-static char *read_file(const char *path, size_t *len, size_t max) {
-	FILE *f = fopen(path, "rb");
-	if (!f) {
-		return NULL;
-	}
-	char *data = NULL;
-	if (fseek(f, 0, SEEK_END) == 0) {
-		long size = ftell(f);
-		if (size > 0 && (size_t)size <= max && fseek(f, 0, SEEK_SET) == 0) {
-			data = malloc(size + 1);
-			if (fread(data, 1, size, f) == (size_t)size) {
-				data[size] = '\0';
-				*len = size;
-			} else {
-				free(data);
-				data = NULL;
-			}
-		}
-	}
-	fclose(f);
-	return data;
-}
-
-/* Pinned entries survive restarts: texts in index.json, pictures next to it. */
-static void save_pinned(void) {
-	char *dir = clip_dir();
-	if (!dir || !tw_mkdir_p(dir)) {
-		free(dir);
-		return;
-	}
-	json_object *array = json_object_new_array();
-	for (int i = 0; i < cb.entries->length; i++) {
-		struct clip *c = cb.entries->items[i];
-		if (!c->pinned) {
+static bool write_all(int fd, const void *data, size_t len) {
+	const char *p = data;
+	while (len > 0) {
+		ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
+		if (n > 0) {
+			p += n;
+			len -= n;
+		} else if (n < 0 && errno == EINTR) {
 			continue;
-		}
-		json_object *obj = json_object_new_object();
-		if (c->image) {
-			if (!c->file) {
-				char name[64];
-				snprintf(name, sizeof(name), "%lld-%d.png", (long long)time(NULL), i);
-				c->file = strdup(name);
-				char *path = malloc(strlen(dir) + strlen(name) + 2);
-				sprintf(path, "%s/%s", dir, name);
-				write_file(path, c->data, c->len);
-				free(path);
-			}
-			json_object_object_add(obj, "image", json_object_new_string(c->file));
 		} else {
-			json_object_object_add(obj, "text", json_object_new_string_len(c->data, c->len));
-		}
-		json_object_array_add(array, obj);
-	}
-	char *index = malloc(strlen(dir) + 16);
-	sprintf(index, "%s/index.json", dir);
-	tw_write_string(index, json_object_to_json_string_ext(array, JSON_C_TO_STRING_PLAIN));
-	free(index);
-	json_object_put(array);
-
-	// pictures that are no longer pinned
-	DIR *d = opendir(dir);
-	struct dirent *de;
-	while (d && (de = readdir(d))) {
-		size_t n = strlen(de->d_name);
-		if (n < 5 || strcmp(de->d_name + n - 4, ".png") != 0) {
-			continue;
-		}
-		bool used = false;
-		for (int i = 0; i < cb.entries->length && !used; i++) {
-			struct clip *c = cb.entries->items[i];
-			used = c->pinned && c->file && strcmp(c->file, de->d_name) == 0;
-		}
-		if (!used) {
-			unlinkat(dirfd(d), de->d_name, 0);
-		}
-	}
-	if (d) {
-		closedir(d);
-	}
-	free(dir);
-}
-
-static void load_pinned(void) {
-	char *dir = clip_dir();
-	if (!dir) {
-		return;
-	}
-	char *index = malloc(strlen(dir) + 16);
-	sprintf(index, "%s/index.json", dir);
-	json_object *array = json_object_from_file(index);
-	free(index);
-	for (size_t i = 0; array && json_object_is_type(array, json_type_array) &&
-			i < json_object_array_length(array); i++) {
-		json_object *obj = json_object_array_get_idx(array, i), *value;
-		struct clip *c = calloc(1, sizeof(*c));
-		c->pinned = true;
-		if (json_object_object_get_ex(obj, "text", &value)) {
-			c->len = json_object_get_string_len(value);
-			c->data = strndup(json_object_get_string(value), c->len);
-		} else if (json_object_object_get_ex(obj, "image", &value) &&
-				!strchr(json_object_get_string(value), '/')) {
-			char *path = malloc(strlen(dir) + json_object_get_string_len(value) + 2);
-			sprintf(path, "%s/%s", dir, json_object_get_string(value));
-			c->image = true;
-			c->file = strdup(json_object_get_string(value));
-			c->data = read_file(path, &c->len, MAX_IMAGE);
-			c->thumb = c->data ? make_thumb(c->data, c->len) : NULL;
-			free(path);
-		}
-		if (c->data && (!c->image || c->thumb)) {
-			list_add(cb.entries, c);
-		} else {
-			clip_free(c);
-		}
-	}
-	json_object_put(array);
-	free(dir);
-}
-
-static void remove_at(int index) {
-	struct clip *c = cb.entries->items[index];
-	bool pinned = c->pinned;
-	list_del(cb.entries, index);
-	clip_free(c);
-	if (pinned) {
-		save_pinned();
-	}
-	view_changed();
-}
-
-static bool only_space(const char *s, size_t len) {
-	for (size_t i = 0; i < len; i++) {
-		if (s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r') {
 			return false;
 		}
 	}
 	return true;
 }
 
-/* Takes the data; a copy of an existing entry moves it to the top. */
-static void add_entry(bool image, char *data, size_t len) {
-	cairo_surface_t *thumb = NULL;
-	if (image) {
-		thumb = make_thumb(data, len);
-		if (!thumb) {
-			free(data);
-			return;
+static bool read_all(int fd, void *data, size_t len) {
+	char *p = data;
+	while (len > 0) {
+		ssize_t n = read(fd, p, len);
+		if (n > 0) {
+			p += n;
+			len -= n;
+		} else if (n < 0 && errno == EINTR) {
+			continue;
+		} else {
+			return false;
 		}
-	} else if (only_space(data, len)) {
-		free(data);
+	}
+	return true;
+}
+
+static bool read_line(int fd, char *out, size_t size) {
+	size_t i = 0;
+	while (i + 1 < size) {
+		char ch;
+		ssize_t n = read(fd, &ch, 1);
+		if (n < 0 && errno == EINTR) {
+			continue;
+		}
+		if (n <= 0) {
+			return false;
+		}
+		if (ch == '\n') {
+			out[i] = '\0';
+			return true;
+		}
+		out[i++] = ch;
+	}
+	return false;
+}
+
+/* Sends one command and closes; nothing comes back. */
+static void clip_send(const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	char *line = vformat_str(fmt, args);
+	va_end(args);
+	int fd = clip_connect();
+	if (fd >= 0) {
+		write_all(fd, line, strlen(line));
+		close(fd);
+	}
+	free(line);
+}
+
+static void entry_free(struct entry *e) {
+	if (e->thumb) {
+		cairo_surface_destroy(e->thumb);
+	}
+	free(e->preview);
+	free(e);
+}
+
+static cairo_surface_t *fetch_thumb(uint64_t id) {
+	int fd = clip_connect();
+	if (fd < 0) {
+		return NULL;
+	}
+	char *line = format_str("thumb %llu\n", (unsigned long long)id);
+	cairo_surface_t *thumb = NULL;
+	char head[128];
+	int w = 0, h = 0, stride = 0;
+	size_t len = 0;
+	if (write_all(fd, line, strlen(line)) && read_line(fd, head, sizeof(head)) &&
+			sscanf(head, "%d %d %d %zu", &w, &h, &stride, &len) == 4 &&
+			w > 0 && h > 0 && len > 0 && len <= REPLY_MAX &&
+			stride >= w * 4 && len == (size_t)stride * h) {
+		thumb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+		if (cairo_surface_status(thumb) == CAIRO_STATUS_SUCCESS &&
+				cairo_image_surface_get_stride(thumb) == stride &&
+				read_all(fd, cairo_image_surface_get_data(thumb), len)) {
+			cairo_surface_mark_dirty(thumb);
+		} else {
+			cairo_surface_destroy(thumb);
+			thumb = NULL;
+		}
+	}
+	free(line);
+	close(fd);
+	return thumb;
+}
+
+/* Reads the list again, keeping the thumbnails of entries that are still there. */
+static void refresh(void) {
+	int fd = clip_connect();
+	if (fd < 0) {
+		cb.connected = false;
 		return;
 	}
-	for (int i = 0; i < cb.entries->length; i++) {
-		struct clip *c = cb.entries->items[i];
-		if (c->image == image && c->len == len && memcmp(c->data, data, len) == 0) {
-			list_del(cb.entries, i);
-			list_insert(cb.entries, 0, c);
-			free(data);
-			if (thumb) {
-				cairo_surface_destroy(thumb);
+	cb.connected = true;
+	list_t *old = cb.entries;
+	list_t *fresh = create_list();
+	char head[64];
+	int count = 0;
+	if (write_all(fd, "list\n", 5) && read_line(fd, head, sizeof(head)) &&
+			sscanf(head, "%d", &count) == 1 && count >= 0) {
+		for (int i = 0; i < count; i++) {
+			char line[160];
+			unsigned long long id = 0;
+			int image = 0, pinned = 0;
+			size_t len = 0;
+			if (!read_line(fd, line, sizeof(line)) ||
+					sscanf(line, "%llu %d %d %zu", &id, &image, &pinned, &len) != 4 ||
+					len > REPLY_MAX) {
+				break;
 			}
-			view_changed();
-			return;
+			struct entry *e = calloc(1, sizeof(*e));
+			e->id = id;
+			e->image = image != 0;
+			e->pinned = pinned != 0;
+			e->preview = malloc(len + 1);
+			if (!e->preview || (len && !read_all(fd, e->preview, len))) {
+				entry_free(e);
+				break;
+			}
+			e->preview[len] = '\0';
+			list_add(fresh, e);
 		}
 	}
-	struct clip *c = calloc(1, sizeof(*c));
-	c->image = image;
-	c->data = data;
-	c->len = len;
-	c->thumb = thumb;
-	list_insert(cb.entries, 0, c);
-	int unpinned = 0;
+	close(fd);
+
+	cb.entries = fresh;
+	for (int i = 0; i < fresh->length; i++) {
+		struct entry *e = fresh->items[i];
+		if (!e->image) {
+			continue;
+		}
+		struct entry *was = NULL;
+		for (int j = 0; old && j < old->length && !was; j++) {
+			struct entry *o = old->items[j];
+			was = o->id == e->id ? o : NULL;
+		}
+		if (was && was->thumb) {
+			e->thumb = was->thumb;
+			was->thumb = NULL;
+		} else {
+			e->thumb = fetch_thumb(e->id);
+		}
+	}
+	// an entry whose picture never arrived would draw nothing at all
 	for (int i = 0; i < cb.entries->length; i++) {
-		struct clip *e = cb.entries->items[i];
-		if (!e->pinned && ++unpinned > MAX_ENTRIES) {
+		struct entry *e = cb.entries->items[i];
+		if (e->image && !e->thumb) {
 			list_del(cb.entries, i--);
-			clip_free(e);
+			entry_free(e);
 		}
 	}
+	for (int i = 0; old && i < old->length; i++) {
+		entry_free(old->items[i]);
+	}
+	list_free(old);
+}
+
+static void watch_event(int fd, short mask, void *data) {
+	char buf[64];
+	ssize_t n = read(fd, buf, sizeof(buf));
+	if (n <= 0 && !(n < 0 && errno == EAGAIN)) {
+		loop_remove_fd(cb.panel->loop, fd);
+		close(fd);
+		cb.watch_fd = -1;
+		cb.connected = false;
+		return;
+	}
+	refresh();
 	view_changed();
 }
 
-/* ---------- reading the clipboard ---------- */
+static void try_connect(void *data);
 
-static void finish_read(bool ok) {
-	loop_remove_fd(cb.panel->loop, cb.read_fd);
-	close(cb.read_fd);
-	cb.read_fd = -1;
-	char *data = cb.buf;
-	size_t len = cb.len;
-	cb.buf = NULL;
-	cb.len = cb.cap = 0;
-	if (!ok || len == 0) {
-		free(data);
+static void schedule_connect(int ms) {
+	if (cb.connect_timer) {
+		loop_remove_timer(cb.panel->loop, cb.connect_timer);
+	}
+	cb.connect_timer = loop_add_timer(cb.panel->loop, ms, try_connect, NULL);
+}
+
+static void try_connect(void *data) {
+	cb.connect_timer = NULL;
+	int fd = clip_connect();
+	if (fd < 0) {
+		if (cb.connect_tries++ == 0) {
+			proc_spawn("tilewin-clipboard");
+		}
+		if (cb.connect_tries < 12) {
+			schedule_connect(250);
+		} else {
+			sway_log(SWAY_INFO, "Clipboard history: tilewin-clipboard did not come up");
+		}
 		return;
 	}
-	if (!cb.read_image) {
-		data[len] = '\0'; // the buffer always has room for it
-	}
-	add_entry(cb.read_image, data, len);
-}
-
-static void read_in(int fd, short mask, void *data) {
-	size_t max = cb.read_image ? MAX_IMAGE : MAX_TEXT;
-	while (true) {
-		if (cb.cap - cb.len < 4097) {
-			size_t cap = cb.cap ? cb.cap * 2 : 16384;
-			char *buf = realloc(cb.buf, cap);
-			if (!buf) {
-				finish_read(false);
-				return;
-			}
-			cb.buf = buf;
-			cb.cap = cap;
-		}
-		ssize_t n = read(fd, cb.buf + cb.len, cb.cap - cb.len - 1);
-		if (n > 0) {
-			cb.len += n;
-			if (cb.len > max) {
-				finish_read(false); // too big to keep
-				return;
-			}
-		} else if (n < 0 && errno == EINTR) {
-			continue;
-		} else if (n < 0 && errno == EAGAIN) {
-			return;
-		} else {
-			finish_read(n == 0);
-			return;
-		}
-	}
-}
-
-static bool recording(void) {
-	struct panel_config *config = cb.panel->config;
-	return !config || twconf_parse_bool(twconf_value(config->root, "clipboard_history"), true);
-}
-
-static void offer_free(struct offer *o) {
-	if (o) {
-		ext_data_control_offer_v1_destroy(o->offer);
-		free(o);
-	}
-}
-
-static void offer_mime(void *data, struct ext_data_control_offer_v1 *offer, const char *mime) {
-	struct offer *o = data;
-	if (strcmp(mime, "x-kde-passwordManagerHint") == 0) {
-		o->secret = true;
-	} else if (strcmp(mime, "image/png") == 0) {
-		o->png = true;
-	}
-	for (int i = 0; i < (int)(sizeof(text_mimes) / sizeof(text_mimes[0])); i++) {
-		if (strcmp(mime, text_mimes[i]) == 0 && (o->text_rank < 0 || i < o->text_rank)) {
-			o->text_rank = i;
-		}
-	}
-}
-
-static const struct ext_data_control_offer_v1_listener offer_listener = {
-	.offer = offer_mime,
-};
-
-static void device_data_offer(void *data, struct ext_data_control_device_v1 *device,
-		struct ext_data_control_offer_v1 *offer) {
-	offer_free(cb.pending);
-	cb.pending = calloc(1, sizeof(*cb.pending));
-	cb.pending->offer = offer;
-	cb.pending->text_rank = -1;
-	ext_data_control_offer_v1_add_listener(offer, &offer_listener, cb.pending);
-}
-
-static void device_selection(void *data, struct ext_data_control_device_v1 *device,
-		struct ext_data_control_offer_v1 *offer) {
-	struct offer *o = cb.pending && cb.pending->offer == offer ? cb.pending : NULL;
-	if (!o) {
-		return;
-	}
-	cb.pending = NULL;
-	if (recording() && !o->secret && (o->text_rank >= 0 || o->png)) {
-		int fds[2];
-		if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0) {
-			if (cb.read_fd >= 0) {
-				finish_read(false); // a newer copy replaces an unfinished one
-			}
-			cb.read_image = o->text_rank < 0;
-			ext_data_control_offer_v1_receive(o->offer,
-				cb.read_image ? "image/png" : text_mimes[o->text_rank], fds[1]);
-			close(fds[1]);
-			cb.read_fd = fds[0];
-			loop_add_fd(cb.panel->loop, cb.read_fd, POLLIN, read_in, NULL);
-		}
-	}
-	offer_free(o);
-	wl_display_flush(cb.panel->display);
-}
-
-static void device_primary_selection(void *data, struct ext_data_control_device_v1 *device,
-		struct ext_data_control_offer_v1 *offer) {
-	if (cb.pending && cb.pending->offer == offer) {
-		offer_free(cb.pending);
-		cb.pending = NULL;
-	}
-}
-
-static void device_finished(void *data, struct ext_data_control_device_v1 *device) {
-	ext_data_control_device_v1_destroy(device);
-	if (cb.device == device) {
-		cb.device = NULL;
-	}
-}
-
-static const struct ext_data_control_device_v1_listener device_listener = {
-	.data_offer = device_data_offer,
-	.selection = device_selection,
-	.finished = device_finished,
-	.primary_selection = device_primary_selection,
-};
-
-/* ---------- setting the clipboard ---------- */
-
-static void writer_out(int fd, short mask, void *data) {
-	struct writer *w = data;
-	while (w->done < w->len) {
-		ssize_t n = write(fd, w->data + w->done, w->len - w->done);
-		if (n > 0) {
-			w->done += n;
-		} else if (n < 0 && errno == EINTR) {
-			continue;
-		} else if (n < 0 && errno == EAGAIN && !(mask & (POLLERR | POLLHUP))) {
-			return;
-		} else {
-			break;
-		}
-	}
-	loop_remove_fd(cb.panel->loop, fd);
-	close(fd);
-	free(w->data);
-	free(w);
-}
-
-static void source_send(void *data, struct ext_data_control_source_v1 *source,
-		const char *mime, int32_t fd) {
-	struct source *s = data;
-	struct writer *w = calloc(1, sizeof(*w));
-	w->data = malloc(s->len ? s->len : 1);
-	if (!w->data) {
-		free(w);
+	if (!write_all(fd, "watch\n", 6)) {
 		close(fd);
+		schedule_connect(1000);
 		return;
 	}
-	memcpy(w->data, s->data, s->len);
-	w->len = s->len;
-	w->fd = fd;
-	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
-	loop_add_fd(cb.panel->loop, fd, POLLOUT, writer_out, w);
-}
-
-static void source_cancelled(void *data, struct ext_data_control_source_v1 *source) {
-	struct source *s = data;
-	ext_data_control_source_v1_destroy(source);
-	free(s->data);
-	free(s);
-}
-
-static const struct ext_data_control_source_v1_listener source_listener = {
-	.send = source_send,
-	.cancelled = source_cancelled,
-};
-
-static void set_clipboard(struct clip *c) {
-	struct panel *panel = cb.panel;
-	if (!cb.device || !panel->data_control) {
-		return;
-	}
-	struct source *s = calloc(1, sizeof(*s));
-	s->data = malloc(c->len ? c->len : 1);
-	memcpy(s->data, c->data, c->len);
-	s->len = c->len;
-	s->source = ext_data_control_manager_v1_create_data_source(panel->data_control);
-	ext_data_control_source_v1_add_listener(s->source, &source_listener, s);
-	if (c->image) {
-		ext_data_control_source_v1_offer(s->source, "image/png");
-	} else {
-		for (size_t i = 0; i < sizeof(text_mimes) / sizeof(text_mimes[0]); i++) {
-			ext_data_control_source_v1_offer(s->source, text_mimes[i]);
-		}
-	}
-	ext_data_control_device_v1_set_selection(cb.device, s->source);
-	wl_display_flush(panel->display);
+	cb.watch_fd = fd;
+	cb.connected = true;
+	loop_add_fd(cb.panel->loop, fd, POLLIN, watch_event, NULL);
+	refresh();
+	view_changed();
 }
 
 void clipboard_copy_text(struct panel *panel, const char *text) {
 	if (!text || !*text) {
 		return;
 	}
-	if (cb.device && panel->data_control) {
-		struct clip c = { .image = false, .data = (char *)text, .len = strlen(text) };
-		set_clipboard(&c);
-		return;
+	size_t len = strlen(text);
+	int fd = clip_connect();
+	if (fd >= 0) {
+		char *head = format_str("copy %zu\n", len);
+		bool ok = write_all(fd, head, strlen(head)) && write_all(fd, text, len);
+		free(head);
+		close(fd);
+		if (ok) {
+			return;
+		}
 	}
-	// no data control: wl-copy does it
+	// no clipboard program: wl-copy does it
 	GString *cmd = g_string_new("wl-copy -- '");
 	for (const char *s = text; *s; s++) {
 		if (*s == '\'') {
@@ -581,75 +346,9 @@ void clipboard_copy_text(struct panel *panel, const char *text) {
 	g_string_free(cmd, TRUE);
 }
 
-/* ---------- pasting ---------- */
-
-static bool setup_keyboard(void) {
-	struct panel *panel = cb.panel;
-	struct panel_seat *seat = panel_first_seat(panel);
-	if (cb.keyboard) {
-		return true;
-	}
-	if (!seat || !panel->virtual_keyboard) {
-		return false;
-	}
-	struct xkb_context *ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	struct xkb_rule_names names = { .layout = "us" };
-	struct xkb_keymap *keymap = ctx ? xkb_keymap_new_from_names(ctx, &names, 0) : NULL;
-	char *text = keymap ? xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1) : NULL;
-	bool ok = false;
-	if (text) {
-		size_t size = strlen(text) + 1;
-		int fd = memfd_create("tilewin-keymap", MFD_CLOEXEC);
-		if (fd >= 0 && write(fd, text, size) == (ssize_t)size) {
-			cb.keyboard = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(
-				panel->virtual_keyboard, seat->wl_seat);
-			zwp_virtual_keyboard_v1_keymap(cb.keyboard, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd,
-				size);
-			cb.ctrl_mask = 1 << xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_CTRL);
-			cb.shift_mask = 1 << xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
-			ok = true;
-		}
-		if (fd >= 0) {
-			close(fd);
-		}
-		free(text);
-	}
-	xkb_keymap_unref(keymap);
-	xkb_context_unref(ctx);
-	return ok;
-}
-
-static uint32_t now_ms(void) {
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
-static void send_key(uint32_t key, bool down, uint32_t mods) {
-	zwp_virtual_keyboard_v1_key(cb.keyboard, now_ms(), key,
-		down ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
-	zwp_virtual_keyboard_v1_modifiers(cb.keyboard, mods, 0, 0, 0);
-}
-
-static void paste_fired(void *data) {
-	cb.paste_timer = NULL;
-	if (!setup_keyboard()) {
-		return;
-	}
-	uint32_t mods = cb.ctrl_mask;
-	send_key(KEY_LEFTCTRL, true, mods);
-	if (cb.paste_shift) {
-		mods |= cb.shift_mask;
-		send_key(KEY_LEFTSHIFT, true, mods);
-	}
-	send_key(KEY_V, true, mods);
-	send_key(KEY_V, false, mods);
-	if (cb.paste_shift) {
-		mods &= ~cb.shift_mask;
-		send_key(KEY_LEFTSHIFT, false, mods);
-	}
-	send_key(KEY_LEFTCTRL, false, 0);
-	wl_display_flush(cb.panel->display);
+static bool recording(void) {
+	struct panel_config *config = cb.panel->config;
+	return !config || twconf_parse_bool(twconf_value(config->root, "clipboard_history"), true);
 }
 
 static bool focused_terminal(struct panel *panel) {
@@ -665,22 +364,20 @@ static bool focused_terminal(struct panel *panel) {
 }
 
 static void choose(int index) {
-	struct panel *panel = cb.panel;
 	if (index < 0 || index >= cb.entries->length) {
 		return;
 	}
-	set_clipboard(cb.entries->items[index]);
-	popup_close_later(panel);
-	bool paste = !panel->config ||
-		twconf_parse_bool(twconf_value(panel->config->root, "clipboard_paste"), true);
-	if (paste) {
-		// after the list closed and the window has the keyboard again
-		cb.paste_shift = focused_terminal(panel);
-		if (cb.paste_timer) {
-			loop_remove_timer(panel->loop, cb.paste_timer);
-		}
-		cb.paste_timer = loop_add_timer(panel->loop, 150, paste_fired, NULL);
+	struct entry *e = cb.entries->items[index];
+	clip_send("use %llu %d\n", (unsigned long long)e->id, focused_terminal(cb.panel) ? 1 : 0);
+	popup_close_later(cb.panel);
+}
+
+static void remove_at(int index) {
+	if (index < 0 || index >= cb.entries->length) {
+		return;
 	}
+	struct entry *e = cb.entries->items[index];
+	clip_send("remove %llu\n", (unsigned long long)e->id);
 }
 
 /* ---------- the list ---------- */
@@ -697,17 +394,17 @@ struct view {
 	bool inside;
 	int selected, scroll, content;
 	struct pbox list, clear_all;
-	struct view_row rows[MAX_ENTRIES * 2];
+	struct view_row rows[VIEW_ROWS_MAX];
 	int row_count;
 };
 
 static struct view *view_current = NULL;
 
-static int card_height(struct clip *c, cairo_t *cr, const struct fly_style *st, int w) {
+static int card_height(struct entry *c, cairo_t *cr, const struct fly_style *st, int w) {
 	if (c->image) {
 		return cairo_image_surface_get_height(c->thumb) + 2 * CARD_PAD;
 	}
-	int h = pd_text_wrapped(cr, st->font, c->data, 0, 0, w - 2 * CARD_PAD - 56, 3, st->fg, false);
+	int h = pd_text_wrapped(cr, st->font, c->preview, 0, 0, w - 2 * CARD_PAD - 56, 3, st->fg, false);
 	return (h < 20 ? 20 : h) + 2 * CARD_PAD;
 }
 
@@ -766,7 +463,7 @@ static void view_render(struct popup *p, cairo_t *cr) {
 	v->clear_all = (struct pbox){ 0 };
 	bool unpinned = false;
 	for (int i = 0; i < cb.entries->length; i++) {
-		unpinned |= !((struct clip *)cb.entries->items[i])->pinned;
+		unpinned |= !((struct entry *)cb.entries->items[i])->pinned;
 	}
 	if (unpinned) {
 		int tw = 0;
@@ -782,7 +479,8 @@ static void view_render(struct popup *p, cairo_t *cr) {
 	v->list = (struct pbox){ M, M + HEADER, W - 2 * M, H - 2 * M - HEADER };
 	v->row_count = 0;
 	if (cb.entries->length == 0) {
-		pd_text_wrapped(cr, st.font, recording() ?
+		pd_text_wrapped(cr, st.font, !cb.connected ?
+			"tilewin-clipboard is not running, so nothing is being kept." : recording() ?
 			"Nothing here yet. Copy some text or a picture and it shows up here." :
 			"Clipboard history is off (clipboard_history in taskbar.conf).",
 			x0 + 4, v->list.y + 8, cw - 8, 3, st.dim, true);
@@ -797,8 +495,11 @@ static void view_render(struct popup *p, cairo_t *cr) {
 	cairo_clip(cr);
 	int y = v->list.y - v->scroll;
 	for (int i = 0; i < cb.entries->length; i++) {
-		struct clip *c = cb.entries->items[i];
+		struct entry *c = cb.entries->items[i];
 		int h = card_height(c, cr, &st, cw);
+		if (v->row_count >= VIEW_ROWS_MAX) {
+			break;
+		}
 		struct view_row *r = &v->rows[v->row_count++];
 		r->card = (struct pbox){ x0, y, cw, h };
 		r->pin = (struct pbox){ x0 + cw - 56, y + 6, 26, 26 };
@@ -824,7 +525,7 @@ static void view_render(struct popup *p, cairo_t *cr) {
 			cairo_paint(cr);
 			cairo_restore(cr);
 		} else {
-			pd_text_wrapped(cr, st.font, c->data, x0 + CARD_PAD, y + CARD_PAD,
+			pd_text_wrapped(cr, st.font, c->preview, x0 + CARD_PAD, y + CARD_PAD,
 				cw - 2 * CARD_PAD - 56, 3, st.fg, true);
 		}
 		if (hover || c->pinned) {
@@ -912,15 +613,8 @@ static void view_button(struct popup *p, double x, double y, uint32_t button, bo
 		return;
 	}
 	if (v->clear_all.width && pbox_contains(&v->clear_all, x, y)) {
-		for (int i = cb.entries->length - 1; i >= 0; i--) {
-			struct clip *c = cb.entries->items[i];
-			if (!c->pinned) {
-				list_del(cb.entries, i);
-				clip_free(c);
-			}
-		}
+		clip_send("clear\n");
 		v->selected = 0;
-		view_changed();
 		return;
 	}
 	if (!pbox_contains(&v->list, x, y)) {
@@ -934,10 +628,8 @@ static void view_button(struct popup *p, double x, double y, uint32_t button, bo
 		if (pbox_contains(&r.remove, x, y)) {
 			remove_at(i);
 		} else if (pbox_contains(&r.pin, x, y)) {
-			struct clip *c = cb.entries->items[i];
-			c->pinned = !c->pinned;
-			save_pinned();
-			popup_set_dirty(p);
+			struct entry *c = cb.entries->items[i];
+			clip_send("pin %llu\n", (unsigned long long)c->id);
 		} else {
 			choose(i);
 		}
@@ -998,6 +690,7 @@ static const struct popup_vtable view_vtable = {
 	.destroy = view_destroy,
 };
 
+
 void clipboard_toggle(struct panel *panel, struct panel_output *output) {
 	if (popup_is_open(panel, POPUP_CLIPBOARD)) {
 		popup_close_all(panel);
@@ -1006,6 +699,7 @@ void clipboard_toggle(struct panel *panel, struct panel_output *output) {
 	if (!output || !cb.entries) {
 		return;
 	}
+	refresh(); // the list may have changed while nothing was watching
 	struct view *v = calloc(1, sizeof(*v));
 	v->panel = panel;
 	v->output = output;
@@ -1018,12 +712,6 @@ void clipboard_toggle(struct panel *panel, struct panel_output *output) {
 		return;
 	}
 	view_current = v;
-	// a new virtual keyboard loses its first keys: create it before anything is pasted
-	if (twconf_parse_bool(panel->config ? twconf_value(panel->config->root, "clipboard_paste") :
-			NULL, true)) {
-		setup_keyboard();
-		wl_display_flush(panel->display);
-	}
 }
 
 /* ---------- start and stop ---------- */
@@ -1031,40 +719,23 @@ void clipboard_toggle(struct panel *panel, struct panel_output *output) {
 void clipboard_init(struct panel *panel) {
 	cb.panel = panel;
 	cb.entries = create_list();
-	load_pinned();
-	struct panel_seat *seat = panel_first_seat(panel);
-	if (!panel->data_control || !seat) {
-		sway_log(SWAY_INFO, "Clipboard history: the compositor has no data control");
-		return;
-	}
-	cb.device = ext_data_control_manager_v1_get_data_device(panel->data_control, seat->wl_seat);
-	ext_data_control_device_v1_add_listener(cb.device, &device_listener, NULL);
+	try_connect(NULL);
 }
 
 void clipboard_fini(struct panel *panel) {
-	if (!cb.entries) {
-		return;
+	if (cb.connect_timer) {
+		loop_remove_timer(panel->loop, cb.connect_timer);
+		cb.connect_timer = NULL;
 	}
-	if (cb.paste_timer) {
-		loop_remove_timer(panel->loop, cb.paste_timer);
-		cb.paste_timer = NULL;
+	if (cb.watch_fd >= 0) {
+		loop_remove_fd(panel->loop, cb.watch_fd);
+		close(cb.watch_fd);
+		cb.watch_fd = -1;
 	}
-	if (cb.read_fd >= 0) {
-		finish_read(false);
-	}
-	offer_free(cb.pending);
-	cb.pending = NULL;
-	if (cb.device) {
-		ext_data_control_device_v1_destroy(cb.device);
-		cb.device = NULL;
-	}
-	if (cb.keyboard) {
-		zwp_virtual_keyboard_v1_destroy(cb.keyboard);
-		cb.keyboard = NULL;
-	}
-	for (int i = 0; i < cb.entries->length; i++) {
-		clip_free(cb.entries->items[i]);
+	for (int i = 0; cb.entries && i < cb.entries->length; i++) {
+		entry_free(cb.entries->items[i]);
 	}
 	list_free(cb.entries);
 	cb.entries = NULL;
+	// tilewin-clipboard keeps running: the history outlives a taskbar restart
 }

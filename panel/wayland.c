@@ -518,12 +518,6 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 	} else if (strcmp(interface, ext_image_copy_capture_manager_v1_interface.name) == 0) {
 		panel->copy_capture = wl_registry_bind(registry, name,
 			&ext_image_copy_capture_manager_v1_interface, 1);
-	} else if (strcmp(interface, ext_data_control_manager_v1_interface.name) == 0) {
-		panel->data_control = wl_registry_bind(registry, name,
-			&ext_data_control_manager_v1_interface, 1);
-	} else if (strcmp(interface, zwp_virtual_keyboard_manager_v1_interface.name) == 0) {
-		panel->virtual_keyboard = wl_registry_bind(registry, name,
-			&zwp_virtual_keyboard_manager_v1_interface, 1);
 	} else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
 		panel->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {

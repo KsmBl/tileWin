@@ -45,6 +45,15 @@ pointer_tool = executable(
 	dependencies: [wayland_client],
 )
 
+test(
+	'clipboard-split',
+	find_program('clipboard_split.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
 # works the settings app, so it needs a compositor to drive:
 #   meson test -C build --suite gui
 test(

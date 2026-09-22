@@ -324,8 +324,6 @@ struct panel {
 	struct zxdg_output_manager_v1 *xdg_output_manager;
 	struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
 	struct wp_viewporter *viewporter;
-	struct ext_data_control_manager_v1 *data_control;
-	struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard;
 	struct ext_foreign_toplevel_list_v1 *toplevel_list;
 	struct ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture;
 	struct ext_image_copy_capture_manager_v1 *copy_capture;
