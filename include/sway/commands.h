@@ -130,6 +130,7 @@ sway_cmd cmd_xdg_autostart;
 sway_cmd cmd_animation;
 sway_cmd cmd_animations;
 sway_cmd cmd_animation_speed;
+sway_cmd cmd_expensive_calculations;
 sway_cmd cmd_double_click_time;
 sway_cmd cmd_always_on_top;
 sway_cmd cmd_alttab_style;

@@ -464,6 +464,16 @@ struct cmd_results *cmd_animation_speed(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_expensive_calculations(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "expensive_calculations", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_animation_expensive =
+		parse_boolean(argv[0], config->tw_animation_expensive);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_window_stick(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "window_stick", EXPECTED_EQUAL_TO, 1))) {

@@ -57,7 +57,7 @@ struct kind_row {
 struct animations_page {
 	struct settings *s;
 	bool updating;
-	GtkWidget *master_switch, *speed_scale;
+	GtkWidget *master_switch, *speed_scale, *expensive_switch;
 	struct kind_row rows[KIND_COUNT];
 	guint speed_timer;
 	guint preview_timer;
@@ -94,6 +94,11 @@ static double speed(struct animations_page *p) {
 	return v > 0 ? v : 1;
 }
 
+static bool expensive_on(struct animations_page *p) {
+	struct cstmt *stmt = confdoc_child(common(p)->root, "expensive_calculations", NULL);
+	return stmt && !word_is(cstmt_arg(stmt, 0), off_words);
+}
+
 static void kind_state(struct animations_page *p, int kind, guint *style, bool *on) {
 	const struct kind *k = &kinds[kind];
 	struct cstmt *stmt = confdoc_child(common(p)->root, "animation", k->key);
@@ -119,6 +124,7 @@ static void kind_state(struct animations_page *p, int kind, guint *style, bool *
 static void update_sensitivity(struct animations_page *p) {
 	bool all = gtk_switch_get_active(GTK_SWITCH(p->master_switch));
 	gtk_widget_set_sensitive(p->speed_scale, all);
+	gtk_widget_set_sensitive(p->expensive_switch, all);
 	for (int i = 0; i < KIND_COUNT; i++) {
 		struct kind_row *r = &p->rows[i];
 		bool on = all && gtk_switch_get_active(GTK_SWITCH(r->on_switch));
@@ -139,6 +145,20 @@ static void on_master(GObject *object, GParamSpec *pspec, gpointer data) {
 	settings_command(p->s, "animations %s", on ? "enable" : "disable");
 	settings_status(p->s, on ? "Windows and desktops are animated" : "Animations are off");
 	update_sensitivity(p);
+}
+
+static void on_expensive(GObject *object, GParamSpec *pspec, gpointer data) {
+	struct animations_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	bool on = gtk_switch_get_active(GTK_SWITCH(p->expensive_switch));
+	confdoc_set(common(p), common(p)->root, "expensive_calculations", NULL, on ? "on" : NULL);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "expensive_calculations %s", on ? "on" : "off");
+	settings_status(p->s, on ?
+		"Windows are laid out again for every frame while they change size" :
+		"A picture of the window is stretched while it changes size");
 }
 
 static gboolean apply_speed(gpointer data) {
@@ -280,6 +300,7 @@ void animations_page_refresh(struct settings *s) {
 	p->updating = true;
 	gtk_switch_set_active(GTK_SWITCH(p->master_switch), master_on(p));
 	gtk_range_set_value(GTK_RANGE(p->speed_scale), speed(p));
+	gtk_switch_set_active(GTK_SWITCH(p->expensive_switch), expensive_on(p));
 	for (int i = 0; i < KIND_COUNT; i++) {
 		guint style;
 		bool on;
@@ -333,6 +354,12 @@ GtkWidget *animations_page_new(struct settings *s) {
 	gtk_scale_add_mark(GTK_SCALE(p->speed_scale), 2, GTK_POS_BOTTOM, NULL);
 	g_signal_connect(p->speed_scale, "value-changed", G_CALLBACK(on_speed), p);
 	ui_row(general, "Speed", "Slower to the left, faster to the right; 2× plays them twice as fast", p->speed_scale);
+	p->expensive_switch = gtk_switch_new();
+	g_signal_connect(p->expensive_switch, "notify::active", G_CALLBACK(on_expensive), p);
+	ui_row(general, "Expensive calculations",
+		"While a window is snapped to an edge, maximized or resized, lay it out again for "
+		"every frame instead of stretching a picture of it. The window is then never the "
+		"wrong shape, at the cost of a redraw per frame.", p->expensive_switch);
 
 	GtkWidget *windows = ui_group(content, "Windows", NULL);
 	for (int i = KIND_OPEN; i <= KIND_MAXIMIZE; i++) {

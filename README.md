@@ -295,6 +295,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
 | `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
 | `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
+| `expensive_calculations on` | While a window is snapped, maximized or resized, lay it out again for every frame instead of stretching a picture of it: never the wrong shape, at the cost of a redraw per frame |
 | `animation open\|close\|minimize\|maximize\|desktop <style> [enable\|disable]` | Style of one animation, or turn it off. open: `rise` (default), `fade`, `zoom`, `pop`, `drop`; close: `shrink`, `fade`, `grow`, `drop`, `explode` (shatters with fire, smoke, sparks and a shock wave); minimize: `taskbar`, `fade`, `shrink`, `drop`; maximize (also snapping): `morph`, `bounce`, `fade`; desktop: `slide`, `vertical`, `fade`, `zoom` |
 | `window_stick enable\|disable` | Moved and resized windows stick to the edges of other windows and of the screen (default enable) |
 | `window_stick_distance <pixels>` | How close an edge has to come to stick (default 12) |

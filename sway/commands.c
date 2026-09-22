@@ -64,6 +64,7 @@ static const struct cmd_handler handlers[] = {
 	{ "double_click_time", cmd_double_click_time },
 	{ "exec", cmd_exec },
 	{ "exec_always", cmd_exec_always },
+	{ "expensive_calculations", cmd_expensive_calculations },
 	{ "floating_maximum_size", cmd_floating_maximum_size },
 	{ "floating_minimum_size", cmd_floating_minimum_size },
 	{ "floating_modifier", cmd_floating_modifier },

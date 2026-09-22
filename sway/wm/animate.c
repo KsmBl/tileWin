@@ -29,6 +29,8 @@
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
 #include "sway/tree/view.h"
+#include "sway/tree/arrange.h"
+#include "sway/desktop/transaction.h"
 #include "sway/tree/workspace.h"
 #include "list.h"
 #include "log.h"
@@ -79,6 +81,7 @@ enum kind {
 	ANIM_SNAPSHOT, // a copy of a window moves between two boxes
 	ANIM_DESKTOP,  // desktop switch: a copy of the old desktop, the new one offset
 	ANIM_EXPLODE,  // a closing window blowing up (explode.c)
+	ANIM_RESIZE,   // the window itself is given a new size every frame
 };
 
 struct piece {
@@ -410,6 +413,15 @@ static void finish(struct anim *a) {
 		shaken = false;
 	}
 	if (a->con) {
+		if (a->kind == ANIM_RESIZE) {
+			// land exactly on the size that was asked for, not on the last step
+			a->con->pending.x = round(a->box1.x);
+			a->con->pending.y = round(a->box1.y);
+			a->con->pending.width = round(a->box1.width);
+			a->con->pending.height = round(a->box1.height);
+			arrange_container(a->con);
+			transaction_commit_dirty();
+		}
 		if (a->kind == ANIM_LIVE) {
 			a->con->tw.anim.active = false;
 			a->con->tw.anim.alpha = 1;
@@ -503,10 +515,21 @@ static int tick(void *data) {
 			a->dy = a->dy0 * (1 - e);
 			place_workspace(a->ws);
 			break;
+		case ANIM_RESIZE:
+			if (a->con) {
+				a->con->pending.x = round(lerp(a->box0.x, a->box1.x, e));
+				a->con->pending.y = round(lerp(a->box0.y, a->box1.y, e));
+				a->con->pending.width = round(lerp(a->box0.width, a->box1.width, e));
+				a->con->pending.height = round(lerp(a->box0.height, a->box1.height, e));
+				arrange_container(a->con);
+				transaction_commit_dirty();
+			}
+			break;
 		case ANIM_EXPLODE:
 			break; // handled above
 		}
-		if (t >= 1 || ((a->kind == ANIM_LIVE || a->kind == ANIM_GROW) && !a->con)) {
+		if (t >= 1 || ((a->kind == ANIM_LIVE || a->kind == ANIM_GROW ||
+				a->kind == ANIM_RESIZE) && !a->con)) {
 			list_del(anims, i);
 			finish(a);
 		}
@@ -707,6 +730,27 @@ void tw_animate_resize(struct sway_container *con) {
 		return;
 	}
 	cancel_for(con);
+	if (config->tw_animation_expensive) {
+		/*
+		 * The window is given a new size on every frame instead of a picture of
+		 * the old one being stretched, so it draws itself at each step and is
+		 * never the wrong shape. It costs a configure and a redraw per frame,
+		 * which is what the name says.
+		 */
+		struct anim *a = anim_new(ANIM_RESIZE, RESIZE_MS, EASE_OUT);
+		if (!a) {
+			return;
+		}
+		a->con = con;
+		a->box0 = (struct fbox){ old.x, old.y, old.width, old.height };
+		a->box1 = (struct fbox){ new.x, new.y, new.width, new.height };
+		con->pending.x = old.x;
+		con->pending.y = old.y;
+		con->pending.width = old.width;
+		con->pending.height = old.height;
+		arrange_container(con);
+		return;
+	}
 	int s = style(TW_ANIM_MAXIMIZE);
 	struct anim *a = copy_anim_new(ANIM_SNAPSHOT, s == MAXIMIZE_BOUNCE ? BOUNCE_MS :
 		s == MAXIMIZE_FADE ? FADE_MS : RESIZE_MS,

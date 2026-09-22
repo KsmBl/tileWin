@@ -549,6 +549,8 @@ struct sway_config {
 	bool tw_xdg_autostart; // run the XDG autostart entries at start
 	bool tw_animations;
 	float tw_animation_speed;
+	/* Resize the window itself every frame instead of stretching a picture. */
+	bool tw_animation_expensive;
 	bool tw_animation_on[5]; // per enum tw_anim_kind
 	int tw_animation_style[5];
 	bool tw_stick; // windows stick to screen and window edges
