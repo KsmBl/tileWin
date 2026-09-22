@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <limits.h>
 #include <ifaddrs.h>
 #include <linux/input-event-codes.h>
 #include <arpa/inet.h>
@@ -346,7 +347,7 @@ static void topology_load(struct cpu_topology *t) {
 		if (de->d_name[0] == '.' || !strstr(de->d_name, "atom")) {
 			continue;
 		}
-		char path[256], buf[1024];
+		char path[NAME_MAX + 64], buf[1024];
 		snprintf(path, sizeof(path), "/sys/devices/system/cpu/types/%s/cpulist", de->d_name);
 		if (read_file(path, buf, sizeof(buf))) {
 			size_t len = strlen(efficiency);
@@ -921,7 +922,7 @@ static void nm_pick_device(struct nm_state *s) {
 		if (de->d_name[0] == '.' || strcmp(de->d_name, "lo") == 0) {
 			continue;
 		}
-		char path[256], buf[64];
+		char path[NAME_MAX + 64], buf[64];
 		snprintf(path, sizeof(path), "/sys/class/net/%s/operstate", de->d_name);
 		if (read_file(path, buf, sizeof(buf)) && strcmp(buf, "up") != 0) {
 			continue;
@@ -929,7 +930,8 @@ static void nm_pick_device(struct nm_state *s) {
 		unsigned long long rx = 0, tx = 0;
 		if (nm_counters(de->d_name, &rx, &tx) && rx + tx >= best) {
 			best = rx + tx;
-			snprintf(s->device, sizeof(s->device), "%s", de->d_name);
+			snprintf(s->device, sizeof(s->device), "%.*s", (int)sizeof(s->device) - 1,
+				de->d_name);
 		}
 	}
 	if (dir) {
@@ -1141,7 +1143,8 @@ static void power_update(struct widget *w) {
 		s->watts = micro_watts / 1e6;
 		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", de->d_name);
 		s->charging = read_file(path, buf, sizeof(buf)) && strcmp(buf, "Charging") == 0;
-		snprintf(s->device, sizeof(s->device), "%s", de->d_name);
+		snprintf(s->device, sizeof(s->device), "%.*s", (int)sizeof(s->device) - 1,
+				de->d_name);
 		break;
 	}
 	if (dir) {
@@ -1236,7 +1239,8 @@ static void battery_update(struct widget *w) {
 		if (!read_file(path, s->status, sizeof(s->status))) {
 			s->status[0] = '\0';
 		}
-		snprintf(s->device, sizeof(s->device), "%s", de->d_name);
+		snprintf(s->device, sizeof(s->device), "%.*s", (int)sizeof(s->device) - 1,
+				de->d_name);
 		break;
 	}
 	closedir(dir);

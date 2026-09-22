@@ -1131,13 +1131,15 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
  */
 static void run_browse_done(void *data, const char *output) {
 	struct panel *panel = data;
-	char path[1024];
+	// two shorter than the field it ends up in, so a path needing quotes still
+	// fits once the two quotation marks are around it
+	char path[1022];
 	snprintf(path, sizeof(path), "%s", output ? output : "");
 	path[strcspn(path, "\n")] = '\0';
 	if (!path[0]) {
 		return; // cancelled
 	}
-	char quoted[1100];
+	char quoted[1024];
 	if (strpbrk(path, " \t\"'")) {
 		snprintf(quoted, sizeof(quoted), "\"%s\"", path);
 	} else {

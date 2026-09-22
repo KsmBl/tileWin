@@ -2873,7 +2873,7 @@ static void mem_read_processes(struct mem_flyout *f) {
 		if (entry->d_name[0] < '0' || entry->d_name[0] > '9') {
 			continue;
 		}
-		char path[64];
+		char path[NAME_MAX + 16]; // d_name is a directory name, not just a pid
 		snprintf(path, sizeof(path), "/proc/%s/statm", entry->d_name);
 		FILE *file = fopen(path, "r");
 		if (!file) {
