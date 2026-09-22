@@ -80,9 +80,6 @@ static const struct opt opts_git[] = {
 	{ "max_width", "Maximum width", "Pixels; empty or 0 lets it take the room it needs", NULL },
 	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default, and the added and removed "
 		"counts keep their own colors", NULL },
-	{ "on_click", "On click", "Replaces opening a terminal in the repository", NULL },
-	{ "on_middle_click", "On middle click", NULL, NULL },
-	{ "on_right_click", "On right click", "Replaces the right-click menu", NULL },
 	{ 0 },
 };
 
