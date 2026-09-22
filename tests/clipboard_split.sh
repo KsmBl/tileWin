@@ -85,8 +85,26 @@ fi
 display=$(cat "$work/display")
 export WAYLAND_DISPLAY=$display
 
+# A tilewin-clipboard left over from an earlier run on the same display holds
+# the lock, so the one started here would exit at once and the test would go on
+# measuring a process that is no longer there.
+# the name is over fifteen characters, so /proc reports it cut short
+for stale in $(pgrep -x tilewin-clipboa 2>/dev/null); do
+	if tr '\0' '\n' < "/proc/$stale/environ" 2>/dev/null |
+			grep -qx "WAYLAND_DISPLAY=$display"; then
+		kill "$stale" 2>/dev/null
+	fi
+done
+sleep 1
+
 "$clipboard" > "$work/clipboard.log" 2>&1 &
 clip_pid=$!
+sleep 2
+if ! kill -0 "$clip_pid" 2>/dev/null; then
+	echo "tilewin-clipboard stopped as soon as it started"
+	tail -n 3 "$work/clipboard.log"
+	exit 1
+fi
 attempt=0
 while [ ! -S "$XDG_RUNTIME_DIR/tilewin-clipboard-$display.sock" ] && [ $attempt -lt 40 ]; do
 	sleep 0.25

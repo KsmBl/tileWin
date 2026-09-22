@@ -311,6 +311,7 @@ extern const struct widget_impl widget_separator;
 extern const struct widget_impl widget_spacer;
 extern const struct widget_impl widget_custom;
 extern const struct widget_impl widget_notifications;
+extern const struct widget_impl widget_git;
 
 /* ---------- panel ---------- */
 

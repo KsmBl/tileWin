@@ -52,6 +52,7 @@ executable(
 		'wayland.c',
 		'widgets/basic.c',
 		'widgets/custom.c',
+		'widgets/git.c',
 		'widgets/system.c',
 		'widgets/taskbar.c',
 		'widgets/tray.c',

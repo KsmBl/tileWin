@@ -67,6 +67,15 @@ pointer_tool = executable(
 )
 
 test(
+	'git-widget',
+	find_program('git_widget.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'restart-keeps-windows',
 	find_program('restart_keeps_windows.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

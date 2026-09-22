@@ -530,6 +530,7 @@ static const struct widget_impl *impls[] = {
 	&widget_net, &widget_storage, &widget_power, &widget_brightness,
 	&widget_keyboard, &widget_modeswitch, &widget_showdesktop, &widget_search,
 	&widget_separator, &widget_spacer, &widget_custom, &widget_notifications,
+	&widget_git,
 };
 
 const struct widget_impl *widget_impl_find(const char *type) {

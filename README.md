@@ -64,7 +64,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -264,6 +264,20 @@ Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`,
 Copies that password managers mark as secret are not recorded. The Clipboard group on the Taskbar page of the settings turns the history off (`clipboard_history no` in taskbar.conf) and can have a picked entry only copied instead of pasted (`clipboard_paste no`).
 
 The history is kept by **tilewin-clipboard**, a program of its own that the taskbar starts. A single copied picture can be sixteen megabytes, and keeping that inside the taskbar made the taskbar look like it was growing for no reason; in its own process a look at `htop` says plainly what the memory is for. The taskbar only holds a thumbnail and the first few hundred bytes of each text. It keeps running when the taskbar restarts, so the history survives `tilewinmsg restart panel`.
+
+### Git
+
+The **git** widget shows the branch, the newest tag reachable from HEAD and the lines added and removed of the repository the focused window is working in:
+
+```
+main  v1.0.7  ↑2  +42 -7
+```
+
+The directory comes from the kernel rather than from the shell: the focused window has a process, and the foreground process of its terminal has a `/proc/<pid>/cwd`. Nothing is sourced into a shell, so bash, zsh, fish and the rest behave identically. Terminals that serve every window from one process (`xfce4-terminal`, `gnome-terminal` and `konsole` in their default mode) cannot be told apart this way; start them with `--disable-server` (`--disable-factory` for gnome-terminal) to give each window its own process.
+
+The reading **stays on the last repository it saw**, so moving to a browser or an editor leaves the outstanding work on screen instead of blanking it. Clicking opens a terminal in the repository. The tooltip adds the path, what is staged, changed, untracked or conflicted, and how far the branch is from its upstream. Theme keys `git.clean`, `git.dirty` and `git.conflict` color it; `interval` (default 5 s), `show_tag`, `icon` and `max_width` are widget options.
+
+git is asked in the background — one shell running three git commands, whose answers the taskbar reads when they are ready — so the bar never waits for a slow repository, and nothing runs at all while the widget is off screen.
 
 ### Bluetooth
 

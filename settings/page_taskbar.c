@@ -37,6 +37,7 @@ static const struct widget_type widget_types[] = {
 	{ "net", "Network usage", "What goes through an interface" },
 	{ "storage", "Disk space", "How full a file system is" },
 	{ "power", "Power draw", "Watts the computer is drawing" },
+	{ "git", "Git", "Branch and changed lines of the repository the focused window works in" },
 	{ "clock", "Clock", "Time and date with a calendar" },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
@@ -67,6 +68,18 @@ static const struct opt opts_clock[] = {
 	{ "settings", "Settings link", "Opened by the link in the calendar, default exec tilewin-settings --page datetime", NULL },
 	{ 0 },
 };
+static const struct opt opts_git[] = {
+	{ "interval", "Update interval", "Seconds between checks, default 5", NULL },
+	{ "show_tag", "Show the newest tag", "The tag git describe finds from HEAD", NULL },
+	{ "icon", "Icon", "Drawn before the branch, e.g. a Nerd Font glyph", NULL },
+	{ "max_width", "Maximum width", "Pixels, 0 for as much as it needs", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "on_click", "On click", "Replaces opening a terminal in the repository", NULL },
+	{ "on_middle_click", "On middle click", NULL, NULL },
+	{ "on_right_click", "On right click", "Replaces the right-click menu", NULL },
+	{ 0 },
+};
+
 static const struct opt opts_cpu[] = {
 	{ "interval", "Update interval", "Seconds, default 2", NULL },
 	{ "format", "Format", "{usage} is the load in percent", NULL },
@@ -248,6 +261,7 @@ static const struct {
 	const struct opt *opts;
 } type_opts[] = {
 	{ "clock", opts_clock },
+	{ "git", opts_git },
 	{ "cpu", opts_cpu },
 	{ "memory", opts_memory },
 	{ "disk", opts_disk },
