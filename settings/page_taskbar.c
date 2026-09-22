@@ -69,11 +69,17 @@ static const struct opt opts_clock[] = {
 	{ 0 },
 };
 static const struct opt opts_git[] = {
-	{ "interval", "Update interval", "Seconds between checks, default 5", NULL },
-	{ "show_tag", "Show the newest tag", "The tag git describe finds from HEAD", NULL },
-	{ "icon", "Icon", "Drawn before the branch, e.g. a Nerd Font glyph", NULL },
-	{ "max_width", "Maximum width", "Pixels, 0 for as much as it needs", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
+	{ "show_tag", "Show the newest tag", "The tag git describe reaches from HEAD, e.g. v1.0.7",
+		choice_yes_no },
+	{ "show_untracked", "Count untracked files", "Adds \u201c?3\u201d for files git does not follow yet",
+		choice_yes_no },
+	{ "interval", "Update interval", "Seconds between checks; 5 by default, and it also "
+		"looks whenever another window is focused", NULL },
+	{ "icon", "Icon", "Drawn before the branch, e.g. a Nerd Font glyph. Empty by default, "
+		"because not every font has one", NULL },
+	{ "max_width", "Maximum width", "Pixels; empty or 0 lets it take the room it needs", NULL },
+	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default, and the added and removed "
+		"counts keep their own colors", NULL },
 	{ "on_click", "On click", "Replaces opening a terminal in the repository", NULL },
 	{ "on_middle_click", "On middle click", NULL, NULL },
 	{ "on_right_click", "On right click", "Replaces the right-click menu", NULL },

@@ -27,6 +27,7 @@
 #include <linux/input-event-codes.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -452,35 +453,69 @@ static void git_destroy(struct widget *w) {
 
 /* ---------- drawing ---------- */
 
-static char *git_text(struct widget *w) {
+/*
+ * The reading is drawn in pieces so that what was added can be green and what
+ * was removed red, the way a diff is read everywhere else. Each piece carries
+ * the colour it wants; the widget measures them all and draws them in a row.
+ */
+#define GIT_PIECES 8
+
+struct piece {
+	char text[64];
+	const char *color_key; // theme key, NULL for the widget's own colour
+	uint32_t fallback;
+};
+
+static void add_piece(struct piece *pieces, int *count, const char *color_key,
+		uint32_t fallback, const char *fmt, ...) {
+	if (*count >= GIT_PIECES) {
+		return;
+	}
+	struct piece *p = &pieces[(*count)++];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(p->text, sizeof(p->text), fmt, args);
+	va_end(args);
+	p->color_key = color_key;
+	p->fallback = fallback;
+}
+
+/* Fills in what is to be drawn; returns how many pieces there are. */
+static int git_pieces(struct widget *w, struct piece *pieces) {
 	struct git_state *g = w->data;
+	int count = 0;
 	if (!g->repo || !g->branch) {
-		return NULL;
+		return 0;
 	}
 	// no glyph by default: not every theme font has one, and a missing
 	// glyph draws as nothing at all rather than as a branch
 	const char *icon = widget_conf(w, "icon", NULL);
-	GString *out = g_string_new(NULL);
 	if (icon && *icon) {
-		g_string_append_printf(out, "%s ", icon);
+		add_piece(pieces, &count, NULL, 0, "%s ", icon);
 	}
-	g_string_append(out, g->branch);
+	add_piece(pieces, &count, NULL, 0, "%s", g->branch);
 	if (g->tag && widget_conf_bool(w, "show_tag", true)) {
-		g_string_append_printf(out, "  %s", g->tag);
+		add_piece(pieces, &count, "git.tag", 0, "  %s", g->tag);
 	}
 	if (g->ahead) {
-		g_string_append_printf(out, "  ↑%d", g->ahead);
+		add_piece(pieces, &count, NULL, 0, "  ↑%d", g->ahead);
 	}
 	if (g->behind) {
-		g_string_append_printf(out, "  ↓%d", g->behind);
+		add_piece(pieces, &count, NULL, 0, "  ↓%d", g->behind);
 	}
-	if (g->added || g->removed) {
-		g_string_append_printf(out, "  +%ld -%ld", g->added, g->removed);
+	if (g->added) {
+		add_piece(pieces, &count, "git.added", 0x4ade80ff, "  +%ld", g->added);
+	}
+	if (g->removed) {
+		add_piece(pieces, &count, "git.removed", 0xf87171ff, "  -%ld", g->removed);
+	}
+	if (g->untracked && widget_conf_bool(w, "show_untracked", true)) {
+		add_piece(pieces, &count, "git.untracked", 0, "  ?%d", g->untracked);
 	}
 	if (g->conflicts) {
-		g_string_append_printf(out, "  !%d", g->conflicts);
+		add_piece(pieces, &count, "git.conflict", 0xf87171ff, "  !%d", g->conflicts);
 	}
-	return g_string_free(out, FALSE);
+	return count;
 }
 
 static int git_padding(struct render_ctx *ctx) {
@@ -488,34 +523,48 @@ static int git_padding(struct render_ctx *ctx) {
 }
 
 static int git_measure(struct widget *w, struct render_ctx *ctx) {
-	char *text = git_text(w);
-	if (!text) {
+	struct piece pieces[GIT_PIECES];
+	int count = git_pieces(w, pieces);
+	if (count == 0) {
 		return 0; // nothing seen yet: the widget takes no room
 	}
-	int width = render_text_width(ctx, bar_font(ctx->panel), text) + 2 * git_padding(ctx);
-	free(text);
+	int width = 2 * git_padding(ctx);
+	for (int i = 0; i < count; i++) {
+		width += render_text_width(ctx, bar_font(ctx->panel), pieces[i].text);
+	}
 	int max = widget_conf_int(w, "max_width", 0);
 	return max > 0 && width > max ? max : width;
 }
 
 static void git_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	struct git_state *g = w->data;
-	char *text = git_text(w);
-	if (!text) {
+	struct piece pieces[GIT_PIECES];
+	int count = git_pieces(w, pieces);
+	if (count == 0) {
 		return;
 	}
 	if (ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) {
 		render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
 	}
+	// the branch takes the colour of the state the repository is in
 	uint32_t fg = widget_fg(ctx->panel, "git");
-	const char *key = g->conflicts ? "git.conflict" :
+	const char *state = g->conflicts ? "git.conflict" :
 		g->staged || g->unstaged || g->untracked ? "git.dirty" : "git.clean";
-	fg = tw_theme_color(ctx->panel->theme, key, fg);
+	fg = tw_theme_color(ctx->panel->theme, state, fg);
 	int pad = git_padding(ctx);
-	pd_text(ctx->cairo, bar_font(ctx->panel), text, b.x + pad, b.y, b.width - 2 * pad,
-		b.height, fg, PD_CENTER);
+	double x = b.x + pad;
+	double end = b.x + b.width - pad;
+	for (int i = 0; i < count && x < end; i++) {
+		int width = render_text_width(ctx, bar_font(ctx->panel), pieces[i].text);
+		uint32_t color = pieces[i].color_key ?
+			tw_theme_color(ctx->panel->theme, pieces[i].color_key,
+				pieces[i].fallback ? pieces[i].fallback : fg) : fg;
+		double room = x + width > end ? end - x : width;
+		pd_text(ctx->cairo, bar_font(ctx->panel), pieces[i].text, x, b.y, room, b.height,
+			color, PD_LEFT);
+		x += width;
+	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
-	free(text);
 }
 
 static char *git_tooltip(struct widget *w, struct hotspot *hs) {
