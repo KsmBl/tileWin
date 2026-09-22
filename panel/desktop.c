@@ -461,11 +461,13 @@ static int layout_items(struct psurface *s) {
 
 /* The icons surface is as wide as the icon columns it shows. */
 static void update_icons_size(struct panel *panel, struct psurface *s) {
-	bool primary = s == primary_icons(panel) && desktop.items && desktop.items->length;
+	bool primary = s == primary_icons(panel) && desktop.items;
 	int width = 1;
-	if (primary) {
+	if (primary && desktop.items->length) {
 		width = 2 * desktop.margin + (layout_items(s) + 1) * desktop.cell_w;
 	}
+	// the rubber band is drawn here too, so an empty desktop needs the room as
+	// well: without it a drag on the wallpaper would show nothing
 	if ((desktop.drag.active || desktop.band.active) && primary && s->output) {
 		width = s->output->width; // room to drag an icon or a band anywhere
 	}
