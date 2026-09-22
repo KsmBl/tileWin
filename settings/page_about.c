@@ -46,14 +46,18 @@ static const char *const logo_tiny =
 	"▛▀▜ ▛▀▜\n"
 	"▙▄▟ ▙▄▟";
 
-/* Plain letters for the face, so it cannot fall apart in a font without the
- * fancier characters. */
+/*
+ * The uwu logo is tileWin's own, written in the spirit of the fetch tools that
+ * do this rather than taken from one: uwufetch is under the GPL and tileWin is
+ * under the MIT licence, so its art could not be carried in here even if it
+ * were copied faithfully. Ears, a >w< face and a nya are the whole joke.
+ */
 static const char *const logo_uwu =
-	" /\\___/\\   ▛▀▜ ▛▀▜\n"
-	"( o   o )  ▙▄▟ ▙▄▟\n"
-	"(   w   )  ▛▀▜ ▛▀▜\n"
-	" \\     /   ▙▄▟ ▙▄▟\n"
-	"  \\___/    tiwoWin uwu~";
+	"   /\\   /\\     ▛▀▜ ▛▀▜\n"
+	"  (  =^w^=  )  ▙▄▟ ▙▄▟\n"
+	"   (  uwu  )   ▛▀▜ ▛▀▜\n"
+	"    \\  ~  /    ▙▄▟ ▙▄▟\n"
+	"     ^^ ^^     tiwoWin nyaa~";
 
 struct about_page {
 	struct settings *s;
