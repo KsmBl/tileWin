@@ -19,7 +19,8 @@
  *  - night light: nightlight.conf and the on/off state, which
  *    tilewin-nightlight watches
  *  - power: dimming, turning the screen off, locking and sleeping after a time
- *    without input, and what closing the lid does (idle_timeout, lid_action
+ *    without input, what the power button and closing the lid do and locking
+ *    before sleep (idle_timeout, power_key_action, lid_action, lock_on_sleep
  *    and lock_command in common.conf)
  */
 
@@ -68,7 +69,9 @@ struct screen_page {
 
 	GtkWidget *idle_dd[4];
 	GtkWidget *lid_dd[2];
+	GtkWidget *power_key_dd;
 	GtkWidget *lock_entry;
+	GtkWidget *lock_on_sleep_switch;
 	guint lock_timer;
 
 	// the "keep these settings?" question
@@ -870,10 +873,10 @@ static const char *const duration_labels[] = { "Never", "1 minute", "2 minutes",
 	"5 minutes", "10 minutes", "15 minutes", "20 minutes", "25 minutes", "30 minutes",
 	"45 minutes", "1 hour", "2 hours", "3 hours", "4 hours", "5 hours", NULL };
 
-static const char *const lid_values[] = { "default", "nothing", "sleep", "hibernate", "lock",
-	"screen_off", "shutdown", NULL };
+static const char *const lid_values[] = { "default", "nothing", "sleep", "hibernate",
+	"hybrid_sleep", "lock", "screen_off", "shutdown", NULL };
 static const char *const lid_labels[] = { "System default", "Do nothing", "Sleep",
-	"Hibernate", "Lock the screen", "Turn off the screen", "Shut down", NULL };
+	"Hibernate", "Hybrid sleep", "Lock the screen", "Turn off the screen", "Shut down", NULL };
 static const char *const lid_names[2] = { "closed", "docked" };
 
 static void on_idle(GObject *dropdown, GParamSpec *pspec, gpointer data) {
@@ -910,6 +913,33 @@ static void on_lid(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	settings_common_changed(p->s, false);
 	settings_command(p->s, "lid_action %s", args);
 	g_free(args);
+}
+
+static void on_power_key(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct screen_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	if (sel >= G_N_ELEMENTS(lid_values) - 1) {
+		return;
+	}
+	struct confdoc *d = p->s->common;
+	confdoc_set(d, d->root, "power_key_action", NULL, sel == 0 ? NULL : lid_values[sel]);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "power_key_action %s", lid_values[sel]);
+}
+
+static gboolean on_lock_on_sleep(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct screen_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	struct confdoc *d = p->s->common;
+	confdoc_set(d, d->root, "lock_on_sleep", NULL, active ? NULL : "no");
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "lock_on_sleep %s", active ? "yes" : "no");
+	return FALSE;
 }
 
 static gboolean save_lock_command(gpointer data) {
@@ -1131,6 +1161,20 @@ void screen_page_refresh(struct settings *s) {
 		}
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->lid_dd[i]), sel);
 	}
+	struct cstmt *key = confdoc_child(d->root, "power_key_action", NULL);
+	const char *key_value = cstmt_arg(key, 0);
+	guint key_sel = 0;
+	for (guint k = 0; key_value && lid_values[k]; k++) {
+		if (strcmp(key_value, lid_values[k]) == 0) {
+			key_sel = k;
+		}
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->power_key_dd), key_sel);
+	struct cstmt *on_sleep = confdoc_child(d->root, "lock_on_sleep", NULL);
+	const char *on_sleep_value = cstmt_arg(on_sleep, 0);
+	gtk_switch_set_active(GTK_SWITCH(p->lock_on_sleep_switch), !on_sleep_value ||
+		!(strcmp(on_sleep_value, "no") == 0 || strcmp(on_sleep_value, "false") == 0 ||
+		strcmp(on_sleep_value, "off") == 0 || strcmp(on_sleep_value, "disable") == 0));
 	struct cstmt *lock = confdoc_child(d->root, "lock_command", NULL);
 	char *lock_text = lock ? cstmt_join(lock, 0) : g_strdup("tilewin-lock -f");
 	if (strcmp(gtk_editable_get_text(GTK_EDITABLE(p->lock_entry)), lock_text) != 0) {
@@ -1238,8 +1282,15 @@ GtkWidget *screen_page_new(struct settings *s) {
 		ui_row(power, stage_titles[i], NULL, p->idle_dd[i]);
 	}
 
+	GtkWidget *lid = ui_group(content, has_lid() ? "Power button and lid" : "Power button",
+		"Sleep keeps the work in memory and wakes up at once. Hibernate saves it to the disk "
+		"and turns the computer off. Hybrid sleep does both, so the work survives when the "
+		"battery runs out.");
+	p->power_key_dd = gtk_drop_down_new_from_strings(lid_labels);
+	g_signal_connect(p->power_key_dd, "notify::selected", G_CALLBACK(on_power_key), p);
+	ui_row(lid, "When I press the power button", "System default usually is shut down",
+		p->power_key_dd);
 	if (has_lid()) {
-		GtkWidget *lid = ui_group(content, "Laptop lid", NULL);
 		const char *titles[2] = { "When I close the lid",
 			"When I close the lid with a screen connected" };
 		for (int i = 0; i < 2; i++) {
@@ -1257,6 +1308,10 @@ GtkWidget *screen_page_new(struct settings *s) {
 	g_signal_connect(p->lock_entry, "changed", G_CALLBACK(on_lock_command), p);
 	ui_row(lock, "Lock with", "The program that locks the screen (Win+L uses $locker from "
 		"common.conf)", p->lock_entry);
+	p->lock_on_sleep_switch = gtk_switch_new();
+	g_signal_connect(p->lock_on_sleep_switch, "state-set", G_CALLBACK(on_lock_on_sleep), p);
+	ui_row(lock, "Lock before sleeping", "Locks the screen before the computer sleeps or "
+		"hibernates, so it wakes up locked", p->lock_on_sleep_switch);
 
 	screen_page_refresh(s);
 	return page;

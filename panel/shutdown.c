@@ -42,6 +42,8 @@ enum sd_action {
 	ACT_SWITCH_USER,
 	ACT_LOGOUT,
 	ACT_SUSPEND,
+	ACT_HIBERNATE,
+	ACT_HYBRID_SLEEP,
 	ACT_RESTART,
 	ACT_SHUTDOWN,
 	ACT_COUNT,
@@ -161,6 +163,27 @@ static void glyph_logout(cairo_t *cr, double cx, double cy, double s, double lw)
 	cairo_fill(cr);
 }
 
+/* Hibernate: a snowflake, the computer is cold. */
+static void glyph_snowflake(cairo_t *cr, double cx, double cy, double s, double lw) {
+	cairo_new_path(cr);
+	double r = s * 0.38, b = s * 0.12;
+	for (int i = 0; i < 6; i++) {
+		double a = i * M_PI / 3 - M_PI / 2, ca = cos(a), sa = sin(a);
+		cairo_move_to(cr, cx, cy);
+		cairo_line_to(cr, cx + r * ca, cy + r * sa);
+		// the little branches two thirds out
+		double bx = cx + r * 0.62 * ca, by = cy + r * 0.62 * sa;
+		for (int side = -1; side <= 1; side += 2) {
+			double ba = a + side * M_PI / 4;
+			cairo_move_to(cr, bx, by);
+			cairo_line_to(cr, bx + b * cos(ba), by + b * sin(ba));
+		}
+	}
+	cairo_set_line_width(cr, lw * 0.8);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_stroke(cr);
+}
+
 static void glyph_lock(cairo_t *cr, double cx, double cy, double s, double lw) {
 	cairo_new_path(cr);
 	cairo_arc(cr, cx, cy - s * 0.08, s * 0.2, M_PI, 2 * M_PI);
@@ -203,6 +226,14 @@ static void glyph(cairo_t *cr, enum sd_action action, double cx, double cy, doub
 	case ACT_SUSPEND:
 		glyph_moon(cr, cx, cy, s);
 		break;
+	case ACT_HIBERNATE:
+		glyph_snowflake(cr, cx, cy, s, lw);
+		break;
+	case ACT_HYBRID_SLEEP:
+		// both: the moon with a small snowflake
+		glyph_moon(cr, cx - s * 0.1, cy - s * 0.08, s * 0.85);
+		glyph_snowflake(cr, cx + s * 0.26, cy + s * 0.24, s * 0.5, lw);
+		break;
 	case ACT_RESTART:
 		glyph_restart(cr, cx, cy, s, lw);
 		break;
@@ -220,13 +251,14 @@ static const char *action_label(struct shutdown *sd, enum sd_action action) {
 	case SD_CLASSIC: {
 		static const char *const labels[ACT_COUNT] = { "Lock the computer?",
 			"Switch the user?", "Close all programs and log on as a different user?",
-			"Put the computer on stand by?", "Restart the computer?",
+			"Put the computer on stand by?", "Hibernate the computer?",
+			"Put the computer into hybrid sleep?", "Restart the computer?",
 			"Shut down the computer?" };
 		return labels[action];
 	}
 	case SD_LUNA: {
 		static const char *const labels[ACT_COUNT] = { "Lock", "Switch User", "Log Off",
-			"Stand By", "Restart", "Turn Off" };
+			"Stand By", "Hibernate", "Hybrid Sleep", "Restart", "Turn Off" };
 		return labels[action];
 	}
 	case SD_SECURITY:
@@ -234,7 +266,7 @@ static const char *action_label(struct shutdown *sd, enum sd_action action) {
 		break;
 	}
 	static const char *const labels[ACT_COUNT] = { "Lock", "Switch user", "Sign out",
-		"Sleep", "Restart", "Shut down" };
+		"Sleep", "Hibernate", "Hybrid sleep", "Restart", "Shut down" };
 	return labels[action];
 }
 
@@ -242,6 +274,7 @@ static const char *action_label(struct shutdown *sd, enum sd_action action) {
 static char *action_command(struct panel *panel, enum sd_action action) {
 	static const char *const defaults[ACT_COUNT] = { "exec tilewin-lock -f",
 		"exec tilewin-lock -f", "exit", "exec systemctl suspend",
+		"exec systemctl hibernate", "exec systemctl hybrid-sleep",
 		"exec systemctl reboot", "exec systemctl poweroff" };
 	struct twconf_node *sm = panel->config ? panel->config->startmenu : NULL;
 	for (int i = 0; sm && i < twconf_count(sm); i++) {
@@ -260,7 +293,13 @@ static char *action_command(struct panel *panel, enum sd_action action) {
 			match = strcmp(cmd, "exit") == 0;
 			break;
 		case ACT_SUSPEND:
-			match = strstr(cmd, "suspend") || strstr(cmd, "hibernate");
+			match = strstr(cmd, "suspend") && !strstr(cmd, "hibernate");
+			break;
+		case ACT_HIBERNATE:
+			match = strstr(cmd, "hibernate") && !strstr(cmd, "hybrid");
+			break;
+		case ACT_HYBRID_SLEEP:
+			match = strstr(cmd, "hybrid-sleep") != NULL;
 			break;
 		case ACT_RESTART:
 			match = strstr(cmd, "reboot") != NULL;
@@ -768,9 +807,10 @@ static void render_luna(struct shutdown *sd, cairo_t *cr, double W, double H) {
 		pd_rect(cr, 0, 0, W, H, 0x00000000 | (uint32_t)lround(0x50 * sd->fade));
 	}
 
-	// Windows XP's dialog is 314 x 200; shutdown.scale enlarges it
+	// Windows XP's dialog is 314 x 200, wider for more than three buttons;
+	// shutdown.scale enlarges it
 	double k = tw_theme_double(t, "shutdown.scale", 1.25);
-	double dw = 314, dh = 200;
+	double dw = sd->count * 79 + 40 > 314 ? sd->count * 79 + 40 : 314, dh = 200;
 	double dx = round((W - dw * k) / 2), dy = round((H - dh * k) / 3);
 	cairo_save(cr);
 	cairo_translate(cr, dx, dy);
@@ -779,9 +819,9 @@ static void render_luna(struct shutdown *sd, cairo_t *cr, double W, double H) {
 	cairo_rectangle(cr, 0, 0, dw, 44);
 	pd_fill(cr, t, "shutdown.header_bg", 0, 44, 0x0a2f9cff);
 	pd_text(cr, "Franklin Gothic Medium, Trebuchet MS, Noto Sans 14",
-		sd->logoff ? "Log Off Windows" : "Turn off computer", 12, 0, 240, 44, 0xffffffff,
+		sd->logoff ? "Log Off Windows" : "Turn off computer", 12, 0, dw - 74, 44, 0xffffffff,
 		PD_LEFT);
-	pd_glyph_windows(cr, 272, 8, 28, 0xf35325ff, 0x81bc06ff, 0x05a6f0ff, 0xffba08ff, true);
+	pd_glyph_windows(cr, dw - 42, 8, 28, 0xf35325ff, 0x81bc06ff, 0x05a6f0ff, 0xffba08ff, true);
 	cairo_pattern_t *line = pd_gradient("0:#6f95e8 0.35:#c9d8f8 1:#4b73d6", 0, 0, dw, 0);
 	cairo_rectangle(cr, 0, 44, dw, 2);
 	cairo_set_source(cr, line);
@@ -797,17 +837,11 @@ static void render_luna(struct shutdown *sd, cairo_t *cr, double W, double H) {
 	cairo_rectangle(cr, 0, 156, dw, 44);
 	pd_fill(cr, t, "shutdown.footer_bg", 156, 44, 0x0a2f9cff);
 
-	if (sd->count == 3) {
-		for (int i = 0; i < 3; i++) {
-			luna_button(sd, cr, i, 78 + i * 79, 93, k, dx, dy);
-		}
-	} else {
-		for (int i = 0; i < sd->count; i++) {
-			luna_button(sd, cr, i, 118 + i * 79, 93, k, dx, dy);
-		}
+	for (int i = 0; i < sd->count; i++) {
+		luna_button(sd, cr, i, dw / 2 + (i - (sd->count - 1) / 2.0) * 79, 93, k, dx, dy);
 	}
 
-	double bx = 240, by = 167, bw = 62, bh = 22;
+	double bx = dw - 74, by = 167, bw = 62, bh = 22;
 	bool cancel_hot = hot(sd, HS_CANCEL, 0);
 	pd_rounded(cr, bx + 0.5, by + 0.5, bw - 1, bh - 1, 3);
 	cairo_pattern_t *face = pd_gradient(pressed(sd, HS_CANCEL, 0) ?
@@ -1044,13 +1078,14 @@ static void sd_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 		}
 		return;
 	}
-	// letters of the actions: Lock, sign out (E), Sleep/Stand by, Restart, Turn off (U), Switch user (W)
+	// letters of the actions: Lock, sign out (E), Sleep/Stand by, Hibernate, hYbrid sleep,
+	// Restart, Turn off (U), Switch user (W)
 	static const struct {
 		xkb_keysym_t sym;
 		enum sd_action action;
 	} letters[] = {
 		{ XKB_KEY_k, ACT_LOCK }, { XKB_KEY_e, ACT_LOGOUT }, { XKB_KEY_s, ACT_SUSPEND },
-		{ XKB_KEY_r, ACT_RESTART }, { XKB_KEY_u, ACT_SHUTDOWN }, { XKB_KEY_w, ACT_SWITCH_USER },
+		{ XKB_KEY_h, ACT_HIBERNATE }, { XKB_KEY_y, ACT_HYBRID_SLEEP }, { XKB_KEY_r, ACT_RESTART }, { XKB_KEY_u, ACT_SHUTDOWN }, { XKB_KEY_w, ACT_SWITCH_USER },
 		{ XKB_KEY_l, ACT_LOGOUT }, { XKB_KEY_l, ACT_LOCK },
 	};
 	xkb_keysym_t lower = xkb_keysym_to_lower(sym);
@@ -1155,28 +1190,40 @@ void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool
 	sd->selected = -1;
 	sd->hover_id = sd->press_id = -1;
 	static const enum sd_action classic[] = { ACT_SHUTDOWN, ACT_RESTART, ACT_SUSPEND,
-		ACT_LOGOUT };
-	static const enum sd_action luna[] = { ACT_SUSPEND, ACT_SHUTDOWN, ACT_RESTART };
+		ACT_HIBERNATE, ACT_HYBRID_SLEEP, ACT_LOGOUT };
+	static const enum sd_action luna[] = { ACT_SUSPEND, ACT_HIBERNATE, ACT_HYBRID_SLEEP,
+		ACT_SHUTDOWN, ACT_RESTART };
 	static const enum sd_action luna_logoff[] = { ACT_SWITCH_USER, ACT_LOGOUT };
-	static const enum sd_action full[] = { ACT_LOCK, ACT_LOGOUT, ACT_SUSPEND, ACT_RESTART,
-		ACT_SHUTDOWN };
+	static const enum sd_action full[] = { ACT_LOCK, ACT_LOGOUT, ACT_SUSPEND, ACT_HIBERNATE,
+		ACT_HYBRID_SLEEP, ACT_RESTART, ACT_SHUTDOWN };
 	const enum sd_action *list = full;
-	sd->count = 5;
+	int count = sizeof(full) / sizeof(full[0]);
 	switch (sd->style) {
 	case SD_CLASSIC:
 		list = classic;
-		sd->count = 4;
-		sd->selected = logoff ? 3 : 0;
+		count = sizeof(classic) / sizeof(classic[0]);
 		break;
 	case SD_LUNA:
 		list = logoff ? luna_logoff : luna;
-		sd->count = logoff ? 2 : 3;
+		count = logoff ? 2 : sizeof(luna) / sizeof(luna[0]);
 		break;
 	case SD_SECURITY:
 	case SD_TILES:
 		break;
 	}
-	memcpy(sd->actions, list, sd->count * sizeof(*list));
+	// leave out the kinds of sleep this computer cannot do
+	for (int i = 0; i < count; i++) {
+		char *cmd = action_command(panel, list[i]);
+		if (power_command_available(cmd)) {
+			sd->actions[sd->count++] = list[i];
+		}
+		free(cmd);
+	}
+	if (sd->style == SD_CLASSIC && logoff) {
+		sd->selected = sd->count - 1;
+	} else if (sd->style == SD_CLASSIC) {
+		sd->selected = 0;
+	}
 
 	// the Windows 95 look dithers the live screen, the others need a copy of it
 	if (sd->style == SD_CLASSIC || !panel->screencopy) {

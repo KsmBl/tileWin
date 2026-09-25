@@ -553,7 +553,9 @@ struct sway_config {
 	int tw_idle_timeout[5]; // seconds per enum tw_idle_stage, 0: never
 	char *tw_screensaver_command; // NULL: tilewin-screensaver
 	bool tw_screensaver_lock; // lock when someone comes back to the screen saver
-	int tw_lid_action[2]; // enum tw_lid_action with the lid closed, and docked
+	int tw_lid_action[2]; // enum tw_power_action with the lid closed, and docked
+	int tw_power_key_action; // enum tw_power_action
+	bool tw_lock_on_sleep; // lock the session before the computer sleeps or hibernates
 	char *tw_lock_command;
 	char *tw_main_output; // name or "make model serial", NULL: the one at 0,0
 	bool tw_xdg_autostart; // run the XDG autostart entries at start

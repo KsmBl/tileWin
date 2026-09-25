@@ -314,6 +314,8 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_session_restore = true;
 	memset(config->tw_idle_timeout, 0, sizeof(config->tw_idle_timeout));
 	memset(config->tw_lid_action, 0, sizeof(config->tw_lid_action));
+	config->tw_power_key_action = TW_POWER_DEFAULT;
+	config->tw_lock_on_sleep = true;
 	if (!(config->tw_lock_command = strdup("tilewin-lock -f"))) goto cleanup;
 	config->tw_xdg_autostart = true;
 	config->tw_animations = true;

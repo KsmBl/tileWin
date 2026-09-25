@@ -11,10 +11,16 @@
  *       the timers.
  *   lid_action closed|docked <action>
  *       what closing the laptop lid does, without and with an external
- *       monitor: default (leave it to logind), nothing, sleep, hibernate,
- *       lock, screen_off or shutdown. As soon as one is not "default",
- *       tileWin takes logind's handle-lid-switch inhibitor lock and does all
- *       lid handling itself.
+ *       monitor: default (leave it to logind), nothing, sleep (stand by in
+ *       RAM), hibernate (to disk), hybrid_sleep (both), lock, screen_off or
+ *       shutdown. As soon as one is not "default", tileWin takes logind's
+ *       handle-lid-switch inhibitor lock and does all lid handling itself.
+ *   power_key_action <action>
+ *       the same for the power key, with logind's handle-power-key lock.
+ *   lock_on_sleep yes|no
+ *       lock the session before the computer sleeps or hibernates, however
+ *       that was asked for (the power key, the lid, a menu, systemctl): a
+ *       delay inhibitor holds logind back until the lock screen is up.
  *
  * Input only records a timestamp; a single timer wakes up at the next
  * deadline and checks the time since the last input.
@@ -51,8 +57,13 @@
 
 static const char *const stage_names[TW_IDLE_STAGES] = { "dim", "screen_off", "lock", "sleep",
 	"screensaver" };
-static const char *const lid_names[] = { "default", "nothing", "sleep", "hibernate", "lock",
-	"screen_off", "shutdown", NULL };
+static const char *const action_names[] = { "default", "nothing", "sleep", "hibernate",
+	"hybrid_sleep", "lock", "screen_off", "shutdown", NULL };
+
+// how long logind may wait for the lock screen before the computer sleeps anyway
+#define SLEEP_LOCK_TIMEOUT_MS 3000
+// after the lock is up, so the lock screen is drawn before the picture freezes
+#define SLEEP_LOCK_SETTLE_MS 300
 
 static struct {
 	struct wl_event_source *timer;
@@ -69,7 +80,17 @@ static struct {
 	pid_t saver_pid;   // and its process group
 	struct timespec saver_started;
 	bool saver_by_hand; // "screensaver start": the keys of that do not end it
-} power = { .lid_inhibit_fd = -1, .saver_fd = -1 };
+	int key_inhibit_fd;
+	int sleep_inhibit_fd; // delay lock, held while awake with lock_on_sleep
+	struct wl_event_source *sleep_timer; // waits for the lock screen
+	int sleep_waited_ms;
+	bool sleep_locked; // the lock came up, settling
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+	sd_bus *bus;
+	struct wl_event_source *bus_source;
+	sd_bus_slot *sleep_slot;
+#endif
+} power = { .lid_inhibit_fd = -1, .saver_fd = -1, .key_inhibit_fd = -1, .sleep_inhibit_fd = -1 };
 
 bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage) {
 	for (int i = 0; i < TW_IDLE_STAGES; i++) {
@@ -81,9 +102,9 @@ bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage) {
 	return false;
 }
 
-bool tw_lid_action_parse(const char *name, enum tw_lid_action *action) {
-	for (int i = 0; lid_names[i]; i++) {
-		if (strcasecmp(name, lid_names[i]) == 0) {
+bool tw_power_action_parse(const char *name, enum tw_power_action *action) {
+	for (int i = 0; action_names[i]; i++) {
+		if (strcasecmp(name, action_names[i]) == 0) {
 			*action = i;
 			return true;
 		}
@@ -309,6 +330,110 @@ void tw_power_set_inhibited(bool inhibited) {
 	schedule();
 }
 
+/* ---------- logind ---------- */
+
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+static int handle_bus(int fd, uint32_t mask, void *data) {
+	while (power.bus && sd_bus_process(power.bus, NULL) > 0) {
+		// one message per call
+	}
+	return 0;
+}
+
+/* The system bus, read from the event loop so logind's signals arrive. */
+static sd_bus *system_bus(void) {
+	if (power.bus) {
+		return power.bus;
+	}
+	if (sd_bus_open_system(&power.bus) < 0) {
+		sway_log(SWAY_ERROR, "Cannot connect to the system bus");
+		power.bus = NULL;
+		return NULL;
+	}
+	power.bus_source = wl_event_loop_add_fd(server.wl_event_loop, sd_bus_get_fd(power.bus),
+		WL_EVENT_READABLE, handle_bus, NULL);
+	return power.bus;
+}
+
+/* Takes a logind inhibitor lock; -1 when logind refuses. */
+static int inhibit(const char *what, const char *why, const char *mode) {
+	sd_bus *bus = system_bus();
+	if (!bus) {
+		return -1;
+	}
+	sd_bus_message *reply = NULL;
+	sd_bus_error error = SD_BUS_ERROR_NULL;
+	int ret = sd_bus_call_method(bus, "org.freedesktop.login1", "/org/freedesktop/login1",
+		"org.freedesktop.login1.Manager", "Inhibit", &error, &reply, "ssss",
+		what, "tileWin", why, mode);
+	int fd = -1, result = -1;
+	if (ret < 0) {
+		sway_log(SWAY_ERROR, "logind refused the %s inhibitor: %s", what,
+			error.message ? error.message : strerror(-ret));
+	} else if (sd_bus_message_read(reply, "h", &fd) >= 0 && fd >= 0) {
+		// the message owns fd
+		result = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+	}
+	sd_bus_error_free(&error);
+	sd_bus_message_unref(reply);
+	// signals that came in during the call wait in the queue
+	handle_bus(-1, 0, NULL);
+	return result;
+}
+#else
+static int inhibit(const char *what, const char *why, const char *mode) {
+	sway_log(SWAY_ERROR, "%s needs tileWin built with sd-bus; logind keeps handling it", what);
+	return -1;
+}
+#endif
+
+/* Takes or lets go of an inhibitor lock, so *fd >= 0 when want. */
+static void set_inhibitor(int *fd, bool want, const char *what, const char *why,
+		const char *mode) {
+	if (want == (*fd >= 0)) {
+		return;
+	}
+	if (!want) {
+		close(*fd);
+		*fd = -1;
+		sway_log(SWAY_INFO, "logind handles %s again", what);
+		return;
+	}
+	*fd = inhibit(what, why, mode);
+	if (*fd >= 0) {
+		sway_log(SWAY_INFO, "%s", why);
+	}
+}
+
+/* ---------- actions ---------- */
+
+/* The actions the lid and the power key share; false for screen_off, which differs. */
+static bool run_action(enum tw_power_action action) {
+	switch (action) {
+	case TW_POWER_DEFAULT:
+	case TW_POWER_NOTHING:
+		return true;
+	case TW_POWER_SLEEP:
+		spawn("systemctl suspend");
+		return true;
+	case TW_POWER_HIBERNATE:
+		spawn("systemctl hibernate");
+		return true;
+	case TW_POWER_HYBRID_SLEEP:
+		spawn("systemctl hybrid-sleep");
+		return true;
+	case TW_POWER_LOCK:
+		spawn(config->tw_lock_command);
+		return true;
+	case TW_POWER_SHUTDOWN:
+		spawn("systemctl poweroff");
+		return true;
+	case TW_POWER_SCREEN_OFF:
+		break;
+	}
+	return false;
+}
+
 /* ---------- lid ---------- */
 
 static bool internal_output_name(const char *name) {
@@ -328,46 +453,6 @@ static struct sway_output *internal_output(bool *docked) {
 		}
 	}
 	return internal;
-}
-
-static void update_lid_inhibitor(void) {
-	bool want = config && (config->tw_lid_action[0] != TW_LID_DEFAULT ||
-		config->tw_lid_action[1] != TW_LID_DEFAULT);
-	if (want == (power.lid_inhibit_fd >= 0)) {
-		return;
-	}
-	if (!want) {
-		close(power.lid_inhibit_fd);
-		power.lid_inhibit_fd = -1;
-		sway_log(SWAY_INFO, "Closing the lid is handled by logind again");
-		return;
-	}
-#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
-	sd_bus *bus = NULL;
-	sd_bus_message *reply = NULL;
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	if (sd_bus_open_system(&bus) < 0) {
-		sway_log(SWAY_ERROR, "Cannot connect to the system bus for the lid inhibitor");
-		return;
-	}
-	int ret = sd_bus_call_method(bus, "org.freedesktop.login1", "/org/freedesktop/login1",
-		"org.freedesktop.login1.Manager", "Inhibit", &error, &reply, "ssss",
-		"handle-lid-switch", "tileWin", "tileWin handles closing the lid", "block");
-	int fd = -1;
-	if (ret < 0) {
-		sway_log(SWAY_ERROR, "logind refused the lid inhibitor: %s",
-			error.message ? error.message : strerror(-ret));
-	} else if (sd_bus_message_read(reply, "h", &fd) >= 0 && fd >= 0) {
-		// the message owns fd
-		power.lid_inhibit_fd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
-		sway_log(SWAY_INFO, "tileWin handles closing the lid");
-	}
-	sd_bus_error_free(&error);
-	sd_bus_message_unref(reply);
-	sd_bus_unref(bus);
-#else
-	sway_log(SWAY_ERROR, "lid_action needs tileWin built with sd-bus; logind keeps handling the lid");
-#endif
 }
 
 void tw_power_lid(bool closed) {
@@ -394,45 +479,146 @@ void tw_power_lid(bool closed) {
 	}
 	bool docked;
 	struct sway_output *internal = internal_output(&docked);
-	enum tw_lid_action action = config->tw_lid_action[docked ? 1 : 0];
-	if (action == TW_LID_DEFAULT) {
+	enum tw_power_action action = config->tw_lid_action[docked ? 1 : 0];
+	if (action == TW_POWER_DEFAULT) {
 		// what logind does when it is not inhibited
-		action = docked ? TW_LID_NOTHING : TW_LID_SLEEP;
+		action = docked ? TW_POWER_NOTHING : TW_POWER_SLEEP;
 	}
-	sway_log(SWAY_DEBUG, "Lid closed%s: %s", docked ? " (docked)" : "", lid_names[action]);
-	switch (action) {
-	case TW_LID_DEFAULT:
-	case TW_LID_NOTHING:
-		break;
-	case TW_LID_SLEEP:
-		spawn("systemctl suspend");
-		break;
-	case TW_LID_HIBERNATE:
-		spawn("systemctl hibernate");
-		break;
-	case TW_LID_LOCK:
-		spawn(config->tw_lock_command);
-		break;
-	case TW_LID_SCREEN_OFF:
-		if (docked && internal && internal->enabled) {
-			free(power.lid_disabled_output);
-			power.lid_disabled_output = strdup(internal->wlr_output->name);
-			char *cmd = format_str("output \"%s\" disable", internal->wlr_output->name);
-			run_command(cmd);
-			free(cmd);
-		} else {
-			power.lid_screen_off = true;
-			run_command("output * power off");
-		}
-		break;
-	case TW_LID_SHUTDOWN:
-		spawn("systemctl poweroff");
-		break;
+	sway_log(SWAY_DEBUG, "Lid closed%s: %s", docked ? " (docked)" : "", action_names[action]);
+	if (run_action(action)) {
+		return;
+	}
+	// screen_off
+	if (docked && internal && internal->enabled) {
+		free(power.lid_disabled_output);
+		power.lid_disabled_output = strdup(internal->wlr_output->name);
+		char *cmd = format_str("output \"%s\" disable", internal->wlr_output->name);
+		run_command(cmd);
+		free(cmd);
+	} else {
+		power.lid_screen_off = true;
+		run_command("output * power off");
 	}
 }
 
+/* ---------- power key ---------- */
+
+bool tw_power_key(bool pressed) {
+	if (!config || power.key_inhibit_fd < 0) {
+		return false; // logind does it
+	}
+	if (!pressed) {
+		return true;
+	}
+	enum tw_power_action action = config->tw_power_key_action;
+	sway_log(SWAY_DEBUG, "Power key: %s", action_names[action]);
+	if (!run_action(action)) {
+		// screen_off: like idling, the next input turns the screens on again
+		power.idle_screen_off = true;
+		run_command("output * power off");
+	}
+	return true;
+}
+
+/* ---------- lock before sleep ---------- */
+
+static void release_sleep_inhibitor(void) {
+	if (power.sleep_timer) {
+		wl_event_source_remove(power.sleep_timer);
+		power.sleep_timer = NULL;
+	}
+	if (power.sleep_inhibit_fd >= 0) {
+		close(power.sleep_inhibit_fd);
+		power.sleep_inhibit_fd = -1;
+	}
+}
+
+static int handle_sleep_timer(void *data) {
+	if (power.sleep_locked) {
+		sway_log(SWAY_DEBUG, "Locked, the computer may sleep");
+		release_sleep_inhibitor();
+		return 0;
+	}
+	if (server.session_lock.lock) {
+		power.sleep_locked = true;
+		wl_event_source_timer_update(power.sleep_timer, SLEEP_LOCK_SETTLE_MS);
+		return 0;
+	}
+	power.sleep_waited_ms += 50;
+	if (power.sleep_waited_ms >= SLEEP_LOCK_TIMEOUT_MS) {
+		sway_log(SWAY_ERROR, "The lock screen did not come up, sleeping unlocked");
+		release_sleep_inhibitor();
+		return 0;
+	}
+	wl_event_source_timer_update(power.sleep_timer, 50);
+	return 0;
+}
+
+static void update_sleep_inhibitor(void);
+
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+static int handle_prepare_for_sleep(sd_bus_message *msg, void *data, sd_bus_error *error) {
+	int start = 0;
+	if (sd_bus_message_read(msg, "b", &start) < 0) {
+		return 0;
+	}
+	if (!start) {
+		// woke up, or the sleep was called off: hold logind back again for the next time
+		release_sleep_inhibitor();
+		update_sleep_inhibitor();
+		return 0;
+	}
+	if (power.sleep_inhibit_fd < 0 || power.sleep_timer) {
+		return 0;
+	}
+	if (server.session_lock.lock) {
+		release_sleep_inhibitor();
+		return 0;
+	}
+	sway_log(SWAY_DEBUG, "Going to sleep: locking first");
+	spawn(config->tw_lock_command);
+	power.sleep_waited_ms = 0;
+	power.sleep_locked = false;
+	power.sleep_timer = wl_event_loop_add_timer(server.wl_event_loop, handle_sleep_timer, NULL);
+	if (!power.sleep_timer) {
+		release_sleep_inhibitor();
+		return 0;
+	}
+	wl_event_source_timer_update(power.sleep_timer, 50);
+	return 0;
+}
+#endif
+
+static void update_sleep_inhibitor(void) {
+	bool want = config && config->tw_lock_on_sleep;
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+	if (want && !power.sleep_slot && system_bus()) {
+		if (sd_bus_match_signal(power.bus, &power.sleep_slot, "org.freedesktop.login1",
+				"/org/freedesktop/login1", "org.freedesktop.login1.Manager",
+				"PrepareForSleep", handle_prepare_for_sleep, NULL) < 0) {
+			sway_log(SWAY_ERROR, "Cannot watch logind for sleep; not locking before it");
+			return;
+		}
+	}
+#endif
+	if (!want) {
+		release_sleep_inhibitor();
+		return;
+	}
+	if (power.sleep_timer) {
+		return; // on the way to sleep
+	}
+	set_inhibitor(&power.sleep_inhibit_fd, true, "sleep",
+		"tileWin locks the screen before sleeping", "delay");
+}
+
 void tw_power_config_changed(void) {
-	update_lid_inhibitor();
+	set_inhibitor(&power.lid_inhibit_fd, config && (config->tw_lid_action[0] != TW_POWER_DEFAULT ||
+		config->tw_lid_action[1] != TW_POWER_DEFAULT), "handle-lid-switch",
+		"tileWin handles closing the lid", "block");
+	set_inhibitor(&power.key_inhibit_fd, config && config->tw_power_key_action != TW_POWER_DEFAULT,
+		"handle-power-key", "tileWin handles the power key", "block");
+	update_sleep_inhibitor();
 	if (power.last_input.tv_sec == 0 && power.last_input.tv_nsec == 0) {
 		clock_gettime(CLOCK_MONOTONIC, &power.last_input);
 	}
@@ -462,10 +648,22 @@ void tw_power_fini(void) {
 		wl_event_source_remove(power.timer);
 		power.timer = NULL;
 	}
-	if (power.lid_inhibit_fd >= 0) {
-		close(power.lid_inhibit_fd);
-		power.lid_inhibit_fd = -1;
+	int *fds[] = { &power.lid_inhibit_fd, &power.key_inhibit_fd };
+	for (size_t i = 0; i < sizeof(fds) / sizeof(fds[0]); i++) {
+		if (*fds[i] >= 0) {
+			close(*fds[i]);
+			*fds[i] = -1;
+		}
 	}
+	release_sleep_inhibitor();
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+	power.sleep_slot = sd_bus_slot_unref(power.sleep_slot);
+	if (power.bus_source) {
+		wl_event_source_remove(power.bus_source);
+		power.bus_source = NULL;
+	}
+	power.bus = sd_bus_flush_close_unref(power.bus);
+#endif
 	free(power.lid_disabled_output);
 	power.lid_disabled_output = NULL;
 }

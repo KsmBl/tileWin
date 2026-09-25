@@ -429,19 +429,49 @@ struct cmd_results *cmd_idle_timeout(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+#define POWER_ACTIONS "default|nothing|sleep|hibernate|hybrid_sleep|lock|screen_off|shutdown"
+
 struct cmd_results *cmd_lid_action(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "lid_action", EXPECTED_EQUAL_TO, 2))) {
 		return error;
 	}
-	enum tw_lid_action action;
+	enum tw_power_action action;
 	int which = strcasecmp(argv[0], "closed") == 0 ? 0 :
 		strcasecmp(argv[0], "docked") == 0 ? 1 : -1;
-	if (which < 0 || !tw_lid_action_parse(argv[1], &action)) {
+	if (which < 0 || !tw_power_action_parse(argv[1], &action)) {
 		return cmd_results_new(CMD_INVALID, "Expected 'lid_action closed|docked "
-			"default|nothing|sleep|hibernate|lock|screen_off|shutdown'");
+			POWER_ACTIONS "'");
 	}
 	config->tw_lid_action[which] = action;
+	if (config->active && !config->reading) {
+		tw_power_config_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_power_key_action(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "power_key_action", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	enum tw_power_action action;
+	if (!tw_power_action_parse(argv[0], &action)) {
+		return cmd_results_new(CMD_INVALID, "Expected 'power_key_action " POWER_ACTIONS "'");
+	}
+	config->tw_power_key_action = action;
+	if (config->active && !config->reading) {
+		tw_power_config_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_lock_on_sleep(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "lock_on_sleep", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_lock_on_sleep = parse_boolean(argv[0], config->tw_lock_on_sleep);
 	if (config->active && !config->reading) {
 		tw_power_config_changed();
 	}

@@ -1,3 +1,4 @@
+#include <gio/gio.h>
 #include <linux/input-event-codes.h>
 #include <math.h>
 #include <stdio.h>
@@ -846,12 +847,40 @@ void menu_open_start_classic(struct panel *panel, struct panel_output *output,
 	menu_create(panel, NULL, output, items, true, x, y, true, NULL, true);
 }
 
+bool power_command_available(const char *command) {
+	const char *method = strstr(command, "hybrid-sleep") ? "CanHybridSleep" :
+		strstr(command, "suspend-then-hibernate") ? "CanSuspendThenHibernate" :
+		strstr(command, "hibernate") ? "CanHibernate" :
+		strstr(command, "suspend") ? "CanSuspend" : NULL;
+	if (!method) {
+		return true;
+	}
+	GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
+	if (!bus) {
+		return true;
+	}
+	GVariant *reply = g_dbus_connection_call_sync(bus, "org.freedesktop.login1",
+		"/org/freedesktop/login1", "org.freedesktop.login1.Manager", method, NULL,
+		G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 1000, NULL, NULL);
+	g_object_unref(bus);
+	if (!reply) {
+		return true; // no logind to ask: offer it
+	}
+	const char *answer = NULL;
+	g_variant_get(reply, "(&s)", &answer);
+	// "challenge" asks for a password, which systemctl does
+	bool available = strcmp(answer, "yes") == 0 || strcmp(answer, "challenge") == 0;
+	g_variant_unref(reply);
+	return available;
+}
+
 list_t *power_menu_items(struct panel *panel) {
 	list_t *items = create_list();
 	struct twconf_node *sm = panel->config ? panel->config->startmenu : NULL;
 	for (int i = 0; sm && i < twconf_count(sm); i++) {
 		struct twconf_node *child = twconf_at(sm, i);
-		if (strcmp(child->name, "power") == 0 && child->argc >= 2) {
+		if (strcmp(child->name, "power") == 0 && child->argc >= 2 &&
+				power_command_available(child->argv[1])) {
 			list_add(items, menu_item_new(child->argv[0], child->argv[1]));
 		}
 	}
@@ -860,6 +889,14 @@ list_t *power_menu_items(struct panel *panel) {
 		list_add(items, menu_item_new("Sign out", "exit"));
 		list_add(items, menu_item_new("Restart tileWin", "restart"));
 		list_add(items, menu_item_separator());
+		static const char *const sleeps[][2] = { { "Sleep", "exec systemctl suspend" },
+			{ "Hibernate", "exec systemctl hibernate" },
+			{ "Hybrid sleep", "exec systemctl hybrid-sleep" } };
+		for (size_t i = 0; i < sizeof(sleeps) / sizeof(sleeps[0]); i++) {
+			if (power_command_available(sleeps[i][1])) {
+				list_add(items, menu_item_new(sleeps[i][0], sleeps[i][1]));
+			}
+		}
 		list_add(items, menu_item_new("Restart", "exec systemctl reboot"));
 		list_add(items, menu_item_new("Shut down", "exec systemctl poweroff"));
 	}

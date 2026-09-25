@@ -125,6 +125,8 @@ sway_cmd cmd_wallpaper;
 sway_cmd cmd_wm_mode;
 sway_cmd cmd_idle_timeout;
 sway_cmd cmd_lid_action;
+sway_cmd cmd_power_key_action;
+sway_cmd cmd_lock_on_sleep;
 sway_cmd cmd_lock_command;
 sway_cmd cmd_screensaver;
 sway_cmd cmd_screensaver_command;

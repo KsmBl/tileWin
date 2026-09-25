@@ -46,6 +46,8 @@ void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,
 int popup_shadow_margin(struct panel *panel);
 double popup_radius(struct panel *panel, const char *prefix);
 list_t *power_menu_items(struct panel *panel);
+/* False for a sleep, hibernate or hybrid-sleep command logind says this computer cannot do. */
+bool power_command_available(const char *command);
 list_t *theme_menu_items(struct panel *panel);
 
 #endif

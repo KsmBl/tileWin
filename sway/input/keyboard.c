@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <limits.h>
+#include <linux/input-event-codes.h>
 #include <strings.h>
 #include <wlr/config.h>
 #include <wlr/backend/multi.h>
@@ -464,6 +465,13 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 	// first) and once for the device: react only to the group's copy, or
 	// Win+Tab would open the task view and close it again at once.
 	bool tw_input = !keyboard->wlr->group;
+	// the power key works on the lock screen too; the copy of a grouped
+	// keyboard is swallowed without acting twice
+	if (event->keycode == KEY_POWER &&
+			tw_power_key(tw_input && event->state == WL_KEYBOARD_KEY_STATE_PRESSED)) {
+		free(device_identifier);
+		return;
+	}
 	if (tw_input && !locked) {
 		for (size_t i = 0; i < keyinfo.raw_keysyms_len; i++) {
 			tw_pointer_key(keyinfo.raw_keysyms[i],

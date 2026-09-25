@@ -418,7 +418,7 @@ void tw_session_shutdown(void);
 /* Gives D-Bus and systemd services (portals, Thunar) the session environment. */
 void tw_session_export_environment(void);
 
-/* power.c: idle timeouts and the laptop lid */
+/* power.c: idle timeouts, the laptop lid, the power key and locking before sleep */
 enum tw_idle_stage {
 	TW_IDLE_DIM,
 	TW_IDLE_SCREEN_OFF,
@@ -427,23 +427,28 @@ enum tw_idle_stage {
 	TW_IDLE_SCREENSAVER, // tilewin-screensaver until input comes
 	TW_IDLE_STAGES,
 };
-enum tw_lid_action {
-	TW_LID_DEFAULT,
-	TW_LID_NOTHING,
-	TW_LID_SLEEP,
-	TW_LID_HIBERNATE,
-	TW_LID_LOCK,
-	TW_LID_SCREEN_OFF,
-	TW_LID_SHUTDOWN,
+/* What closing the lid or pressing the power key does. */
+enum tw_power_action {
+	TW_POWER_DEFAULT, // leave it to logind
+	TW_POWER_NOTHING,
+	TW_POWER_SLEEP, // stand by: suspend to RAM
+	TW_POWER_HIBERNATE, // suspend to disk
+	TW_POWER_HYBRID_SLEEP, // both: stand by, and wake from disk if the power ran out
+	TW_POWER_LOCK,
+	TW_POWER_SCREEN_OFF,
+	TW_POWER_SHUTDOWN,
 };
 bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage);
-bool tw_lid_action_parse(const char *name, enum tw_lid_action *action);
+bool tw_power_action_parse(const char *name, enum tw_power_action *action);
 /* Input happened (cheap, called for every event). */
 void tw_power_activity(void);
 /* An app keeps the screen on (idle inhibitor) or stopped doing so. */
 void tw_power_set_inhibited(bool inhibited);
 void tw_power_lid(bool closed);
-/* The config was loaded or an idle_timeout/lid_action command ran. */
+/* The power key went down or up; true when tileWin handles it and the key goes no further. */
+bool tw_power_key(bool pressed);
+/* The config was loaded or an idle_timeout, lid_action, power_key_action or
+ * lock_on_sleep command ran. */
 void tw_power_config_changed(void);
 /* The screen saver now ("screensaver start") or no more. */
 void tw_screensaver_start(void);
