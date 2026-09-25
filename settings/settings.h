@@ -23,6 +23,7 @@ struct animations_page;
 struct window_page;
 struct datetime_page;
 struct desktop_page;
+struct screensaver_page;
 
 struct settings {
 	GtkApplication *app;
@@ -52,6 +53,7 @@ struct settings {
 	struct window_page *window_page;
 	struct datetime_page *datetime_page;
 	struct desktop_page *desktop_page;
+	struct screensaver_page *screensaver_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -181,6 +183,8 @@ GtkWidget *taskbar_page_new(struct settings *s);
 void taskbar_page_refresh(struct settings *s);
 /* Deletes a script widget, from the layouts and the desktop too. */
 void taskbar_delete_script(struct settings *s, const char *name);
+GtkWidget *screensaver_page_new(struct settings *s);
+void screensaver_page_refresh(struct settings *s);
 GtkWidget *desktop_page_new(struct settings *s);
 void desktop_page_refresh(struct settings *s);
 

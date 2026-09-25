@@ -424,6 +424,7 @@ enum tw_idle_stage {
 	TW_IDLE_SCREEN_OFF,
 	TW_IDLE_LOCK,
 	TW_IDLE_SLEEP,
+	TW_IDLE_SCREENSAVER, // tilewin-screensaver until input comes
 	TW_IDLE_STAGES,
 };
 enum tw_lid_action {
@@ -444,6 +445,9 @@ void tw_power_set_inhibited(bool inhibited);
 void tw_power_lid(bool closed);
 /* The config was loaded or an idle_timeout/lid_action command ran. */
 void tw_power_config_changed(void);
+/* The screen saver now ("screensaver start") or no more. */
+void tw_screensaver_start(void);
+void tw_screensaver_stop(void);
 void tw_power_fini(void);
 
 #endif

@@ -420,7 +420,7 @@ struct cmd_results *cmd_idle_timeout(int argc, char **argv) {
 	if (!tw_idle_stage_parse(argv[0], &stage) || (end && (end == argv[1] || *end)) ||
 			seconds < 0) {
 		return cmd_results_new(CMD_INVALID,
-			"Expected 'idle_timeout dim|screen_off|lock|sleep <seconds>|never'");
+			"Expected 'idle_timeout dim|screen_off|lock|sleep|screensaver <seconds>|never'");
 	}
 	config->tw_idle_timeout[stage] = seconds > (1L << 30) ? (1 << 30) : (int)seconds;
 	if (config->active && !config->reading) {
@@ -794,6 +794,44 @@ struct cmd_results *cmd_main_output(int argc, char **argv) {
 	}
 	config->tw_main_output = name;
 	tw_main_output_changed();
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* "screensaver start|stop": now, as if the computer had been left alone, or no more. */
+struct cmd_results *cmd_screensaver(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "screensaver", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (config->reading) {
+		return cmd_results_new(CMD_INVALID, "'screensaver' only works at runtime");
+	}
+	if (strcasecmp(argv[0], "start") == 0) {
+		tw_screensaver_start();
+	} else if (strcasecmp(argv[0], "stop") == 0) {
+		tw_screensaver_stop();
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'screensaver start|stop'");
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_screensaver_command(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "screensaver_command", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	free(config->tw_screensaver_command);
+	config->tw_screensaver_command = join_args(argv, argc);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_screensaver_lock(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "screensaver_lock", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_screensaver_lock = parse_boolean(argv[0], config->tw_screensaver_lock);
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

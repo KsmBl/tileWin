@@ -49,6 +49,19 @@ test(
 )
 
 test(
+	'savers',
+	executable(
+		'test-savers',
+		'test_savers.c',
+		include_directories: [sway_inc, include_directories('../screensaver')],
+		link_with: [lib_savers, lib_sway_common],
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, math],
+	),
+	env: ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent'],
+	suite: 'unit',
+)
+
+test(
 	'reorder',
 	executable(
 		'test-reorder',
@@ -227,6 +240,16 @@ if gdk_pixbuf.found()
 		suite: 'gui',
 		is_parallel: false,
 		timeout: 300,
+	)
+
+	test(
+		'screensaver',
+		find_program('screensaver.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [pointer_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 120,
 	)
 
 	test(

@@ -550,7 +550,9 @@ struct sway_config {
 	list_t *tw_output_wallpapers; // struct tw_output_wallpaper *
 	char *tw_launcher_command;
 	bool tw_session_restore;
-	int tw_idle_timeout[4]; // seconds per enum tw_idle_stage, 0: never
+	int tw_idle_timeout[5]; // seconds per enum tw_idle_stage, 0: never
+	char *tw_screensaver_command; // NULL: tilewin-screensaver
+	bool tw_screensaver_lock; // lock when someone comes back to the screen saver
 	int tw_lid_action[2]; // enum tw_lid_action with the lid closed, and docked
 	char *tw_lock_command;
 	char *tw_main_output; // name or "make model serial", NULL: the one at 0,0

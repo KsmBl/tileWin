@@ -1,9 +1,12 @@
 /*
  * Screen power, like the power options of Windows:
  *
- *   idle_timeout dim|screen_off|lock|sleep <seconds>
+ *   idle_timeout dim|screen_off|lock|sleep|screensaver <seconds>
  *       after that long without input the screen turns darker, turns off,
- *       gets locked (lock_command) or the computer goes to sleep; 0 is never.
+ *       gets locked (lock_command), the computer goes to sleep or the screen
+ *       saver starts (screensaver_command, tilewin-screensaver by default,
+ *       which runs until input comes and is then ended; with
+ *       "screensaver_lock yes" the screen is locked then); 0 is never.
  *       Apps that keep the screen on (idle inhibitors, e.g. a video) pause
  *       the timers.
  *   lid_action closed|docked <action>
@@ -16,10 +19,13 @@
  * Input only records a timestamp; a single timer wakes up at the next
  * deadline and checks the time since the last input.
  */
+#define _DEFAULT_SOURCE // syscall()
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <signal.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -43,7 +49,8 @@
 #include "list.h"
 #include "log.h"
 
-static const char *const stage_names[TW_IDLE_STAGES] = { "dim", "screen_off", "lock", "sleep" };
+static const char *const stage_names[TW_IDLE_STAGES] = { "dim", "screen_off", "lock", "sleep",
+	"screensaver" };
 static const char *const lid_names[] = { "default", "nothing", "sleep", "hibernate", "lock",
 	"screen_off", "shutdown", NULL };
 
@@ -58,7 +65,11 @@ static struct {
 	char *lid_disabled_output; // internal screen turned off while docked
 	bool lid_screen_off;
 	int lid_inhibit_fd;
-} power = { .lid_inhibit_fd = -1 };
+	int saver_fd;      // pidfd of the running screen saver, -1 without one
+	pid_t saver_pid;   // and its process group
+	struct timespec saver_started;
+	bool saver_by_hand; // "screensaver start": the keys of that do not end it
+} power = { .lid_inhibit_fd = -1, .saver_fd = -1 };
 
 bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage) {
 	for (int i = 0; i < TW_IDLE_STAGES; i++) {
@@ -145,20 +156,68 @@ static void dim(void) {
 	}
 }
 
+/* ---------- screen saver ---------- */
+
+#define SAVER_GRACE_MS 1000 // after "screensaver start", for the keys that ran it
+
+static void saver_launch(void) {
+	if (power.saver_fd >= 0) {
+		return;
+	}
+	const char *command = config && config->tw_screensaver_command ?
+		config->tw_screensaver_command : "tilewin-screensaver";
+	pid_t pid = fork();
+	if (pid < 0) {
+		return;
+	}
+	if (pid == 0) {
+		setsid(); // a group of its own, which is ended as a whole
+		execl("/bin/sh", "/bin/sh", "-c", command, (char *)NULL);
+		_exit(127);
+	}
+	// a pidfd, so a finished saver's number taken over by another process is never hit
+	power.saver_fd = (int)syscall(SYS_pidfd_open, pid, 0);
+	power.saver_pid = pid;
+	clock_gettime(CLOCK_MONOTONIC, &power.saver_started);
+	sway_log(SWAY_DEBUG, "Screen saver started: %s", command);
+}
+
+/* Ends the screen saver; true when one was showing. */
+static bool saver_end(void) {
+	if (power.saver_fd < 0) {
+		return false;
+	}
+	if (syscall(SYS_pidfd_send_signal, power.saver_fd, 0, NULL, 0) == 0) {
+		kill(-power.saver_pid, SIGTERM);
+	}
+	close(power.saver_fd);
+	power.saver_fd = -1;
+	power.saver_by_hand = false;
+	return true;
+}
+
 static void run_stage(enum tw_idle_stage stage) {
 	switch (stage) {
 	case TW_IDLE_DIM:
 		dim();
 		break;
 	case TW_IDLE_SCREEN_OFF:
+		saver_end(); // nobody sees it any more
 		run_command("output * power off");
 		power.idle_screen_off = true;
 		break;
 	case TW_IDLE_LOCK:
+		saver_end();
 		spawn(config->tw_lock_command);
 		break;
 	case TW_IDLE_SLEEP:
+		saver_end();
 		spawn("systemctl suspend");
+		break;
+	case TW_IDLE_SCREENSAVER:
+		if (!power.idle_screen_off) {
+			saver_launch();
+		}
 		break;
 	case TW_IDLE_STAGES:
 		break;
@@ -204,8 +263,11 @@ static int handle_timer(void *data) {
 	return 0;
 }
 
-/* Undoes dimming and turning the screen off after input. */
+/* Undoes dimming, the screen saver and turning the screen off after input. */
 static void wake(void) {
+	if (saver_end() && config && config->tw_screensaver_lock) {
+		spawn(config->tw_lock_command); // "on resume, display the logon screen"
+	}
 	undim();
 	if (power.idle_screen_off) {
 		power.idle_screen_off = false;
@@ -218,6 +280,13 @@ static void wake(void) {
 
 void tw_power_activity(void) {
 	clock_gettime(CLOCK_MONOTONIC, &power.last_input);
+	if (power.saver_by_hand && power.saver_fd >= 0) {
+		long since = (power.last_input.tv_sec - power.saver_started.tv_sec) * 1000 +
+			(power.last_input.tv_nsec - power.saver_started.tv_nsec) / 1000000;
+		if (since < SAVER_GRACE_MS) {
+			return; // letting go of the keys that started it
+		}
+	}
 	for (int i = 0; i < TW_IDLE_STAGES; i++) {
 		if (power.done[i]) {
 			wake();
@@ -370,7 +439,24 @@ void tw_power_config_changed(void) {
 	schedule();
 }
 
+void tw_screensaver_start(void) {
+	if (power.saver_fd >= 0) {
+		return;
+	}
+	saver_launch();
+	if (power.saver_fd >= 0) {
+		power.saver_by_hand = true;
+		power.done[TW_IDLE_SCREENSAVER] = true; // so the next input ends it
+	}
+}
+
+void tw_screensaver_stop(void) {
+	saver_end();
+	power.done[TW_IDLE_SCREENSAVER] = false;
+}
+
 void tw_power_fini(void) {
+	saver_end();
 	undim();
 	if (power.timer) {
 		wl_event_source_remove(power.timer);

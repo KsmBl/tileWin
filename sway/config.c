@@ -189,6 +189,7 @@ void free_config(struct sway_config *config) {
 	list_free(config->tw_output_wallpapers);
 	free(config->tw_launcher_command);
 	free(config->tw_lock_command);
+	free(config->tw_screensaver_command);
 	free(config->tw_main_output);
 	free((char *)config->current_config_path);
 	free((char *)config->current_config);

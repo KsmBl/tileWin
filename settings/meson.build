@@ -15,6 +15,7 @@ executable(
 		'page_menus.c',
 		'page_mouse.c',
 		'page_screen.c',
+		'page_screensaver.c',
 		'page_sound.c',
 		'page_taskbar.c',
 		'page_theme.c',
@@ -24,9 +25,9 @@ executable(
 		'ui.c',
 		'widgets.c',
 	],
-	include_directories: [sway_inc],
+	include_directories: [sway_inc, include_directories('../screensaver')],
 	dependencies: [gtk4, dependency('gio-unix-2.0'), jsonc, cairo, gdk_pixbuf, math, rsvg, pango],
-	link_with: [lib_sway_common],
+	link_with: [lib_savers, lib_sway_common],
 	install: true,
 )
 

@@ -197,6 +197,7 @@ void settings_refresh(struct settings *s) {
 	wallpaper_page_refresh(s);
 	taskbar_page_refresh(s);
 	desktop_page_refresh(s);
+	screensaver_page_refresh(s);
 	menus_page_refresh(s);
 	launcher_page_refresh(s);
 	keyboard_page_refresh(s);
@@ -505,6 +506,9 @@ static void build_window(struct settings *s) {
 			"double click focus follows mouse attention activation", window_page_new },
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
+		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
+			"slideshow starfield pipes flying windows aurora word clock tiling idle lock "
+			"password resume", screensaver_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "
 			"12 24 seconds automatic", datetime_page_new },
@@ -615,7 +619,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, animations, windows, screen, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
+				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -675,7 +679,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, animations, windows, screen, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account or about", "PAGE");
+		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

@@ -92,6 +92,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Shut down dialog** in the look of the theme, opened from the start menu or with Ctrl+Alt+Delete: Windows 95 asks "Shut Down Windows" with radio buttons over the dithered screen, Windows XP shows "Turn off computer" with Stand By, Turn Off and Restart while the screen fades to gray (and "Log Off Windows" from Log Off), Windows 7, 10 and 11 show the Ctrl+Alt+Delete screen over the blurred desktop, and the Sway theme big buttons like wlogout. The commands are the `power` entries of the `startmenu` block.
 - **Text fields** (start menu search, launcher, Run dialog, desktop dialogs, Wi-Fi password) edit like on Windows: ←/→ move the cursor (Ctrl: by word), Home/End, Shift with any of them selects, Ctrl+A selects everything, typing replaces the selection and Backspace/Delete remove it (Ctrl: a word). Themes can color the selection with `text { selection_bg; selection_fg }`.
 - **Lock screen** (Win+L): `tilewin-lock` shows the wallpaper with the time and date like Windows; any key shows the sign-in view with your picture (`~/.face`), name and password. The password is checked with PAM (`/etc/pam.d/tilewin-lock`, installed by install.sh). If the lock screen crashes, the session stays locked. `tilewin-lock -f` returns once the session is locked (for scripts and `lock_command`).
+- **Screen saver** (`tilewin-screensaver`), started after a time without input like on Windows, and ended by the mouse or a key; with "On resume, display the lock screen" coming back asks for the password. The screen savers of Windows 7 are there: **Blank**, **Bubbles** (soap bubbles with rainbow rims drifting over the desktop, which stays visible, and bouncing off each other), **Mystify** (two shapes of lines leaving echoes of color), **Ribbons** (glowing ribbons that twist in space), **3D Text** (your words or the time in solid chrome letters turning slowly) and **Photos** (a slideshow of a folder, zooming and fading from picture to picture). From older Windows come **Starfield**, **3D Pipes** and **Flying Windows**. And three of tileWin's own: **Aurora**, northern lights over dark hills whose curtains sway faster, burn brighter and turn from green to purple and red the harder the computer works, so a glance at the screen says whether that build is still running; **Word Clock**, the time spelled out in a grid of letters ("it is twenty past ten"), with the minutes in between as dots and the grid wandering a little so nothing burns in; and **Tiling**, windows opening, closing and making room for each other the way tile mode does it, with a shell that keeps typing, an editor, a monitor, an equalizer and a picture. **Random** picks another one each time. An app that keeps the screen on, like a video, keeps the screen saver away too. It draws at most 30 times a second and only while it is shown.
 - **Theme icons in other apps:** Thunar, Dolphin, Nautilus, file dialogs and other GTK, KDE and Qt apps show the icons of the theme too, e.g. Windows XP folders and files (see [Icons](#icons)).
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
 - **Dark mode:** `tilewin-theme scheme dark` (or the switch in tileWin Settings) gives every theme dark title bars, menus, flyouts and start menu, and switches GTK, GNOME (and Qt apps through the desktop portal) and KDE apps to dark as well.
@@ -140,7 +141,7 @@ Start tileWin:
 ### Tests
 
 ```sh
-meson test -C build-release --suite unit   # the config parser, the config editor, the disk list, the widget list, moving taskbar widgets and the settings coverage
+meson test -C build-release --suite unit   # the config parser, the config editor, the disk list, the widget list, the screen savers, moving taskbar widgets and the settings coverage
 meson test -C build-release --suite gui    # drives a nested tileWin and looks at what it does
 ```
 
@@ -182,6 +183,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   one dropped onto another card goes back, that clicking the disk space ring
   opens its flyout without taking the taskbar down, and that a new place or
   style in the config wins over an old drag;
+- lets a nested tileWin sit idle and checks the screen saver covers the screen
+  only after its time, that moving the mouse ends it and runs the lock command,
+  and that `screensaver start` is not ended by the input right after it but by
+  input a moment later;
 - shows a card of every desktop style and switches through all themes, light
   and dark, checking that each card is drawn, that the dark scheme is darker
   where a theme has one, and that no two themes draw the chart alike;
@@ -360,7 +365,10 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
 | `output_wallpaper <screen> <wallpaper>\|default` | A wallpaper of its own for one screen, with the arguments of `wallpaper`; the screen is its name (`DP-1`) or `"make model serial"`. `default` gives it the wallpaper of every screen again |
 | `main_output <screen>\|auto` | The main display: it gets the desktop icons and the taskbar that `outputs main` fills with the windows of every screen. `auto` (default) takes the screen at the top left |
-| `idle_timeout dim\|screen_off\|lock\|sleep <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`) or sleep. Apps that keep the screen on (videos) pause it. |
+| `idle_timeout dim\|screen_off\|lock\|sleep\|screensaver <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`), sleep, or start the screen saver (`screensaver_command`), which input ends again. Apps that keep the screen on (videos) pause it. |
+| `screensaver_lock yes\|no` | Lock the screen (`lock_command`) when someone comes back to the screen saver, like "On resume, display the logon screen" (default no) |
+| `screensaver_command <command>` | The screen saver program (default `tilewin-screensaver`); which saver it shows is the `screensaver { name <saver> }` block of `taskbar.conf`, with `speed`, `text` (3D Text; `time` shows the clock), `photos` (a folder) and `photo_seconds`. `tilewin-screensaver --list` lists the savers |
+| `screensaver start\|stop` | Starts the screen saver right away, as if the computer had been left alone (the keys that ran the command do not end it), or ends it |
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
 | `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
 | `animation_speed <factor>` | Faster (e.g. `2`) or slower (e.g. `0.5`) animations |
@@ -403,6 +411,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview. **Expensive calculations** lays a window out again for every frame while it is snapped, maximized or resized, instead of stretching a picture of it |
 | Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention, and **Gravity mode** with its drag and bounce |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), which one is the main display, brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
+| Screen saver | The screen saver, with a little monitor that shows it running, a Preview on the whole screen, how long to wait, whether coming back shows the lock screen, and the options of the one picked: its speed, the words of 3D Text, the folder and pace of Photos |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
