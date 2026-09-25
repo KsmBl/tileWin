@@ -4,6 +4,7 @@ lib_savers = static_library(
 		'savers.c',
 		'saver_classic.c',
 		'saver_diggers.c',
+		'saver_matrix.c',
 		'saver_maze.c',
 		'saver_new.c',
 		'saver_pipes.c',
