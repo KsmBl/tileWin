@@ -24,6 +24,18 @@ test(
 	suite: 'unit',
 )
 
+test(
+	'disks',
+	executable(
+		'test-disks',
+		'test_disks.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
 virtual_keyboard_xml = '../protocols/virtual-keyboard-unstable-v1.xml'
 keyboard_tool = executable(
 	'keyboard-tool',

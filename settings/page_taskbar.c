@@ -2,6 +2,7 @@
 #include <string.h>
 #include "settings.h"
 #include "tw_desktop.h"
+#include "tw_disks.h"
 
 enum {
 	SECTION_LEFT,
@@ -164,8 +165,31 @@ static const struct opt opts_power[] = {
 	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
 	{ 0 },
 };
+static void list_disks(GPtrArray *values, GPtrArray *labels) {
+	g_ptr_array_add(labels, g_strdup("Every disk"));
+	struct tw_disk *disks;
+	size_t count = tw_disks_list(TW_BLOCK_DIR, &disks);
+	for (size_t i = 0; i < count; i++) {
+		g_ptr_array_add(values, g_strdup(disks[i].name));
+		g_ptr_array_add(labels, tw_disk_label(&disks[i]));
+	}
+	tw_disks_free(disks, count);
+}
+
+/*
+ * Options picked from a list found when the dialog opens instead of a fixed
+ * one. The list fills in the values and one more label: the first label
+ * stands for the default.
+ */
+static const struct {
+	const char *type, *key;
+	void (*list)(GPtrArray *values, GPtrArray *labels);
+} listed_opts[] = {
+	{ "disk", "devices", list_disks },
+};
+
 static const struct opt opts_disk[] = {
-	{ "devices", "Disks", "Names from /proc/diskstats separated by spaces, e.g. nvme0n1 sda; empty watches every whole disk", NULL },
+	{ "devices", "Disk", "The disk whose lamp this is; every whole disk by default", NULL },
 	{ "threshold", "Threshold", "KiB per second before the lamp lights up, default 50", NULL },
 	{ "interval", "Update interval", "Seconds, default 1", NULL },
 	{ "format", "Format", "{rate} is e.g. 1.2 MB/s, {kbps} the plain number; empty shows only the lamp", NULL },
@@ -457,11 +481,15 @@ struct opt_binding {
 	struct taskbar_page *p;
 	char *widget;
 	const struct opt *opt;
+	GPtrArray *values; // of a dropdown, NULL stands for the default
 };
 
 static void opt_binding_free(gpointer data, GClosure *closure) {
 	struct opt_binding *b = data;
 	g_free(b->widget);
+	if (b->values) {
+		g_ptr_array_unref(b->values);
+	}
 	g_free(b);
 }
 
@@ -498,11 +526,24 @@ static void on_option_choice(GObject *dropdown, GParamSpec *pspec, gpointer data
 		return;
 	}
 	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-	write_option(b->p, b->widget, b->opt->key, i == 0 ? NULL : b->opt->choices[i - 1]);
+	write_option(b->p, b->widget, b->opt->key, i < b->values->len ? b->values->pdata[i] : NULL);
+}
+
+static void (*opt_lister(const char *widget, const struct opt *opt))(GPtrArray *, GPtrArray *) {
+	char *type = widget_type_of(widget);
+	void (*list)(GPtrArray *, GPtrArray *) = NULL;
+	for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
+		if (strcmp(listed_opts[i].type, type) == 0 && strcmp(listed_opts[i].key, opt->key) == 0) {
+			list = listed_opts[i].list;
+		}
+	}
+	g_free(type);
+	return list;
 }
 
 static void add_option_row(struct taskbar_page *p, GtkWidget *list, const char *widget,
 		const struct opt *opt) {
+	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt);
 	struct cstmt *block = confdoc_block(doc(p), "widget", widget, false);
 	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
 	struct opt_binding *b = g_new0(struct opt_binding, 1);
@@ -510,16 +551,36 @@ static void add_option_row(struct taskbar_page *p, GtkWidget *list, const char *
 	b->widget = g_strdup(widget);
 	b->opt = opt;
 	GtkWidget *control;
-	if (opt->choices) {
-		GtkStringList *model = gtk_string_list_new(NULL);
-		gtk_string_list_append(model, "Default");
-		guint sel = 0;
-		for (guint i = 0; opt->choices[i]; i++) {
-			gtk_string_list_append(model, opt->choices[i]);
-			if (value && g_ascii_strcasecmp(value, opt->choices[i]) == 0) {
-				sel = i + 1;
+	if (opt->choices || lister) {
+		b->values = g_ptr_array_new_with_free_func(g_free);
+		GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
+		g_ptr_array_add(b->values, NULL);
+		if (lister) {
+			lister(b->values, labels);
+		} else {
+			g_ptr_array_add(labels, g_strdup("Default"));
+			for (guint i = 0; opt->choices[i]; i++) {
+				g_ptr_array_add(b->values, g_strdup(opt->choices[i]));
+				g_ptr_array_add(labels, g_strdup(opt->choices[i]));
 			}
 		}
+		guint sel = 0;
+		for (guint i = 1; value && i < b->values->len; i++) {
+			if (g_ascii_strcasecmp(value, b->values->pdata[i]) == 0) {
+				sel = i;
+			}
+		}
+		if (value && *value && sel == 0) {
+			// a value written by hand, or a disk that is not plugged in, stays offered
+			g_ptr_array_add(b->values, g_strdup(value));
+			g_ptr_array_add(labels, g_strdup(value));
+			sel = b->values->len - 1;
+		}
+		GtkStringList *model = gtk_string_list_new(NULL);
+		for (guint i = 0; i < labels->len; i++) {
+			gtk_string_list_append(model, labels->pdata[i]);
+		}
+		g_ptr_array_unref(labels);
 		control = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(control), sel);
 		g_signal_connect_data(control, "notify::selected", G_CALLBACK(on_option_choice), b,

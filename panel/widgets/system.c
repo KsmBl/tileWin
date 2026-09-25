@@ -13,6 +13,7 @@
 #include "draw.h"
 #include "panel.h"
 #include "stringop.h"
+#include "tw_disks.h"
 
 /*
  * System widgets read /proc and /sys directly at their configured interval
@@ -610,23 +611,10 @@ struct disk_state {
 	bool busy;
 };
 
-/* Whether a name of /proc/diskstats is a whole disk worth watching. */
-static bool disk_is_whole(const char *name) {
-	static const char *const skip[] = { "loop", "ram", "zram", "dm-", "md", "sr", "fd" };
-	for (size_t i = 0; i < sizeof(skip) / sizeof(skip[0]); i++) {
-		if (strncmp(name, skip[i], strlen(skip[i])) == 0) {
-			return false;
-		}
-	}
-	char path[128];
-	snprintf(path, sizeof(path), "/sys/class/block/%s/partition", name);
-	return access(path, F_OK) != 0; // a partition has this file, a disk has not
-}
-
 static bool disk_wanted(struct widget *w, const char *name) {
 	const char *list = widget_conf(w, "devices", NULL);
 	if (!list || !*list) {
-		return disk_is_whole(name);
+		return tw_disk_is_whole(TW_BLOCK_DIR, name);
 	}
 	size_t len = strlen(name);
 	for (const char *p = list; *p;) {

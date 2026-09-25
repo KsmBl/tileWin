@@ -425,26 +425,63 @@ void pd_glyph_brightness(cairo_t *cr, double x, double y, double s, uint32_t col
 	cairo_restore(cr);
 }
 
-/* A drive with a lamp that lights up while it is busy. */
+/* Adds a stop of color to a gradient, with its alpha scaled and lightened toward white. */
+static void led_stop(cairo_pattern_t *pattern, double offset, uint32_t color, double white,
+		double alpha) {
+	double c[3];
+	for (int i = 0; i < 3; i++) {
+		double v = (color >> ((3 - i) * 8) & 0xff) / 255.0;
+		c[i] = v + (1 - v) * white;
+	}
+	cairo_pattern_add_color_stop_rgba(pattern, offset, c[0], c[1], c[2],
+		(color & 0xff) / 255.0 * alpha);
+}
+
+/*
+ * The drive lamp: a round LED. Lit, it glows in its color with a halo around
+ * it; dark, it is a dim lens with a rim, so it still shows where it sits.
+ */
 void pd_glyph_disk(cairo_t *cr, double x, double y, double s, bool active, uint32_t color) {
+	double cx = x + s / 2, cy = y + s / 2, r = s * 0.33;
 	cairo_new_path(cr);
 	cairo_save(cr);
-	cairo_set_source_u32(cr, color);
-	cairo_set_line_width(cr, s * 0.08);
-	pd_rounded(cr, x + s * 0.12, y + s * 0.26, s * 0.76, s * 0.48, s * 0.08);
-	cairo_stroke(cr);
-	// the platter
-	cairo_new_path(cr);
-	cairo_arc(cr, x + s * 0.40, y + s * 0.50, s * 0.13, 0, 2 * M_PI);
-	cairo_stroke(cr);
-	// the lamp
-	cairo_new_path(cr);
-	cairo_arc(cr, x + s * 0.72, y + s * 0.50, s * 0.07, 0, 2 * M_PI);
+	cairo_pattern_t *pattern;
 	if (active) {
+		// the glow the light throws around the lens
+		pattern = cairo_pattern_create_radial(cx, cy, r * 0.8, cx, cy, s * 0.5);
+		led_stop(pattern, 0, color, 0, 0.55);
+		led_stop(pattern, 1, color, 0, 0);
+		cairo_set_source(cr, pattern);
+		cairo_arc(cr, cx, cy, s * 0.5, 0, 2 * M_PI);
 		cairo_fill(cr);
-	} else {
-		cairo_stroke(cr);
+		cairo_pattern_destroy(pattern);
 	}
+	// the lens, brightest toward the top left where the light catches it
+	pattern = cairo_pattern_create_radial(cx - r * 0.35, cy - r * 0.35, 0, cx, cy, r);
+	if (active) {
+		led_stop(pattern, 0, color, 0.6, 1);
+		led_stop(pattern, 0.55, color, 0.1, 1);
+		led_stop(pattern, 1, color, 0, 1);
+	} else {
+		led_stop(pattern, 0, color, 0, 0.3);
+		led_stop(pattern, 1, color, 0, 0.12);
+	}
+	cairo_set_source(cr, pattern);
+	cairo_arc(cr, cx, cy, r, 0, 2 * M_PI);
+	cairo_fill_preserve(cr);
+	cairo_pattern_destroy(pattern);
+	// the rim of the lens
+	cairo_set_source_u32(cr, (color & 0xffffff00) | (uint32_t)((color & 0xff) * (active ? 0.9 : 0.7)));
+	cairo_set_line_width(cr, s * 0.06);
+	cairo_stroke(cr);
+	// the reflection on the lens
+	cairo_save(cr);
+	cairo_translate(cr, cx - r * 0.3, cy - r * 0.4);
+	cairo_scale(cr, r * 0.38, r * 0.24);
+	cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
+	cairo_restore(cr);
+	cairo_set_source_rgba(cr, 1, 1, 1, active ? 0.75 : 0.3);
+	cairo_fill(cr);
 	cairo_restore(cr);
 }
 

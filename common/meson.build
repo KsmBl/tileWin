@@ -11,6 +11,7 @@ lib_sway_common = static_library(
 		'stringop.c',
 		'util.c',
 		'tw_paths.c',
+		'tw_disks.c',
 		'twconf.c',
 		'tw_theme.c',
 		'tw_desktop.c',
