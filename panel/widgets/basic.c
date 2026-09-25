@@ -59,6 +59,13 @@ static void clock_update(struct widget *w) {
 	const char *format = widget_conf(w, "format",
 		tw_theme_str(w->panel->theme, "clock.format", "%H:%M"));
 	d->seconds = strstr(format, "%S") || strstr(format, "%T") || strstr(format, "%s");
+	if (w->desk) {
+		// the second hand of the analog clock, the last LEDs of the binary one
+		const char *style = twconf_value(w->desk, "style");
+		bool second_style = style && (strcmp(style, "analog") == 0 ||
+			strcmp(style, "binary") == 0);
+		d->seconds = d->seconds || widget_conf_bool(w, "seconds", second_style);
+	}
 	char *unescaped = strdup(format);
 	// allow a literal "\n" in the config for two-line clocks
 	char *p;

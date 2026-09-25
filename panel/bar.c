@@ -52,7 +52,9 @@ const char *bar_bold_font(struct panel *panel) {
 
 uint32_t bar_fg(struct panel *panel) {
 	if (panel->desktop_pass) {
-		return tw_theme_color(panel->theme, "desktop_widget.fg", 0xffffffff);
+		struct gadget_palette pal;
+		gadget_palette(panel, NULL, panel->desktop_card, &pal);
+		return pal.fg;
 	}
 	enum pstyle style = panel_style(panel);
 	return tw_theme_color(panel->theme, "panel.fg",

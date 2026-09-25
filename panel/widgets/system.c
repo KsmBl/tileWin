@@ -186,7 +186,7 @@ static double render_item_start(struct render_ctx *ctx, struct pbox b) {
 
 /* ---------- meters: text, a history chart or a bar ---------- */
 
-#define METER_HISTORY 32
+#define METER_HISTORY WIDGET_HISTORY
 
 enum meter_style {
 	METER_TEXT,
@@ -221,8 +221,9 @@ static enum meter_style meter_style_of(struct widget *w) {
  * levels it changes at and "warning_fg"/"critical_fg" the colors, from the
  * widget itself or, where it says nothing, from the theme.
  */
-static uint32_t meter_fg(struct widget *w, struct render_ctx *ctx, int value, bool low_is_bad) {
-	const struct tw_theme *t = ctx->panel->theme;
+/* 2 over the critical level, 1 over the warning level, 0 below both. */
+static int meter_level(struct widget *w, int value, bool low_is_bad) {
+	const struct tw_theme *t = w->panel->theme;
 	const char *type = w->impl->type;
 	char key[64];
 	snprintf(key, sizeof(key), "%s.critical", type);
@@ -230,15 +231,44 @@ static uint32_t meter_fg(struct widget *w, struct render_ctx *ctx, int value, bo
 	snprintf(key, sizeof(key), "%s.warning", type);
 	int warning = widget_conf_int(w, "warning", tw_theme_int(t, key, -1));
 	if (critical >= 0 && (low_is_bad ? value <= critical : value >= critical)) {
+		return 2;
+	}
+	if (warning >= 0 && (low_is_bad ? value <= warning : value >= warning)) {
+		return 1;
+	}
+	return 0;
+}
+
+static uint32_t meter_fg(struct widget *w, struct render_ctx *ctx, int value, bool low_is_bad) {
+	const struct tw_theme *t = ctx->panel->theme;
+	const char *type = w->impl->type;
+	char key[64];
+	int level = meter_level(w, value, low_is_bad);
+	if (level == 2) {
 		snprintf(key, sizeof(key), "%s.critical_fg", type);
 		return widget_conf_color(w, "critical_fg", tw_theme_color(t, key, 0xf87171ff));
 	}
-	if (warning >= 0 && (low_is_bad ? value <= warning : value >= warning)) {
+	if (level == 1) {
 		snprintf(key, sizeof(key), "%s.warning_fg", type);
 		return widget_conf_color(w, "warning_fg", tw_theme_color(t, key, 0xfbbf24ff));
 	}
 	snprintf(key, sizeof(key), "%s.fg", type);
 	return widget_conf_color(w, "fg", widget_fg(ctx->panel, type));
+}
+
+/* What a meter shows, for the desktop styles; history may be NULL. */
+static void meter_sample(struct widget *w, struct widget_sample *out, int percent,
+		const struct meter_history *history, bool low_is_bad) {
+	out->percent = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+	if (history) {
+		for (int i = 0; i < METER_HISTORY; i++) {
+			out->history[i] = history->values[(history->pos + i) % METER_HISTORY];
+		}
+		out->has_history = true;
+	}
+	int level = meter_level(w, percent, low_is_bad);
+	out->warning = level == 1;
+	out->critical = level == 2;
 }
 
 static int meter_measure(struct widget *w, struct render_ctx *ctx, const char *text) {
@@ -471,6 +501,13 @@ static void cpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) 
 	free(text);
 }
 
+static bool cpu_sample(struct widget *w, struct widget_sample *out) {
+	struct cpu_state *s = ((struct poll_data *)w->data)->state;
+	meter_sample(w, out, s->usage, &s->history, false);
+	snprintf(out->value, sizeof(out->value), "%d%%", s->usage);
+	return true;
+}
+
 static bool cpu_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
 	if (button != BTN_LEFT) {
@@ -514,6 +551,7 @@ const struct widget_impl widget_cpu = {
 	.click = cpu_click,
 	.tooltip = cpu_tooltip,
 	.set_active = poll_set_active,
+	.sample = cpu_sample,
 };
 
 /* ================= memory ================= */
@@ -569,6 +607,17 @@ static void memory_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	free(text);
 }
 
+static bool memory_sample(struct widget *w, struct widget_sample *out) {
+	struct mem_state *s = ((struct poll_data *)w->data)->state;
+	long long used = s->total_kb - s->available_kb;
+	int percent = s->total_kb ? (int)(used * 100 / s->total_kb) : 0;
+	meter_sample(w, out, percent, &s->history, false);
+	snprintf(out->value, sizeof(out->value), "%d%%", percent);
+	snprintf(out->detail, sizeof(out->detail), "%.1f of %.1f GiB", used / 1048576.0,
+		s->total_kb / 1048576.0);
+	return true;
+}
+
 static bool memory_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
 	if (button != BTN_LEFT) {
@@ -595,6 +644,7 @@ const struct widget_impl widget_memory = {
 	.click = memory_click,
 	.tooltip = memory_tooltip,
 	.set_active = poll_set_active,
+	.sample = memory_sample,
 };
 
 /* ================= disk ================= */
@@ -618,6 +668,8 @@ struct disk_state {
 	struct disk_dev devices[DISK_MAX];
 	int count;
 	double kbps; // read and written together
+	double rates[WIDGET_HISTORY]; // the last ones, for the chart
+	int rate_pos;
 	struct timespec sampled;
 	bool sampled_once;
 	bool busy;
@@ -692,6 +744,8 @@ static void disk_update(struct widget *w) {
 	s->sampled_once = true;
 	int threshold = widget_conf_int(w, "threshold", DISK_DEFAULT_THRESHOLD);
 	s->busy = s->kbps >= threshold;
+	s->rates[s->rate_pos] = s->kbps;
+	s->rate_pos = (s->rate_pos + 1) % WIDGET_HISTORY;
 }
 
 static void disk_init(struct widget *w) {
@@ -746,6 +800,28 @@ static void disk_render(struct widget *w, struct render_ctx *ctx, struct pbox b)
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
+/* The chart is drawn against the busiest moment it shows, so a quiet disk still moves it. */
+static bool disk_sample(struct widget *w, struct widget_sample *out) {
+	struct disk_state *s = ((struct poll_data *)w->data)->state;
+	double top = widget_conf_int(w, "threshold", DISK_DEFAULT_THRESHOLD) * 4.0;
+	for (int i = 0; i < WIDGET_HISTORY; i++) {
+		top = s->rates[i] > top ? s->rates[i] : top;
+	}
+	for (int i = 0; i < WIDGET_HISTORY; i++) {
+		out->history[i] = (int)(s->rates[(s->rate_pos + i) % WIDGET_HISTORY] * 100 / top);
+	}
+	out->has_history = true;
+	out->percent = (int)(s->kbps * 100 / top);
+	out->warning = s->busy;
+	disk_rate_text(s->kbps, out->value, sizeof(out->value));
+	for (int i = 0; i < s->count; i++) {
+		size_t len = strlen(out->detail);
+		snprintf(out->detail + len, sizeof(out->detail) - len, "%s%s", len ? ", " : "",
+			s->devices[i].name);
+	}
+	return true;
+}
+
 static char *disk_tooltip(struct widget *w, struct hotspot *hs) {
 	struct disk_state *s = ((struct poll_data *)w->data)->state;
 	char rate[32];
@@ -769,6 +845,7 @@ const struct widget_impl widget_disk = {
 	.render = disk_render,
 	.tooltip = disk_tooltip,
 	.set_active = poll_set_active,
+	.sample = disk_sample,
 	.click = info_click,
 };
 
@@ -870,6 +947,14 @@ static void gpu_render(struct widget *w, struct render_ctx *ctx, struct pbox b) 
 	free(text);
 }
 
+static bool gpu_sample(struct widget *w, struct widget_sample *out) {
+	struct gpu_state *s = ((struct poll_data *)w->data)->state;
+	meter_sample(w, out, s->percent, &s->history, false);
+	snprintf(out->value, sizeof(out->value), "%d%%", s->percent);
+	snprintf(out->detail, sizeof(out->detail), "%s", s->card);
+	return true;
+}
+
 static char *gpu_tooltip(struct widget *w, struct hotspot *hs) {
 	struct gpu_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("Graphics: %d%%%s%s", s->percent, s->card[0] ? " on " : "", s->card);
@@ -884,6 +969,7 @@ const struct widget_impl widget_gpu = {
 	.tooltip = gpu_tooltip,
 	.set_active = poll_set_active,
 	.click = info_click,
+	.sample = gpu_sample,
 };
 
 /* ================= net ================= */
@@ -1009,6 +1095,20 @@ static void nm_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	free(text);
 }
 
+static bool nm_sample(struct widget *w, struct widget_sample *out) {
+	struct nm_state *s = ((struct poll_data *)w->data)->state;
+	int max = widget_conf_int(w, "max_rate", 12500);
+	double total = s->rx_rate + s->tx_rate;
+	meter_sample(w, out, max > 0 ? (int)(total * 100 / max) : 0, &s->history, false);
+	char down[32], up[32];
+	nm_rate_text(s->rx_rate, down, sizeof(down));
+	nm_rate_text(s->tx_rate, up, sizeof(up));
+	snprintf(out->value, sizeof(out->value), "↓ %s", down);
+	snprintf(out->detail, sizeof(out->detail), "↑ %s%s%s", up, s->device[0] ? " · " : "",
+		s->device);
+	return true;
+}
+
 static char *nm_tooltip(struct widget *w, struct hotspot *hs) {
 	struct nm_state *s = ((struct poll_data *)w->data)->state;
 	char down[32], up[32];
@@ -1026,6 +1126,7 @@ const struct widget_impl widget_net = {
 	.tooltip = nm_tooltip,
 	.set_active = poll_set_active,
 	.click = info_click,
+	.sample = nm_sample,
 };
 
 /* ================= storage ================= */
@@ -1084,6 +1185,15 @@ static void storage_render(struct widget *w, struct render_ctx *ctx, struct pbox
 	free(text);
 }
 
+static bool storage_sample(struct widget *w, struct widget_sample *out) {
+	struct storage_state *s = ((struct poll_data *)w->data)->state;
+	meter_sample(w, out, s->percent, &s->history, false);
+	snprintf(out->value, sizeof(out->value), "%d%%", s->percent);
+	snprintf(out->detail, sizeof(out->detail), "%.0f of %.0f GiB · %.40s", s->used_gb,
+		s->total_gb, s->path);
+	return true;
+}
+
 static char *storage_tooltip(struct widget *w, struct hotspot *hs) {
 	struct storage_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("%s\n%.1f GiB of %.1f GiB used (%d%%)", s->path, s->used_gb,
@@ -1099,6 +1209,7 @@ const struct widget_impl widget_storage = {
 	.tooltip = storage_tooltip,
 	.set_active = poll_set_active,
 	.click = info_click,
+	.sample = storage_sample,
 };
 
 /* ================= power ================= */
@@ -1185,6 +1296,16 @@ static void power_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 	free(text);
 }
 
+static bool power_sample(struct widget *w, struct widget_sample *out) {
+	struct power_state *s = ((struct poll_data *)w->data)->state;
+	int max = widget_conf_int(w, "max_watts", 60);
+	meter_sample(w, out, max > 0 ? (int)(s->watts * 100 / max) : 0, &s->history, false);
+	snprintf(out->value, sizeof(out->value), "%.1f W", s->watts);
+	snprintf(out->detail, sizeof(out->detail), "%s", s->watts <= 0 ? "No reading" :
+		s->charging ? "Charging" : "Drawn now");
+	return true;
+}
+
 static char *power_tooltip(struct widget *w, struct hotspot *hs) {
 	struct power_state *s = ((struct poll_data *)w->data)->state;
 	if (s->watts <= 0) {
@@ -1203,6 +1324,7 @@ const struct widget_impl widget_power = {
 	.tooltip = power_tooltip,
 	.set_active = poll_set_active,
 	.click = info_click,
+	.sample = power_sample,
 };
 
 /* ================= battery ================= */
@@ -1328,6 +1450,17 @@ static bool power_click(struct widget *w, struct psurface *s, struct hotspot *hs
 	return true;
 }
 
+static bool battery_sample(struct widget *w, struct widget_sample *out) {
+	struct battery_state *s = ((struct poll_data *)w->data)->state;
+	if (!s->present) {
+		return false;
+	}
+	meter_sample(w, out, s->capacity, NULL, true);
+	snprintf(out->value, sizeof(out->value), "%d%%", s->capacity);
+	snprintf(out->detail, sizeof(out->detail), "%s", s->status);
+	return true;
+}
+
 static char *battery_tooltip(struct widget *w, struct hotspot *hs) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("Battery: %d%% (%s)", s->capacity, s->status);
@@ -1342,6 +1475,7 @@ const struct widget_impl widget_battery = {
 	.click = power_click,
 	.tooltip = battery_tooltip,
 	.set_active = poll_set_active,
+	.sample = battery_sample,
 };
 
 /* ================= network ================= */
@@ -1479,6 +1613,16 @@ static void network_render(struct widget *w, struct render_ctx *ctx, struct pbox
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
+static bool network_sample(struct widget *w, struct widget_sample *out) {
+	struct net_state *s = ((struct poll_data *)w->data)->state;
+	meter_sample(w, out, !s->connected ? 0 : s->wireless ? s->quality : 100, NULL, false);
+	snprintf(out->value, sizeof(out->value), "%s", !s->connected ? "Offline" :
+		s->wireless ? "Wi-Fi" : "Cable");
+	snprintf(out->detail, sizeof(out->detail), "%.24s%s%.48s", s->iface,
+		s->address[0] ? " · " : "", s->address);
+	return true;
+}
+
 static char *network_tooltip(struct widget *w, struct hotspot *hs) {
 	struct net_state *s = ((struct poll_data *)w->data)->state;
 	if (!s->connected) {
@@ -1514,6 +1658,7 @@ const struct widget_impl widget_network = {
 	.click = network_click,
 	.tooltip = network_tooltip,
 	.set_active = poll_set_active,
+	.sample = network_sample,
 };
 
 /* ================= brightness ================= */
@@ -1605,6 +1750,16 @@ static bool brightness_scroll(struct widget *w, struct psurface *s, struct hotsp
 	return true;
 }
 
+static bool brightness_sample(struct widget *w, struct widget_sample *out) {
+	struct brightness_state *s = ((struct poll_data *)w->data)->state;
+	if (!s->present) {
+		return false;
+	}
+	meter_sample(w, out, s->percent, NULL, false);
+	snprintf(out->value, sizeof(out->value), "%d%%", s->percent);
+	return true;
+}
+
 static char *brightness_tooltip(struct widget *w, struct hotspot *hs) {
 	struct brightness_state *s = ((struct poll_data *)w->data)->state;
 	return format_str("Brightness: %d%%", s->percent);
@@ -1620,6 +1775,7 @@ const struct widget_impl widget_brightness = {
 	.scroll = brightness_scroll,
 	.tooltip = brightness_tooltip,
 	.set_active = poll_set_active,
+	.sample = brightness_sample,
 };
 
 /* ================= volume (PulseAudio / PipeWire via pactl) ================= */
@@ -1797,6 +1953,20 @@ static bool volume_scroll(struct widget *w, struct psurface *s, struct hotspot *
 	return true;
 }
 
+static bool volume_sample(struct widget *w, struct widget_sample *out) {
+	struct volume_data *d = w->data;
+	if (!d->available) {
+		return false;
+	}
+	out->percent = d->muted ? 0 : d->volume > 100 ? 100 : d->volume;
+	if (d->muted) {
+		snprintf(out->value, sizeof(out->value), "Muted");
+	} else {
+		snprintf(out->value, sizeof(out->value), "%d%%", d->volume);
+	}
+	return true;
+}
+
 static char *volume_tooltip(struct widget *w, struct hotspot *hs) {
 	struct volume_data *d = w->data;
 	return format_str("Volume: %d%%%s", d->volume, d->muted ? " (muted)" : "");
@@ -1812,4 +1982,5 @@ const struct widget_impl widget_volume = {
 	.scroll = volume_scroll,
 	.tooltip = volume_tooltip,
 	.set_active = volume_set_active,
+	.sample = volume_sample,
 };

@@ -16,67 +16,87 @@
  * Widgets on the desktop. taskbar.conf lists them in a block of their own,
  *
  *   desktop_widgets {
- *       clock { x 40; y 40; scale 2.5 }
- *       cpu { x -40; y 40; style graph; output all }
+ *       clock { style analog; column -1; row 0 }
+ *       cpu { style chart; size 3x2; output all }
  *   }
  *
- * and each of them is the same widget the taskbar shows: the same code draws
- * it, the "widget <name>" block of taskbar.conf sets it up for both places,
- * and whatever its entry here says on top of that (a style, a format) is only
- * for the desktop. A desktop widget is laid out the way it would be on a
- * taskbar DESK_BASE pixels high and then drawn bigger, "scale" times, on a
- * surface of its own over the wallpaper and under the windows, with a
- * translucent card behind it.
+ * and each of them is the same widget the taskbar shows: the "widget <name>"
+ * block of taskbar.conf sets it up for both places, and whatever its entry
+ * here says on top of that (a format, a color) is only for the desktop.
  *
- * Dragging a widget moves it. Where it was put is kept in
- * ~/.local/state/tileWin/desktop-widgets, together with the place the config
- * gave it then, so changing the place in the config (or in the settings) still
- * wins over an older drag.
+ * The widgets sit in the grid of the desktop icons and take whole cells of it:
+ * "column" and "row" say where (negative numbers count from the right and the
+ * bottom), "size" how many cells, and the style decides when it does not.
+ * Widgets without a place line up along the right edge, and the icons flow
+ * around all of them. The "compact" style draws the widget the way the taskbar
+ * does, laid out for a taskbar DESK_BASE pixels high and drawn bigger; the
+ * others (gadgets.c) draw what the widget measures their own way. Each widget
+ * has a surface of its own over the wallpaper and under the windows.
+ *
+ * Dragging a widget moves it from cell to cell. Where it was put is kept in
+ * ~/.local/state/tileWin/desktop-widget-cells, together with the place the
+ * config gave it then, so changing the place in the config (or in the
+ * settings) still wins over an older drag.
  */
 
-#define DESK_BASE 40      // taskbar height the widget is laid out for
-#define DESK_PAD 6        // around the widget, inside the card, before scaling
-#define DESK_DRAG 6       // pixels the pointer moves before a press becomes a drag
-#define DESK_SPACING 16   // between widgets placed one below the other by default
+#define DESK_BASE 40    // taskbar height the compact style is laid out for
+#define DESK_PAD 6      // around a compact widget, inside the card, before scaling
+#define DESK_DRAG 6     // pixels the pointer moves before a press becomes a drag
+#define DESK_INSET 4    // between a card and the edges of its cells
 
 struct desk_surface {
 	struct deskwidget *dw;
 	struct panel_output *output;
 	struct psurface *surface;
-	int x, y;            // top left corner on the output, when dragged or placed
-	bool placed;         // x and y hold where it was dragged to
-	double px, py;       // pointer, surface coordinates
+	int col, row;         // the cell of its upper left corner
+	int columns, rows;    // how many cells it covers
+	bool placed;          // dragged to col and row by hand
+	int content_width;    // compact and tile: the width the widget measured
+	// where the widget draws: surface = offset + (widget + pad) * k
+	double k, ox, oy, pad;
+	double px, py;        // pointer, surface coordinates
 	bool inside, pressed, dragging;
 	double press_x, press_y;
-	int drag_x, drag_y; // where it was when the drag began
-	struct wl_list link; // deskwidget::surfaces
+	int drag_x, drag_y;   // where the card was when the drag began, in pixels
+	int drag_col, drag_row;
+	bool drag_placed;
+	struct wl_list link;  // deskwidget::surfaces
 };
 
 struct deskwidget {
 	struct panel *panel;
 	struct widget *widget;
 	struct twconf_node *conf; // its entry in desktop_widgets
-	int index;                // place in the block, for the default position
-	double scale;
+	const struct tw_widget_style *style;
+	int want_columns, want_rows; // from "size"; 0 lets the style decide
 	bool card;
 	struct wl_list surfaces;  // desk_surface::link
 };
 
 static bool is_desk_surface(struct psurface *s);
+static void layout_output(struct panel *panel, struct panel_output *output);
+
+static bool compact(struct deskwidget *dw) {
+	return !dw->style || strcmp(dw->style->name, "compact") == 0;
+}
+
+static bool tile(struct deskwidget *dw) {
+	return dw->style && strcmp(dw->style->name, "tile") == 0;
+}
 
 /* ---------- where widgets were dragged to ---------- */
 
 struct saved_place {
-	char *key; // "<widget> <output>"
-	int x, y;  // where it was put
-	int config_x, config_y; // what the config said when it was put there
+	char *key;       // "<widget> <output>"
+	int col, row;    // where it was put
+	char *config;    // what the config said when it was put there
 };
 
 static list_t *saved; // struct saved_place *
 
 static char *saved_path(void) {
 	char *dir = tw_state_dir();
-	char *path = dir ? format_str("%s/desktop-widgets", dir) : NULL;
+	char *path = dir ? format_str("%s/desktop-widget-cells", dir) : NULL;
 	free(dir);
 	return path;
 }
@@ -93,11 +113,13 @@ static void saved_load(void) {
 	while (f && fgets(line, sizeof(line), f)) {
 		line[strcspn(line, "\n")] = '\0';
 		struct saved_place place = { 0 };
+		char config[256];
 		int offset = 0;
-		if (sscanf(line, "%d %d %d %d %n", &place.x, &place.y, &place.config_x,
-				&place.config_y, &offset) >= 4 && offset > 0 && line[offset]) {
+		if (sscanf(line, "%d %d %255s %n", &place.col, &place.row, config, &offset) >= 3 &&
+				offset > 0 && line[offset]) {
 			struct saved_place *copy = malloc(sizeof(*copy));
 			*copy = place;
+			copy->config = strdup(config);
 			copy->key = strdup(line + offset);
 			list_add(saved, copy);
 		}
@@ -116,8 +138,8 @@ static void saved_write(void) {
 	char *content = strdup("");
 	for (int i = 0; i < saved->length; i++) {
 		struct saved_place *place = saved->items[i];
-		char *next = format_str("%s%d %d %d %d %s\n", content, place->x, place->y,
-			place->config_x, place->config_y, place->key);
+		char *next = format_str("%s%d %d %s %s\n", content, place->col, place->row,
+			place->config, place->key);
 		free(content);
 		content = next;
 	}
@@ -153,6 +175,7 @@ static void saved_forget(const char *key) {
 		struct saved_place *place = saved->items[i];
 		if (strcmp(place->key, key) == 0) {
 			free(place->key);
+			free(place->config);
 			free(place);
 			list_del(saved, i);
 			saved_write();
@@ -163,37 +186,81 @@ static void saved_forget(const char *key) {
 
 /* ---------- size and place ---------- */
 
-static int config_int(struct deskwidget *dw, const char *key, int fallback) {
+static const char *conf_value(struct deskwidget *dw, const char *key) {
 	const char *value = dw->conf ? twconf_value(dw->conf, key) : NULL;
-	return value && *value ? atoi(value) : fallback;
+	return value && *value ? value : NULL;
 }
 
-/* The place the config gives it; unset, the widgets line up along the top right. */
-static void config_place(struct deskwidget *dw, int *x, int *y) {
-	*x = config_int(dw, "x", -24);
-	*y = config_int(dw, "y", 24 + dw->index * (int)(DESK_BASE * dw->scale + DESK_SPACING));
+/* What the config says about the place, as one word: an older drag is kept while it holds. */
+static char *config_signature(struct deskwidget *dw) {
+	static const char *const keys[] = { "column", "row", "x", "y" };
+	char *signature = strdup("");
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		const char *value = conf_value(dw, keys[i]);
+		char *next = format_str("%s%s%s", signature, i ? "," : "", value ? value : "");
+		free(signature);
+		signature = next;
+	}
+	for (char *c = signature; *c; c++) {
+		if (*c == ' ' || *c == '\t') {
+			*c = '_';
+		}
+	}
+	return signature;
+}
+
+/*
+ * The cell the config puts a widget of columns x rows cells in; false when it
+ * gives none. "column" and "row" count cells, negative ones from the right
+ * and the bottom; "x" and "y" are pixels, from before the widgets had cells.
+ */
+static bool config_cell(struct deskwidget *dw, const struct desk_grid *g, int columns,
+		int rows, int *col, int *row) {
+	const char *column = conf_value(dw, "column"), *line = conf_value(dw, "row");
+	const char *x = conf_value(dw, "x"), *y = conf_value(dw, "y");
+	if (!column && !line && !x && !y) {
+		return false;
+	}
+	int c = -1, r = 0;
+	if (column) {
+		c = atoi(column);
+	} else if (x) {
+		int px = atoi(x);
+		c = px >= 0 ? (int)lround((double)(px - g->margin) / g->cell_w) :
+			-1 - (int)lround((double)(-px - g->margin) / g->cell_w);
+	}
+	if (line) {
+		r = atoi(line);
+	} else if (y) {
+		int py = atoi(y);
+		r = py >= 0 ? (int)lround((double)(py - g->margin) / g->cell_h) :
+			-1 - (int)lround((double)(-py - g->margin) / g->cell_h);
+	}
+	*col = c >= 0 ? c : g->columns + c - columns + 1;
+	*row = r >= 0 ? r : g->rows + r - rows + 1;
+	return true;
 }
 
 static void render_ctx_init(struct render_ctx *ctx, struct desk_surface *ds, cairo_t *cr) {
 	struct panel *panel = ds->dw->panel;
-	double k = ds->dw->scale;
+	double k = ds->k > 0 ? ds->k : 1;
 	*ctx = (struct render_ctx){
 		.panel = panel,
 		.surface = ds->surface,
 		.output = ds->output,
 		.cairo = cr,
 		.height = DESK_BASE,
-		// white text on a dark card, whatever the taskbar of the theme looks like
+		// the card has colors of its own, whatever the taskbar of the theme looks like
 		.style = PSV_FLAT,
 		.pointer_inside = ds->inside && !ds->dragging,
 		.pressed = ds->pressed && !ds->dragging,
-		.px = ds->px / k - DESK_PAD,
-		.py = ds->py / k - DESK_PAD,
+		.px = (ds->px - ds->ox) / k - ds->pad,
+		.py = (ds->py - ds->oy) / k - ds->pad,
 	};
 }
 
-/* The width the widget takes when laid out, 0 when it has nothing to show. */
-static int measure(struct desk_surface *ds, cairo_t *cr) {
+/* The width the widget takes when laid out at scale k, 0 when it has nothing to show. */
+static int measure(struct desk_surface *ds, cairo_t *cr, double k) {
 	struct widget *w = ds->dw->widget;
 	if (!w->impl->measure) {
 		return 0;
@@ -203,9 +270,10 @@ static int measure(struct desk_surface *ds, cairo_t *cr) {
 	// text is measured at the size it is drawn at: hinted bigger, it runs wider
 	cairo_save(cr);
 	cairo_identity_matrix(cr);
-	cairo_scale(cr, ds->dw->scale * (ds->output ? ds->output->scale : 1),
-		ds->dw->scale * (ds->output ? ds->output->scale : 1));
+	double scale = k * (ds->output ? ds->output->scale : 1);
+	cairo_scale(cr, scale, scale);
 	ds->dw->panel->desktop_pass = true;
+	ds->dw->panel->desktop_card = ds->dw->card;
 	int width = w->impl->measure(w, &ctx);
 	ds->dw->panel->desktop_pass = false;
 	cairo_restore(cr);
@@ -215,106 +283,167 @@ static int measure(struct desk_surface *ds, cairo_t *cr) {
 	return width > 0 ? width + 2 : 0;
 }
 
-static void surface_size(struct desk_surface *ds, int width, int *sw, int *sh) {
-	double k = ds->dw->scale;
-	*sw = width > 0 ? (int)ceil((width + 2 * DESK_PAD) * k) : 1;
-	*sh = width > 0 ? (int)ceil((DESK_BASE + 2 * DESK_PAD) * k) : 1;
+/* How big the text of a card is: 1 for cells 100 pixels high. */
+static double card_scale(const struct desk_grid *g) {
+	return g->cell_h / 100.0;
 }
 
-/* Puts the surface where it belongs: dragged there, or where the config says. */
-static void apply_place(struct desk_surface *ds) {
+static double caption_height(const struct desk_grid *g) {
+	double sc = card_scale(g);
+	return 12 * sc * 1.6 + 4 * sc;
+}
+
+/* How much bigger than on the taskbar a compact widget is drawn in rows of cells. */
+static double compact_scale(const struct desk_grid *g, int rows) {
+	double k = (rows * g->cell_h - 2.0 * DESK_INSET) / (DESK_BASE + 2 * DESK_PAD);
+	return k < 0.5 ? 0.5 : k > 4 ? 4 : k;
+}
+
+/* The cells a widget takes, from its style, its "size" and what it measured. */
+static void decide_size(struct desk_surface *ds, const struct desk_grid *g) {
+	struct deskwidget *dw = ds->dw;
+	int rows = dw->want_rows ? dw->want_rows : dw->style && dw->style->rows ?
+		dw->style->rows : 1;
+	int columns = dw->want_columns;
+	if (!columns && compact(dw)) {
+		double k = compact_scale(g, rows);
+		double needed = (ds->content_width + 2 * DESK_PAD) * k + 2 * DESK_INSET;
+		columns = (int)ceil(needed / g->cell_w);
+	} else if (!columns) {
+		columns = dw->style && dw->style->columns ? dw->style->columns : 2;
+	}
+	ds->columns = columns < 1 ? 1 : columns > g->columns ? g->columns : columns;
+	ds->rows = rows < 1 ? 1 : rows > g->rows ? g->rows : rows;
+}
+
+static void card_size(struct desk_surface *ds, const struct desk_grid *g, int *w, int *h) {
+	*w = ds->columns * g->cell_w - 2 * DESK_INSET;
+	*h = ds->rows * g->cell_h - 2 * DESK_INSET;
+	*w = *w < 8 ? 8 : *w;
+	*h = *h < 8 ? 8 : *h;
+}
+
+/* Where the widget draws inside the card: scaled and centered, or 1:1 for a gadget. */
+static void decide_transform(struct desk_surface *ds, const struct desk_grid *g) {
+	struct deskwidget *dw = ds->dw;
+	int sw, sh;
+	card_size(ds, g, &sw, &sh);
+	if (!compact(dw) && !tile(dw)) {
+		ds->k = 1;
+		ds->ox = ds->oy = ds->pad = 0;
+		return;
+	}
+	double width = ds->content_width + 2 * DESK_PAD, height = DESK_BASE + 2 * DESK_PAD;
+	double area_h = tile(dw) ? sh - caption_height(g) : sh;
+	// a tile does not blow the widget up much more than a compact card of one row
+	double k = compact(dw) ? compact_scale(g, ds->rows) :
+		fmin(area_h / height, compact_scale(g, 1) * 1.25);
+	if (width * k > sw) {
+		k = sw / width;
+	}
+	ds->k = k > 0.2 ? k : 0.2;
+	ds->pad = DESK_PAD;
+	ds->ox = (sw - width * ds->k) / 2;
+	ds->oy = (area_h - height * ds->k) / 2;
+}
+
+/* Puts the surface on its cells, counted from what the taskbar leaves free. */
+static void apply_place(struct desk_surface *ds, const struct desk_grid *g) {
 	struct zwlr_layer_surface_v1 *layer = ds->surface->layer_surface;
-	if (ds->placed) {
-		zwlr_layer_surface_v1_set_anchor(layer, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-			ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-		zwlr_layer_surface_v1_set_margin(layer, ds->y, 0, 0, ds->x);
-		return;
-	}
-	int x, y;
-	config_place(ds->dw, &x, &y);
-	uint32_t anchor = (x < 0 ? ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT : ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) |
-		(y < 0 ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP);
-	zwlr_layer_surface_v1_set_anchor(layer, anchor);
-	zwlr_layer_surface_v1_set_margin(layer, y < 0 ? 0 : y, x < 0 ? -x : 0, y < 0 ? -y : 0,
-		x < 0 ? 0 : x);
+	zwlr_layer_surface_v1_set_anchor(layer, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+	zwlr_layer_surface_v1_set_margin(layer, g->margin + ds->row * g->cell_h + DESK_INSET, 0, 0,
+		g->margin + ds->col * g->cell_w + DESK_INSET);
 }
 
-/* The top and bottom of what the taskbar leaves free: margins count from there. */
-static void usable_edges(struct desk_surface *ds, int *top, int *bottom) {
+/* The top of what the taskbar leaves free: the grid counts from there. */
+static int usable_top(struct desk_surface *ds) {
 	struct panel *panel = ds->dw->panel;
-	*top = 0;
-	*bottom = ds->output ? ds->output->height : 0;
-	if (ds->output && ds->output->bar && panel->config) {
-		if (panel->config->layouts[panel->layout].bottom) {
-			*bottom -= ds->output->bar->height;
-		} else {
-			*top += ds->output->bar->height;
-		}
+	if (ds->output && ds->output->bar && panel->config &&
+			!panel->config->layouts[panel->layout].bottom) {
+		return ds->output->bar->height;
 	}
+	return 0;
 }
 
-/* Top left corner of the surface on its output. */
+/* Top left corner of the card on its output. */
 static void surface_origin(struct desk_surface *ds, int *ox, int *oy) {
-	int top, bottom;
-	usable_edges(ds, &top, &bottom);
-	if (ds->placed) {
-		*ox = ds->x;
-		*oy = top + ds->y;
-		return;
-	}
-	int x, y;
-	config_place(ds->dw, &x, &y);
-	int width = ds->output ? ds->output->width : 0;
-	*ox = x < 0 ? width + x - ds->surface->width : x;
-	*oy = y < 0 ? bottom + y - ds->surface->height : top + y;
+	struct desk_grid g;
+	desktop_grid(ds->output, &g);
+	*ox = g.margin + ds->col * g.cell_w + DESK_INSET;
+	*oy = usable_top(ds) + g.margin + ds->row * g.cell_h + DESK_INSET;
 }
 
 /* ---------- drawing ---------- */
-
-static void draw_card(struct desk_surface *ds, cairo_t *cr) {
-	const struct tw_theme *t = ds->dw->panel->theme;
-	double k = ds->dw->scale;
-	double w = ds->surface->width, h = ds->surface->height;
-	double r = tw_theme_int(t, "desktop_widget.radius", 8) * k;
-	cairo_new_path(cr);
-	pd_rounded(cr, 0.5, 0.5, w - 1, h - 1, fmin(r, h / 2));
-	pd_color(cr, tw_theme_color(t, "desktop_widget.bg", 0x0000006b));
-	cairo_fill_preserve(cr);
-	pd_color(cr, tw_theme_color(t, "desktop_widget.border", 0xffffff26));
-	cairo_set_line_width(cr, 1);
-	cairo_stroke(cr);
-}
 
 static void desk_render(struct psurface *s, cairo_t *cr) {
 	struct desk_surface *ds = s->data;
 	struct deskwidget *dw = ds->dw;
 	struct widget *w = dw->widget;
-	int width = measure(ds, cr);
+	struct desk_grid g;
+	desktop_grid(ds->output, &g);
+	if (compact(dw) || tile(dw)) {
+		int width = measure(ds, cr, ds->k > 0 ? ds->k : compact_scale(&g, ds->rows));
+		if (width != ds->content_width) {
+			// it grew or shrank: it may need other cells, and the others may move
+			ds->content_width = width;
+			layout_output(dw->panel, ds->output);
+			if (s->req_width != s->width || s->req_height != s->height) {
+				return; // drawn again once the new size is there
+			}
+		}
+	}
 	int sw, sh;
-	surface_size(ds, width, &sw, &sh);
+	card_size(ds, &g, &sw, &sh);
 	if (sw != s->req_width || sh != s->req_height) {
-		// the widget grew or shrank: draw again once the new size is there
 		psurface_set_size(s, sw, sh);
 		wl_surface_commit(s->surface);
 		return;
 	}
-	if (width <= 0) {
+	struct gadget_ctx gadget = {
+		.panel = dw->panel,
+		.widget = w,
+		.style = dw->style ? dw->style->name : "compact",
+		.cairo = cr,
+		.width = s->width,
+		.height = s->height,
+		.scale = card_scale(&g),
+		.card = dw->card,
+		.hover = ds->inside && !ds->dragging,
+		.pressed = ds->pressed && !ds->dragging,
+	};
+	if (gadget_draw(&gadget)) {
+		// the whole card is the widget: clicks and tooltips as on the taskbar
+		psurface_add_hotspot(s, 0, 0, s->width, s->height, w, 0, 0, NULL);
 		return;
 	}
+	struct gadget_palette pal;
+	gadget_palette(dw->panel, w, dw->card, &pal);
 	if (dw->card) {
-		draw_card(ds, cr);
+		gadget.hover = false; // the widget shows its own hover
+		gadget_draw_card(&gadget, &pal);
 	}
-	double k = dw->scale;
+	if (tile(dw)) {
+		const struct tw_widget_info *info = tw_widget_find(w->name);
+		const char *colon = strchr(w->name, ':');
+		gadget_draw_caption(&gadget, &pal, info && strcmp(info->type, "custom") == 0 && colon ?
+			colon + 1 : info ? info->title : w->name);
+	}
+	if (ds->content_width <= 0) {
+		return;
+	}
 	struct render_ctx ctx;
 	render_ctx_init(&ctx, ds, cr);
 	cairo_save(cr);
-	cairo_scale(cr, k, k);
+	cairo_translate(cr, ds->ox, ds->oy);
+	cairo_scale(cr, ds->k, ds->k);
 	cairo_translate(cr, DESK_PAD, DESK_PAD);
-	cairo_rectangle(cr, 0, 0, width, DESK_BASE);
+	cairo_rectangle(cr, 0, 0, ds->content_width, DESK_BASE);
 	cairo_clip(cr);
 	dw->panel->desktop_pass = true;
+	dw->panel->desktop_card = dw->card;
 	if (w->impl->render) {
-		w->impl->render(w, &ctx, (struct pbox){ 0, 0, width, DESK_BASE });
+		w->impl->render(w, &ctx, (struct pbox){ 0, 0, ds->content_width, DESK_BASE });
 	}
 	dw->panel->desktop_pass = false;
 	cairo_restore(cr);
@@ -324,8 +453,9 @@ static void desk_render(struct psurface *s, cairo_t *cr) {
 
 /* The pointer in the coordinates the widget drew in. */
 static void widget_point(struct desk_surface *ds, double x, double y, double *wx, double *wy) {
-	*wx = x / ds->dw->scale - DESK_PAD;
-	*wy = y / ds->dw->scale - DESK_PAD;
+	double k = ds->k > 0 ? ds->k : 1;
+	*wx = (x - ds->ox) / k - ds->pad;
+	*wy = (y - ds->oy) / k - ds->pad;
 }
 
 static struct hotspot *hotspot_at(struct desk_surface *ds, double x, double y) {
@@ -334,39 +464,69 @@ static struct hotspot *hotspot_at(struct desk_surface *ds, double x, double y) {
 	return psurface_hotspot_at(ds->surface, wx, wy);
 }
 
+static bool overlaps(struct desk_surface *a, int col, int row, struct desk_surface *b) {
+	return col < b->col + b->columns && b->col < col + a->columns &&
+		row < b->row + b->rows && b->row < row + a->rows;
+}
+
+/* Another widget on the same screen in the way of a at col and row. */
+static bool cells_taken(struct desk_surface *a, int col, int row) {
+	struct panel *panel = a->dw->panel;
+	for (int i = 0; i < panel->config->desk_widgets->length; i++) {
+		struct deskwidget *dw = panel->config->desk_widgets->items[i];
+		struct desk_surface *b;
+		wl_list_for_each(b, &dw->surfaces, link) {
+			if (b != a && b->output == a->output && overlaps(a, col, row, b)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 static void desk_motion(struct psurface *s, double x, double y) {
 	struct desk_surface *ds = s->data;
 	if (ds->pressed && !ds->dragging &&
 			hypot(x - ds->press_x, y - ds->press_y) >= DESK_DRAG) {
-		// a press that moves becomes a drag; the widget goes along
+		// a press that moves becomes a drag; the widget goes along, cell by cell
 		ds->dragging = true;
 		tooltip_cancel(s->panel);
-		int ox, oy, top, bottom;
-		surface_origin(ds, &ox, &oy);
-		usable_edges(ds, &top, &bottom);
-		ds->x = ds->drag_x = ox;
-		ds->y = ds->drag_y = oy - top;
-		ds->placed = true;
+		struct desk_grid g;
+		desktop_grid(ds->output, &g);
+		ds->drag_x = g.margin + ds->col * g.cell_w;
+		ds->drag_y = g.margin + ds->row * g.cell_h;
+		ds->drag_col = ds->col;
+		ds->drag_row = ds->row;
+		ds->drag_placed = ds->placed;
+		psurface_set_dirty(s);
 	}
 	if (ds->dragging) {
 		// while the button is down the compositor goes on measuring the pointer from
 		// where the surface was when it was pressed, however far it has moved since
-		ds->x = ds->drag_x + (int)(x - ds->press_x);
-		ds->y = ds->drag_y + (int)(y - ds->press_y);
-		int max_x = ds->output ? ds->output->width - 16 : ds->x;
-		int max_y = ds->output ? ds->output->height - 16 : ds->y;
-		ds->x = ds->x < 16 - s->width ? 16 - s->width : ds->x > max_x ? max_x : ds->x;
-		ds->y = ds->y < 0 ? 0 : ds->y > max_y ? max_y : ds->y;
-		apply_place(ds);
-		wl_surface_commit(s->surface);
+		struct desk_grid g;
+		desktop_grid(ds->output, &g);
+		double left = ds->drag_x + (x - ds->press_x) - g.margin;
+		double top = ds->drag_y + (y - ds->press_y) - g.margin;
+		int col = (int)lround(left / g.cell_w), row = (int)lround(top / g.cell_h);
+		int max_col = g.columns - ds->columns, max_row = g.rows - ds->rows;
+		col = col > max_col ? max_col : col < 0 ? 0 : col;
+		row = row > max_row ? max_row : row < 0 ? 0 : row;
+		if (col != ds->col || row != ds->row) {
+			ds->col = col;
+			ds->row = row;
+			ds->placed = true;
+			apply_place(ds, &g);
+			wl_surface_commit(s->surface);
+		}
 		return;
 	}
 	struct hotspot *before = ds->inside ? hotspot_at(ds, ds->px, ds->py) : NULL;
+	bool entered = !ds->inside;
 	ds->px = x;
 	ds->py = y;
 	ds->inside = true;
 	struct hotspot *after = hotspot_at(ds, x, y);
-	if (before != after || !after) {
+	if (before != after || !after || entered) {
 		// drawing again frees the hotspots, so the tooltip gets a copy
 		struct hotspot hovered = after ? *after : (struct hotspot){ 0 };
 		char *str = after && after->str ? strdup(after->str) : NULL;
@@ -394,19 +554,29 @@ static void desk_leave(struct psurface *s) {
 static void end_drag(struct desk_surface *ds) {
 	ds->dragging = false;
 	ds->pressed = false;
-	char *key = place_key(ds);
-	struct saved_place *place = saved_find(key);
-	if (!place) {
-		place = calloc(1, sizeof(*place));
-		place->key = key;
-		list_add(saved, place);
-	} else {
-		free(key);
+	if (cells_taken(ds, ds->col, ds->row)) {
+		// another widget sits there: back to where it came from
+		ds->col = ds->drag_col;
+		ds->row = ds->drag_row;
+		ds->placed = ds->drag_placed;
+	} else if (ds->col != ds->drag_col || ds->row != ds->drag_row) {
+		char *key = place_key(ds);
+		struct saved_place *place = saved_find(key);
+		if (!place) {
+			place = calloc(1, sizeof(*place));
+			place->key = key;
+			list_add(saved, place);
+		} else {
+			free(key);
+			free(place->config);
+		}
+		place->col = ds->col;
+		place->row = ds->row;
+		place->config = config_signature(ds->dw);
+		saved_write();
 	}
-	place->x = ds->x;
-	place->y = ds->y;
-	config_place(ds->dw, &place->config_x, &place->config_y);
-	saved_write();
+	layout_output(ds->dw->panel, ds->output);
+	desktop_widgets_moved(ds->dw->panel);
 	psurface_set_dirty(ds->surface);
 }
 
@@ -426,7 +596,7 @@ static void desk_menu(struct desk_surface *ds, double x, double y) {
 	reset->disabled = !ds->placed;
 	list_add(items, reset);
 	list_add(items, menu_item_new("Desktop widget settings",
-		"exec tilewin-settings --page taskbar"));
+		"exec tilewin-settings --page desktop"));
 	list_add(items, menu_item_separator());
 	list_add(items, menu_item_new("Refresh", "panel desktop refresh"));
 	menu_items_default_icons(items);
@@ -459,7 +629,7 @@ static void desk_button(struct psurface *s, double x, double y, uint32_t button,
 		return;
 	}
 	if (button == BTN_RIGHT) {
-		desk_menu(ds, wx, wy);
+		desk_menu(ds, x, y);
 	}
 }
 
@@ -503,14 +673,139 @@ bool deskwidget_place(struct psurface *s, struct pbox box, struct pbox *out) {
 		return false;
 	}
 	struct desk_surface *ds = s->data;
-	double k = ds->dw->scale;
+	double k = ds->k > 0 ? ds->k : 1;
 	int ox, oy;
 	surface_origin(ds, &ox, &oy);
 	*out = (struct pbox){
-		ox + (int)((box.x + DESK_PAD) * k), oy + (int)((box.y + DESK_PAD) * k),
+		ox + (int)(ds->ox + (box.x + ds->pad) * k), oy + (int)(ds->oy + (box.y + ds->pad) * k),
 		(int)(box.width * k), (int)(box.height * k),
 	};
 	return true;
+}
+
+/* ---------- the grid ---------- */
+
+/*
+ * The free cells closest to col and row where on->items[i] fits: two widgets
+ * never cover each other, whatever the config says. Only the widgets marked
+ * done have their cells yet.
+ */
+static void free_cells_near(list_t *on, bool *done, int i, const struct desk_grid *g,
+		int *col, int *row) {
+	struct desk_surface *ds = on->items[i];
+	int max_col = g->columns - ds->columns, max_row = g->rows - ds->rows;
+	max_col = max_col < 0 ? 0 : max_col;
+	max_row = max_row < 0 ? 0 : max_row;
+	int want_col = *col > max_col ? max_col : *col < 0 ? 0 : *col;
+	int want_row = *row > max_row ? max_row : *row < 0 ? 0 : *row;
+	*col = want_col;
+	*row = want_row;
+	int best = -1;
+	for (int c = 0; c <= max_col; c++) {
+		for (int r = 0; r <= max_row; r++) {
+			bool free_cells = true;
+			for (int j = 0; j < on->length && free_cells; j++) {
+				if (j != i && done[j] && overlaps(ds, c, r, on->items[j])) {
+					free_cells = false;
+				}
+			}
+			// closest first; on a tie the one nearer the right edge and the top
+			int distance = (c - want_col) * (c - want_col) + (r - want_row) * (r - want_row);
+			if (free_cells && (best < 0 || distance < best ||
+					(distance == best && (c > *col || (c == *col && r < *row))))) {
+				best = distance;
+				*col = c;
+				*row = r;
+			}
+		}
+	}
+}
+
+/*
+ * Gives every widget on the screen its cells: first the ones dragged somewhere
+ * or put somewhere by the config, then the rest, as close to the upper right
+ * corner as they fit. None covers another; the icons flow around all of them.
+ */
+static void layout_output(struct panel *panel, struct panel_output *output) {
+	if (!panel->config || !panel->config->desk_widgets || !output) {
+		return;
+	}
+	struct desk_grid g;
+	desktop_grid(output, &g);
+	list_t *on = create_list(); // struct desk_surface *, in the order of the config
+	for (int i = 0; i < panel->config->desk_widgets->length; i++) {
+		struct deskwidget *dw = panel->config->desk_widgets->items[i];
+		struct desk_surface *ds;
+		wl_list_for_each(ds, &dw->surfaces, link) {
+			if (ds->output == output) {
+				list_add(on, ds);
+			}
+		}
+	}
+	bool *done = calloc(on->length ? on->length : 1, sizeof(bool));
+	// first the ones dragged somewhere or placed by the config, then the rest
+	for (int pass = 0; pass < 2; pass++) {
+		for (int i = 0; i < on->length; i++) {
+			struct desk_surface *ds = on->items[i];
+			if (pass == 0) {
+				decide_size(ds, &g);
+			}
+			int col = g.columns - ds->columns, row = 0;
+			if (done[i] || (pass == 0 && !ds->placed &&
+					!config_cell(ds->dw, &g, ds->columns, ds->rows, &col, &row))) {
+				continue;
+			}
+			if (pass == 0 && ds->placed) {
+				col = ds->col;
+				row = ds->row;
+			}
+			free_cells_near(on, done, i, &g, &col, &row);
+			ds->col = col;
+			ds->row = row;
+			done[i] = true;
+		}
+	}
+	for (int i = 0; i < on->length; i++) {
+		struct desk_surface *ds = on->items[i];
+		decide_transform(ds, &g);
+		int sw, sh;
+		card_size(ds, &g, &sw, &sh);
+		if (sw != ds->surface->req_width || sh != ds->surface->req_height) {
+			psurface_set_size(ds->surface, sw, sh);
+		}
+		apply_place(ds, &g);
+		wl_surface_commit(ds->surface->surface);
+		psurface_set_dirty(ds->surface);
+	}
+	free(done);
+	list_free(on);
+}
+
+bool deskwidgets_cover(struct panel_output *output, int col, int row) {
+	struct panel *panel = output ? output->panel : NULL;
+	if (!panel || !panel->config || !panel->config->desk_widgets) {
+		return false;
+	}
+	for (int i = 0; i < panel->config->desk_widgets->length; i++) {
+		struct deskwidget *dw = panel->config->desk_widgets->items[i];
+		struct desk_surface *ds;
+		wl_list_for_each(ds, &dw->surfaces, link) {
+			if (ds->output == output && col >= ds->col && col < ds->col + ds->columns &&
+					row >= ds->row && row < ds->row + ds->rows) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void deskwidgets_grid_changed(struct panel *panel) {
+	struct panel_output *output;
+	wl_list_for_each(output, &panel->outputs, link) {
+		if (output->ready) {
+			layout_output(panel, output);
+		}
+	}
 }
 
 /* ---------- surfaces on the screens ---------- */
@@ -548,21 +843,22 @@ static void surface_create(struct deskwidget *dw, struct panel_output *output) {
 	ds->surface = s;
 	char *key = place_key(ds);
 	struct saved_place *place = saved_find(key);
-	int config_x, config_y;
-	config_place(dw, &config_x, &config_y);
-	if (place && place->config_x == config_x && place->config_y == config_y) {
+	char *signature = config_signature(dw);
+	if (place && strcmp(place->config, signature) == 0) {
 		ds->placed = true;
-		ds->x = place->x;
-		ds->y = place->y;
+		ds->col = place->col;
+		ds->row = place->row;
 	} else if (place) {
 		saved_forget(key); // the config moved it since: the config wins
 	}
+	free(signature);
 	free(key);
-	int sw, sh;
-	surface_size(ds, measure(ds, popup_scratch_cairo()), &sw, &sh);
-	psurface_set_size(s, sw, sh);
-	apply_place(ds);
-	wl_surface_commit(s->surface);
+	if (compact(dw) || tile(dw)) {
+		struct desk_grid g;
+		desktop_grid(output, &g);
+		ds->content_width = measure(ds, popup_scratch_cairo(), compact_scale(&g, 1));
+	}
+	// layout_output gives it its cells and its size, and commits it
 }
 
 static struct desk_surface *surface_on(struct deskwidget *dw, struct panel_output *output) {
@@ -592,6 +888,9 @@ void deskwidgets_update(struct panel *panel) {
 			}
 		}
 	}
+	// the screens or the taskbar may have changed size: every widget finds its cells again
+	deskwidgets_grid_changed(panel);
+	desktop_widgets_moved(panel);
 }
 
 void deskwidgets_output_gone(struct panel_output *output) {
@@ -665,8 +964,9 @@ void deskwidgets_handle_command(struct panel *panel, int argc, char **argv) {
 				saved_forget(key);
 				free(key);
 				ds->placed = false;
-				apply_place(ds);
-				wl_surface_commit(ds->surface->surface);
+				layout_output(panel, ds->output);
+				desktop_widgets_moved(panel);
+				return;
 			}
 		}
 	}
@@ -702,11 +1002,12 @@ void deskwidgets_load(struct panel *panel, struct panel_config *config) {
 		dw->panel = panel;
 		dw->widget = w;
 		dw->conf = entry;
-		dw->index = config->desk_widgets->length;
-		const char *scale = twconf_value(entry, "scale");
-		dw->scale = scale ? strtod(scale, NULL) : 2;
-		if (!(dw->scale >= 0.5 && dw->scale <= 8)) {
-			dw->scale = 2;
+		dw->style = tw_widget_style_find(info, twconf_value(entry, "style"));
+		const char *size = twconf_value(entry, "size");
+		if (size && sscanf(size, "%dx%d", &dw->want_columns, &dw->want_rows) != 2) {
+			sway_log(SWAY_ERROR, "Desktop widget '%s': size is columns x rows, e.g. 3x2",
+				entry->name);
+			dw->want_columns = dw->want_rows = 0;
 		}
 		dw->card = twconf_parse_bool(twconf_value(entry, "background"), true);
 		wl_list_init(&dw->surfaces);

@@ -5,10 +5,15 @@
  * background is whichever color covers most of the area, which keeps the
  * answer the same in a light and in a dark theme.
  *
- * usage: count-content <png> <x> <y> <width> <height>
+ * With --mean it prints the mean red, green and blue of the area instead, to
+ * tell a light card from a dark one.
+ *
+ * usage: count-content [--mean] <png> <x> <y> <width> <height>
  */
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
 #define DIFFERENT_ENOUGH 24
@@ -30,8 +35,13 @@ static int channel_distance(guint a, guint b) {
 }
 
 int main(int argc, char **argv) {
+	bool mean = argc > 1 && strcmp(argv[1], "--mean") == 0;
+	if (mean) {
+		argv++;
+		argc--;
+	}
 	if (argc != 6) {
-		fprintf(stderr, "usage: %s <png> <x> <y> <width> <height>\n", argv[0]);
+		fprintf(stderr, "usage: %s [--mean] <png> <x> <y> <width> <height>\n", argv[0]);
 		return 2;
 	}
 	GError *error = NULL;
@@ -47,6 +57,24 @@ int main(int argc, char **argv) {
 	int channels = gdk_pixbuf_get_n_channels(image);
 	int stride = gdk_pixbuf_get_rowstride(image);
 	const guchar *pixels = gdk_pixbuf_read_pixels(image);
+
+	if (mean) {
+		double sum[3] = { 0 };
+		long n = 0;
+		for (int y = top; y < bottom; y++) {
+			for (int x = left; x < right; x++) {
+				guint color = color_at(pixels, stride, channels, x, y);
+				sum[0] += color >> 16 & 0xff;
+				sum[1] += color >> 8 & 0xff;
+				sum[2] += color & 0xff;
+				n++;
+			}
+		}
+		n = n ? n : 1;
+		printf("%.0f %.0f %.0f\n", sum[0] / n, sum[1] / n, sum[2] / n);
+		g_object_unref(image);
+		return 0;
+	}
 
 	GHashTable *counts = g_hash_table_new(g_direct_hash, g_direct_equal);
 	guint background = 0, most = 0;

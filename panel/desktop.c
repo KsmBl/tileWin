@@ -408,6 +408,24 @@ static int grid_columns(struct psurface *s) {
 	return columns > 0 ? columns : 1;
 }
 
+void desktop_grid(struct panel_output *output, struct desk_grid *grid) {
+	desktop_sizes_update(output->panel);
+	grid->margin = desktop.margin;
+	grid->cell_w = desktop.cell_w;
+	grid->cell_h = desktop.cell_h;
+	// the icons surface spans what the taskbar leaves free; before it has a size, guess
+	int height = output->height;
+	if (output->desktop && output->desktop->configured && output->desktop->height > 0) {
+		height = output->desktop->height;
+	} else if (output->bar) {
+		height -= output->bar->height;
+	}
+	grid->columns = (output->width - 2 * desktop.margin) / desktop.cell_w;
+	grid->rows = (height - 2 * desktop.margin) / desktop.cell_h;
+	grid->columns = grid->columns > 0 ? grid->columns : 1;
+	grid->rows = grid->rows > 0 ? grid->rows : 1;
+}
+
 /* Whether an icon moves with the drag: the grabbed one, or the whole selection. */
 static bool drag_moves(int index, struct desktop_item *item) {
 	return index == desktop.drag.index || (desktop.drag.group && item->selected);
@@ -421,6 +439,11 @@ static struct desktop_item *item_in_cell(int col, int row, int except) {
 		}
 	}
 	return NULL;
+}
+
+/* A cell an icon cannot have: another icon or a widget on the desktop is there. */
+static bool cell_taken(struct psurface *s, int col, int row, int except) {
+	return item_in_cell(col, row, except) || deskwidgets_cover(s->output, col, row);
 }
 
 /*
@@ -442,7 +465,7 @@ static int layout_items(struct psurface *s) {
 		struct desktop_item *item = desktop.items->items[i];
 		struct saved_pos *pos = positions_find(item->name);
 		if (pos && pos->col >= 0 && pos->col < columns && pos->row >= 0 && pos->row < rows &&
-				!item_in_cell(pos->col, pos->row, i)) {
+				!cell_taken(s, pos->col, pos->row, i)) {
 			item->col = pos->col;
 			item->row = pos->row;
 		}
@@ -452,7 +475,7 @@ static int layout_items(struct psurface *s) {
 		struct desktop_item *item = desktop.items->items[i];
 		for (int c = 0; item->col < 0 && c < columns; c++) {
 			for (int r = 0; item->col < 0 && r < rows; r++) {
-				if (!item_in_cell(c, r, i)) {
+				if (!cell_taken(s, c, r, i)) {
 					item->col = c;
 					item->row = r;
 				}
@@ -494,6 +517,10 @@ static void desktop_refresh_surfaces(struct panel *panel) {
 			psurface_set_dirty(output->desktop);
 		}
 	}
+}
+
+void desktop_widgets_moved(struct panel *panel) {
+	desktop_refresh_surfaces(panel);
 }
 
 void desktop_main_output_changed(struct panel *panel) {
@@ -674,6 +701,8 @@ static list_t *background_menu(struct panel *panel) {
 	list_add(items, menu_item_separator());
 	add_item(items, "Change wallpaper", "preferences-desktop-wallpaper",
 		"exec tilewin-settings --page wallpaper");
+	add_item(items, "Icons and widgets", "preferences-desktop",
+		"exec tilewin-settings --page desktop");
 	add_item(items, "Personalize", "preferences-desktop-theme", "exec tilewin-settings --page theme");
 	return items;
 }
@@ -806,8 +835,25 @@ static void drag_update_target(struct psurface *s) {
 	desktop.drag.row = row < lo_row ? lo_row : row > hi_row ? hi_row : row;
 }
 
+/* Whether one of the dragged icons would land on a widget of the desktop. */
+static bool drag_hits_widget(struct psurface *s, struct desktop_item *grabbed) {
+	int dcol = desktop.drag.col - grabbed->col, drow = desktop.drag.row - grabbed->row;
+	for (int i = 0; i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		if (drag_moves(i, item) &&
+				deskwidgets_cover(s->output, item->col + dcol, item->row + drow)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void drag_finish(struct psurface *s) {
 	struct desktop_item *item = item_at(desktop.drag.index);
+	if (desktop.drag.active && item && drag_hits_widget(s, item)) {
+		// a widget sits there: the icons go back where they were
+		desktop.drag.active = false;
+	}
 	if (desktop.drag.active && item && desktop.drag.group) {
 		int dcol = desktop.drag.col - item->col, drow = desktop.drag.row - item->row;
 		// an icon that stays behind and sits where the group lands loses its

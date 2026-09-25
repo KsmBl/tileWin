@@ -249,6 +249,18 @@ list_t *taskbar_window_menu(struct panel *panel, struct pwindow *win);
 bool taskbar_activate_index(struct panel *panel, int index);
 list_t *start_default_menu(struct panel *panel);
 
+#define WIDGET_HISTORY 32
+
+/* What a widget measures right now, drawn by the desktop styles (gadgets.c). */
+struct widget_sample {
+	int percent;                 // 0 to 100, -1 when it measures nothing that has a scale
+	int history[WIDGET_HISTORY]; // the last percentages, oldest first
+	bool has_history;
+	char value[48];              // the reading, e.g. "37%" or "12.4 W"
+	char detail[96];             // more of it, e.g. "5.9 of 16 GiB"; may be empty
+	bool warning, critical;      // over the levels the widget warns at
+};
+
 struct widget_impl {
 	const char *type;
 	void (*init)(struct widget *w);
@@ -264,6 +276,8 @@ struct widget_impl {
 	char *(*tooltip)(struct widget *w, struct hotspot *hs);
 	void (*set_active)(struct widget *w, bool active);
 	void (*state_changed)(struct widget *w);
+	/* What it measures, for the desktop styles that draw it their own way. */
+	bool (*sample)(struct widget *w, struct widget_sample *sample);
 };
 
 struct widget {
@@ -366,6 +380,7 @@ struct panel {
 	// a desktop widget is being measured or drawn: the colors of the desktop
 	// cards, not of the taskbar
 	bool desktop_pass;
+	bool desktop_card; // and it sits on a card of its own
 
 	struct popup *popup;
 	struct psurface *tooltip;
@@ -503,6 +518,58 @@ void deskwidgets_handle_command(struct panel *panel, int argc, char **argv);
  * not a desktop widget.
  */
 bool deskwidget_place(struct psurface *s, struct pbox box, struct pbox *out);
+/* Whether a widget on the desktop of that screen covers the cell. */
+bool deskwidgets_cover(struct panel_output *output, int col, int row);
+/* The grid changed (its size, or a screen): the widgets move along. */
+void deskwidgets_grid_changed(struct panel *panel);
+
+/* desktop.c: the grid the icons and the widgets on the desktop sit in */
+struct desk_grid {
+	int margin, cell_w, cell_h;
+	int columns, rows; // that fit on the screen, below or above the taskbar
+};
+void desktop_grid(struct panel_output *output, struct desk_grid *grid);
+/* The widgets on the desktop moved: the icons make room. */
+void desktop_widgets_moved(struct panel *panel);
+
+/* gadgets.c: the desktop styles of the widgets */
+struct gadget_ctx {
+	struct panel *panel;
+	struct widget *widget;
+	const char *style;
+	cairo_t *cairo;
+	double width, height; // of the card, in surface pixels
+	double scale;         // how big the text is drawn, 1 for a cell of 100 pixels
+	bool card;            // draws the background of the card
+	bool hover, pressed;
+};
+/* The colors the desktop styles are drawn in, from the theme and its scheme. */
+struct gadget_palette {
+	enum gadget_look {
+		GADGET_CLASSIC, // Windows 95: grey, raised edges
+		GADGET_LUNA,    // XP: soft blue gradient
+		GADGET_AERO,    // 7: glass with a glossy top
+		GADGET_METRO,   // 8: flat tiles in a strong color
+		GADGET_FLAT,    // 10: flat, translucent
+		GADGET_FLUENT,  // 11: rounded, mica
+	} look;
+	bool dark;
+	uint32_t bg, bg2, fg, dim, accent, accent2, border, track, grid, face;
+	uint32_t warning, critical;
+	double radius;
+	bool shadow;       // text gets a shadow: glass, or no card behind it
+	char family[160]; // font family, without a size
+};
+/* w picks the color of a Windows 8 tile and may be NULL. */
+void gadget_palette(struct panel *panel, struct widget *w, bool card,
+	struct gadget_palette *pal);
+/* Draws the card of a desktop widget: its background in the look of the theme. */
+void gadget_draw_card(struct gadget_ctx *ctx, const struct gadget_palette *pal);
+/* Draws a widget in one of its own desktop styles; false for "compact" and "tile". */
+bool gadget_draw(struct gadget_ctx *ctx);
+/* Draws the name of the widget under a tile, returns the height it took. */
+double gadget_draw_caption(struct gadget_ctx *ctx, const struct gadget_palette *pal,
+	const char *text);
 
 /* flyouts.c */
 #define TW_DATETIME_SETTINGS "exec tilewin-settings --page datetime"

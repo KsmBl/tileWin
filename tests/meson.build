@@ -37,6 +37,18 @@ test(
 )
 
 test(
+	'widgets',
+	executable(
+		'test-widgets',
+		'test_widgets.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'reorder',
 	executable(
 		'test-reorder',
@@ -212,6 +224,16 @@ if gdk_pixbuf.found()
 		find_program('desktop_widgets.sh'),
 		args: [meson.project_build_root(), meson.project_source_root()],
 		depends: [pointer_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 300,
+	)
+
+	test(
+		'desktop-widget-styles',
+		find_program('desktop_widget_styles.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [count_content],
 		suite: 'gui',
 		is_parallel: false,
 		timeout: 300,

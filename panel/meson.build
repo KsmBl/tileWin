@@ -33,6 +33,7 @@ executable(
 		'desktop.c',
 		'infoflyouts.c',
 		'deskwidgets.c',
+		'gadgets.c',
 		'draw.c',
 		'flyouts.c',
 		'ipc.c',
