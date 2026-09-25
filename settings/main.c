@@ -196,6 +196,7 @@ void settings_refresh(struct settings *s) {
 	theme_page_refresh(s);
 	wallpaper_page_refresh(s);
 	taskbar_page_refresh(s);
+	desktop_page_refresh(s);
 	menus_page_refresh(s);
 	launcher_page_refresh(s);
 	keyboard_page_refresh(s);
@@ -496,6 +497,8 @@ static void build_window(struct settings *s) {
 	} pages[] = {
 		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new },
 		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new },
+		{ "desktop", "Desktop", "icons grid cells widgets gadgets clock analog binary digital "
+			"chart gauge ring bar cpu memory power", desktop_page_new },
 		{ "animations", "Animations", "effects motion speed fade zoom slide minimize maximize "
 			"open close desktop switch", animations_page_new },
 		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
@@ -507,8 +510,8 @@ static void build_window(struct settings *s) {
 			"12 24 seconds automatic", datetime_page_new },
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 			bluetooth_page_new },
-		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications desktop icons "
-			"grid clipboard history right click context menu", taskbar_page_new },
+		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications clipboard "
+			"history right click context menu", taskbar_page_new },
 		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },

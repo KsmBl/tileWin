@@ -22,6 +22,7 @@ struct account_page;
 struct animations_page;
 struct window_page;
 struct datetime_page;
+struct desktop_page;
 
 struct settings {
 	GtkApplication *app;
@@ -50,6 +51,7 @@ struct settings {
 	struct animations_page *animations_page;
 	struct window_page *window_page;
 	struct datetime_page *datetime_page;
+	struct desktop_page *desktop_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -101,6 +103,13 @@ GtkWidget *ui_group(GtkWidget *content, const char *title, const char *descripti
 GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 		GtkWidget *control);
 GtkWidget *ui_row_box(GtkWidget *row);
+/*
+ * A switch or a number at the top level of taskbar.conf, added to keys; the
+ * default is written as nothing at all. ui_taskbar_keys_refresh reads them in.
+ */
+void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
+	const char *title, const char *hint, bool is_switch, int low, int high, int fallback);
+void ui_taskbar_keys_refresh(GPtrArray *keys);
 GtkWidget *ui_icon_button(const char *icon, const char *tooltip, bool sensitive,
 		GCallback callback, gpointer data);
 void ui_closure_free(gpointer data, GClosure *closure);
@@ -170,6 +179,19 @@ GtkWidget *wallpaper_page_new(struct settings *s);
 void wallpaper_page_refresh(struct settings *s);
 GtkWidget *taskbar_page_new(struct settings *s);
 void taskbar_page_refresh(struct settings *s);
+/* Deletes a script widget, from the layouts and the desktop too. */
+void taskbar_delete_script(struct settings *s, const char *name);
+GtkWidget *desktop_page_new(struct settings *s);
+void desktop_page_refresh(struct settings *s);
+
+/* widgets.c: the settings window of a widget, for the taskbar and the desktop */
+char *widget_type_of(const char *name);
+/* "CPU usage", "Clock (analog)"; description may be NULL. */
+char *widget_title(const char *name, const char **description);
+/* The entry of a widget in desktop_widgets, NULL if it has none. */
+struct cstmt *widget_desktop_entry(struct settings *s, const char *widget);
+/* desktop: also the options of its place on the desktop. */
+void widget_dialog_open(struct settings *s, const char *name, bool desktop);
 /* The right-click menus of the taskbar, put at the end of the Taskbar page. */
 void menus_section_attach(struct settings *s, GtkWidget *content);
 GtkWidget *startmenu_page_new(struct settings *s);

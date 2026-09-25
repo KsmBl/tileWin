@@ -79,11 +79,11 @@ fi
 sleep 6 # the settings app has to be up and laid out before it is clicked
 
 # maximize the window and scroll down to the Left section: its rows are then
-# start at y 433, search at 490 and taskbar at 547, with the handles at x 283
-WAYLAND_DISPLAY=$display "$tool" 1280 720 click 1008 15 scroll 690 400 13 >/dev/null 2>&1
+# start at y 377, search at 434 and taskbar at 491, with the handles at x 283
+WAYLAND_DISPLAY=$display "$tool" 1280 720 click 1008 15 scroll 690 400 7 >/dev/null 2>&1
 sleep 1
 # the start button, dropped onto the lower half of the window buttons
-WAYLAND_DISPLAY=$display "$tool" 1280 720 drag 283 433 400 559 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 720 drag 283 377 400 503 >/dev/null 2>&1
 sleep 2
 kill "$starter" 2>/dev/null
 pkill -f "tilewin -c $work/" 2>/dev/null

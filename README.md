@@ -85,8 +85,8 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Windows 8: a full-screen start screen with colored tiles, all apps in columns and search.
   - All include app search, pinned apps, places and a power menu.
 - **Run dialog**, tooltips, calendar flyout.
-- **Desktop** like on Windows: icons of the files in `~/Desktop` (double-click opens them) and a right-click menu to create folders, text documents and shortcuts to programs, files or web addresses, rename or delete (to the trash) items, open a terminal there, and change the wallpaper or theme. Drag icons to any cell of the grid; where they sit is kept in `~/.local/state/tileWin/desktop-icons`, and "Sort icons" puts them back in order. Dragging one of several selected icons moves them all and keeps the places they have next to each other. Drag on the empty desktop to draw a selection rectangle, and Ctrl+click to add or remove single icons. Clicking the desktop gives it the keyboard: **Delete** moves the selected icons to the trash (where there is none, it asks whether to delete it for good), **F2** renames the one selected icon, **F5** rereads the folder and **Escape** drops the selection. Shortcuts of other desktops work too, including KDE's `Type=Link` files such as the trash can. The Desktop group on the Taskbar page of the settings turns the icons off and sizes the grid: the picture (`desktop_icon_size`, default 48), the cell an icon sits in (`desktop_icon_width` and `desktop_icon_height`, default 100) and the room around the whole grid (`desktop_margin`, default 10), all in `taskbar.conf`.
-- **Desktop widgets.** Every taskbar widget can sit on the desktop as well: the clock, the meters of the CPU, memory, GPU, network and disk space, the disk lamp, volume, battery, git, script widgets and the rest. The same code draws them, bigger (`scale`, default 2) and on a translucent card of their own over the wallpaper and under the windows; the `widget <name>` block of `taskbar.conf` sets a widget up for both places, and what its entry in `desktop_widgets` says (a style, a format) is only for the desktop. Clicks, scrolling, tooltips and flyouts work there as on the taskbar. Drag a card to put it anywhere; where it was put is kept in `~/.local/state/tileWin/desktop-widgets` until the config gives it another place. `output` puts a widget on the main display (default), on every screen or on one by name. The Desktop widgets group on the Taskbar page of the settings adds and removes them and edits the place, size, screen and card of each.
+- **Desktop** like on Windows: icons of the files in `~/Desktop` (double-click opens them) and a right-click menu to create folders, text documents and shortcuts to programs, files or web addresses, rename or delete (to the trash) items, open a terminal there, and change the wallpaper or theme. Drag icons to any cell of the grid; where they sit is kept in `~/.local/state/tileWin/desktop-icons`, and "Sort icons" puts them back in order. Dragging one of several selected icons moves them all and keeps the places they have next to each other. Drag on the empty desktop to draw a selection rectangle, and Ctrl+click to add or remove single icons. Clicking the desktop gives it the keyboard: **Delete** moves the selected icons to the trash (where there is none, it asks whether to delete it for good), **F2** renames the one selected icon, **F5** rereads the folder and **Escape** drops the selection. Shortcuts of other desktops work too, including KDE's `Type=Link` files such as the trash can. The Desktop page of the settings turns the icons off and sizes the grid: the picture (`desktop_icon_size`, default 48), the cell an icon sits in (`desktop_icon_width` and `desktop_icon_height`, default 100) and the room around the whole grid (`desktop_margin`, default 10), all in `taskbar.conf`.
+- **Desktop widgets.** Every taskbar widget can sit on the desktop as well: the clock, the meters of the CPU, memory, GPU, network, disk space and power draw, the disk lamp, volume, battery, git, script widgets and the rest. They sit in the grid of the desktop icons and take whole cells of it, and the icons flow around them. Each has styles of its own: the taskbar look and a tile for every widget, a chart of the last measurements, a gauge with a needle, a ring and a bar for the meters, and a digital, an analog and a binary clock. Every style is drawn in the look of the theme (grey and raised for Windows 95, soft blue for XP, glass with a chrome gauge and a white clock for 7, colored tiles for 8, flat for 10, rounded for 11) and in its light or dark colors. The `widget <name>` block of `taskbar.conf` sets a widget up for both places, and what its entry in `desktop_widgets` says (a style, a format) is only for the desktop. Clicks, scrolling, tooltips and flyouts work there as on the taskbar. Drag a card to move it from cell to cell; a card dropped onto another one goes back. Where it was put is kept in `~/.local/state/tileWin/desktop-widget-cells` until the config gives it another place. `output` puts a widget on the main display (default), on every screen or on one by name. The Desktop page of the settings adds and removes them and picks the style, cells, screen and card of each.
 - **Named desktops.** `tilewinmsg desktop rename Work` gives the current virtual desktop a name; the task view and the workspaces widget then show it instead of *Desktop 2*. The name is kept beside the number (`2:Work`), so the desktop keeps its place in the order, `Win+Ctrl+←/→` still walks through them in order, and moving a desktop takes its name along. `desktop rename` with nothing after it gives the number back. A workspace named by hand in a tile-mode config keeps the name it was given.
 - **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Shut down dialog** in the look of the theme, opened from the start menu or with Ctrl+Alt+Delete: Windows 95 asks "Shut Down Windows" with radio buttons over the dithered screen, Windows XP shows "Turn off computer" with Stand By, Turn Off and Restart while the screen fades to gray (and "Log Off Windows" from Log Off), Windows 7, 10 and 11 show the Ctrl+Alt+Delete screen over the blurred desktop, and the Sway theme big buttons like wlogout. The commands are the `power` entries of the `startmenu` block.
@@ -140,7 +140,7 @@ Start tileWin:
 ### Tests
 
 ```sh
-meson test -C build-release --suite unit   # the config parser, the config editor, the disk list, moving taskbar widgets and the settings coverage
+meson test -C build-release --suite unit   # the config parser, the config editor, the disk list, the widget list, moving taskbar widgets and the settings coverage
 meson test -C build-release --suite gui    # drives a nested tileWin and looks at what it does
 ```
 
@@ -176,10 +176,15 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   not snap while the outer edge does, that unplugging a screen brings its
   windows onto the desktop on view and plugging it back sends them home as they
   were, and that show desktop clears both screens;
-- puts widgets on the desktop and checks their cards are drawn where the
-  config puts them, that a card dragged with a pointer moves and keeps its
-  place, that clicking the disk space card opens its flyout without taking the
-  taskbar down, and that a new place in the config wins over an old drag;
+- puts widgets on the desktop and checks their cards take the cells the config
+  gives them (and the upper right corner without one), that the icons make room,
+  that a card dragged with a pointer lands on whole cells and keeps them while
+  one dropped onto another card goes back, that clicking the disk space ring
+  opens its flyout without taking the taskbar down, and that a new place or
+  style in the config wins over an old drag;
+- shows a card of every desktop style and switches through all themes, light
+  and dark, checking that each card is drawn, that the dark scheme is darker
+  where a theme has one, and that no two themes draw the chart alike;
 - throws a window with a pointer of its own and checks it slides on past the
   throw, is still going a second later, and does neither when it was put down
   gently or when gravity mode is off.
@@ -394,13 +399,14 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 |---|---|
 | Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
 | Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes; with several screens, a wallpaper of its own for each screen |
+| Desktop | Desktop icons on or off, the icon size and the grid they and the widgets sit in (cell width and height, margin); the widgets on the desktop, a widget added more than once under a name of its own, and for each its style, its cells (column, row, size), seconds for the clocks, its screen and its card |
 | Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview. **Expensive calculations** lays a window out again for every frame while it is snapped, maximized or resized, instead of stretching a picture of it |
 | Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention, and **Gravity mode** with its drag and bounce |
 | Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), which one is the main display, brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
-| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections, put in order by dragging each one by its handle, also from one section into another), settings of each widget, the widgets on the desktop with their place, size and screen, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
+| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections, put in order by dragging each one by its handle, also from one section into another), settings of each widget, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
 | Start menu | The style of the start menu, its pinned apps, its places and its power entries |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
@@ -490,20 +496,26 @@ All widgets are described in one place, `common/tw_widgets.c`: their names, what
 
 ```
 desktop_widgets {
-    clock { x -40; y 40; scale 3 }             # 40 px from the right and the top
-    cpu { x -40; y 220; style graph; width 120 }
-    custom:weather { x -40; y 340; output all }
+    clock { style analog; column -1; row 0 }   # the last two columns, at the top
+    clock:digital { style digital; column -3; row 2 }
+    cpu { style chart }                        # the first free cells at the upper right
+    power { style chart; size 4x2 }
+    custom:weather { column 0; row -1; output all }
 }
 ```
 
 | Option | |
 |---|---|
-| `x`, `y` | Pixels from the left and top edge of the screen; negative numbers count from the right and bottom edge. Without them the widgets line up along the top right |
-| `scale` | How much bigger than on the taskbar, 0.5 to 8 (default 2) |
+| `style` | How it looks; the first is the default. Every widget: `compact` (as on the taskbar, drawn bigger) and `tile` (with its name under it). The meters `cpu`, `memory`, `gpu`, `net`, `storage` and `power`: `chart` (3x2 cells), `gauge` (2x2), `ring` (2x2), `bar` (3x1). `volume`, `network`, `battery` and `brightness`: `ring`, `gauge`, `bar`. `disk`: `chart`. `clock`: `digital` (3x2), `analog` (2x2), `binary` (3x2) |
+| `column`, `row` | The cell of its upper left corner in the grid of the desktop icons, counted from 0; negative numbers count from the right and the bottom, `-1` being the last column or row. Without them a widget takes the free cells closest to the upper right corner. Two cards never cover each other: one put onto another moves to the closest free cells |
+| `size` | Cells it takes, `<columns>x<rows>`; the style decides by default, and `compact` is as wide as it needs |
+| `seconds` | `yes` or `no`: the analog clock has a second hand and the binary clock shows the seconds (default `yes`); the digital clock shows them only with `yes` |
 | `output` | `main` (the main display, default), `all`, or a screen by name |
-| `background` | `yes` (default) or `no`: the translucent card. Themes color it with `desktop_widget { bg; border; fg; radius }` |
+| `background` | `yes` (default) or `no`: the card. Without it the widget is drawn in white with a shadow, like the icon labels |
 
-Any option of the widget itself can be given here too and then only applies on the desktop. A right click on a card without a menu of its own offers **Put back in its place** and the settings.
+The size of the cells is `desktop_icon_width` and `desktop_icon_height`, so bigger cells make the widgets bigger too. Any option of the widget itself can be given here too and then only applies on the desktop. A widget can be on the desktop more than once under names of its own (`clock:digital`, `cpu:2`). A right click on a card without a menu of its own offers **Put back in its place** and the settings.
+
+All styles and their sizes are listed with the widgets in `common/tw_widgets.c`; `panel/gadgets.c` draws them.
 
 **Commands and menus:**
 - Every widget accepts `on_click`, `on_middle_click`, `on_right_click`, `on_scroll_up`, `on_scroll_down` and a `menu { ... }` block.
@@ -565,6 +577,10 @@ To make your own:
 1. Create `~/.config/tileWin/themes/mytheme/theme.conf` starting with `inherit win10`.
 2. Override only the keys you want, e.g. `decoration { active { title_bg #202020; title_fg #ffffff } }`.
 3. Look at the built-in theme files for all available keys.
+
+Keys for the widgets on the desktop:
+- `desktop_widget { look classic|luna|aero|metro|flat|fluent }` picks how the cards and their charts, gauges and clocks are drawn; by default it follows `style` (win95, winxp, win7, win8, win10, win11).
+- `desktop_widget { bg; bg2; fg; dim; accent; accent2; border; track; grid; face; warning; critical; radius; font }` sets their colors; `bg2` is the lower end of the gradient of the XP and 7 looks, `accent2` the green of their progress bars, `face` the face of charts and gauges. Put them in the `dark { }` block for the dark scheme. Without them each look has colors of its own for light and dark; the Windows 8 look gives every widget a tile color of its own. The Sway theme colors them like its bar.
 
 Keys for Alt+Tab:
 - `alttab { style flip3d }` shows the windows themselves as a 3D stack that flies past, like Flip 3D on Windows 7, instead of the grid of icons. `alttab { wash <color> }` is what the desktop behind it is covered with. The Windows 7 theme uses it; the others show icons (`style icons`).

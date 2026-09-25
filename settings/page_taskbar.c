@@ -3,7 +3,6 @@
 #include "reorder.h"
 #include "settings.h"
 #include "tw_desktop.h"
-#include "tw_disks.h"
 #include "tw_widgets.h"
 
 enum {
@@ -13,55 +12,14 @@ enum {
 	SECTION_COUNT,
 };
 
-/* The desktop instead of a section of the taskbar, where a widget goes. */
-#define SECTION_DESKTOP -1
-
 static const char *const section_keys[] = { "left", "center", "right" };
 static const char *const section_titles[] = { "Left", "Center", "Right" };
-
-static void list_disks(GPtrArray *values, GPtrArray *labels) {
-	g_ptr_array_add(labels, g_strdup("Every disk"));
-	struct tw_disk *disks;
-	size_t count = tw_disks_list(TW_BLOCK_DIR, &disks);
-	for (size_t i = 0; i < count; i++) {
-		g_ptr_array_add(values, g_strdup(disks[i].name));
-		g_ptr_array_add(labels, tw_disk_label(&disks[i]));
-	}
-	tw_disks_free(disks, count);
-}
-
-/*
- * Options picked from a list found when the dialog opens instead of a fixed
- * one. The list fills in the values and one more label: the first label
- * stands for the default.
- */
-static const struct {
-	const char *type, *key;
-	void (*list)(GPtrArray *values, GPtrArray *labels);
-} listed_opts[] = {
-	{ "disk", "devices", list_disks },
-};
-
-/* The screens a desktop widget can go on: the main one, all of them, or one by name. */
-static void list_desktop_screens(GPtrArray *values, GPtrArray *labels) {
-	g_ptr_array_add(labels, g_strdup("The main display"));
-	g_ptr_array_add(values, g_strdup("all"));
-	g_ptr_array_add(labels, g_strdup("Every screen"));
-	GPtrArray *screens = tw_ipc_screens();
-	for (guint i = 0; i < screens->len; i++) {
-		const struct tw_screen *screen = screens->pdata[i];
-		g_ptr_array_add(values, g_strdup(screen->name));
-		g_ptr_array_add(labels, g_strdup(screen->label));
-	}
-	g_ptr_array_unref(screens);
-}
 
 struct taskbar_page {
 	struct settings *s;
 	bool updating;
 	GtkWidget *layout_dd, *position_dd, *height_spin;
 	GtkWidget *sections[SECTION_COUNT];
-	GtkWidget *desktop; // the widgets on the desktop
 	GtkWidget *scripts;
 	GtkWidget *custom_entry, *custom_popover;
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
@@ -91,31 +49,6 @@ static bool array_has(GPtrArray *array, const char *str) {
 		}
 	}
 	return false;
-}
-
-static char *widget_type_of(const char *name) {
-	const char *colon = strchr(name, ':');
-	return colon ? g_strndup(name, colon - name) : g_strdup(name);
-}
-
-static char *widget_title(const char *name, const char **description) {
-	const char *colon = strchr(name, ':');
-	char *type = widget_type_of(name);
-	char *title = NULL;
-	if (description) {
-		*description = NULL;
-	}
-	const struct tw_widget_info *info = tw_widget_find(type);
-	if (info && strcmp(type, "custom") == 0) {
-		title = g_strdup_printf("%s: %s", info->title, colon ? colon + 1 : name);
-	} else if (info) {
-		title = colon ? g_strdup_printf("%s (%s)", info->title, colon + 1) : g_strdup(info->title);
-	}
-	if (info && description) {
-		*description = info->description;
-	}
-	g_free(type);
-	return title ? title : g_strdup(name);
 }
 
 /* The layout the panel uses: a missing layout mirrors the other one. */
@@ -215,170 +148,17 @@ static void schedule_rebuild(struct taskbar_page *p) {
 	}
 }
 
-/* ---------- widget options ---------- */
-
-struct opt_binding {
-	struct taskbar_page *p;
-	char *widget;
-	bool desktop; // an option of its entry in desktop_widgets, not of its widget block
-	const struct tw_widget_option *opt;
-	GPtrArray *values; // of a dropdown, NULL stands for the default
-};
-
-static void opt_binding_free(gpointer data, GClosure *closure) {
-	struct opt_binding *b = data;
-	g_free(b->widget);
-	if (b->values) {
-		g_ptr_array_unref(b->values);
-	}
-	g_free(b);
-}
-
-static void write_option(struct taskbar_page *p, const char *widget, const char *key,
-		const char *value) {
-	struct confdoc *d = doc(p);
-	struct cstmt *block = confdoc_block(d, "widget", widget, value != NULL);
-	if (!block) {
-		return;
-	}
-	if (value) {
-		char *quoted = conf_quote_command(value);
-		confdoc_set(d, block, key, NULL, quoted);
-		g_free(quoted);
-	} else {
-		confdoc_set(d, block, key, NULL, NULL);
-	}
-	settings_taskbar_changed(p->s);
-}
-
-/* The entry of a widget in desktop_widgets, NULL if it has none. */
-static struct cstmt *desktop_entry(struct taskbar_page *p, const char *widget) {
-	struct cstmt *block = confdoc_block(doc(p), "desktop_widgets", NULL, false);
-	struct cstmt *entry = block ? confdoc_child(block, widget, NULL) : NULL;
-	return entry && entry->children ? entry : NULL;
-}
-
-static void write_desktop_option(struct taskbar_page *p, const char *widget, const char *key,
-		const char *value) {
-	struct cstmt *entry = desktop_entry(p, widget);
-	if (!entry) {
-		return;
-	}
-	char *quoted = value ? conf_quote_command(value) : NULL;
-	confdoc_set(doc(p), entry, key, NULL, quoted);
-	g_free(quoted);
-	settings_taskbar_changed(p->s);
-}
-
-static void write_bound(struct opt_binding *b, const char *value) {
-	if (b->desktop) {
-		write_desktop_option(b->p, b->widget, b->opt->key, value);
-	} else {
-		write_option(b->p, b->widget, b->opt->key, value);
-	}
-}
-
-static void on_option_text(GtkEditable *editable, gpointer data) {
-	struct opt_binding *b = data;
-	if (b->p->updating) {
-		return;
-	}
-	char *value = ui_input_value(gtk_editable_get_text(editable));
-	write_bound(b, *value ? value : NULL);
-	g_free(value);
-}
-
-static void on_option_choice(GObject *dropdown, GParamSpec *pspec, gpointer data) {
-	struct opt_binding *b = data;
-	if (b->p->updating) {
-		return;
-	}
-	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-	write_bound(b, i < b->values->len ? b->values->pdata[i] : NULL);
-}
-
-static void (*opt_lister(const char *widget, const struct tw_widget_option *opt,
-		bool desktop))(GPtrArray *, GPtrArray *) {
-	if (desktop) {
-		return strcmp(opt->key, "output") == 0 ? list_desktop_screens : NULL;
-	}
-	char *type = widget_type_of(widget);
-	void (*list)(GPtrArray *, GPtrArray *) = NULL;
-	for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
-		if (strcmp(listed_opts[i].type, type) == 0 && strcmp(listed_opts[i].key, opt->key) == 0) {
-			list = listed_opts[i].list;
-		}
-	}
-	g_free(type);
-	return list;
-}
-
-static void add_option_row(struct taskbar_page *p, GtkWidget *list, const char *widget,
-		const struct tw_widget_option *opt, bool desktop) {
-	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
-	struct cstmt *block = desktop ? desktop_entry(p, widget) :
-		confdoc_block(doc(p), "widget", widget, false);
-	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
-	struct opt_binding *b = g_new0(struct opt_binding, 1);
-	b->p = p;
-	b->widget = g_strdup(widget);
-	b->desktop = desktop;
-	b->opt = opt;
-	GtkWidget *control;
-	if (opt->choices || lister) {
-		b->values = g_ptr_array_new_with_free_func(g_free);
-		GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
-		g_ptr_array_add(b->values, NULL);
-		if (lister) {
-			lister(b->values, labels);
-		} else {
-			g_ptr_array_add(labels, g_strdup("Default"));
-			for (guint i = 0; opt->choices[i]; i++) {
-				g_ptr_array_add(b->values, g_strdup(opt->choices[i]));
-				g_ptr_array_add(labels, g_strdup(opt->choices[i]));
-			}
-		}
-		guint sel = 0;
-		for (guint i = 1; value && i < b->values->len; i++) {
-			if (g_ascii_strcasecmp(value, b->values->pdata[i]) == 0) {
-				sel = i;
-			}
-		}
-		if (value && *value && sel == 0) {
-			// a value written by hand, or a disk that is not plugged in, stays offered
-			g_ptr_array_add(b->values, g_strdup(value));
-			g_ptr_array_add(labels, g_strdup(value));
-			sel = b->values->len - 1;
-		}
-		GtkStringList *model = gtk_string_list_new(NULL);
-		for (guint i = 0; i < labels->len; i++) {
-			gtk_string_list_append(model, labels->pdata[i]);
-		}
-		g_ptr_array_unref(labels);
-		control = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
-		gtk_drop_down_set_selected(GTK_DROP_DOWN(control), sel);
-		g_signal_connect_data(control, "notify::selected", G_CALLBACK(on_option_choice), b,
-			opt_binding_free, 0);
-	} else {
-		control = gtk_entry_new();
-		gtk_entry_set_placeholder_text(GTK_ENTRY(control), "Default");
-		gtk_widget_set_size_request(control, 300, -1);
-		char *display = ui_display_value(value);
-		gtk_editable_set_text(GTK_EDITABLE(control), display);
-		g_free(display);
-		g_signal_connect_data(control, "changed", G_CALLBACK(on_option_text), b,
-			opt_binding_free, 0);
-	}
-	ui_row(list, opt->title, opt->hint, control);
-	g_free(value);
-}
-
 static void delete_custom(struct taskbar_page *p, const char *widget) {
 	char *name = g_strdup(widget);
 	struct confdoc *d = doc(p);
 	struct cstmt *block = confdoc_block(d, "widget", name, false);
 	if (block) {
 		confdoc_remove(d, block);
+	}
+	struct cstmt *entry = widget_desktop_entry(p->s, name);
+	if (entry) {
+		confdoc_remove(d, entry);
+		desktop_page_refresh(p->s);
 	}
 	static const char *const layouts[] = { "window", "tile" };
 	for (size_t l = 0; l < G_N_ELEMENTS(layouts); l++) {
@@ -402,20 +182,15 @@ static void delete_custom(struct taskbar_page *p, const char *widget) {
 	schedule_rebuild(p);
 }
 
-/* ---------- widget settings dialog ---------- */
-
 struct name_action {
 	struct taskbar_page *p;
 	char *name;
-	GtkWidget *window; // dialog to close afterwards, may be NULL
 };
 
-static struct name_action *name_action_new(struct taskbar_page *p, const char *name,
-		GtkWidget *window) {
+static struct name_action *name_action_new(struct taskbar_page *p, const char *name) {
 	struct name_action *a = g_new0(struct name_action, 1);
 	a->p = p;
 	a->name = g_strdup(name);
-	a->window = window;
 	return a;
 }
 
@@ -425,104 +200,14 @@ static void name_action_free(gpointer data, GClosure *closure) {
 	g_free(a);
 }
 
-static void on_dialog_delete(GtkButton *button, gpointer data) {
-	struct name_action *a = data;
-	struct taskbar_page *p = a->p;
-	char *name = g_strdup(a->name);
-	GtkWidget *window = a->window;
-	delete_custom(p, name);
-	g_free(name);
-	if (window) {
-		gtk_window_destroy(GTK_WINDOW(window)); // frees a
+void taskbar_delete_script(struct settings *s, const char *name) {
+	if (s->taskbar_page) {
+		delete_custom(s->taskbar_page, name);
 	}
-}
-
-static void on_dialog_close(GtkButton *button, gpointer data) {
-	gtk_window_destroy(GTK_WINDOW(data));
-}
-
-static void open_widget_dialog_for(struct taskbar_page *p, const char *name, bool desktop) {
-	const char *description;
-	char *title = widget_title(name, &description);
-	char *type = widget_type_of(name);
-
-	GtkWidget *window = gtk_window_new();
-	gtk_window_set_transient_for(GTK_WINDOW(window), p->s->window);
-	gtk_window_set_modal(GTK_WINDOW(window), TRUE);
-	gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
-	char *window_title = g_strdup_printf("%s settings", title);
-	gtk_window_set_title(GTK_WINDOW(window), window_title);
-	g_free(window_title);
-	gtk_window_set_default_size(GTK_WINDOW(window), 640, 660);
-
-	char *subtitle = description ? g_strdup_printf("%s (%s)", description, name) : g_strdup(name);
-	GtkWidget *content;
-	GtkWidget *page = ui_page(title, subtitle, &content);
-	g_free(subtitle);
-	gtk_widget_set_vexpand(page, TRUE);
-
-	if (desktop) {
-		GtkWidget *place = ui_group(content, "On the desktop",
-			"Where the widget sits and how big it is. Dragging it on the desktop moves it too.");
-		for (const struct tw_widget_option *opt = tw_widget_desktop_options; opt->key; opt++) {
-			add_option_row(p, place, name, opt, true);
-		}
-	}
-	GtkWidget *list = ui_group(content, "Settings", desktop ?
-		"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
-		"Leave a field empty to use the default.");
-	int count = 0;
-	const struct tw_widget_info *info = tw_widget_find(type);
-	for (const struct tw_widget_option *opt = info ? info->options : NULL; opt && opt->key; opt++) {
-		add_option_row(p, list, name, opt, false);
-		count++;
-	}
-	if (strcmp(type, "quicklaunch") == 0) {
-		ui_row(list, "Apps", "Edit the apps under Quick launch on the Taskbar page.", NULL);
-		count++;
-	}
-	if (count == 0) {
-		ui_row(list, NULL, "This widget has no settings of its own.", NULL);
-	}
-
-	GtkWidget *events = ui_group(content, "Mouse actions",
-		"Commands run when the widget is clicked or scrolled, e.g. exec pavucontrol. "
-		"On right click replaces the widget's menu.");
-	for (const struct tw_widget_option *opt = tw_widget_events; opt->key; opt++) {
-		add_option_row(p, events, name, opt, false);
-	}
-
-	if (strcmp(type, "custom") == 0) {
-		GtkWidget *danger = ui_group(content, "Script widget", NULL);
-		GtkWidget *button = gtk_button_new_with_label("Delete widget");
-		gtk_widget_add_css_class(button, "destructive-action");
-		g_signal_connect_data(button, "clicked", G_CALLBACK(on_dialog_delete),
-			name_action_new(p, name, window), name_action_free, 0);
-		ui_row(danger, "Delete this script widget", "It is also removed from both layouts.",
-			button);
-	}
-
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_box_append(GTK_BOX(box), page);
-	gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-	GtkWidget *close = gtk_button_new_with_label("Close");
-	gtk_widget_add_css_class(close, "suggested-action");
-	gtk_widget_set_halign(close, GTK_ALIGN_END);
-	gtk_widget_set_margin_top(close, 10);
-	gtk_widget_set_margin_bottom(close, 10);
-	gtk_widget_set_margin_end(close, 16);
-	g_signal_connect(close, "clicked", G_CALLBACK(on_dialog_close), window);
-	gtk_box_append(GTK_BOX(box), close);
-	gtk_window_set_child(GTK_WINDOW(window), box);
-	gtk_window_set_default_widget(GTK_WINDOW(window), close);
-	gtk_window_present(GTK_WINDOW(window));
-
-	g_free(type);
-	g_free(title);
 }
 
 static void open_widget_dialog(struct taskbar_page *p, const char *name) {
-	open_widget_dialog_for(p, name, false);
+	widget_dialog_open(p->s, name, false);
 }
 
 static void on_open_dialog(GtkButton *button, gpointer data) {
@@ -682,15 +367,6 @@ static void on_add_widget(GtkButton *button, gpointer data) {
 	if (popover) {
 		gtk_popover_popdown(GTK_POPOVER(popover));
 	}
-	if (r->section == SECTION_DESKTOP) {
-		struct cstmt *block = confdoc_block(doc(r->p), "desktop_widgets", NULL, true);
-		char *entry = g_strdup_printf("%s {\n}", r->name);
-		confdoc_append(doc(r->p), block, entry);
-		g_free(entry);
-		settings_taskbar_changed(r->p->s);
-		schedule_rebuild(r->p);
-		return;
-	}
 	GPtrArray *names = read_section(r->p, r->section);
 	g_ptr_array_add(names, g_strdup(r->name));
 	write_section(r->p, r->section, names);
@@ -698,20 +374,9 @@ static void on_add_widget(GtkButton *button, gpointer data) {
 	schedule_rebuild(r->p);
 }
 
-static GPtrArray *desktop_names(struct taskbar_page *p) {
-	GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
-	struct cstmt *block = confdoc_block(doc(p), "desktop_widgets", NULL, false);
-	for (guint i = 0; block && i < block->children->len; i++) {
-		struct cstmt *c = block->children->pdata[i];
-		g_ptr_array_add(names, g_strdup(c->name));
-	}
-	return names;
-}
-
 static GtkWidget *add_widget_button(struct taskbar_page *p, int section) {
-	bool desktop = section == SECTION_DESKTOP;
-	GPtrArray *used = desktop ? desktop_names(p) : g_ptr_array_new_with_free_func(g_free);
-	for (int s = 0; s < SECTION_COUNT && !desktop; s++) {
+	GPtrArray *used = g_ptr_array_new_with_free_func(g_free);
+	for (int s = 0; s < SECTION_COUNT; s++) {
 		GPtrArray *names = read_section(p, s);
 		for (guint i = 0; i < names->len; i++) {
 			g_ptr_array_add(used, g_strdup(names->pdata[i]));
@@ -719,16 +384,6 @@ static GtkWidget *add_widget_button(struct taskbar_page *p, int section) {
 		g_ptr_array_unref(names);
 	}
 	GPtrArray *candidates = known_widgets(p);
-	if (desktop) {
-		// every widget that can go there, scripts included, once each
-		for (guint i = candidates->len; i > 0; i--) {
-			const struct tw_widget_info *info = tw_widget_find(candidates->pdata[i - 1]);
-			if (!info || !(info->flags & TW_WIDGET_DESKTOP) ||
-					array_has(used, candidates->pdata[i - 1])) {
-				g_ptr_array_remove_index(candidates, i - 1);
-			}
-		}
-	}
 
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	for (guint i = 0; i < candidates->len; i++) {
@@ -1019,56 +674,6 @@ static void rebuild_sections(struct taskbar_page *p) {
 	}
 }
 
-static void on_desktop_settings(GtkButton *button, gpointer data) {
-	struct name_action *a = data;
-	open_widget_dialog_for(a->p, a->name, true);
-}
-
-static void on_desktop_remove(GtkButton *button, gpointer data) {
-	struct name_action *a = data;
-	struct cstmt *entry = desktop_entry(a->p, a->name);
-	if (entry) {
-		confdoc_remove(doc(a->p), entry);
-		settings_taskbar_changed(a->p->s);
-	}
-	schedule_rebuild(a->p);
-}
-
-static void rebuild_desktop(struct taskbar_page *p) {
-	GtkWidget *list = p->desktop;
-	gtk_list_box_remove_all(GTK_LIST_BOX(list));
-	GPtrArray *names = desktop_names(p);
-	for (guint i = 0; i < names->len; i++) {
-		const char *name = names->pdata[i];
-		char *title = widget_title(name, NULL);
-		GtkWidget *row = ui_row(list, title, name, NULL);
-		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
-		gtk_widget_set_tooltip_text(row, "Click to change the settings of this widget");
-		g_object_set_data_full(G_OBJECT(row), "widget", g_strdup(name), g_free);
-		g_object_set_data(G_OBJECT(row), "desktop", GINT_TO_POINTER(1));
-		GtkWidget *box = ui_row_box(row);
-		static const struct {
-			const char *icon, *tooltip;
-			GCallback callback;
-		} buttons[] = {
-			{ "emblem-system-symbolic", "Widget settings", G_CALLBACK(on_desktop_settings) },
-			{ "list-remove-symbolic", "Take off the desktop", G_CALLBACK(on_desktop_remove) },
-		};
-		for (size_t b = 0; b < G_N_ELEMENTS(buttons); b++) {
-			GtkWidget *button = gtk_button_new_from_icon_name(buttons[b].icon);
-			gtk_widget_set_tooltip_text(button, buttons[b].tooltip);
-			gtk_widget_add_css_class(button, "flat");
-			gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
-			g_signal_connect_data(button, "clicked", buttons[b].callback,
-				name_action_new(p, name, NULL), name_action_free, 0);
-			gtk_box_append(GTK_BOX(box), button);
-		}
-		g_free(title);
-	}
-	ui_row(list, NULL, names->len ? NULL : "None yet", add_widget_button(p, SECTION_DESKTOP));
-	g_ptr_array_unref(names);
-}
-
 static void rebuild_scripts(struct taskbar_page *p) {
 	gtk_list_box_remove_all(GTK_LIST_BOX(p->scripts));
 	struct cstmt *root = doc(p)->root;
@@ -1094,14 +699,14 @@ static void rebuild_scripts(struct taskbar_page *p) {
 		gtk_widget_add_css_class(settings, "flat");
 		gtk_widget_set_valign(settings, GTK_ALIGN_CENTER);
 		g_signal_connect_data(settings, "clicked", G_CALLBACK(on_open_dialog),
-			name_action_new(p, name, NULL), name_action_free, 0);
+			name_action_new(p, name), name_action_free, 0);
 		gtk_box_append(GTK_BOX(box), settings);
 		GtkWidget *remove = gtk_button_new_from_icon_name("user-trash-symbolic");
 		gtk_widget_set_tooltip_text(remove, "Delete");
 		gtk_widget_add_css_class(remove, "flat");
 		gtk_widget_set_valign(remove, GTK_ALIGN_CENTER);
 		g_signal_connect_data(remove, "clicked", G_CALLBACK(on_delete_script),
-			name_action_new(p, name, NULL), name_action_free, 0);
+			name_action_new(p, name), name_action_free, 0);
 		gtk_box_append(GTK_BOX(box), remove);
 		g_free(title);
 		g_free(command);
@@ -1157,16 +762,13 @@ static void refresh_general(struct taskbar_page *p) {
 	g_ptr_array_unref(ids);
 }
 
-static void root_settings_refresh(struct taskbar_page *p);
-
 static void rebuild_all(struct taskbar_page *p) {
 	p->updating = true;
 	refresh_layout_controls(p);
-	root_settings_refresh(p);
+	ui_taskbar_keys_refresh(p->root_settings);
 	refresh_general(p);
 	p->updating = false;
 	rebuild_sections(p);
-	rebuild_desktop(p);
 	rebuild_scripts(p);
 	if (p->open_dialog) {
 		char *name = p->open_dialog;
@@ -1187,8 +789,7 @@ void taskbar_page_refresh(struct settings *s) {
 static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
 	const char *name = g_object_get_data(G_OBJECT(row), "widget");
 	if (name) {
-		open_widget_dialog_for(data, name,
-			g_object_get_data(G_OBJECT(row), "desktop") != NULL);
+		open_widget_dialog(data, name);
 	}
 }
 
@@ -1307,99 +908,6 @@ static void on_quick_icon(struct app_list *l, guint index, gpointer data) {
 		e ? e->icon : NULL, "Use the app's icon", on_icon_chosen, r);
 }
 
-/* ---------- switches and numbers at the top level of taskbar.conf ---------- */
-
-struct root_setting {
-	struct taskbar_page *p;
-	const char *key;
-	GtkWidget *widget;
-	bool is_switch;
-	int fallback;
-	guint timer;
-};
-
-static bool setting_is_on(const char *value) {
-	return !(g_ascii_strcasecmp(value, "no") == 0 || g_ascii_strcasecmp(value, "off") == 0 ||
-		g_ascii_strcasecmp(value, "false") == 0 || g_ascii_strcasecmp(value, "disable") == 0);
-}
-
-/* The default is written as nothing at all, so the file stays as short as it can. */
-static void root_setting_write(struct root_setting *r) {
-	char number[16];
-	const char *value;
-	if (r->is_switch) {
-		bool on = gtk_switch_get_active(GTK_SWITCH(r->widget));
-		value = on == (r->fallback != 0) ? NULL : on ? "yes" : "no";
-	} else {
-		int size = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(r->widget));
-		snprintf(number, sizeof(number), "%d", size);
-		value = size == r->fallback ? NULL : number;
-	}
-	confdoc_set(doc(r->p), doc(r->p)->root, r->key, NULL, value);
-	settings_taskbar_changed(r->p->s);
-}
-
-static gboolean root_setting_apply(gpointer data) {
-	struct root_setting *r = data;
-	r->timer = 0;
-	root_setting_write(r);
-	return G_SOURCE_REMOVE;
-}
-
-static void on_root_setting(GObject *object, gpointer data) {
-	struct root_setting *r = data;
-	if (r->p->updating) {
-		return;
-	}
-	if (r->is_switch) {
-		root_setting_write(r);
-		return;
-	}
-	// spinning through the numbers must not rewrite the file on every step
-	if (r->timer) {
-		g_source_remove(r->timer);
-	}
-	r->timer = g_timeout_add(300, root_setting_apply, r);
-}
-
-/* "notify::..." hands the handler the property before the data. */
-static void on_root_switch(GObject *object, GParamSpec *pspec, gpointer data) {
-	on_root_setting(object, data);
-}
-
-static void root_setting_new(struct taskbar_page *p, GtkWidget *group, const char *key,
-		const char *title, const char *hint, bool is_switch, int low, int high,
-		int fallback) {
-	struct root_setting *r = g_new0(struct root_setting, 1);
-	r->p = p;
-	r->key = key;
-	r->is_switch = is_switch;
-	r->fallback = fallback;
-	if (is_switch) {
-		r->widget = gtk_switch_new();
-		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_root_switch), r);
-	} else {
-		r->widget = gtk_spin_button_new_with_range(low, high, 1);
-		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);
-	}
-	ui_row(group, title, hint, r->widget);
-	g_ptr_array_add(p->root_settings, r);
-}
-
-static void root_settings_refresh(struct taskbar_page *p) {
-	for (guint i = 0; i < p->root_settings->len; i++) {
-		struct root_setting *r = p->root_settings->pdata[i];
-		const char *value = cstmt_arg(confdoc_child(doc(p)->root, r->key, NULL), 0);
-		if (r->is_switch) {
-			gtk_switch_set_active(GTK_SWITCH(r->widget),
-				value ? setting_is_on(value) : r->fallback != 0);
-		} else {
-			gtk_spin_button_set_value(GTK_SPIN_BUTTON(r->widget),
-				value ? atoi(value) : r->fallback);
-		}
-	}
-}
-
 static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char *placeholder) {
 	GtkWidget *entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
@@ -1412,7 +920,7 @@ static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char
 GtkWidget *taskbar_page_new(struct settings *s) {
 	struct taskbar_page *p = g_new0(struct taskbar_page, 1);
 	p->s = s;
-	p->root_settings = g_ptr_array_new_with_free_func(g_free);
+	p->root_settings = g_ptr_array_new();
 	p->quick_icons = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Taskbar",
@@ -1444,31 +952,13 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->height_spin = gtk_spin_button_new_with_range(0, 200, 1);
 	g_signal_connect(p->height_spin, "value-changed", G_CALLBACK(on_height_changed), p);
 	ui_row(layout, "Height", "Pixels; 0 uses the theme's height", p->height_spin);
-	root_setting_new(p, layout, "theme_layout", "Let the theme bring its own layout",
+	ui_taskbar_key(s, p->root_settings, layout, "theme_layout", "Let the theme bring its own layout",
 		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
 
-	GtkWidget *desktop = ui_group(content, "Desktop",
-		"The icons of ~/Desktop and the grid they sit in.");
-	root_setting_new(p, desktop, "desktop_icons", "Show icons on the desktop", NULL,
-		true, 0, 0, 1);
-	root_setting_new(p, desktop, "desktop_icon_size", "Icon size", "Pixels",
-		false, 16, 256, 48);
-	root_setting_new(p, desktop, "desktop_icon_width", "Cell width",
-		"Pixels of the cell an icon sits in", false, 48, 400, 100);
-	root_setting_new(p, desktop, "desktop_icon_height", "Cell height",
-		"Pixels of the cell an icon sits in", false, 48, 400, 100);
-	root_setting_new(p, desktop, "desktop_margin", "Margin", "Pixels around the whole grid",
-		false, 0, 200, 10);
-
-	p->desktop = ui_group(content, "Desktop widgets",
-		"The same widgets on the desktop, bigger and on a card of their own. Drag one on the "
-		"desktop to move it; its settings are shared with the taskbar.");
-	g_signal_connect(p->desktop, "row-activated", G_CALLBACK(on_row_activated), p);
-
 	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);
-	root_setting_new(p, clipboard, "clipboard_history", "Remember what was copied",
+	ui_taskbar_key(s, p->root_settings, clipboard, "clipboard_history", "Remember what was copied",
 		"Win+V shows the history; passwords marked as secret are never kept", true, 0, 0, 1);
-	root_setting_new(p, clipboard, "clipboard_paste", "Paste the entry that is picked",
+	ui_taskbar_key(s, p->root_settings, clipboard, "clipboard_paste", "Paste the entry that is picked",
 		"Off only copies it back to the clipboard", true, 0, 0, 1);
 
 	for (int i = 0; i < SECTION_COUNT; i++) {

@@ -1301,3 +1301,97 @@ GdkTexture *ui_wallpaper_texture(const char *wallpaper, const char *theme, int w
 	}
 	return texture;
 }
+
+/* ---------- switches and numbers at the top level of taskbar.conf ---------- */
+
+struct ui_taskbar_key {
+	struct settings *s;
+	const char *key;
+	GtkWidget *widget;
+	bool is_switch, refreshing;
+	int fallback;
+	guint timer;
+};
+
+static bool setting_is_on(const char *value) {
+	return !(g_ascii_strcasecmp(value, "no") == 0 || g_ascii_strcasecmp(value, "off") == 0 ||
+		g_ascii_strcasecmp(value, "false") == 0 || g_ascii_strcasecmp(value, "disable") == 0);
+}
+
+/* The default is written as nothing at all, so the file stays as short as it can. */
+static void taskbar_key_write(struct ui_taskbar_key *r) {
+	char number[16];
+	const char *value;
+	if (r->is_switch) {
+		bool on = gtk_switch_get_active(GTK_SWITCH(r->widget));
+		value = on == (r->fallback != 0) ? NULL : on ? "yes" : "no";
+	} else {
+		int size = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(r->widget));
+		snprintf(number, sizeof(number), "%d", size);
+		value = size == r->fallback ? NULL : number;
+	}
+	confdoc_set(r->s->taskbar, r->s->taskbar->root, r->key, NULL, value);
+	settings_taskbar_changed(r->s);
+}
+
+static gboolean taskbar_key_apply(gpointer data) {
+	struct ui_taskbar_key *r = data;
+	r->timer = 0;
+	taskbar_key_write(r);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_taskbar_key(GObject *object, gpointer data) {
+	struct ui_taskbar_key *r = data;
+	if (r->refreshing) {
+		return;
+	}
+	if (r->is_switch) {
+		taskbar_key_write(r);
+		return;
+	}
+	// spinning through the numbers must not rewrite the file on every step
+	if (r->timer) {
+		g_source_remove(r->timer);
+	}
+	r->timer = g_timeout_add(300, taskbar_key_apply, r);
+}
+
+/* "notify::..." hands the handler the property before the data. */
+static void on_taskbar_key_switch(GObject *object, GParamSpec *pspec, gpointer data) {
+	on_taskbar_key(object, data);
+}
+
+void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
+		const char *title, const char *hint, bool is_switch, int low, int high, int fallback) {
+	struct ui_taskbar_key *r = g_new0(struct ui_taskbar_key, 1);
+	r->s = s;
+	r->key = key;
+	r->is_switch = is_switch;
+	r->fallback = fallback;
+	if (is_switch) {
+		r->widget = gtk_switch_new();
+		g_signal_connect(r->widget, "notify::active", G_CALLBACK(on_taskbar_key_switch), r);
+	} else {
+		r->widget = gtk_spin_button_new_with_range(low, high, 1);
+		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_taskbar_key), r);
+	}
+	ui_row(group, title, hint, r->widget);
+	g_ptr_array_add(keys, r);
+}
+
+void ui_taskbar_keys_refresh(GPtrArray *keys) {
+	for (guint i = 0; i < keys->len; i++) {
+		struct ui_taskbar_key *r = keys->pdata[i];
+		const char *value = cstmt_arg(confdoc_child(r->s->taskbar->root, r->key, NULL), 0);
+		r->refreshing = true;
+		if (r->is_switch) {
+			gtk_switch_set_active(GTK_SWITCH(r->widget),
+				value ? setting_is_on(value) : r->fallback != 0);
+		} else {
+			gtk_spin_button_set_value(GTK_SPIN_BUTTON(r->widget),
+				value ? atoi(value) : r->fallback);
+		}
+		r->refreshing = false;
+	}
+}
