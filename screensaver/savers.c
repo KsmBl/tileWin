@@ -23,6 +23,7 @@ const struct saver *const savers[] = {
 	&saver_starfield,
 	&saver_pipes,
 	&saver_flying,
+	&saver_maze,
 	&saver_aurora,
 	&saver_wordclock,
 	&saver_tiling,

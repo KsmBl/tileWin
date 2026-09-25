@@ -507,7 +507,7 @@ static void build_window(struct settings *s) {
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
 		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
-			"slideshow starfield pipes flying windows aurora word clock tiling idle lock "
+			"slideshow starfield pipes maze flying windows aurora word clock tiling idle lock "
 			"password resume", screensaver_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "

@@ -35,6 +35,6 @@ static inline double saver_clamp(double v, double low, double high) {
 extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbons,
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
-extern const struct saver saver_aurora, saver_wordclock, saver_tiling;
+extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_maze;
 
 #endif
