@@ -202,6 +202,7 @@ struct panel_config {
 	char *terminal;
 	struct layout_config layouts[2];
 	list_t *widgets; // struct widget * (all instances)
+	list_t *desk_widgets; // struct deskwidget *, the widgets on the desktop
 	struct twconf_node *startmenu;
 	int tooltip_delay;
 	bool desktop_icons;
@@ -270,6 +271,7 @@ struct widget {
 	struct panel *panel;
 	char *name;
 	struct twconf_node *conf; // may be NULL
+	struct twconf_node *desk; // its entry in desktop_widgets, whose words win; NULL on the taskbar
 	void *data;
 	bool active;
 	char *on_click, *on_middle_click, *on_right_click;
@@ -280,6 +282,18 @@ struct widget {
 const struct widget_impl *widget_impl_find(const char *type);
 struct widget *widget_create(struct panel *panel, const char *name,
 	struct twconf_node *conf);
+/* A widget whose own settings (desk, e.g. its desktop_widgets entry) come before conf. */
+struct widget *widget_create_with(struct panel *panel, const char *name,
+	struct twconf_node *conf, struct twconf_node *desk);
+/*
+ * What a click or the wheel on a widget does, wherever it sits: the on_click
+ * and similar commands, else the widget's own handling. False when nothing
+ * took it, so the host can show its menu.
+ */
+bool widget_handle_button(struct panel *panel, struct psurface *s, struct hotspot *hs,
+	uint32_t button, double x, double y);
+void widget_handle_scroll(struct panel *panel, struct psurface *s, struct hotspot *hs,
+	int direction);
 void widget_destroy(struct widget *w);
 const char *widget_conf(struct widget *w, const char *key, const char *fallback);
 int widget_conf_int(struct widget *w, const char *key, int fallback);
@@ -349,6 +363,10 @@ struct panel {
 	int config_watch, theme_watch, desktop_watch;
 	struct loop_timer *reload_timer;
 
+	// a desktop widget is being measured or drawn: the colors of the desktop
+	// cards, not of the taskbar
+	bool desktop_pass;
+
 	struct popup *popup;
 	struct psurface *tooltip;
 	struct loop_timer *tooltip_timer;
@@ -369,6 +387,8 @@ enum pstyle panel_style(struct panel *panel);
 
 /* main.c */
 void panel_set_dirty(struct panel *panel);
+/* Draws again only what shows that widget: the taskbars, or its desktop cards. */
+void widget_set_dirty(struct widget *w);
 void panel_request_reload(struct panel *panel);
 struct panel_output *panel_focused_output(struct panel *panel);
 struct panel_seat *panel_first_seat(struct panel *panel);
@@ -395,6 +415,8 @@ bool ipc_panel_commandf(struct panel *panel, const char *fmt, ...);
 void ipc_panel_refresh_tree(struct panel *panel);
 void ipc_panel_refresh_workspaces(struct panel *panel);
 void ipc_panel_refresh_inputs(struct panel *panel);
+/* The parsed reply of a request without a payload, e.g. IPC_GET_INPUTS. */
+json_object *ipc_panel_request(struct panel *panel, uint32_t type);
 struct pwindow *panel_find_window(struct panel *panel, int64_t id);
 
 /* config.c */
@@ -429,6 +451,7 @@ enum popup_kind {
 	POPUP_BLUETOOTH,
 	POPUP_SNIP,
 	POPUP_CLIPBOARD,
+	POPUP_INFO,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -464,6 +487,23 @@ void desktop_main_output_changed(struct panel *panel);
 void desktop_dir_changed(struct panel *panel);
 void desktop_handle_command(struct panel *panel, int argc, char **argv);
 
+/* deskwidgets.c: widgets on the desktop */
+void deskwidgets_load(struct panel *panel, struct panel_config *config);
+void deskwidgets_free(struct panel_config *config);
+/* Creates and removes their surfaces for the screens there are. */
+void deskwidgets_update(struct panel *panel);
+void deskwidgets_output_gone(struct panel_output *output);
+void deskwidgets_set_dirty(struct panel *panel);
+void deskwidgets_widget_dirty(struct widget *w);
+/* The windows, desktops or mode changed: the widgets on the desktop hear it too. */
+void deskwidgets_state_changed(struct panel *panel);
+void deskwidgets_handle_command(struct panel *panel, int argc, char **argv);
+/*
+ * Where a box a desktop widget drew in lies on its screen; false when s is
+ * not a desktop widget.
+ */
+bool deskwidget_place(struct psurface *s, struct pbox box, struct pbox *out);
+
 /* flyouts.c */
 #define TW_DATETIME_SETTINGS "exec tilewin-settings --page datetime"
 #define TW_NETWORK_SETTINGS "exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"
@@ -476,6 +516,16 @@ void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const 
 void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager);
 void flyout_memory_toggle(struct panel *panel, struct popup_anchor anchor,
 		const char *task_manager);
+/*
+ * infoflyouts.c: what a click on a widget without a flyout of its own opens
+ * (disk, gpu, net, storage, power, keyboard, title, git and script widgets).
+ */
+void info_flyout_toggle(struct widget *w, struct popup_anchor anchor);
+/* custom.c and git.c, for their flyouts */
+void custom_run_now(struct widget *w);
+const char *custom_output(struct widget *w);
+const char *git_widget_repo(struct widget *w);
+
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);
 

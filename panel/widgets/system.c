@@ -27,6 +27,18 @@ struct poll_data {
 	void *state;
 };
 
+/* Opens the flyout of a widget that has no flyout of its own elsewhere. */
+static bool info_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	info_flyout_toggle(w, anchor);
+	return true;
+}
+
 static void poll_tick(void *data) {
 	struct widget *w = data;
 	struct poll_data *p = w->data;
@@ -35,7 +47,7 @@ static void poll_tick(void *data) {
 		return;
 	}
 	p->update(w);
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 	p->timer = loop_add_timer(w->panel->loop, p->interval_ms, poll_tick, w);
 }
 
@@ -757,6 +769,7 @@ const struct widget_impl widget_disk = {
 	.render = disk_render,
 	.tooltip = disk_tooltip,
 	.set_active = poll_set_active,
+	.click = info_click,
 };
 
 /* ================= gpu ================= */
@@ -799,7 +812,7 @@ static void gpu_command_done(void *data, const char *output) {
 		s->percent = s->percent < 0 ? 0 : s->percent > 100 ? 100 : s->percent;
 	}
 	meter_push(&s->history, s->percent);
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 }
 
 static void gpu_update(struct widget *w) {
@@ -870,6 +883,7 @@ const struct widget_impl widget_gpu = {
 	.render = gpu_render,
 	.tooltip = gpu_tooltip,
 	.set_active = poll_set_active,
+	.click = info_click,
 };
 
 /* ================= net ================= */
@@ -1011,6 +1025,7 @@ const struct widget_impl widget_net = {
 	.render = nm_render,
 	.tooltip = nm_tooltip,
 	.set_active = poll_set_active,
+	.click = info_click,
 };
 
 /* ================= storage ================= */
@@ -1083,6 +1098,7 @@ const struct widget_impl widget_storage = {
 	.render = storage_render,
 	.tooltip = storage_tooltip,
 	.set_active = poll_set_active,
+	.click = info_click,
 };
 
 /* ================= power ================= */
@@ -1186,6 +1202,7 @@ const struct widget_impl widget_power = {
 	.render = power_render,
 	.tooltip = power_tooltip,
 	.set_active = poll_set_active,
+	.click = info_click,
 };
 
 /* ================= battery ================= */
@@ -1584,7 +1601,7 @@ static bool brightness_scroll(struct widget *w, struct psurface *s, struct hotsp
 		int direction) {
 	proc_spawn(direction < 0 ? "brightnessctl -q set 5%+" : "brightnessctl -q set 5%-");
 	brightness_update(w);
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 	return true;
 }
 
@@ -1630,7 +1647,7 @@ static void volume_query_done(void *data, const char *output) {
 		d->available = true;
 	}
 	d->muted = strstr(output, "Mute: yes") != NULL;
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 }
 
 static void volume_query(struct widget *w) {

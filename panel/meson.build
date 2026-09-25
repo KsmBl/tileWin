@@ -31,6 +31,8 @@ executable(
 		'clipboard.c',
 		'config.c',
 		'desktop.c',
+		'infoflyouts.c',
+		'deskwidgets.c',
 		'draw.c',
 		'flyouts.c',
 		'ipc.c',

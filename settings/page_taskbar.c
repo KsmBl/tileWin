@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "tw_desktop.h"
 #include "tw_disks.h"
+#include "tw_widgets.h"
 
 enum {
 	SECTION_LEFT,
@@ -12,161 +13,12 @@ enum {
 	SECTION_COUNT,
 };
 
+/* The desktop instead of a section of the taskbar, where a widget goes. */
+#define SECTION_DESKTOP -1
+
 static const char *const section_keys[] = { "left", "center", "right" };
 static const char *const section_titles[] = { "Left", "Center", "Right" };
 
-struct widget_type {
-	const char *type, *title, *description;
-};
-
-static const struct widget_type widget_types[] = {
-	{ "start", "Start button", "Opens the start menu" },
-	{ "search", "Search box", "Opens the start menu to search apps" },
-	{ "taskbar", "Window buttons", "A button for each open window" },
-	{ "quicklaunch", "Quick launch", "Icons of pinned apps" },
-	{ "workspaces", "Workspaces", "Buttons for the virtual desktops" },
-	{ "title", "Window title", "Title of the focused window" },
-	{ "tray", "System tray", "Icons of background apps" },
-	{ "keyboard", "Keyboard layout", "Current layout, click to switch" },
-	{ "volume", "Volume", "Speaker volume" },
-	{ "network", "Network", "Connection status" },
-	{ "battery", "Battery", "Charge level" },
-	{ "brightness", "Brightness", "Screen brightness" },
-	{ "cpu", "CPU usage", "Processor load" },
-	{ "memory", "Memory usage", "RAM in use, click for a flyout" },
-	{ "disk", "Disk activity", "A lamp that lights up while the disks are busy" },
-	{ "gpu", "GPU usage", "Load of a graphics card" },
-	{ "net", "Network usage", "What goes through an interface" },
-	{ "storage", "Disk space", "How full a file system is" },
-	{ "power", "Power draw", "Watts the computer is drawing" },
-	{ "git", "Git", "Branch and changed lines of the repository the focused window works in" },
-	{ "clock", "Clock", "Time and date with a calendar" },
-	{ "notifications", "Notifications", "Opens the Action Center with the notification history" },
-	{ "modeswitch", "Mode switch", "Switches between tile and window mode" },
-	{ "showdesktop", "Show desktop", "Minimizes all windows" },
-	{ "separator", "Separator", "A thin line" },
-	{ "spacer", "Spacer", "Empty space" },
-};
-
-enum opt_flags {
-	OPT_TEXT,
-	OPT_CHOICE,
-};
-
-struct opt {
-	const char *key, *title, *hint;
-	const char *const *choices; // NULL for free text
-};
-
-static const char *const choice_yes_no[] = { "yes", "no", NULL };
-static const char *const choice_theme_yes_no[] = { "theme", "yes", "no", NULL };
-static const char *const choice_current_all[] = { "current", "all", NULL };
-static const char *const choice_current_all_main[] = { "current", "all", "main", NULL };
-static const char *const choice_close_new[] = { "close", "new", NULL };
-static const char *const choice_meter[] = { "text", "graph", "bar", NULL };
-
-static const struct opt opts_clock[] = {
-	{ "format", "Format", "strftime format, \\n starts a second line. The theme decides by default.", NULL },
-	{ "tooltip_format", "Tooltip format", "strftime format of the tooltip", NULL },
-	{ "settings", "Settings link", "Opened by the link in the calendar, default exec tilewin-settings --page datetime", NULL },
-	{ 0 },
-};
-static const struct opt opts_git[] = {
-	{ "show_tag", "Show the newest tag", "The tag git describe reaches from HEAD, e.g. v1.0.7",
-		choice_yes_no },
-	{ "show_untracked", "Count untracked files", "Adds \u201c?3\u201d for files git does not follow yet",
-		choice_yes_no },
-	{ "interval", "Update interval", "Seconds between checks; 5 by default, and it also "
-		"looks whenever another window is focused", NULL },
-	{ "icon", "Icon", "Drawn before the branch, e.g. a Nerd Font glyph. Empty by default, "
-		"because not every font has one", NULL },
-	{ "max_width", "Maximum width", "Pixels; empty or 0 lets it take the room it needs", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default, and the added and removed "
-		"counts keep their own colors", NULL },
-	{ 0 },
-};
-
-static const struct opt opts_cpu[] = {
-	{ "interval", "Update interval", "Seconds, default 2", NULL },
-	{ "format", "Format", "{usage} is the load in percent", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
-	{ 0 },
-};
-static const struct opt opts_memory[] = {
-	{ "interval", "Update interval", "Seconds, default 5", NULL },
-	{ "format", "Format", "{used_percent}, {used} and {total} in GiB", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ "task_manager", "Task manager", "Opened by the link in the flyout, e.g. exec btop", NULL },
-	{ 0 },
-};
-static const struct opt opts_gpu[] = {
-	{ "interval", "Update interval", "Seconds, default 2", NULL },
-	{ "format", "Format", "{usage} is the load in percent", NULL },
-	{ "device", "Card", "e.g. card0; the first one that reports anything by default", NULL },
-	{ "command", "Command", "For cards that report nothing in /sys, e.g. nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ 0 },
-};
-static const struct opt opts_net[] = {
-	{ "interval", "Update interval", "Seconds, default 2", NULL },
-	{ "format", "Format", "{down}, {up}, {total} and {device}", NULL },
-	{ "device", "Interface", "e.g. wlan0; the busiest one by default", NULL },
-	{ "max_rate", "Full scale", "KiB per second the chart and the bar are drawn against, default 12500", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ 0 },
-};
-static const struct opt opts_storage[] = {
-	{ "interval", "Update interval", "Seconds, default 30", NULL },
-	{ "path", "Folder", "Any folder of the file system to watch, default /", NULL },
-	{ "format", "Format", "{used_percent}, {used}, {free}, {total} in GiB and {path}", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ 0 },
-};
-static const struct opt opts_power[] = {
-	{ "interval", "Update interval", "Seconds, default 5", NULL },
-	{ "format", "Format", "{watts} is what is being drawn", NULL },
-	{ "device", "Battery", "Name in /sys/class/power_supply, e.g. BAT0", NULL },
-	{ "max_watts", "Full scale", "Watts the chart and the bar are drawn against, default 60", NULL },
-	{ "style", "Style", "Text, a chart of the last measurements or a bar", choice_meter },
-	{ "width", "Width", "Pixels, for the chart and the bar", NULL },
-	{ "warning", "Warning above", "Percent; the text turns to the warning color", NULL },
-	{ "critical", "Critical above", "Percent; the text turns to the critical color", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ "warning_fg", "Warning color", "e.g. #fbbf24", NULL },
-	{ "critical_fg", "Critical color", "e.g. #f87171", NULL },
-	{ 0 },
-};
 static void list_disks(GPtrArray *values, GPtrArray *labels) {
 	g_ptr_array_add(labels, g_strdup("Every disk"));
 	struct tw_disk *disks;
@@ -190,135 +42,26 @@ static const struct {
 	{ "disk", "devices", list_disks },
 };
 
-static const struct opt opts_disk[] = {
-	{ "devices", "Disk", "The disk whose lamp this is; every whole disk by default", NULL },
-	{ "threshold", "Threshold", "KiB per second before the lamp lights up, default 50", NULL },
-	{ "interval", "Update interval", "Seconds, default 1", NULL },
-	{ "format", "Format", "{rate} is e.g. 1.2 MB/s, {kbps} the plain number; empty shows only the lamp", NULL },
-	{ "fg", "Color", "e.g. #7eb8f7; the theme decides by default", NULL },
-	{ 0 },
-};
-static const struct opt opts_battery[] = {
-	{ "interval", "Update interval", "Seconds, default 30", NULL },
-	{ "format", "Format", "{capacity} is the charge in percent", NULL },
-	{ "format_charging", "Format while charging", "Used instead of Format while the battery charges", NULL },
-	{ "format_full", "Format when full", "Used instead of Format once the battery is full", NULL },
-	{ "format_plugged", "Format on mains", "Used instead of Format while the charger is plugged in", NULL },
-	{ "device", "Device", "Name in /sys/class/power_supply, e.g. BAT0", NULL },
-	{ "icons", "Icons", "Characters for {icon}, lowest charge first, separated by spaces", NULL },
-	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the battery flyout", choice_yes_no },
-	{ "settings", "Settings link", "Opened by the link in the flyout, e.g. exec tilewin-settings --page screen", NULL },
-	{ 0 },
-};
-static const struct opt opts_network[] = {
-	{ "interval", "Update interval", "Seconds, default 5", NULL },
-	{ "interface", "Interface", "e.g. wlan0; detected automatically if empty", NULL },
-	{ "format", "Format", "{essid}, {quality} and {ifname}", NULL },
-	{ "format_ethernet", "Format on a cable", "Used instead of Format for a wired connection", NULL },
-	{ "format_disconnected", "Format when offline", "Used instead of Format while nothing is connected", NULL },
-	{ "icons", "Icons", "Characters for {icon}, weakest signal first", NULL },
-	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the network flyout", choice_yes_no },
-	{ "settings", "Settings link", "Opened by the link in the flyout, default exec nm-connection-editor", NULL },
-	{ 0 },
-};
-static const struct opt opts_volume[] = {
-	{ "mixer", "Mixer command", "Runs on click, default exec pavucontrol", NULL },
-	{ "step", "Scroll step", "Percent, default 5", NULL },
-	{ "format", "Format", "{volume} is the level in percent", NULL },
-	{ "format_muted", "Format when muted", "Used instead of Format while the sound is off", NULL },
-	{ "icons", "Icons", "Characters for {icon}, quietest first", NULL },
-	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the volume flyout", choice_yes_no },
-	{ 0 },
-};
-static const struct opt opts_brightness[] = {
-	{ "format", "Format", "{percent} is the brightness", NULL },
-	{ "icons", "Icons", "Characters for {icon}, darkest first", NULL },
-	{ 0 },
-};
-static const struct opt opts_notifications[] = {
-	{ "always", "Always show the button", "Otherwise it appears only when something is waiting", choice_yes_no },
-	{ 0 },
-};
-static const struct opt opts_taskbar[] = {
-	{ "icons_only", "Icons only", "\"theme\" follows the theme (Windows 7 and 11 show icons only)", choice_theme_yes_no },
-	{ "group", "Combine windows of the same app", NULL, choice_yes_no },
-	{ "workspaces", "Show windows of", "The current workspace or all workspaces", choice_current_all },
-	{ "outputs", "Show windows on", "The taskbar of their screen, every taskbar, or also the "
-		"taskbar of the main display (\"main\", as on Windows)", choice_current_all_main },
-	{ "middle_click", "Middle click", "Close the window or start a new one", choice_close_new },
-	{ "max_width", "Maximum button width", "Pixels", NULL },
-	{ "button_width", "Button width", "Pixels", NULL },
-	{ "thumbnails", "Preview on hover", "A live picture of the window above the button", choice_yes_no },
-	{ 0 },
-};
-static const struct opt opts_search[] = {
-	{ "label", "Placeholder text", NULL, NULL },
-	{ "width", "Width", "Pixels", NULL },
-	{ 0 },
-};
-static const struct opt opts_start[] = {
-	{ "label", "Label", "The theme decides by default", NULL },
-	{ "width", "Width", "Pixels", NULL },
-	{ 0 },
-};
-static const struct opt opts_title[] = {
-	{ "max_width", "Maximum width", "Pixels, default 480", NULL },
-	{ 0 },
-};
-static const struct opt opts_width[] = {
-	{ "width", "Width", "Pixels", NULL },
-	{ 0 },
-};
-static const struct opt opts_custom[] = {
-	{ "exec", "Command", "Shell command whose output is shown", NULL },
-	{ "interval", "Interval", "Seconds between runs; 0 runs it once", NULL },
-	{ "exec_listen", "Streaming command", "Instead of Command: keeps running and prints one line (or JSON) per update", NULL },
-	{ "format", "Format", "{} is replaced with the output", NULL },
-	{ "icon", "Icon", "Icon name or path", NULL },
-	{ 0 },
-};
-static const struct opt opts_events[] = {
-	{ "on_click", "On click", "Command, e.g. exec pavucontrol", NULL },
-	{ "on_middle_click", "On middle click", NULL, NULL },
-	{ "on_right_click", "On right click", "Replaces the right-click menu", NULL },
-	{ "on_scroll_up", "On scroll up", NULL, NULL },
-	{ "on_scroll_down", "On scroll down", NULL, NULL },
-	{ 0 },
-};
-
-static const struct {
-	const char *type;
-	const struct opt *opts;
-} type_opts[] = {
-	{ "clock", opts_clock },
-	{ "git", opts_git },
-	{ "cpu", opts_cpu },
-	{ "memory", opts_memory },
-	{ "disk", opts_disk },
-	{ "gpu", opts_gpu },
-	{ "net", opts_net },
-	{ "storage", opts_storage },
-	{ "power", opts_power },
-	{ "battery", opts_battery },
-	{ "network", opts_network },
-	{ "volume", opts_volume },
-	{ "brightness", opts_brightness },
-	{ "notifications", opts_notifications },
-	{ "taskbar", opts_taskbar },
-	{ "search", opts_search },
-	{ "start", opts_start },
-	{ "title", opts_title },
-	{ "separator", opts_width },
-	{ "spacer", opts_width },
-	{ "showdesktop", opts_width },
-	{ "custom", opts_custom },
-};
+/* The screens a desktop widget can go on: the main one, all of them, or one by name. */
+static void list_desktop_screens(GPtrArray *values, GPtrArray *labels) {
+	g_ptr_array_add(labels, g_strdup("The main display"));
+	g_ptr_array_add(values, g_strdup("all"));
+	g_ptr_array_add(labels, g_strdup("Every screen"));
+	GPtrArray *screens = tw_ipc_screens();
+	for (guint i = 0; i < screens->len; i++) {
+		const struct tw_screen *screen = screens->pdata[i];
+		g_ptr_array_add(values, g_strdup(screen->name));
+		g_ptr_array_add(labels, g_strdup(screen->label));
+	}
+	g_ptr_array_unref(screens);
+}
 
 struct taskbar_page {
 	struct settings *s;
 	bool updating;
 	GtkWidget *layout_dd, *position_dd, *height_spin;
 	GtkWidget *sections[SECTION_COUNT];
+	GtkWidget *desktop; // the widgets on the desktop
 	GtkWidget *scripts;
 	GtkWidget *custom_entry, *custom_popover;
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
@@ -362,20 +105,14 @@ static char *widget_title(const char *name, const char **description) {
 	if (description) {
 		*description = NULL;
 	}
-	if (strcmp(type, "custom") == 0) {
-		title = g_strdup_printf("Script: %s", colon ? colon + 1 : name);
-		if (description) {
-			*description = "Shows the output of a command";
-		}
+	const struct tw_widget_info *info = tw_widget_find(type);
+	if (info && strcmp(type, "custom") == 0) {
+		title = g_strdup_printf("%s: %s", info->title, colon ? colon + 1 : name);
+	} else if (info) {
+		title = colon ? g_strdup_printf("%s (%s)", info->title, colon + 1) : g_strdup(info->title);
 	}
-	for (size_t i = 0; !title && i < G_N_ELEMENTS(widget_types); i++) {
-		if (strcmp(widget_types[i].type, type) == 0) {
-			title = colon ? g_strdup_printf("%s (%s)", widget_types[i].title, colon + 1) :
-				g_strdup(widget_types[i].title);
-			if (description) {
-				*description = widget_types[i].description;
-			}
-		}
+	if (info && description) {
+		*description = info->description;
 	}
 	g_free(type);
 	return title ? title : g_strdup(name);
@@ -483,7 +220,8 @@ static void schedule_rebuild(struct taskbar_page *p) {
 struct opt_binding {
 	struct taskbar_page *p;
 	char *widget;
-	const struct opt *opt;
+	bool desktop; // an option of its entry in desktop_widgets, not of its widget block
+	const struct tw_widget_option *opt;
 	GPtrArray *values; // of a dropdown, NULL stands for the default
 };
 
@@ -513,13 +251,40 @@ static void write_option(struct taskbar_page *p, const char *widget, const char 
 	settings_taskbar_changed(p->s);
 }
 
+/* The entry of a widget in desktop_widgets, NULL if it has none. */
+static struct cstmt *desktop_entry(struct taskbar_page *p, const char *widget) {
+	struct cstmt *block = confdoc_block(doc(p), "desktop_widgets", NULL, false);
+	struct cstmt *entry = block ? confdoc_child(block, widget, NULL) : NULL;
+	return entry && entry->children ? entry : NULL;
+}
+
+static void write_desktop_option(struct taskbar_page *p, const char *widget, const char *key,
+		const char *value) {
+	struct cstmt *entry = desktop_entry(p, widget);
+	if (!entry) {
+		return;
+	}
+	char *quoted = value ? conf_quote_command(value) : NULL;
+	confdoc_set(doc(p), entry, key, NULL, quoted);
+	g_free(quoted);
+	settings_taskbar_changed(p->s);
+}
+
+static void write_bound(struct opt_binding *b, const char *value) {
+	if (b->desktop) {
+		write_desktop_option(b->p, b->widget, b->opt->key, value);
+	} else {
+		write_option(b->p, b->widget, b->opt->key, value);
+	}
+}
+
 static void on_option_text(GtkEditable *editable, gpointer data) {
 	struct opt_binding *b = data;
 	if (b->p->updating) {
 		return;
 	}
 	char *value = ui_input_value(gtk_editable_get_text(editable));
-	write_option(b->p, b->widget, b->opt->key, *value ? value : NULL);
+	write_bound(b, *value ? value : NULL);
 	g_free(value);
 }
 
@@ -529,10 +294,14 @@ static void on_option_choice(GObject *dropdown, GParamSpec *pspec, gpointer data
 		return;
 	}
 	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-	write_option(b->p, b->widget, b->opt->key, i < b->values->len ? b->values->pdata[i] : NULL);
+	write_bound(b, i < b->values->len ? b->values->pdata[i] : NULL);
 }
 
-static void (*opt_lister(const char *widget, const struct opt *opt))(GPtrArray *, GPtrArray *) {
+static void (*opt_lister(const char *widget, const struct tw_widget_option *opt,
+		bool desktop))(GPtrArray *, GPtrArray *) {
+	if (desktop) {
+		return strcmp(opt->key, "output") == 0 ? list_desktop_screens : NULL;
+	}
 	char *type = widget_type_of(widget);
 	void (*list)(GPtrArray *, GPtrArray *) = NULL;
 	for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
@@ -545,13 +314,15 @@ static void (*opt_lister(const char *widget, const struct opt *opt))(GPtrArray *
 }
 
 static void add_option_row(struct taskbar_page *p, GtkWidget *list, const char *widget,
-		const struct opt *opt) {
-	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt);
-	struct cstmt *block = confdoc_block(doc(p), "widget", widget, false);
+		const struct tw_widget_option *opt, bool desktop) {
+	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
+	struct cstmt *block = desktop ? desktop_entry(p, widget) :
+		confdoc_block(doc(p), "widget", widget, false);
 	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
 	struct opt_binding *b = g_new0(struct opt_binding, 1);
 	b->p = p;
 	b->widget = g_strdup(widget);
+	b->desktop = desktop;
 	b->opt = opt;
 	GtkWidget *control;
 	if (opt->choices || lister) {
@@ -670,7 +441,7 @@ static void on_dialog_close(GtkButton *button, gpointer data) {
 	gtk_window_destroy(GTK_WINDOW(data));
 }
 
-static void open_widget_dialog(struct taskbar_page *p, const char *name) {
+static void open_widget_dialog_for(struct taskbar_page *p, const char *name, bool desktop) {
 	const char *description;
 	char *title = widget_title(name, &description);
 	char *type = widget_type_of(name);
@@ -690,15 +461,21 @@ static void open_widget_dialog(struct taskbar_page *p, const char *name) {
 	g_free(subtitle);
 	gtk_widget_set_vexpand(page, TRUE);
 
-	GtkWidget *list = ui_group(content, "Settings", "Leave a field empty to use the default.");
-	int count = 0;
-	for (size_t i = 0; i < G_N_ELEMENTS(type_opts); i++) {
-		if (strcmp(type_opts[i].type, type) == 0) {
-			for (const struct opt *opt = type_opts[i].opts; opt->key; opt++) {
-				add_option_row(p, list, name, opt);
-				count++;
-			}
+	if (desktop) {
+		GtkWidget *place = ui_group(content, "On the desktop",
+			"Where the widget sits and how big it is. Dragging it on the desktop moves it too.");
+		for (const struct tw_widget_option *opt = tw_widget_desktop_options; opt->key; opt++) {
+			add_option_row(p, place, name, opt, true);
 		}
+	}
+	GtkWidget *list = ui_group(content, "Settings", desktop ?
+		"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
+		"Leave a field empty to use the default.");
+	int count = 0;
+	const struct tw_widget_info *info = tw_widget_find(type);
+	for (const struct tw_widget_option *opt = info ? info->options : NULL; opt && opt->key; opt++) {
+		add_option_row(p, list, name, opt, false);
+		count++;
 	}
 	if (strcmp(type, "quicklaunch") == 0) {
 		ui_row(list, "Apps", "Edit the apps under Quick launch on the Taskbar page.", NULL);
@@ -711,8 +488,8 @@ static void open_widget_dialog(struct taskbar_page *p, const char *name) {
 	GtkWidget *events = ui_group(content, "Mouse actions",
 		"Commands run when the widget is clicked or scrolled, e.g. exec pavucontrol. "
 		"On right click replaces the widget's menu.");
-	for (const struct opt *opt = opts_events; opt->key; opt++) {
-		add_option_row(p, events, name, opt);
+	for (const struct tw_widget_option *opt = tw_widget_events; opt->key; opt++) {
+		add_option_row(p, events, name, opt, false);
 	}
 
 	if (strcmp(type, "custom") == 0) {
@@ -742,6 +519,10 @@ static void open_widget_dialog(struct taskbar_page *p, const char *name) {
 
 	g_free(type);
 	g_free(title);
+}
+
+static void open_widget_dialog(struct taskbar_page *p, const char *name) {
+	open_widget_dialog_for(p, name, false);
 }
 
 static void on_open_dialog(GtkButton *button, gpointer data) {
@@ -776,9 +557,11 @@ static GPtrArray *known_widgets(struct taskbar_page *p) {
 			g_ptr_array_add(names, g_strdup(name));
 		}
 	}
-	for (size_t i = 0; i < G_N_ELEMENTS(widget_types); i++) {
-		if (!array_has(names, widget_types[i].type)) {
-			g_ptr_array_add(names, g_strdup(widget_types[i].type));
+	for (size_t i = 0; i < tw_widget_count; i++) {
+		const struct tw_widget_info *info = &tw_widgets[i];
+		if ((info->flags & TW_WIDGET_TASKBAR) && !(info->flags & TW_WIDGET_UNLISTED) &&
+				!array_has(names, info->type)) {
+			g_ptr_array_add(names, g_strdup(info->type));
 		}
 	}
 	return names;
@@ -899,6 +682,15 @@ static void on_add_widget(GtkButton *button, gpointer data) {
 	if (popover) {
 		gtk_popover_popdown(GTK_POPOVER(popover));
 	}
+	if (r->section == SECTION_DESKTOP) {
+		struct cstmt *block = confdoc_block(doc(r->p), "desktop_widgets", NULL, true);
+		char *entry = g_strdup_printf("%s {\n}", r->name);
+		confdoc_append(doc(r->p), block, entry);
+		g_free(entry);
+		settings_taskbar_changed(r->p->s);
+		schedule_rebuild(r->p);
+		return;
+	}
 	GPtrArray *names = read_section(r->p, r->section);
 	g_ptr_array_add(names, g_strdup(r->name));
 	write_section(r->p, r->section, names);
@@ -906,9 +698,20 @@ static void on_add_widget(GtkButton *button, gpointer data) {
 	schedule_rebuild(r->p);
 }
 
+static GPtrArray *desktop_names(struct taskbar_page *p) {
+	GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+	struct cstmt *block = confdoc_block(doc(p), "desktop_widgets", NULL, false);
+	for (guint i = 0; block && i < block->children->len; i++) {
+		struct cstmt *c = block->children->pdata[i];
+		g_ptr_array_add(names, g_strdup(c->name));
+	}
+	return names;
+}
+
 static GtkWidget *add_widget_button(struct taskbar_page *p, int section) {
-	GPtrArray *used = g_ptr_array_new_with_free_func(g_free);
-	for (int s = 0; s < SECTION_COUNT; s++) {
+	bool desktop = section == SECTION_DESKTOP;
+	GPtrArray *used = desktop ? desktop_names(p) : g_ptr_array_new_with_free_func(g_free);
+	for (int s = 0; s < SECTION_COUNT && !desktop; s++) {
 		GPtrArray *names = read_section(p, s);
 		for (guint i = 0; i < names->len; i++) {
 			g_ptr_array_add(used, g_strdup(names->pdata[i]));
@@ -916,6 +719,16 @@ static GtkWidget *add_widget_button(struct taskbar_page *p, int section) {
 		g_ptr_array_unref(names);
 	}
 	GPtrArray *candidates = known_widgets(p);
+	if (desktop) {
+		// every widget that can go there, scripts included, once each
+		for (guint i = candidates->len; i > 0; i--) {
+			const struct tw_widget_info *info = tw_widget_find(candidates->pdata[i - 1]);
+			if (!info || !(info->flags & TW_WIDGET_DESKTOP) ||
+					array_has(used, candidates->pdata[i - 1])) {
+				g_ptr_array_remove_index(candidates, i - 1);
+			}
+		}
+	}
 
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	for (guint i = 0; i < candidates->len; i++) {
@@ -1206,6 +1019,56 @@ static void rebuild_sections(struct taskbar_page *p) {
 	}
 }
 
+static void on_desktop_settings(GtkButton *button, gpointer data) {
+	struct name_action *a = data;
+	open_widget_dialog_for(a->p, a->name, true);
+}
+
+static void on_desktop_remove(GtkButton *button, gpointer data) {
+	struct name_action *a = data;
+	struct cstmt *entry = desktop_entry(a->p, a->name);
+	if (entry) {
+		confdoc_remove(doc(a->p), entry);
+		settings_taskbar_changed(a->p->s);
+	}
+	schedule_rebuild(a->p);
+}
+
+static void rebuild_desktop(struct taskbar_page *p) {
+	GtkWidget *list = p->desktop;
+	gtk_list_box_remove_all(GTK_LIST_BOX(list));
+	GPtrArray *names = desktop_names(p);
+	for (guint i = 0; i < names->len; i++) {
+		const char *name = names->pdata[i];
+		char *title = widget_title(name, NULL);
+		GtkWidget *row = ui_row(list, title, name, NULL);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+		gtk_widget_set_tooltip_text(row, "Click to change the settings of this widget");
+		g_object_set_data_full(G_OBJECT(row), "widget", g_strdup(name), g_free);
+		g_object_set_data(G_OBJECT(row), "desktop", GINT_TO_POINTER(1));
+		GtkWidget *box = ui_row_box(row);
+		static const struct {
+			const char *icon, *tooltip;
+			GCallback callback;
+		} buttons[] = {
+			{ "emblem-system-symbolic", "Widget settings", G_CALLBACK(on_desktop_settings) },
+			{ "list-remove-symbolic", "Take off the desktop", G_CALLBACK(on_desktop_remove) },
+		};
+		for (size_t b = 0; b < G_N_ELEMENTS(buttons); b++) {
+			GtkWidget *button = gtk_button_new_from_icon_name(buttons[b].icon);
+			gtk_widget_set_tooltip_text(button, buttons[b].tooltip);
+			gtk_widget_add_css_class(button, "flat");
+			gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+			g_signal_connect_data(button, "clicked", buttons[b].callback,
+				name_action_new(p, name, NULL), name_action_free, 0);
+			gtk_box_append(GTK_BOX(box), button);
+		}
+		g_free(title);
+	}
+	ui_row(list, NULL, names->len ? NULL : "None yet", add_widget_button(p, SECTION_DESKTOP));
+	g_ptr_array_unref(names);
+}
+
 static void rebuild_scripts(struct taskbar_page *p) {
 	gtk_list_box_remove_all(GTK_LIST_BOX(p->scripts));
 	struct cstmt *root = doc(p)->root;
@@ -1303,6 +1166,7 @@ static void rebuild_all(struct taskbar_page *p) {
 	refresh_general(p);
 	p->updating = false;
 	rebuild_sections(p);
+	rebuild_desktop(p);
 	rebuild_scripts(p);
 	if (p->open_dialog) {
 		char *name = p->open_dialog;
@@ -1323,7 +1187,8 @@ void taskbar_page_refresh(struct settings *s) {
 static void on_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
 	const char *name = g_object_get_data(G_OBJECT(row), "widget");
 	if (name) {
-		open_widget_dialog(data, name);
+		open_widget_dialog_for(data, name,
+			g_object_get_data(G_OBJECT(row), "desktop") != NULL);
 	}
 }
 
@@ -1594,6 +1459,11 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 		"Pixels of the cell an icon sits in", false, 48, 400, 100);
 	root_setting_new(p, desktop, "desktop_margin", "Margin", "Pixels around the whole grid",
 		false, 0, 200, 10);
+
+	p->desktop = ui_group(content, "Desktop widgets",
+		"The same widgets on the desktop, bigger and on a card of their own. Drag one on the "
+		"desktop to move it; its settings are shared with the taskbar.");
+	g_signal_connect(p->desktop, "row-activated", G_CALLBACK(on_row_activated), p);
 
 	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);
 	root_setting_new(p, clipboard, "clipboard_history", "Remember what was copied",

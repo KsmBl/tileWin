@@ -1542,6 +1542,10 @@ void desktop_handle_command(struct panel *panel, int argc, char **argv) {
 		return;
 	}
 	const char *action = argv[0];
+	if (strcmp(action, "widget") == 0) {
+		deskwidgets_handle_command(panel, argc - 1, argv + 1);
+		return;
+	}
 	struct desktop_item *item = argc > 1 ? item_at(atoi(argv[1])) : NULL;
 	if (strcmp(action, "refresh") == 0) {
 		rescan_now(panel);

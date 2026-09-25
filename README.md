@@ -86,6 +86,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - All include app search, pinned apps, places and a power menu.
 - **Run dialog**, tooltips, calendar flyout.
 - **Desktop** like on Windows: icons of the files in `~/Desktop` (double-click opens them) and a right-click menu to create folders, text documents and shortcuts to programs, files or web addresses, rename or delete (to the trash) items, open a terminal there, and change the wallpaper or theme. Drag icons to any cell of the grid; where they sit is kept in `~/.local/state/tileWin/desktop-icons`, and "Sort icons" puts them back in order. Dragging one of several selected icons moves them all and keeps the places they have next to each other. Drag on the empty desktop to draw a selection rectangle, and Ctrl+click to add or remove single icons. Clicking the desktop gives it the keyboard: **Delete** moves the selected icons to the trash (where there is none, it asks whether to delete it for good), **F2** renames the one selected icon, **F5** rereads the folder and **Escape** drops the selection. Shortcuts of other desktops work too, including KDE's `Type=Link` files such as the trash can. The Desktop group on the Taskbar page of the settings turns the icons off and sizes the grid: the picture (`desktop_icon_size`, default 48), the cell an icon sits in (`desktop_icon_width` and `desktop_icon_height`, default 100) and the room around the whole grid (`desktop_margin`, default 10), all in `taskbar.conf`.
+- **Desktop widgets.** Every taskbar widget can sit on the desktop as well: the clock, the meters of the CPU, memory, GPU, network and disk space, the disk lamp, volume, battery, git, script widgets and the rest. The same code draws them, bigger (`scale`, default 2) and on a translucent card of their own over the wallpaper and under the windows; the `widget <name>` block of `taskbar.conf` sets a widget up for both places, and what its entry in `desktop_widgets` says (a style, a format) is only for the desktop. Clicks, scrolling, tooltips and flyouts work there as on the taskbar. Drag a card to put it anywhere; where it was put is kept in `~/.local/state/tileWin/desktop-widgets` until the config gives it another place. `output` puts a widget on the main display (default), on every screen or on one by name. The Desktop widgets group on the Taskbar page of the settings adds and removes them and edits the place, size, screen and card of each.
 - **Named desktops.** `tilewinmsg desktop rename Work` gives the current virtual desktop a name; the task view and the workspaces widget then show it instead of *Desktop 2*. The name is kept beside the number (`2:Work`), so the desktop keeps its place in the order, `Win+Ctrl+←/→` still walks through them in order, and moving a desktop takes its name along. `desktop rename` with nothing after it gives the number back. A workspace named by hand in a tile-mode config keeps the name it was given.
 - **Flyouts** like on Windows: click the network icon for Wi-Fi networks (connect with password, disconnect, Wi-Fi on/off), the volume icon for the volume, output device and per-app volumes, and the battery or brightness icon for charge, remaining time, brightness and power mode.
 - **Shut down dialog** in the look of the theme, opened from the start menu or with Ctrl+Alt+Delete: Windows 95 asks "Shut Down Windows" with radio buttons over the dithered screen, Windows XP shows "Turn off computer" with Stand By, Turn Off and Restart while the screen fades to gray (and "Log Off Windows" from Log Off), Windows 7, 10 and 11 show the Ctrl+Alt+Delete screen over the blurred desktop, and the Sway theme big buttons like wlogout. The commands are the `power` entries of the `startmenu` block.
@@ -175,6 +176,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   not snap while the outer edge does, that unplugging a screen brings its
   windows onto the desktop on view and plugging it back sends them home as they
   were, and that show desktop clears both screens;
+- puts widgets on the desktop and checks their cards are drawn where the
+  config puts them, that a card dragged with a pointer moves and keeps its
+  place, that clicking the disk space card opens its flyout without taking the
+  taskbar down, and that a new place in the config wins over an old drag;
 - throws a window with a pointer of its own and checks it slides on past the
   throw, is still going a second later, and does neither when it was put down
   gently or when gravity mode is off.
@@ -395,7 +400,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
-| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections, put in order by dragging each one by its handle, also from one section into another), settings of each widget, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
+| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections, put in order by dragging each one by its handle, also from one section into another), settings of each widget, the widgets on the desktop with their place, size and screen, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
 | Start menu | The style of the start menu, its pinned apps, its places and its power entries |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |
@@ -450,7 +455,7 @@ menu taskbar {
 | `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]` |
 | `workspaces` | (none) |
-| `title` | `max_width` |
+| `title` | `max_width`; click for the window: its desktop, screen and process, and Minimize, Maximize and Close |
 | `tray` | (none) |
 | `clock` | `format`, `tooltip_format` (strftime), `settings` (command of the flyout's "Change date and time" link); click opens the clock flyout: an analog and a digital clock, the calendar (the wheel and ←/→ change the month) and that link |
 | `notifications` | `always yes` shows the button also in the 95/XP/7 themes when there are no new notifications |
@@ -459,23 +464,46 @@ menu taskbar {
 | `battery` | `device`, `format "{capacity}% {status}"`, `interval`, `settings` (adds a link to the flyout), left click opens the power flyout |
 | `cpu` | `format "CPU {usage}%"`, `style text\|graph`, `interval`, `task_manager <command>`; click for a popup with the usage of the last minute, the cores, load, up time and the processes using the most CPU (`panel cpu` opens it too) |
 | `memory` | `format "{used_percent}% {used}/{total} GiB"`, `interval`, `task_manager <command>`; click for a flyout with the usage of the last minute, what the memory is made up of, the swap and the processes holding the most of it (`panel memory` opens it too) |
-| `gpu` | Load of a graphics card: `device card0`, or `command <cmd>` for cards that report nothing in `/sys` (e.g. `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits`), `format "GPU {usage}%"`, `interval` |
-| `net` | What goes through a network interface: `device wlan0` (the busiest one by default), `format "↓ {down} ↑ {up}"` with `{down}`, `{up}`, `{total}` and `{device}`, `max_rate <KiB/s>` for the scale of the chart (default 12500), `interval` |
-| `storage` | How full a file system is: `path /home` (default `/`), `format "{path} {used_percent}%"` with `{used}`, `{free}` and `{total}` in GiB, `interval` |
-| `power` | Watts the computer is drawing: `device BAT0`, `format "{watts} W"`, `max_watts` for the scale (default 60), `interval` |
-| `disk` | A round LED that lights up while the disks are busy, like the drive lamp of a PC; while they are idle it stays a dark lens. `devices nvme0n1` picks the disk it watches (empty watches every whole disk, no partitions; several names separated by spaces also work). The settings app offers the disks of the machine in a dropdown, with their model and size. `threshold <KiB/s>` before it lights up (default 50), `interval` (default 1), `format "{rate}"` (`{rate}` is e.g. `1.2 MB/s`, `{kbps}` the plain number; empty shows only the lamp). Themes color the lit lamp with `disk { active_fg }` |
+| `gpu` | Load of a graphics card: `device card0`, or `command <cmd>` for cards that report nothing in `/sys` (e.g. `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits`), `format "GPU {usage}%"`, `interval`; click for a flyout with the load of the last minute, video memory, temperature, power and clock where the card tells them (from `nvidia-smi` for cards that tell `/sys` nothing) |
+| `net` | What goes through a network interface: `device wlan0` (the busiest one by default), `format "↓ {down} ↑ {up}"` with `{down}`, `{up}`, `{total}` and `{device}`, `max_rate <KiB/s>` for the scale of the chart (default 12500), `interval`; click for a flyout with down and up over the last minute, each connection with its address, and what went in and out since they came up |
+| `storage` | How full a file system is: `path /home` (default `/`), `format "{path} {used_percent}%"` with `{used}`, `{free}` and `{total}` in GiB, `interval`; click for every drive with how full it is (clicking one opens it) |
+| `power` | Watts the computer is drawing: `device BAT0`, `format "{watts} W"`, `max_watts` for the scale (default 60), `interval`; click for a flyout with the draw of the last minute and the battery: charge, state, energy, time left, health and charge cycles (RAPL measures the processor where there is no battery) |
+| `disk` | A round LED that lights up while the disks are busy, like the drive lamp of a PC; while they are idle it stays a dark lens. `devices nvme0n1` picks the disk it watches (empty watches every whole disk, no partitions; several names separated by spaces also work). The settings app offers the disks of the machine in a dropdown, with their model and size. `threshold <KiB/s>` before it lights up (default 50), `interval` (default 1), `format "{rate}"` (`{rate}` is e.g. `1.2 MB/s`, `{kbps}` the plain number; empty shows only the lamp). Themes color the lit lamp with `disk { active_fg }`; click for a flyout with reading and writing over the last minute, each disk and what was read and written since the computer started |
 
 The usage widgets (`cpu`, `memory`, `gpu`, `net`, `storage`, `power`) all take `style text|graph|bar` (text, a chart of the last measurements, or a bar), `width` for the chart and the bar, `warning` and `critical` levels in percent with `warning_fg` and `critical_fg` colors, and `fg` for the normal color; without them the theme's `<type>.warning`, `<type>.critical` and `<type>.fg` decide. Several of the same kind can be used at once by naming them `gpu:1`, `net:wlan0`, `storage:home` and so on.
 | `brightness` | (none; scroll changes it via brightnessctl) |
-| `keyboard` | (none) |
+| `keyboard` | (none); click for the layouts to pick from, middle click switches to the next one straight away |
 | `modeswitch` | (none) |
 | `showdesktop` | `width` |
 | `search` | `label`, `width` |
 | `separator` | `width` |
 | `spacer` | `width <px>\|expand` |
-| `custom:<name>` | `exec` + `interval`, or `exec_listen` for long-running scripts, `format "{}"`, `icon` |
+| `custom:<name>` | `exec` + `interval`, or `exec_listen` for long-running scripts, `format "{}"`, `icon`; click for what the script said last in full, with a button that runs it again |
 
 **Custom scripts** print one line per update: plain text, or JSON such as `{"text": "...", "tooltip": "...", "icon": "..."}`.
+
+Every widget that shows something opens a flyout when clicked. The git widget's flyout shows the branch, how far it is from its upstream, what is staged, changed and untracked and the latest commits, with **Open a terminal here** and **Open the folder** (a click used to open the terminal straight away).
+
+All widgets are described in one place, `common/tw_widgets.c`: their names, what they are, whether they can go on the taskbar, on the desktop or both, and their options. The taskbar and the settings app both read that list, so a widget and its options are never described twice.
+
+**Widgets on the desktop:**
+
+```
+desktop_widgets {
+    clock { x -40; y 40; scale 3 }             # 40 px from the right and the top
+    cpu { x -40; y 220; style graph; width 120 }
+    custom:weather { x -40; y 340; output all }
+}
+```
+
+| Option | |
+|---|---|
+| `x`, `y` | Pixels from the left and top edge of the screen; negative numbers count from the right and bottom edge. Without them the widgets line up along the top right |
+| `scale` | How much bigger than on the taskbar, 0.5 to 8 (default 2) |
+| `output` | `main` (the main display, default), `all`, or a screen by name |
+| `background` | `yes` (default) or `no`: the translucent card. Themes color it with `desktop_widget { bg; border; fg; radius }` |
+
+Any option of the widget itself can be given here too and then only applies on the desktop. A right click on a card without a menu of its own offers **Put back in its place** and the settings.
 
 **Commands and menus:**
 - Every widget accepts `on_click`, `on_middle_click`, `on_right_click`, `on_scroll_up`, `on_scroll_down` and a `menu { ... }` block.

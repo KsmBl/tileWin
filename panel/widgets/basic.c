@@ -81,7 +81,7 @@ static void clock_tick(void *data) {
 		return;
 	}
 	clock_update(w);
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	int ms = d->seconds ? 1000 - ts.tv_nsec / 1000000 :
@@ -174,20 +174,40 @@ static const char *focused_title(struct panel *panel) {
 
 static int title_measure(struct widget *w, struct render_ctx *ctx) {
 	const char *title = focused_title(ctx->panel);
+	if (!title || !*title) {
+		return 0; // nothing focused: no room taken, and no empty card on the desktop
+	}
 	int tw = render_text_width(ctx, bar_font(ctx->panel), title);
 	int max = widget_conf_int(w, "max_width", 480);
 	return (tw > max ? max : tw) + 16;
 }
 
 static void title_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	struct pwindow *win = panel_find_window(ctx->panel, ctx->panel->state.focused_window);
+	if (win && render_hover(ctx, b)) {
+		render_item_bg(ctx, b, false, true, render_pressed(ctx, b));
+	}
 	pd_text(ctx->cairo, bar_font(ctx->panel), focused_title(ctx->panel), b.x + 8, b.y,
 		b.width - 16, b.height, bar_fg(ctx->panel), PD_LEFT);
+	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+}
+
+static bool title_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT || !panel_find_window(w->panel, w->panel->state.focused_window)) {
+		return false;
+	}
+	// the window: where it is, and minimize, maximize and close
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x, 0);
+	info_flyout_toggle(w, anchor);
+	return true;
 }
 
 const struct widget_impl widget_title = {
 	.type = "title",
 	.measure = title_measure,
 	.render = title_render,
+	.click = title_click,
 };
 
 /* ================= workspaces ================= */
@@ -368,10 +388,17 @@ static void keyboard_render(struct widget *w, struct render_ctx *ctx, struct pbo
 
 static bool keyboard_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
+	if (button == BTN_MIDDLE) {
+		// the next layout straight away, as a click did before there was a flyout
+		ipc_panel_command(w->panel, "input type:keyboard xkb_switch_layout next");
+		return true;
+	}
 	if (button != BTN_LEFT) {
 		return false;
 	}
-	ipc_panel_command(w->panel, "input type:keyboard xkb_switch_layout next");
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	info_flyout_toggle(w, anchor);
 	return true;
 }
 

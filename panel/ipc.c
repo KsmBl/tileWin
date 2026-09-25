@@ -142,6 +142,7 @@ static void notify_widgets(struct panel *panel) {
 			w->impl->state_changed(w);
 		}
 	}
+	deskwidgets_state_changed(panel);
 	panel_set_dirty(panel);
 }
 
@@ -247,6 +248,10 @@ void ipc_panel_refresh_workspaces(struct panel *panel) {
 	notify_widgets(panel);
 }
 
+json_object *ipc_panel_request(struct panel *panel, uint32_t type) {
+	return request(panel, type, NULL);
+}
+
 void ipc_panel_refresh_inputs(struct panel *panel) {
 	json_object *arr = request(panel, IPC_GET_INPUTS, NULL);
 	if (!arr || !json_object_is_type(arr, json_type_array)) {
@@ -280,6 +285,7 @@ static void set_main_output(struct panel *panel, const char *name) {
 	panel->state.main_output = name ? strdup(name) : NULL;
 	if (panel->config) { // not while starting, before the screens are known
 		desktop_main_output_changed(panel);
+		deskwidgets_update(panel);
 		notify_widgets(panel);
 	}
 }

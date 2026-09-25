@@ -45,12 +45,26 @@ enum pstyle panel_style(struct panel *p) {
 	return PS_FLAT;
 }
 
-void panel_set_dirty(struct panel *p) {
+static void bars_set_dirty(struct panel *p) {
 	struct panel_output *output;
 	wl_list_for_each(output, &p->outputs, link) {
 		if (output->bar) {
 			psurface_set_dirty(output->bar);
 		}
+	}
+}
+
+void panel_set_dirty(struct panel *p) {
+	bars_set_dirty(p);
+	deskwidgets_set_dirty(p);
+}
+
+void widget_set_dirty(struct widget *w) {
+	// a widget on the desktop is a copy of its own: only its cards change
+	if (w->desk) {
+		deskwidgets_widget_dirty(w);
+	} else {
+		bars_set_dirty(w->panel);
 	}
 }
 

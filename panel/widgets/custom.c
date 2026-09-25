@@ -50,13 +50,13 @@ static void apply_line(struct widget *w, const char *line) {
 				d->icon = strdup(json_object_get_string(v));
 			}
 			json_object_put(obj);
-			panel_set_dirty(w->panel);
+			widget_set_dirty(w);
 			return;
 		}
 	}
 	free(d->text);
 	d->text = strdup(line);
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 }
 
 static void on_line(void *data, const char *line) {
@@ -202,14 +202,28 @@ static char *custom_tooltip(struct widget *w, struct hotspot *hs) {
 	return d->tooltip ? strdup(d->tooltip) : NULL;
 }
 
-static bool custom_click(struct widget *w, struct psurface *s, struct hotspot *hs,
-		uint32_t button, double x, double y) {
-	// commands are handled by the generic on_click machinery; refresh after clicks
+void custom_run_now(struct widget *w) {
 	struct custom_data *d = w->data;
-	if (button == BTN_LEFT && !d->listen && !d->proc) {
+	if (!d->listen && !d->proc) {
 		run(w);
 	}
-	return false;
+}
+
+const char *custom_output(struct widget *w) {
+	struct custom_data *d = w->data;
+	return d->text;
+}
+
+static bool custom_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	// the output in full, and a way to run the script again
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	info_flyout_toggle(w, anchor);
+	return true;
 }
 
 const struct widget_impl widget_custom = {

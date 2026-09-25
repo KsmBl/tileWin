@@ -21,9 +21,8 @@ WIDGET_OPTIONS_WITHOUT_A_CONTROL = {
     "type": "names the widget itself, not one of its settings",
 }
 
-# Widget types that are not in the list of widgets to add.
+# Widget types that are not in the widget list.
 WIDGET_TYPES_NOT_IN_THE_LIST = {
-    "custom": "made with the New script widget button, which names it",
 }
 
 # Keys at the top level of taskbar.conf with no control.
@@ -114,9 +113,9 @@ def widget_options_read_by_the_panel(root):
 
 
 def widget_options_offered_by_the_settings(root):
-    """Keys of the `struct opt` tables of the Taskbar page."""
-    text = read(root, "settings", "page_taskbar.c")
-    tables = re.findall(r"static const struct opt \w+\[\] = \{(.*?)\n\};", text, re.S)
+    """Keys of the option tables of the widget list, which the settings app shows."""
+    text = read(root, "common", "tw_widgets.c")
+    tables = re.findall(r"const struct tw_widget_option \w+\[\] = \{(.*?)\n\};", text, re.S)
     keys = set()
     for table in tables:
         keys.update(re.findall(r'^\t\{\s*"([a-z_0-9]+)"', table, re.M))
@@ -132,12 +131,13 @@ def widget_types_of_the_panel(root):
 
 
 def widget_types_offered_by_the_settings(root):
-    text = read(root, "settings", "page_taskbar.c")
-    table = re.search(r"static const struct widget_type widget_types\[\] = \{(.*?)\n\};", text, re.S)
+    """Types of the widget list (common/tw_widgets.c), which the settings app offers."""
+    text = read(root, "common", "tw_widgets.c")
+    table = re.search(r"const struct tw_widget_info tw_widgets\[\] = \{(.*?)\n\};", text, re.S)
     if not table:
-        complain("settings/page_taskbar.c: the widget_types table is gone")
+        complain("common/tw_widgets.c: the tw_widgets table is gone")
         return set()
-    return set(re.findall(r'\{\s*"([a-z_0-9]+)"', table.group(1)))
+    return set(re.findall(r'^\t\{\s*"([a-z_0-9]+)"', table.group(1), re.M))
 
 
 def taskbar_keys_read_by_the_panel(root):
@@ -171,7 +171,8 @@ def command_tables(root):
 
 def strings_in_the_settings(root):
     """Every string literal of the settings app, to look a key up in."""
-    text = "".join(path.read_text(encoding="utf-8") for path in sources(root, "settings"))
+    paths = sources(root, "settings") + [Path(root, "common", "tw_widgets.c")]
+    text = "".join(path.read_text(encoding="utf-8") for path in paths)
     return set(re.findall(r'"([^"\\\n]+)"', text))
 
 

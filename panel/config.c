@@ -496,6 +496,7 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 	twconf_free(theme_window);
 	twconf_free(theme_tile);
 	config->startmenu = twconf_child(root, "startmenu");
+	deskwidgets_load(panel, config);
 	return config;
 }
 
@@ -503,6 +504,7 @@ void panel_config_free(struct panel_config *config) {
 	if (!config) {
 		return;
 	}
+	deskwidgets_free(config);
 	for (int i = 0; i < 2; i++) {
 		list_free(config->layouts[i].left);
 		list_free(config->layouts[i].center);
@@ -555,6 +557,11 @@ static struct twconf_node *find_menu(struct twconf_node *root, const char *name)
 
 struct widget *widget_create(struct panel *panel, const char *name,
 		struct twconf_node *conf) {
+	return widget_create_with(panel, name, conf, NULL);
+}
+
+struct widget *widget_create_with(struct panel *panel, const char *name,
+		struct twconf_node *conf, struct twconf_node *desk) {
 	const char *type = conf ? twconf_value(conf, "type") : NULL;
 	char *type_buf = NULL;
 	if (!type) {
@@ -572,6 +579,7 @@ struct widget *widget_create(struct panel *panel, const char *name,
 	w->panel = panel;
 	w->name = strdup(name);
 	w->conf = conf;
+	w->desk = desk;
 	const char *v;
 	if ((v = widget_conf(w, "on_click", NULL))) {
 		w->on_click = strdup(v);
@@ -588,7 +596,10 @@ struct widget *widget_create(struct panel *panel, const char *name,
 	if ((v = widget_conf(w, "on_scroll_down", NULL))) {
 		w->on_scroll_down = strdup(v);
 	}
-	struct twconf_node *menu = conf ? twconf_child(conf, "menu") : NULL;
+	struct twconf_node *menu = desk ? twconf_child(desk, "menu") : NULL;
+	if (!menu && conf) {
+		menu = twconf_child(conf, "menu");
+	}
 	if (!menu && panel->config) {
 		menu = NULL;
 	}
@@ -654,7 +665,11 @@ const char *widget_conf(struct widget *w, const char *key, const char *fallback)
 }
 
 static const char *widget_conf_own(struct widget *w, const char *key, const char *fallback) {
-	struct twconf_node *node = w->conf ? twconf_child(w->conf, key) : NULL;
+	// what the desktop entry says comes first, then the widget's block
+	struct twconf_node *node = w->desk ? twconf_child(w->desk, key) : NULL;
+	if (!node || node->argc == 0) {
+		node = w->conf ? twconf_child(w->conf, key) : NULL;
+	}
 	if (!node || node->argc == 0) {
 		return fallback;
 	}

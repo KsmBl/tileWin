@@ -464,6 +464,7 @@ static void add_xdg_output(struct panel *panel, struct panel_output *output) {
 }
 
 static void output_destroy(struct panel_output *output) {
+	deskwidgets_output_gone(output);
 	desktop_destroy(output);
 	bar_destroy(output);
 	struct psurface *s, *tmp;
@@ -637,4 +638,6 @@ void panel_outputs_update_bars(struct panel *panel) {
 			desktop_destroy(output);
 		}
 	}
+	// after the desktop icons, so the widgets lie over the surface that takes clicks
+	deskwidgets_update(panel);
 }

@@ -350,7 +350,7 @@ static void git_finished(struct git_state *g, bool ok) {
 	g->len = g->cap = 0;
 	free(g->pending);
 	g->pending = NULL;
-	panel_set_dirty(w->panel);
+	widget_set_dirty(w);
 }
 
 /* ---------- when to look ---------- */
@@ -396,7 +396,7 @@ static void git_tick(void *data) {
 			g->last_seen = NULL;
 			free(g->repo);
 			g->repo = NULL;
-			panel_set_dirty(w->panel);
+			widget_set_dirty(w);
 		}
 	}
 	g->timer = loop_add_timer(w->panel->loop, g->interval_ms, git_tick, w);
@@ -618,16 +618,21 @@ static char *git_tooltip(struct widget *w, struct hotspot *hs) {
 	return g_string_free(t, FALSE);
 }
 
+const char *git_widget_repo(struct widget *w) {
+	struct git_state *g = w->data;
+	return g->repo;
+}
+
 static bool git_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
 	struct git_state *g = w->data;
 	if (button != BTN_LEFT || !g->repo) {
 		return false;
 	}
-	// a terminal where the work is; the compositor knows what $term is
-	char *quoted = g_shell_quote(g->repo);
-	ipc_panel_commandf(w->panel, "exec cd %s && exec $term", quoted);
-	g_free(quoted);
+	// what the repository is up to; a terminal there is one click further, in the flyout
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	info_flyout_toggle(w, anchor);
 	return true;
 }
 

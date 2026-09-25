@@ -7,6 +7,7 @@
 #include "panel.h"
 #include "stringop.h"
 #include "tw_paths.h"
+#include "tw_widgets.h"
 
 struct bar {
 	struct panel_output *output;
@@ -50,12 +51,18 @@ const char *bar_bold_font(struct panel *panel) {
 }
 
 uint32_t bar_fg(struct panel *panel) {
+	if (panel->desktop_pass) {
+		return tw_theme_color(panel->theme, "desktop_widget.fg", 0xffffffff);
+	}
 	enum pstyle style = panel_style(panel);
 	return tw_theme_color(panel->theme, "panel.fg",
 		style == PS_CLASSIC || style == PS_FLUENT ? 0x000000ff : 0xffffffff);
 }
 
 uint32_t widget_fg(struct panel *panel, const char *type) {
+	if (panel->desktop_pass) {
+		return bar_fg(panel); // the colors of a taskbar would get lost on the card
+	}
 	char key[64];
 	snprintf(key, sizeof(key), "%s.fg", type);
 	return tw_theme_color(panel->theme, key, bar_fg(panel));
@@ -125,15 +132,8 @@ void render_item_bg(struct render_ctx *ctx, struct pbox b, bool active, bool hov
 }
 
 static bool is_system_widget(struct widget *w) {
-	static const char *types[] = { "tray", "clock", "volume", "network", "battery",
-		"keyboard", "cpu", "memory", "disk", "gpu", "net", "storage", "power",
-		"brightness", "custom", "git" };
-	for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
-		if (strcmp(w->impl->type, types[i]) == 0) {
-			return true;
-		}
-	}
-	return false;
+	const struct tw_widget_info *info = tw_widget_find(w->impl->type);
+	return info && (info->flags & TW_WIDGET_STATUS);
 }
 
 static bool use_groups(struct panel *panel) {
@@ -451,14 +451,7 @@ static void bar_pointer_button(struct psurface *s, double x, double y,
 		}
 		return;
 	}
-	const char *cmd = button == BTN_LEFT ? w->on_click :
-		button == BTN_MIDDLE ? w->on_middle_click :
-		button == BTN_RIGHT ? w->on_right_click : NULL;
-	if (cmd) {
-		bar_run_command(panel, cmd, NULL);
-		return;
-	}
-	if (w->impl->click && w->impl->click(w, s, hs, button, x, y)) {
+	if (widget_handle_button(panel, s, hs, button, x, y)) {
 		return;
 	}
 	if (button == BTN_RIGHT) {
@@ -471,17 +464,34 @@ static void bar_pointer_button(struct psurface *s, double x, double y,
 	}
 }
 
-static void bar_pointer_axis(struct psurface *s, double x, double y, int direction) {
-	struct hotspot *hs = psurface_hotspot_at(s, x, y);
-	if (!hs || !hs->widget) {
-		return;
+bool widget_handle_button(struct panel *panel, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	struct widget *w = hs->widget;
+	const char *cmd = button == BTN_LEFT ? w->on_click :
+		button == BTN_MIDDLE ? w->on_middle_click :
+		button == BTN_RIGHT ? w->on_right_click : NULL;
+	if (cmd) {
+		bar_run_command(panel, cmd, NULL);
+		return true;
 	}
+	return w->impl->click && w->impl->click(w, s, hs, button, x, y);
+}
+
+void widget_handle_scroll(struct panel *panel, struct psurface *s, struct hotspot *hs,
+		int direction) {
 	struct widget *w = hs->widget;
 	const char *cmd = direction < 0 ? w->on_scroll_up : w->on_scroll_down;
 	if (cmd) {
-		bar_run_command(s->panel, cmd, NULL);
+		bar_run_command(panel, cmd, NULL);
 	} else if (w->impl->scroll) {
 		w->impl->scroll(w, s, hs, direction);
+	}
+}
+
+static void bar_pointer_axis(struct psurface *s, double x, double y, int direction) {
+	struct hotspot *hs = psurface_hotspot_at(s, x, y);
+	if (hs && hs->widget) {
+		widget_handle_scroll(s->panel, s, hs, direction);
 	}
 }
 
@@ -503,6 +513,18 @@ static const struct psurface_impl bar_impl = {
 
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar_surface, int x, int width) {
 	struct panel *panel = bar_surface->panel;
+	struct pbox placed;
+	if (deskwidget_place(bar_surface, (struct pbox){ x, 0, width, 40 }, &placed)) {
+		// a widget on the desktop: below it, or above it near the bottom of the screen
+		struct panel_output *output = bar_surface->output;
+		bool above = output && placed.y + placed.height / 2 > output->height / 2;
+		return (struct popup_anchor){
+			.output = output,
+			.x = placed.x,
+			.y = above ? placed.y - 8 : placed.y + placed.height + 8,
+			.above = above,
+		};
+	}
 	struct bar *bar = bar_surface->data;
 	bool bottom = panel->config->layouts[panel->layout].bottom;
 	struct popup_anchor anchor = {

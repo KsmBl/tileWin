@@ -527,6 +527,10 @@ bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *
 	if (!hs->widget || hs->widget->impl != &widget_taskbar || (hs->kind != 1 && hs->kind != 2)) {
 		return false;
 	}
+	struct pbox placed;
+	if (deskwidget_place(bar, hs->box, &placed)) {
+		return false; // the previews line up along a taskbar; on the desktop the title shows
+	}
 	bool enabled = widget_conf_bool(hs->widget, "thumbnails",
 		tw_theme_bool(panel->theme, "taskbar.thumbnails", true));
 	struct pwindow *win = panel_find_window(panel, hs->id);

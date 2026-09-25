@@ -206,6 +206,16 @@ if gdk_pixbuf.found()
 		is_parallel: false,
 		timeout: 900,
 	)
+
+	test(
+		'desktop-widgets',
+		find_program('desktop_widgets.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [pointer_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 300,
+	)
 endif
 
 python = find_program('python3', required: false)

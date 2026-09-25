@@ -94,13 +94,22 @@ static void show_tooltip(void *data) {
 	}
 	bool bottom = panel->config->layouts[panel->layout].bottom;
 	int x = hs->box.x + hs->box.width / 2 - width / 2;
+	int y = bottom ? output->height - source->height - height - 6 : source->height + 6;
+	struct pbox placed;
+	if (deskwidget_place(source, hs->box, &placed)) {
+		// a widget on the desktop: under the part of it that is pointed at
+		x = placed.x + placed.width / 2 - width / 2;
+		y = placed.y + placed.height + 6;
+		if (y + height > output->height - 2) {
+			y = placed.y - height - 6;
+		}
+	}
 	if (x + width > output->width - 2) {
 		x = output->width - width - 2;
 	}
 	if (x < 2) {
 		x = 2;
 	}
-	int y = bottom ? output->height - source->height - height - 6 : source->height + 6;
 
 	struct tooltip *tip = calloc(1, sizeof(*tip));
 	tip->text = text;
@@ -126,11 +135,13 @@ void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *h
 		return;
 	}
 	bool visible = panel->tooltip != NULL || thumbnails_visible();
+	// cancelling can draw the surface again, which frees its hotspots: keep a copy
+	struct hotspot copy = *hs;
+	copy.str = hs->str ? strdup(hs->str) : NULL;
 	tooltip_cancel(panel);
 	panel->tooltip_source = s;
-	*cur = *hs;
-	cur->str = hs->str ? strdup(hs->str) : NULL;
-	if (!hs->widget || !hs->widget->impl->tooltip) {
+	*cur = copy;
+	if (!cur->widget || !cur->widget->impl->tooltip) {
 		return;
 	}
 	int delay = visible ? 50 : (panel->config ? panel->config->tooltip_delay : 600);
