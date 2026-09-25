@@ -109,6 +109,16 @@ test(
 )
 
 test(
+	'multi-screen',
+	find_program('multi_screen.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'git-widget',
 	find_program('git_widget.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

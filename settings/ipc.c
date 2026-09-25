@@ -151,3 +151,49 @@ char *tw_ipc_state(const char *key) {
 	json_object_put(obj);
 	return value;
 }
+
+static void screen_free(gpointer data) {
+	struct tw_screen *screen = data;
+	g_free(screen->name);
+	g_free(screen->id);
+	g_free(screen->label);
+	g_free(screen);
+}
+
+static const char *field(json_object *obj, const char *key) {
+	json_object *value;
+	const char *s = json_object_object_get_ex(obj, key, &value) && value ?
+		json_object_get_string(value) : NULL;
+	return s && *s ? s : "Unknown";
+}
+
+GPtrArray *tw_ipc_screens(void) {
+	GPtrArray *screens = g_ptr_array_new_with_free_func(screen_free);
+	char *reply = tw_ipc_request(IPC_GET_OUTPUTS, "");
+	json_object *obj = reply ? json_tokener_parse(reply) : NULL;
+	g_free(reply);
+	int n = obj && json_object_is_type(obj, json_type_array) ?
+		(int)json_object_array_length(obj) : 0;
+	for (int i = 0; i < n; i++) {
+		json_object *o = json_object_array_get_idx(obj, i), *active;
+		if (!json_object_object_get_ex(o, "active", &active) ||
+				!json_object_get_boolean(active)) {
+			continue;
+		}
+		struct tw_screen *screen = g_new0(struct tw_screen, 1);
+		screen->name = g_strdup(field(o, "name"));
+		char *id = g_strdup_printf("%s %s %s", field(o, "make"), field(o, "model"),
+			field(o, "serial"));
+		// screens that do not say what they are go by their connector
+		screen->id = strcmp(id, "Unknown Unknown Unknown") == 0 ? g_strdup(screen->name) : id;
+		if (screen->id != id) {
+			g_free(id);
+		}
+		const char *model = field(o, "model");
+		screen->label = g_strdup_printf("%u: %s (%s)", screens->len + 1,
+			strcmp(model, "Unknown") != 0 ? model : screen->name, screen->name);
+		g_ptr_array_add(screens, screen);
+	}
+	json_object_put(obj);
+	return screens;
+}

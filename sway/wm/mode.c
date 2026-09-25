@@ -401,6 +401,9 @@ json_object *tw_describe_state(void) {
 	json_object_object_add(obj, "data_dir", json_object_new_string(tw_data_dir()));
 	json_object_object_add(obj, "version", json_object_new_string(SWAY_VERSION));
 	json_object_object_add(obj, "panel_pid", json_object_new_int(tw_panel_pid()));
+	struct sway_output *main_output = root ? tw_main_output() : NULL;
+	json_object_object_add(obj, "main_output",
+		json_object_new_string(main_output ? main_output->wlr_output->name : ""));
 	json_object_object_add(obj, "double_click_time",
 		json_object_new_int(config ? config->tw_double_click_time : 400));
 	return obj;
@@ -422,6 +425,7 @@ void tw_after_reload(void) {
 	tw_panel_config_reloaded();
 	apply_app_icons();
 	tw_power_config_changed();
+	tw_main_output_changed();
 }
 
 static void mark_container_dirty(struct sway_container *con, void *data);
@@ -666,10 +670,26 @@ static enum wallpaper_type parse_type(const char *s) {
 	return WALLPAPER_NONE;
 }
 
-static void wallpaper_spec_get(struct wallpaper_spec *spec) {
+/* The wallpaper a screen has of its own, else the one of every screen. */
+static const char *wallpaper_of(struct sway_output *output) {
+	if (!config) {
+		return NULL;
+	}
+	char id[256];
+	output_get_identifier(id, sizeof(id), output);
+	for (int i = 0; config->tw_output_wallpapers && i < config->tw_output_wallpapers->length; i++) {
+		struct tw_output_wallpaper *ow = config->tw_output_wallpapers->items[i];
+		if (strcmp(ow->output, output->wlr_output->name) == 0 || strcmp(ow->output, id) == 0) {
+			return ow->wallpaper;
+		}
+	}
+	return config->tw_wallpaper;
+}
+
+static void wallpaper_spec_get(struct wallpaper_spec *spec, struct sway_output *output) {
 	memset(spec, 0, sizeof(*spec));
 	spec->color1 = 0x000000ff;
-	const char *override = config ? config->tw_wallpaper : NULL;
+	const char *override = wallpaper_of(output);
 	if (override && strcasecmp(override, "theme") != 0) {
 		int argc = 0;
 		char **argv = split_args(override, &argc);
@@ -811,7 +831,7 @@ void tw_wallpaper_update(struct sway_output *output) {
 	}
 
 	struct wallpaper_spec spec;
-	wallpaper_spec_get(&spec);
+	wallpaper_spec_get(&spec, output);
 	if (spec.type == WALLPAPER_NONE) {
 		wallpaper_spec_finish(&spec);
 		return;

@@ -60,6 +60,14 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
   - Arrange windows: cascade, stacked, side by side, optimal grid.
   - **Gravity mode** (off by default): let go of a window while it is still moving and it carries on sliding, bouncing off the edges of the screen until it comes to rest. There is no pull downwards — a window behaves like a flat thing pushed across a table. The **drag** says how quickly it stops and the **bounce** how much speed an edge gives back; both are on the Window behavior page. A window put down without moving stays where it is put.
+- **Several screens** (window mode), handled the way Windows handles them:
+  - A window taken to another screen (`Super+Shift+←/→` or dragging it over) stays maximized or snapped there, keeps the focus, and the size it goes back to comes along to the same place on the new screen. A window too big for the new screen is made to fit.
+  - `Super+←` on a window snapped to the left half carries it on to the right half of the screen to the left, and `Super+→` the other way round.
+  - The edge between two screens does not snap a window carried over it; only the outer edges of the screens do.
+  - Unplugging a screen puts its windows on the desktop on view on another screen, still maximized or snapped. Plugging it back in returns them to it, where they were and as they were, unless you moved them in the meantime. Screens are recognized by make, model and serial, so another port does not matter.
+  - Show desktop (`Super+D`) clears every screen at once.
+  - A **main display** (`main_output`, or "Make this my main display" on the Screen page; by default the screen at the top left) gets the desktop icons, and the taskbar there can show the windows of every screen (`outputs main`).
+  - Every screen can have a wallpaper of its own (`output_wallpaper`, or the Screen chooser on the Wallpaper page); the lock screen shows it too.
 - **Tile mode:** everything sway does.
 - **Taskbar:**
   - Separate layouts for window mode and tile mode.
@@ -161,6 +169,12 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   the branch on the bar, and keeps it there once the window has gone;
 - names a desktop and checks the name stays with it when it is moved, while
   the number still says where it sits;
+- runs two screens of different sizes and checks that a maximized window moved
+  to the other one stays maximized and focused, that `Super+→` carries a
+  snapped window on to the next screen, that the edge between the screens does
+  not snap while the outer edge does, that unplugging a screen brings its
+  windows onto the desktop on view and plugging it back sends them home as they
+  were, and that show desktop clears both screens;
 - throws a window with a pointer of its own and checks it slides on past the
   throw, is still going a second later, and does neither when it was put down
   gently or when gravity mode is off.
@@ -334,6 +348,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
 | `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
+| `output_wallpaper <screen> <wallpaper>\|default` | A wallpaper of its own for one screen, with the arguments of `wallpaper`; the screen is its name (`DP-1`) or `"make model serial"`. `default` gives it the wallpaper of every screen again |
+| `main_output <screen>\|auto` | The main display: it gets the desktop icons and the taskbar that `outputs main` fills with the windows of every screen. `auto` (default) takes the screen at the top left |
 | `idle_timeout dim\|screen_off\|lock\|sleep <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`) or sleep. Apps that keep the screen on (videos) pause it. |
 | `lid_action closed\|docked default\|nothing\|sleep\|hibernate\|lock\|screen_off\|shutdown` | What closing the laptop lid does, without and with an external screen. Anything but `default` takes over lid handling from logind. |
 | `animations enable\|disable` | Animations of opening, closing, minimizing, maximizing and snapping windows and of switching desktops (default enable) |
@@ -360,7 +376,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock` and `lid_action ... lock` (default `tilewin-lock -f`) |
 
-- `tilewinmsg -t get_tilewin` prints the current mode, theme and panel pid.
+- `tilewinmsg -t get_tilewin` prints the current mode, theme, panel pid and main display.
 - IPC clients can subscribe to `["tilewin"]` events.
 - The `get_tree` output has `minimized` and `maximized` fields.
 
@@ -372,10 +388,10 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Page | What you can change |
 |---|---|
 | Theme | Window/tile mode and the theme, with wallpaper previews, dark mode |
-| Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes |
+| Wallpaper | Each theme's own wallpaper, your own picture per theme, or one solid color, gradient or picture for all themes; with several screens, a wallpaper of its own for each screen |
 | Animations | All animations on or off and their speed; for opening, closing, minimizing, maximizing/snapping windows and switching desktops each: on or off, the style, and a preview. **Expensive calculations** lays a window out again for every frame while it is snapped, maximized or resized, instead of stretching a picture of it |
 | Window behavior | Alt+Tab switcher style, Snapping to screen edges, sticking windows together and the sticking distance, the key that moves touching windows together, stretching by double-clicking a side, the key to move and resize windows anywhere, focus follows mouse, what happens when an app asks for attention, and **Gravity mode** with its drag and bounce |
-| Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
+| Screen | Resolution, refresh rate, scale, orientation and arrangement of the screens (asks to keep a change, like Windows), which one is the main display, brightness, dimming / screen off / lock / sleep after idle time, what closing the lid does, the lock screen command, night light (strength and schedule) |
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
@@ -431,7 +447,7 @@ menu taskbar {
 | Widget | Options |
 |---|---|
 | `start` | `label`, `width` |
-| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all`, `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`) |
+| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]` |
 | `workspaces` | (none) |
 | `title` | `max_width` |
@@ -548,7 +564,7 @@ Each theme has its own default wallpaper:
 - **win95:** the classic teal desktop.
 - **The other themes:** original look-alike artwork (`themes/<name>/wallpaper.svg`). Microsoft's own wallpapers are copyrighted and can't be included.
 
-If you have your own copy of an original wallpaper (or any picture you like for a theme), save it as `~/.config/tileWin/wallpapers/<theme>.jpg` (or `.png`, `.webp`, `.svg`), e.g. `~/.config/tileWin/wallpapers/winxp.jpg`. tileWin then uses it whenever that theme is active. `wallpaper ...` in `common.conf` overrides the wallpaper for all themes.
+If you have your own copy of an original wallpaper (or any picture you like for a theme), save it as `~/.config/tileWin/wallpapers/<theme>.jpg` (or `.png`, `.webp`, `.svg`), e.g. `~/.config/tileWin/wallpapers/winxp.jpg`. tileWin then uses it whenever that theme is active. `wallpaper ...` in `common.conf` overrides the wallpaper for all themes, and `output_wallpaper <screen> ...` gives one screen a wallpaper of its own.
 
 Wallpapers are rendered once per screen size and cached in `~/.cache/tileWin/wallpapers`.
 

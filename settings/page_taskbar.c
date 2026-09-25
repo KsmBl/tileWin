@@ -61,6 +61,7 @@ struct opt {
 static const char *const choice_yes_no[] = { "yes", "no", NULL };
 static const char *const choice_theme_yes_no[] = { "theme", "yes", "no", NULL };
 static const char *const choice_current_all[] = { "current", "all", NULL };
+static const char *const choice_current_all_main[] = { "current", "all", "main", NULL };
 static const char *const choice_close_new[] = { "close", "new", NULL };
 static const char *const choice_meter[] = { "text", "graph", "bar", NULL };
 
@@ -242,7 +243,8 @@ static const struct opt opts_taskbar[] = {
 	{ "icons_only", "Icons only", "\"theme\" follows the theme (Windows 7 and 11 show icons only)", choice_theme_yes_no },
 	{ "group", "Combine windows of the same app", NULL, choice_yes_no },
 	{ "workspaces", "Show windows of", "The current workspace or all workspaces", choice_current_all },
-	{ "outputs", "Show windows on", "The current monitor or all monitors", choice_current_all },
+	{ "outputs", "Show windows on", "The taskbar of their screen, every taskbar, or also the "
+		"taskbar of the main display (\"main\", as on Windows)", choice_current_all_main },
 	{ "middle_click", "Middle click", "Close the window or start a new one", choice_close_new },
 	{ "max_width", "Maximum button width", "Pixels", NULL },
 	{ "button_width", "Button width", "Pixels", NULL },

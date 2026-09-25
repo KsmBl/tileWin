@@ -493,6 +493,12 @@ enum xwayland_mode {
 /**
  * The configuration struct. The result of loading a config file.
  */
+/* "output_wallpaper <screen> <wallpaper>": a screen with a wallpaper of its own. */
+struct tw_output_wallpaper {
+	char *output; // name or "make model serial"
+	char *wallpaper; // the arguments of "wallpaper"
+};
+
 struct sway_config {
 	char *swaynag_command;
 	struct swaynag_instance swaynag_config_errors;
@@ -541,11 +547,13 @@ struct sway_config {
 	// tileWin
 	char *tw_panel_command;
 	char *tw_wallpaper;
+	list_t *tw_output_wallpapers; // struct tw_output_wallpaper *
 	char *tw_launcher_command;
 	bool tw_session_restore;
 	int tw_idle_timeout[4]; // seconds per enum tw_idle_stage, 0: never
 	int tw_lid_action[2]; // enum tw_lid_action with the lid closed, and docked
 	char *tw_lock_command;
+	char *tw_main_output; // name or "make model serial", NULL: the one at 0,0
 	bool tw_xdg_autostart; // run the XDG autostart entries at start
 	bool tw_animations;
 	float tw_animation_speed;

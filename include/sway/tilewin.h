@@ -110,6 +110,16 @@ struct tw_container {
 		enum tw_hit hover, pressed;
 		cairo_surface_t *icon;
 	} top_cache;
+	// the screen the window was on before that screen went away, so it can
+	// go back there when the screen returns (screens.c)
+	struct {
+		char *output, *id; // name, and "make model serial"
+		struct wlr_box box, restore; // from the top left corner of that screen
+		int width, height; // of that screen
+		bool maximized;
+		enum tw_snap snap;
+	} home;
+
 	struct {
 		bool active; // fading in after opening
 		bool hidden; // a copy of the window is animated instead
@@ -224,6 +234,10 @@ bool tw_handle_motion(struct sway_seat *seat, struct sway_container *cont,
 
 /* manage.c */
 struct wlr_box tw_workarea(struct sway_workspace *ws);
+/* Moves and shrinks box so it lies inside area. */
+struct wlr_box tw_fit_box(struct wlr_box box, struct wlr_box area);
+/* The part of area a window snapped that way takes. */
+struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap);
 void tw_set_box(struct sway_container *con, const struct wlr_box *box);
 void tw_maximize(struct sway_container *con, bool enable);
 void tw_minimize(struct sway_container *con, bool enable);
@@ -289,6 +303,29 @@ bool tw_desktop_move(struct sway_workspace *ws, int direction);
 const char *tw_desktop_label(struct sway_workspace *ws);
 /* Gives a desktop a name, or takes it away again with NULL or "". */
 bool tw_desktop_rename(struct sway_workspace *ws, const char *label);
+
+/* screens.c: several screens in window mode */
+/*
+ * A floating window went from the workspace box old to new (another screen, or
+ * its screen changed): maximized and snapped windows fill the new slot, others
+ * are kept on the screen, and the size to restore to comes along.
+ */
+void tw_floating_screen_changed(struct sway_container *con, const struct wlr_box *old,
+		const struct wlr_box *new);
+/* Moves a window to the desktop shown on another screen, keeping its state. */
+void tw_move_to_screen(struct sway_container *con, struct sway_output *output);
+/* Win+Left/Right on a window snapped at an edge next to another screen. */
+bool tw_snap_across(struct sway_container *con, int direction);
+/* Around handing the workspaces of a screen that goes away to other screens. */
+void tw_screen_leaving(struct sway_output *output);
+void tw_screen_left(struct sway_output *output);
+/* A screen came (back): the windows that lived there return to it. */
+void tw_screen_added(struct sway_output *output);
+/* The user put the window somewhere: it no longer goes back to an old screen. */
+void tw_forget_home(struct sway_container *con);
+/* The main display ("main_output"): desktop icons and the main taskbar. */
+struct sway_output *tw_main_output(void);
+void tw_main_output_changed(void);
 
 /* pointer.c: effects around the mouse pointer */
 /* A key of the keyboard; tapping Ctrl on its own shows where the pointer is. */

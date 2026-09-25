@@ -268,6 +268,22 @@ void ipc_panel_refresh_inputs(struct panel *panel) {
 	notify_widgets(panel);
 }
 
+static void set_main_output(struct panel *panel, const char *name) {
+	if (!name || !*name) {
+		name = NULL;
+	}
+	if ((!name && !panel->state.main_output) || (name && panel->state.main_output &&
+			strcmp(name, panel->state.main_output) == 0)) {
+		return;
+	}
+	free(panel->state.main_output);
+	panel->state.main_output = name ? strdup(name) : NULL;
+	if (panel->config) { // not while starting, before the screens are known
+		desktop_main_output_changed(panel);
+		notify_widgets(panel);
+	}
+}
+
 static void refresh_mode(struct panel *panel) {
 	json_object *state = request(panel, IPC_GET_TILEWIN, NULL);
 	const char *mode = jstr(state, "mode");
@@ -278,6 +294,7 @@ static void refresh_mode(struct panel *panel) {
 	}
 	int64_t ms = jint(state, "double_click_time");
 	panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
+	set_main_output(panel, jstr(state, "main_output"));
 	json_object_put(state);
 }
 
@@ -334,6 +351,7 @@ void ipc_panel_fini(struct panel *panel) {
 	}
 	free(panel->state.mode);
 	free(panel->state.focused_output);
+	free(panel->state.main_output);
 	free(panel->state.focused_workspace);
 	free(panel->state.keyboard_layout);
 }
@@ -413,6 +431,8 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 	} else if (strcmp(change, "settings") == 0) {
 		int64_t ms = jint(event, "double_click_time");
 		panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
+	} else if (strcmp(change, "main_output") == 0) {
+		set_main_output(panel, jstr(event, "main_output"));
 	} else if (strcmp(change, "theme") == 0) {
 		panel_request_reload(panel);
 	} else if (strcmp(change, "panel") == 0) {

@@ -174,6 +174,7 @@ void tw_deco_disable(struct sway_container *con) {
 }
 
 void tw_container_destroy(struct sway_container *con) {
+	tw_forget_home(con);
 	free(con->tw.top_cache.title);
 	con->tw.top_cache.title = NULL;
 	if (press.con == con) {

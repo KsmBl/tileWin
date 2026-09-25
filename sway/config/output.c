@@ -21,6 +21,7 @@
 #include "sway/server.h"
 #include "sway/tree/arrange.h"
 #include "sway/tree/root.h"
+#include "sway/tilewin.h"
 #include "log.h"
 #include "util.h"
 
@@ -1092,6 +1093,7 @@ static bool apply_resolved_output_configs(struct matched_output_config *configs,
 
 	arrange_root();
 	arrange_locks();
+	tw_main_output_changed(); // the automatic main display is the top left one
 	update_output_manager_config(&server);
 	transaction_commit_dirty();
 

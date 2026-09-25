@@ -194,6 +194,7 @@ static const struct sway_seatop_impl seatop_impl = {
 void seatop_begin_move_floating(struct sway_seat *seat,
 		struct sway_container *con) {
 	seatop_end(seat);
+	tw_forget_home(con);
 
 	struct sway_cursor *cursor = seat->cursor;
 	struct seatop_move_floating_event *e =

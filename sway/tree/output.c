@@ -183,6 +183,7 @@ void output_enable(struct sway_output *output) {
 	}
 
 	wl_signal_emit_mutable(&root->events.new_node, &output->node);
+	tw_screen_added(output);
 }
 
 static void evacuate_sticky(struct sway_workspace *old_ws,
@@ -294,7 +295,9 @@ void output_disable(struct sway_output *output) {
 	output->enabled = false;
 
 	destroy_layers(output);
+	tw_screen_leaving(output);
 	output_evacuate(output);
+	tw_screen_left(output);
 	sway_ext_workspace_output_disable(output);
 }
 

@@ -180,8 +180,16 @@ void free_config(struct sway_config *config) {
 	free(config->swaynag_command);
 	free(config->tw_panel_command);
 	free(config->tw_wallpaper);
+	for (int i = 0; config->tw_output_wallpapers && i < config->tw_output_wallpapers->length; i++) {
+		struct tw_output_wallpaper *ow = config->tw_output_wallpapers->items[i];
+		free(ow->output);
+		free(ow->wallpaper);
+		free(ow);
+	}
+	list_free(config->tw_output_wallpapers);
 	free(config->tw_launcher_command);
 	free(config->tw_lock_command);
+	free(config->tw_main_output);
 	free((char *)config->current_config_path);
 	free((char *)config->current_config);
 	keysym_translation_state_destroy(config->keysym_translation_state);

@@ -56,6 +56,7 @@ struct lock_output {
 	bool configured;
 	struct pool_buffer buffers[2];
 	cairo_surface_t *background; // wallpaper at the buffer size
+	char *name, *make_model; // "DP-1", "make model" for output_wallpaper
 	int bg_width, bg_height;
 	struct wl_list link;
 };
@@ -112,24 +113,67 @@ static void set_message(const char *text) {
 
 /* ---------- wallpaper ---------- */
 
-/* The "wallpaper" line of common.conf, NULL for the theme's wallpaper. */
-static char *wallpaper_setting(void) {
+/*
+ * Whether the screen of an "output_wallpaper <screen> <wallpaper>" line, given
+ * as its name or as "make model serial", is o. Returns the wallpaper after it.
+ */
+static const char *output_wallpaper_of(struct lock_output *o, const char *args) {
+	char screen[256];
+	size_t len = 0;
+	const char *p = args;
+	if (*p == '"') {
+		for (p++; *p && *p != '"' && len + 1 < sizeof(screen); p++) {
+			screen[len++] = *p;
+		}
+		p += *p == '"';
+	} else {
+		for (; *p && *p != ' ' && *p != '\t' && len + 1 < sizeof(screen); p++) {
+			screen[len++] = *p;
+		}
+	}
+	screen[len] = '\0';
+	while (*p == ' ' || *p == '\t') {
+		p++;
+	}
+	// the lock screen hears make and model, not the serial
+	bool match = (o->name && strcmp(screen, o->name) == 0) || (o->make_model &&
+		strncmp(screen, o->make_model, strlen(o->make_model)) == 0 &&
+		screen[strlen(o->make_model)] == ' ');
+	return match && *p ? p : NULL;
+}
+
+/*
+ * The wallpaper of the screen from common.conf: its "output_wallpaper" line,
+ * else the "wallpaper" line; NULL for the theme's wallpaper.
+ */
+static char *wallpaper_setting(struct lock_output *o) {
 	char *dir = tw_config_dir();
 	char *path = dir ? format_str("%s/common.conf", dir) : NULL;
 	free(dir);
 	FILE *f = path ? fopen(path, "r") : NULL;
 	free(path);
-	char *value = NULL, line[1024];
+	char *value = NULL, *own = NULL, line[1024];
 	while (f && fgets(line, sizeof(line), f)) {
 		char *p = line;
 		while (*p == ' ' || *p == '\t') {
 			p++;
 		}
+		p[strcspn(p, "\r\n")] = '\0';
 		if (strncmp(p, "wallpaper", 9) == 0 && (p[9] == ' ' || p[9] == '\t')) {
-			p[strcspn(p, "\r\n")] = '\0';
 			free(value);
 			value = strdup(p + 10);
+		} else if (strncmp(p, "output_wallpaper", 16) == 0 &&
+				(p[16] == ' ' || p[16] == '\t')) {
+			const char *mine = output_wallpaper_of(o, p + 17);
+			if (mine) {
+				free(own);
+				own = strdup(mine);
+			}
 		}
+	}
+	if (own) {
+		free(value);
+		value = own;
 	}
 	if (f) {
 		fclose(f);
@@ -154,7 +198,7 @@ static void paint_colors(cairo_t *cr, int w, int h, uint32_t c1, uint32_t c2, bo
 	cairo_pattern_destroy(p);
 }
 
-static cairo_surface_t *render_background(int w, int h) {
+static cairo_surface_t *render_background(struct lock_output *o, int w, int h) {
 	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
 	cairo_t *cr = cairo_create(out);
 	const struct tw_theme *t = lock.theme;
@@ -163,7 +207,7 @@ static cairo_surface_t *render_background(int w, int h) {
 	bool vertical = strcasecmp(tw_theme_str(t, "wallpaper.direction", "vertical"),
 		"horizontal") != 0;
 	char *image = NULL;
-	char *setting = wallpaper_setting();
+	char *setting = wallpaper_setting(o);
 	if (setting) {
 		int argc = 0;
 		char **argv = split_args(setting, &argc);
@@ -286,7 +330,7 @@ static void render_output(struct lock_output *o) {
 		if (o->background) {
 			cairo_surface_destroy(o->background);
 		}
-		o->background = render_background(pw, ph);
+		o->background = render_background(o, pw, ph);
 		o->bg_width = pw;
 		o->bg_height = ph;
 	}
@@ -745,12 +789,18 @@ static void destroy_output(struct lock_output *o) {
 		cairo_surface_destroy(o->background);
 	}
 	wl_output_destroy(o->wl_output);
+	free(o->name);
+	free(o->make_model);
 	free(o);
 }
 
 static void output_geometry(void *data, struct wl_output *out, int32_t x, int32_t y,
 		int32_t pw, int32_t ph, int32_t subpixel, const char *make, const char *model,
 		int32_t transform) {
+	struct lock_output *o = data;
+	free(o->make_model);
+	o->make_model = format_str("%s %s", make && *make ? make : "Unknown",
+		model && *model ? model : "Unknown");
 }
 
 static void output_mode(void *data, struct wl_output *out, uint32_t flags, int32_t w,
@@ -768,6 +818,9 @@ static void output_scale(void *data, struct wl_output *out, int32_t factor) {
 }
 
 static void output_name(void *data, struct wl_output *out, const char *name) {
+	struct lock_output *o = data;
+	free(o->name);
+	o->name = strdup(name);
 }
 
 static void output_description(void *data, struct wl_output *out, const char *description) {

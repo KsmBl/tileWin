@@ -26,7 +26,9 @@ struct taskbar_data {
 	bool icons_only;
 	bool group;
 	bool all_workspaces;
-	bool all_outputs;
+	// current: the windows of the screen the bar is on; all: every window on
+	// every bar; main: every window on the main display's bar, as on Windows
+	enum { OUTPUTS_CURRENT, OUTPUTS_ALL, OUTPUTS_MAIN } outputs;
 	int button_width;
 	bool middle_close;
 };
@@ -45,7 +47,9 @@ static void taskbar_init(struct widget *w) {
 	struct taskbar_data *d = calloc(1, sizeof(*d));
 	w->data = d;
 	d->all_workspaces = strcasecmp(widget_conf(w, "workspaces", "current"), "all") == 0;
-	d->all_outputs = strcasecmp(widget_conf(w, "outputs", "current"), "all") == 0;
+	const char *outputs = widget_conf(w, "outputs", "current");
+	d->outputs = strcasecmp(outputs, "all") == 0 ? OUTPUTS_ALL :
+		strcasecmp(outputs, "main") == 0 ? OUTPUTS_MAIN : OUTPUTS_CURRENT;
 	d->middle_close = strcasecmp(widget_conf(w, "middle_click", "close"), "close") == 0;
 }
 
@@ -75,10 +79,15 @@ static list_t *collect_entries(struct widget *w, struct panel_output *output) {
 	list_t *windows = panel->state.windows;
 	for (int i = 0; windows && i < windows->length; i++) {
 		struct pwindow *win = windows->items[i];
-		if (!d->all_outputs && output && output->name && strcmp(win->output, output->name) != 0) {
+		bool here = !output || !output->name || strcmp(win->output, output->name) == 0;
+		if (!here && !(d->outputs == OUTPUTS_ALL || (d->outputs == OUTPUTS_MAIN &&
+				panel->state.main_output &&
+				strcmp(output->name, panel->state.main_output) == 0))) {
 			continue;
 		}
-		if (!d->all_workspaces && ws_name && strcmp(win->workspace, ws_name) != 0) {
+		// a window of another screen counts as current on the desktop that screen shows
+		const char *shown = here ? ws_name : visible_workspace(panel, win->output);
+		if (!d->all_workspaces && shown && strcmp(win->workspace, shown) != 0) {
 			continue;
 		}
 		struct taskbar_entry *entry = NULL;

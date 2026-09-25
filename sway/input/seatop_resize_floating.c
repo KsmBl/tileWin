@@ -175,6 +175,7 @@ static const struct sway_seatop_impl seatop_impl = {
 void seatop_begin_resize_floating(struct sway_seat *seat,
 		struct sway_container *con, enum wlr_edges edge) {
 	seatop_end(seat);
+	tw_forget_home(con);
 
 	struct seatop_resize_floating_event *e =
 		calloc(1, sizeof(struct seatop_resize_floating_event));

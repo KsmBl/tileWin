@@ -203,6 +203,7 @@ static void container_move_to_workspace(struct sway_container *container,
 	struct sway_workspace *old_workspace = container->pending.workspace;
 	if (container_is_floating(container)) {
 		struct sway_output *old_output = container->pending.workspace->output;
+		tw_forget_home(container);
 		container_detach(container);
 		workspace_add_floating(workspace, container);
 		container_handle_fullscreen_reparent(container);
@@ -595,8 +596,14 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 		seat_set_raw_focus(seat, new_output_last_focus);
 	}
 
-	// restore focus
-	if (focus == &container->node) {
+	// restore focus; in window mode a window taken to the desktop on view on
+	// another screen keeps it, the way Win+Shift+Left/Right does on Windows
+	bool follow = tw_mode == TW_MODE_WINDOW && container_is_floating(container) &&
+		new_output && new_output != old_output &&
+		container->pending.workspace == output_get_active_workspace(new_output);
+	if (focus == &container->node && follow) {
+		container_raise_floating(container);
+	} else if (focus == &container->node) {
 		focus = NULL;
 		if (old_parent) {
 			focus = seat_get_focus_inactive(seat, &old_parent->node);

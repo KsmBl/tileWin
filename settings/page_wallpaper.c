@@ -30,6 +30,10 @@ struct wallpaper_page {
 	bool updating;
 	GtkWidget *preview, *preview_caption;
 	GtkWidget *scope_dd;
+	// with several screens: all of them (0), or one with a wallpaper of its own
+	GtkWidget *screen_dd, *screen_row;
+	GPtrArray *screens; // struct tw_screen *
+	guint screen;
 	GtkWidget *all_group, *themes_group, *themes_list;
 	GtkWidget *type_dd, *color1, *color2, *dir_dd, *image_button, *fit_dd, *bg;
 	GtkWidget *row_color1, *row_color2, *row_dir, *row_image, *row_fit, *row_bg;
@@ -63,10 +67,47 @@ static guint selected(GtkWidget *dropdown) {
 	return gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
 }
 
+static const struct tw_screen *chosen_screen(struct wallpaper_page *p) {
+	return p->screens && p->screen > 0 && p->screen <= p->screens->len ?
+		p->screens->pdata[p->screen - 1] : NULL;
+}
+
+/*
+ * The statement that sets the wallpaper being edited, and where its wallpaper
+ * arguments start: "wallpaper <wallpaper>" for every screen, or
+ * "output_wallpaper <screen> <wallpaper>" for the chosen one.
+ */
+static struct cstmt *wallpaper_stmt(struct wallpaper_page *p, int *first) {
+	const struct tw_screen *screen = chosen_screen(p);
+	*first = screen ? 1 : 0;
+	return screen ? confdoc_child(p->s->common->root, "output_wallpaper", screen->id) :
+		confdoc_child(p->s->common->root, "wallpaper", NULL);
+}
+
+/* The wallpaper arguments of a statement, quoted again. */
+static char *wallpaper_args(struct cstmt *st, int first) {
+	if (!st || cstmt_argc(st) <= first) {
+		return NULL;
+	}
+	GString *args = g_string_new(NULL);
+	for (int i = first; i < cstmt_argc(st); i++) {
+		char *quoted = conf_quote(cstmt_arg(st, i));
+		g_string_append_printf(args, "%s%s", i > first ? " " : "", quoted);
+		free(quoted);
+	}
+	return g_string_free(args, FALSE);
+}
+
 static void update_preview(struct wallpaper_page *p) {
 	char *theme = settings_current_theme();
-	struct cstmt *st = confdoc_child(p->s->common->root, "wallpaper", NULL);
-	char *args = cstmt_raw_args(p->s->common, st);
+	int first;
+	struct cstmt *st = wallpaper_stmt(p, &first);
+	if (!st) {
+		// a screen without its own wallpaper shows the one of every screen
+		st = confdoc_child(p->s->common->root, "wallpaper", NULL);
+		first = 0;
+	}
+	char *args = wallpaper_args(st, first);
 	ui_wallpaper_picture_fill(p->preview, args, theme, 384, 240);
 	char *caption = g_strdup_printf("Preview with the current theme (%s)", theme);
 	gtk_label_set_text(GTK_LABEL(p->preview_caption), caption);
@@ -79,7 +120,7 @@ static void update_visibility(struct wallpaper_page *p) {
 	bool all = selected(p->scope_dd) == SCOPE_ALL;
 	guint type = selected(p->type_dd);
 	gtk_widget_set_visible(p->all_group, all);
-	gtk_widget_set_visible(p->themes_group, !all);
+	gtk_widget_set_visible(p->themes_group, !all && !chosen_screen(p));
 	gtk_widget_set_visible(p->row_color1, type == TYPE_SOLID || type == TYPE_GRADIENT);
 	gtk_widget_set_visible(p->row_color2, type == TYPE_GRADIENT);
 	gtk_widget_set_visible(p->row_dir, type == TYPE_GRADIENT);
@@ -94,7 +135,17 @@ static void apply(struct wallpaper_page *p) {
 	}
 	update_visibility(p);
 	char *args = NULL;
-	if (selected(p->scope_dd) == SCOPE_EACH) {
+	const struct tw_screen *screen = chosen_screen(p);
+	if (selected(p->scope_dd) == SCOPE_EACH && screen) {
+		// the screen goes back to the wallpaper of every screen
+		confdoc_set(p->s->common, p->s->common->root, "output_wallpaper", screen->id, NULL);
+		settings_common_changed(p->s, false);
+		char *id = conf_quote(screen->id);
+		settings_command(p->s, "output_wallpaper %s default", id);
+		free(id);
+		update_preview(p);
+		return;
+	} else if (selected(p->scope_dd) == SCOPE_EACH) {
 		args = g_strdup("theme");
 	} else {
 		char *c1 = get_color(p->color1), *c2 = get_color(p->color2), *bg = get_color(p->bg);
@@ -122,7 +173,17 @@ static void apply(struct wallpaper_page *p) {
 		g_free(c2);
 		g_free(bg);
 	}
-	if (args) {
+	if (args && screen) {
+		char *id = conf_quote(screen->id);
+		char *line = g_strdup_printf("%s %s", id, args);
+		confdoc_set(p->s->common, p->s->common->root, "output_wallpaper", screen->id, line);
+		settings_common_changed(p->s, false);
+		settings_command(p->s, "output_wallpaper %s", line);
+		update_preview(p);
+		g_free(line);
+		free(id);
+		g_free(args);
+	} else if (args) {
 		confdoc_set(p->s->common, p->s->common->root, "wallpaper", NULL, args);
 		settings_common_changed(p->s, false);
 		settings_command(p->s, "wallpaper %s", args);
@@ -323,15 +384,78 @@ static void rebuild_theme_rows(struct wallpaper_page *p) {
 	}
 }
 
+static bool same_screens(GPtrArray *a, GPtrArray *b) {
+	if (!a || !b || a->len != b->len) {
+		return false;
+	}
+	for (guint i = 0; i < a->len; i++) {
+		const struct tw_screen *x = a->pdata[i], *y = b->pdata[i];
+		if (strcmp(x->id, y->id) != 0 || strcmp(x->label, y->label) != 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+ * Offers the screens to choose from when there is more than one. The list is
+ * only replaced when the screens changed: a new list while one is being
+ * picked from would pick again, and again.
+ */
+static void load_screens(struct wallpaper_page *p) {
+	GPtrArray *screens = tw_ipc_screens();
+	if (same_screens(screens, p->screens)) {
+		g_ptr_array_unref(screens);
+		return;
+	}
+	const struct tw_screen *chosen = chosen_screen(p);
+	char *chosen_id = chosen ? g_strdup(chosen->id) : NULL;
+	if (p->screens) {
+		g_ptr_array_unref(p->screens);
+	}
+	p->screens = screens;
+	GtkStringList *labels = gtk_string_list_new((const char *const[]){ "All screens", NULL });
+	p->screen = 0;
+	for (guint i = 0; i < p->screens->len; i++) {
+		const struct tw_screen *screen = p->screens->pdata[i];
+		gtk_string_list_append(labels, screen->label);
+		if (chosen_id && strcmp(chosen_id, screen->id) == 0) {
+			p->screen = i + 1;
+		}
+	}
+	gtk_drop_down_set_model(GTK_DROP_DOWN(p->screen_dd), G_LIST_MODEL(labels));
+	g_object_unref(labels);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->screen_dd), p->screen);
+	gtk_widget_set_visible(p->screen_row, p->screens->len > 1);
+	g_free(chosen_id);
+}
+
+static void on_screen_changed(GObject *object, GParamSpec *pspec, gpointer data) {
+	struct wallpaper_page *p = data;
+	if (p->updating || selected(p->screen_dd) == p->screen) {
+		return;
+	}
+	p->screen = selected(p->screen_dd);
+	wallpaper_page_refresh(p->s);
+}
+
 void wallpaper_page_refresh(struct settings *s) {
 	struct wallpaper_page *p = s->wallpaper_page;
 	if (!p) {
 		return;
 	}
 	p->updating = true;
-	struct cstmt *st = confdoc_child(s->common->root, "wallpaper", NULL);
-	const char *type = cstmt_arg(st, 0);
+	load_screens(p);
+	int first;
+	struct cstmt *st = wallpaper_stmt(p, &first);
+	const char *type = cstmt_arg(st, first);
 	bool each = !type || g_ascii_strcasecmp(type, "theme") == 0;
+	GtkStringList *scopes = gtk_string_list_new(chosen_screen(p) ?
+		(const char *const[]){ "The same as the other screens", "A wallpaper of its own", NULL } :
+		(const char *const[]){ "Each theme has its own wallpaper", "One wallpaper for all themes",
+			NULL });
+	gtk_drop_down_set_model(GTK_DROP_DOWN(p->scope_dd), G_LIST_MODEL(scopes));
+	g_object_unref(scopes);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->scope_dd), each ? SCOPE_EACH : SCOPE_ALL);
 
 	char *theme_name = settings_current_theme();
@@ -347,18 +471,18 @@ void wallpaper_page_refresh(struct settings *s) {
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->type_dd), type_index);
 	g_clear_pointer(&p->image_path, g_free);
 	if (type_index == TYPE_IMAGE) {
-		p->image_path = g_strdup(cstmt_arg(st, 1));
+		p->image_path = g_strdup(cstmt_arg(st, first + 1));
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->fit_dd),
-			index_of(fit_names, cstmt_arg(st, 2), 0));
-		set_color(p->bg, cstmt_arg(st, 3), "#000000");
+			index_of(fit_names, cstmt_arg(st, first + 2), 0));
+		set_color(p->bg, cstmt_arg(st, first + 3), "#000000");
 		set_color(p->color1, NULL, theme_color);
 		set_color(p->color2, NULL, theme_color2);
 	} else {
-		const char *c1 = each ? NULL : cstmt_arg(st, 1);
-		const char *c2 = each ? NULL : cstmt_arg(st, 2);
+		const char *c1 = each ? NULL : cstmt_arg(st, first + 1);
+		const char *c2 = each ? NULL : cstmt_arg(st, first + 2);
 		set_color(p->color1, c1, theme_color);
 		set_color(p->color2, c2 ? c2 : c1, theme_color2);
-		const char *dir = each ? NULL : cstmt_arg(st, 3);
+		const char *dir = each ? NULL : cstmt_arg(st, first + 3);
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dir_dd),
 			dir && g_ascii_strcasecmp(dir, "horizontal") == 0);
 		set_color(p->bg, NULL, "#000000");
@@ -400,17 +524,24 @@ GtkWidget *wallpaper_page_new(struct settings *s) {
 	p->preview = gtk_picture_new();
 	gtk_picture_set_content_fit(GTK_PICTURE(p->preview), GTK_CONTENT_FIT_COVER);
 	gtk_widget_set_size_request(p->preview, 384, 240);
-	gtk_widget_set_halign(p->preview, GTK_ALIGN_START);
 	gtk_widget_set_overflow(p->preview, GTK_OVERFLOW_HIDDEN);
 	gtk_widget_add_css_class(p->preview, "tw-thumb");
 	gtk_widget_set_margin_top(p->preview, 12);
-	gtk_box_append(GTK_BOX(content), p->preview);
+	// in a row of its own the picture is measured at its own width; measured at
+	// the width of the page it would grow as tall as a short page leaves room for
+	GtkWidget *preview_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_append(GTK_BOX(preview_row), p->preview);
+	gtk_box_append(GTK_BOX(content), preview_row);
 	p->preview_caption = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(p->preview_caption), 0);
 	gtk_widget_add_css_class(p->preview_caption, "dim-label");
 	gtk_box_append(GTK_BOX(content), p->preview_caption);
 
 	GtkWidget *group = ui_group(content, NULL, NULL);
+	p->screen_dd = gtk_drop_down_new(NULL, NULL);
+	g_signal_connect(p->screen_dd, "notify::selected", G_CALLBACK(on_screen_changed), p);
+	p->screen_row = ui_row(group, "Screen", "Every screen can have a wallpaper of its own",
+		p->screen_dd);
 	p->scope_dd = dropdown(p, (const char *const[]){
 		"Each theme has its own wallpaper", "One wallpaper for all themes", NULL });
 	ui_row(group, "Wallpaper", NULL, p->scope_dd);

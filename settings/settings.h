@@ -60,6 +60,15 @@ bool tw_ipc_command(const char *command, char **error);
 /* A field of the get_tilewin reply. Newly allocated, NULL if not running. */
 char *tw_ipc_state(const char *key);
 
+/* A screen in use, for settings that can differ from screen to screen. */
+struct tw_screen {
+	char *name;  // connector, e.g. DP-1
+	char *id;    // what the config calls it: "make model serial", or the name
+	char *label; // "1: DELL U2415 (DP-1)"
+};
+/* The screens in use, in the order tileWin lists them. */
+GPtrArray *tw_ipc_screens(void);
+
 /* main.c */
 void settings_status(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 /* Runs a compositor command if tileWin is running and reports failures. */

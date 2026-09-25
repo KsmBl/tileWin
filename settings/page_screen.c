@@ -10,8 +10,9 @@
 
 /*
  * Screen page:
- *  - displays: resolution, refresh rate, scale, orientation, on/off and the
- *    arrangement of several screens. Changes apply right away and ask to be
+ *  - displays: resolution, refresh rate, scale, orientation, on/off, the
+ *    arrangement of several screens and which of them is the main display
+ *    (main_output in common.conf: the desktop icons, the main taskbar). Changes apply right away and ask to be
  *    kept (they revert after 15 seconds otherwise); kept settings are written
  *    to displays.conf, which common.conf includes.
  *  - brightness of a laptop screen (brightnessctl)
@@ -47,6 +48,8 @@ struct screen_page {
 	GtkWidget *displays_group, *not_running;
 	GtkWidget *arrangement, *display_row, *display_dd;
 	GtkWidget *enable_row, *enable_switch;
+	GtkWidget *main_row, *main_switch;
+	char *main_name; // the main display, as tileWin reports it
 	GtkWidget *resolution_dd, *refresh_dd, *scale_dd, *transform_dd;
 	GArray *resolutions; // struct mode (refresh unused) shown in resolution_dd
 	GArray *refreshes;   // int mHz shown in refresh_dd
@@ -448,6 +451,11 @@ static void rebuild_display_rows(struct screen_page *p) {
 	gtk_widget_set_visible(p->enable_row, several);
 
 	struct display *d = selected_display(p);
+	bool is_main = p->main_name && d->name && strcmp(p->main_name, d->name) == 0;
+	gtk_widget_set_visible(p->main_row, several && d->active);
+	gtk_switch_set_active(GTK_SWITCH(p->main_switch), is_main);
+	// another screen is made the main display instead of turning this one off
+	gtk_widget_set_sensitive(p->main_switch, !is_main);
 	gtk_switch_set_active(GTK_SWITCH(p->enable_switch), d->active);
 	// the last screen that is on cannot be turned off
 	gtk_widget_set_sensitive(p->enable_switch, !(d->active && active <= 1));
@@ -512,6 +520,31 @@ static void on_display_selected(GObject *dropdown, GParamSpec *pspec, gpointer d
 	}
 	p->selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
 	rebuild_display_rows(p);
+}
+
+static void load_main_display(struct screen_page *p) {
+	g_free(p->main_name);
+	p->main_name = tw_ipc_state("main_output");
+}
+
+static gboolean on_main(GtkSwitch *widget, gboolean state, gpointer data) {
+	struct screen_page *p = data;
+	struct display *d = selected_display(p);
+	if (p->updating || !d || !state) {
+		return FALSE;
+	}
+	// known by make, model and serial so it stays the main display on another
+	// connector; screens that do not say what they are go by their name
+	char *id = display_id(d);
+	char *quoted = conf_quote(strcmp(id, "Unknown Unknown Unknown") == 0 ? d->name : id);
+	confdoc_set(p->s->common, p->s->common->root, "main_output", NULL, quoted);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "main_output %s", quoted);
+	free(quoted);
+	g_free(id);
+	load_main_display(p);
+	rebuild_display_rows(p);
+	return FALSE;
 }
 
 static gboolean on_enable(GtkSwitch *widget, gboolean state, gpointer data) {
@@ -1059,6 +1092,7 @@ void screen_page_refresh(struct settings *s) {
 	}
 	g_ptr_array_unref(p->displays);
 	p->displays = load_displays();
+	load_main_display(p);
 	rebuild_display_rows(p);
 
 	p->updating = true;
@@ -1147,6 +1181,11 @@ GtkWidget *screen_page_new(struct settings *s) {
 	p->enable_switch = gtk_switch_new();
 	g_signal_connect(p->enable_switch, "state-set", G_CALLBACK(on_enable), p);
 	p->enable_row = ui_row(p->displays_group, "Use this screen", NULL, p->enable_switch);
+	p->main_switch = gtk_switch_new();
+	g_signal_connect(p->main_switch, "state-set", G_CALLBACK(on_main), p);
+	p->main_row = ui_row(p->displays_group, "Make this my main display",
+		"It gets the desktop icons, and the taskbar that can show the windows of every screen",
+		p->main_switch);
 	p->resolution_dd = gtk_drop_down_new(NULL, NULL);
 	g_signal_connect(p->resolution_dd, "notify::selected", G_CALLBACK(on_resolution), p);
 	ui_row(p->displays_group, "Resolution", NULL, p->resolution_dd);

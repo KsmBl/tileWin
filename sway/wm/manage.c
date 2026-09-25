@@ -101,7 +101,7 @@ static struct wlr_box current_box(struct sway_container *con) {
 	};
 }
 
-static struct wlr_box fit_box(struct wlr_box box, struct wlr_box area) {
+struct wlr_box tw_fit_box(struct wlr_box box, struct wlr_box area) {
 	if (box.width > area.width) {
 		box.width = area.width;
 	}
@@ -153,7 +153,7 @@ void tw_maximize(struct sway_container *con, bool enable) {
 		if (box.width <= 0 || box.height <= 0) {
 			box = default_restore_box(con);
 		}
-		box = fit_box(box, tw_workarea(con->pending.workspace));
+		box = tw_fit_box(box, tw_workarea(con->pending.workspace));
 		tw_set_box(con, &box);
 	}
 	tw_animate_resize(con);
@@ -216,7 +216,7 @@ void tw_minimize(struct sway_container *con, bool enable) {
 	ipc_event_window(con, enable ? "minimize" : "unminimize");
 }
 
-static struct wlr_box snap_box(struct wlr_box area, enum tw_snap snap) {
+struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap) {
 	int hw = area.width / 2, hh = area.height / 2;
 	switch (snap) {
 	case TW_SNAP_LEFT:
@@ -390,7 +390,7 @@ void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
 		tw_view_notify_maximized(con->view, false);
 	}
 	con->tw.snap = snap;
-	struct wlr_box box = snap_box(tw_workarea(con->pending.workspace), snap);
+	struct wlr_box box = tw_snap_box(tw_workarea(con->pending.workspace), snap);
 	tw_set_box(con, &box);
 	ipc_event_window(con, "snap");
 	tw_animate_resize(con);
@@ -410,6 +410,7 @@ void tw_restore(struct sway_container *con) {
 		if (box.width <= 0 || box.height <= 0) {
 			box = default_restore_box(con);
 		}
+		box = tw_fit_box(box, tw_workarea(con->pending.workspace));
 		tw_set_box(con, &box);
 		ipc_event_window(con, "restore");
 	}
@@ -476,9 +477,13 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	}
 	enum tw_snap current = con->pending.tw_maximized ? TW_SNAP_TOP : con->tw.snap;
 	if (strcasecmp(direction, "left") == 0) {
-		tw_snap_to(con, current == TW_SNAP_RIGHT ? TW_SNAP_NONE : TW_SNAP_LEFT);
+		if (!tw_snap_across(con, WLR_DIRECTION_LEFT)) {
+			tw_snap_to(con, current == TW_SNAP_RIGHT ? TW_SNAP_NONE : TW_SNAP_LEFT);
+		}
 	} else if (strcasecmp(direction, "right") == 0) {
-		tw_snap_to(con, current == TW_SNAP_LEFT ? TW_SNAP_NONE : TW_SNAP_RIGHT);
+		if (!tw_snap_across(con, WLR_DIRECTION_RIGHT)) {
+			tw_snap_to(con, current == TW_SNAP_LEFT ? TW_SNAP_NONE : TW_SNAP_RIGHT);
+		}
 	} else if (strcasecmp(direction, "up") == 0) {
 		if (current == TW_SNAP_BOTTOMLEFT) {
 			tw_snap_to(con, TW_SNAP_LEFT);
@@ -556,7 +561,7 @@ void tw_place_new_window(struct sway_container *con) {
 		w, h,
 	};
 	cascade = (cascade + 1) % 5;
-	box = fit_box(box, area);
+	box = tw_fit_box(box, area);
 	tw_set_box(con, &box);
 }
 
@@ -767,7 +772,16 @@ bool tw_show_desktop(struct sway_workspace *ws, char **error) {
 	if (!desktop_hidden) {
 		desktop_hidden = create_list();
 	}
-	list_t *visible = collect_floating_windows(ws);
+	// every screen shows the desktop at once, as on Windows
+	list_t *visible = create_list();
+	for (int i = 0; i < root->outputs->length; i++) {
+		struct sway_workspace *shown = output_get_active_workspace(root->outputs->items[i]);
+		if (shown) {
+			list_t *windows = collect_floating_windows(shown);
+			list_cat(visible, windows);
+			list_free(windows);
+		}
+	}
 	if (visible->length > 0) {
 		list_free_items_and_destroy(desktop_hidden);
 		desktop_hidden = create_list();
@@ -820,7 +834,7 @@ static void workspace_to_window_mode(struct sway_workspace *ws) {
 		con->tw.auto_floated = true;
 		container_set_floating(con, true);
 		if (con->tw.has_window_geometry) {
-			struct wlr_box box = fit_box(con->tw.window_geometry, tw_workarea(ws));
+			struct wlr_box box = tw_fit_box(con->tw.window_geometry, tw_workarea(ws));
 			tw_set_box(con, &box);
 			if (con->tw.window_geometry_maximized) {
 				tw_maximize(con, true);
@@ -935,9 +949,9 @@ void tw_workarea_changed(struct sway_output *output) {
 			if (con->pending.tw_maximized) {
 				box = area;
 			} else if (con->tw.snap != TW_SNAP_NONE) {
-				box = snap_box(area, con->tw.snap);
+				box = tw_snap_box(area, con->tw.snap);
 			} else if (after_switch && con->tw.has_window_geometry) {
-				box = fit_box(con->tw.window_geometry, area);
+				box = tw_fit_box(con->tw.window_geometry, area);
 			} else {
 				continue;
 			}
@@ -962,6 +976,10 @@ static struct {
 	struct sway_container *con;
 } preview;
 
+static bool screen_beyond(double lx, double ly) {
+	return wlr_output_layout_output_at(root->output_layout, lx, ly) != NULL;
+}
+
 enum tw_snap tw_snap_zone(double lx, double ly) {
 	struct wlr_output *wlr_output = wlr_output_layout_output_at(root->output_layout, lx, ly);
 	if (!wlr_output) {
@@ -970,9 +988,11 @@ enum tw_snap tw_snap_zone(double lx, double ly) {
 	struct wlr_box box;
 	wlr_output_layout_get_box(root->output_layout, wlr_output, &box);
 	const int edge = 2, corner = 32;
-	bool left = lx <= box.x + edge;
-	bool right = lx >= box.x + box.width - 1 - edge;
-	bool top = ly <= box.y + edge;
+	// an edge shared with another screen lets the pointer through to it, so
+	// a window carried across does not snap on the way
+	bool left = lx <= box.x + edge && !screen_beyond(box.x - 1, ly);
+	bool right = lx >= box.x + box.width - 1 - edge && !screen_beyond(box.x + box.width, ly);
+	bool top = ly <= box.y + edge && !screen_beyond(lx, box.y - 1);
 	bool bottom = ly >= box.y + box.height - 1 - edge;
 	if (left) {
 		if (ly <= box.y + corner) {
@@ -1023,7 +1043,7 @@ void tw_snap_preview_update(struct sway_container *con, double lx, double ly) {
 		return;
 	}
 	struct wlr_box area = tw_workarea(ws);
-	struct wlr_box box = snap == TW_SNAP_TOP ? area : snap_box(area, snap);
+	struct wlr_box box = snap == TW_SNAP_TOP ? area : tw_snap_box(area, snap);
 	uint32_t c = tw_style_snap_color(tw_theme);
 	float a = (c & 0xff) / 255.0f;
 	float color[4] = {

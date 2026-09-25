@@ -842,6 +842,7 @@ void floating_fix_coordinates(struct sway_container *con, struct wlr_box *old, s
 		con->pending.y = new->y + (rel_y * new->height) / old->height - (con->pending.height / 2);
 
 		sway_log(SWAY_DEBUG, "Transformed container %p to coords (%f, %f)", con, con->pending.x, con->pending.y);
+		tw_floating_screen_changed(con, old, new);
 	}
 }
 

@@ -8,7 +8,8 @@
  *   text <word>            types the word (lowercase letters and digits)
  *   key <mods> <name>      presses one key with those modifiers held, where
  *                          mods is ctrl, shift, ctrl+shift or none, and name
- *                          is a letter, a digit, "return", "tab" or "escape"
+ *                          is a letter, a digit, "return", "tab", "escape" or
+ *                          an arrow: "up", "down", "left", "right"
  *
  * The modifiers have to be announced as well as pressed: a virtual keyboard
  * that only sends the key events leaves the compositor thinking nothing is
@@ -72,6 +73,7 @@ static const struct {
 	{ "z", KEY_Z }, { "0", KEY_0 }, { "1", KEY_1 }, { "2", KEY_2 }, { "3", KEY_3 },
 	{ "4", KEY_4 }, { "5", KEY_5 }, { "6", KEY_6 }, { "7", KEY_7 }, { "8", KEY_8 },
 	{ "9", KEY_9 }, { "return", KEY_ENTER }, { "tab", KEY_TAB }, { "escape", KEY_ESC },
+	{ "up", KEY_UP }, { "down", KEY_DOWN }, { "left", KEY_LEFT }, { "right", KEY_RIGHT },
 	{ "minus", KEY_MINUS }, { "slash", KEY_SLASH }, { "space", KEY_SPACE },
 };
 

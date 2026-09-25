@@ -284,11 +284,7 @@ struct cmd_results *cmd_panel_command(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
-struct cmd_results *cmd_wallpaper(int argc, char **argv) {
-	struct cmd_results *error = NULL;
-	if ((error = checkarg(argc, "wallpaper", EXPECTED_AT_LEAST, 1))) {
-		return error;
-	}
+static struct cmd_results *check_wallpaper(int argc, char **argv) {
 	const char *type = argv[0];
 	if (strcasecmp(type, "theme") != 0 && strcasecmp(type, "none") != 0 &&
 			strcasecmp(type, "solid") != 0 && strcasecmp(type, "gradient") != 0 &&
@@ -300,8 +296,53 @@ struct cmd_results *cmd_wallpaper(int argc, char **argv) {
 	if (strcasecmp(type, "image") == 0 && argc < 2) {
 		return cmd_results_new(CMD_INVALID, "wallpaper image needs a path");
 	}
+	return NULL;
+}
+
+struct cmd_results *cmd_wallpaper(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "wallpaper", EXPECTED_AT_LEAST, 1)) ||
+			(error = check_wallpaper(argc, argv))) {
+		return error;
+	}
 	free(config->tw_wallpaper);
 	config->tw_wallpaper = join_args(argv, argc);
+	if (config->active && !config->reading) {
+		tw_wallpaper_invalidate();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* output_wallpaper <name>|"<make model serial>" <wallpaper>|default */
+struct cmd_results *cmd_output_wallpaper(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "output_wallpaper", EXPECTED_AT_LEAST, 2))) {
+		return error;
+	}
+	bool reset = strcasecmp(argv[1], "default") == 0;
+	if (!reset && (error = check_wallpaper(argc - 1, argv + 1))) {
+		return error;
+	}
+	if (!config->tw_output_wallpapers) {
+		config->tw_output_wallpapers = create_list();
+	}
+	list_t *list = config->tw_output_wallpapers;
+	for (int i = 0; i < list->length; i++) {
+		struct tw_output_wallpaper *ow = list->items[i];
+		if (strcmp(ow->output, argv[0]) == 0) {
+			free(ow->output);
+			free(ow->wallpaper);
+			free(ow);
+			list_del(list, i);
+			break;
+		}
+	}
+	if (!reset) {
+		struct tw_output_wallpaper *ow = calloc(1, sizeof(*ow));
+		ow->output = strdup(argv[0]);
+		ow->wallpaper = join_args(argv + 1, argc - 1);
+		list_add(list, ow);
+	}
 	if (config->active && !config->reading) {
 		tw_wallpaper_invalidate();
 	}
@@ -736,6 +777,23 @@ struct cmd_results *cmd_xdg_autostart(int argc, char **argv) {
 		return error;
 	}
 	config->tw_xdg_autostart = parse_boolean(argv[0], config->tw_xdg_autostart);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* main_output <name>|"<make model serial>"|auto */
+struct cmd_results *cmd_main_output(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "main_output", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	free(config->tw_main_output);
+	char *name = join_args(argv, argc);
+	if (strcasecmp(name, "auto") == 0) {
+		free(name);
+		name = NULL;
+	}
+	config->tw_main_output = name;
+	tw_main_output_changed();
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

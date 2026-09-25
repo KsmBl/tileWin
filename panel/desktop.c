@@ -379,8 +379,16 @@ static void positions_clear(void) {
 	positions_save();
 }
 
+/* The icons live on the main display, or on the first screen without one. */
 static struct psurface *primary_icons(struct panel *panel) {
 	struct panel_output *output;
+	const char *main_output = panel->state.main_output;
+	wl_list_for_each(output, &panel->outputs, link) {
+		if (output->desktop && main_output && output->name &&
+				strcmp(output->name, main_output) == 0) {
+			return output->desktop;
+		}
+	}
 	wl_list_for_each(output, &panel->outputs, link) {
 		if (output->desktop) {
 			return output->desktop;
@@ -484,6 +492,16 @@ static void desktop_refresh_surfaces(struct panel *panel) {
 		if (output->desktop) {
 			update_icons_size(panel, output->desktop);
 			psurface_set_dirty(output->desktop);
+		}
+	}
+}
+
+void desktop_main_output_changed(struct panel *panel) {
+	struct panel_output *output;
+	wl_list_for_each(output, &panel->outputs, link) {
+		if (output->desktop) {
+			desktop_refresh_surfaces(panel);
+			return;
 		}
 	}
 }

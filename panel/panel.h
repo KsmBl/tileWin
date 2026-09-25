@@ -167,6 +167,7 @@ struct panel_state {
 	list_t *workspaces; // struct pworkspace *
 	char *mode;         // "tile" or "window"
 	char *focused_output;
+	char *main_output; // the main display: desktop icons, "outputs main" taskbar
 	char *focused_workspace;
 	char *keyboard_layout;
 	int64_t focused_window;
@@ -458,6 +459,8 @@ void tray_handle_event_command(struct panel *panel, const char *service,
 char *desktop_directory(void);
 void desktop_create(struct panel_output *output);
 void desktop_destroy(struct panel_output *output);
+/* The icons move to the new main display. */
+void desktop_main_output_changed(struct panel *panel);
 void desktop_dir_changed(struct panel *panel);
 void desktop_handle_command(struct panel *panel, int argc, char **argv);
 
