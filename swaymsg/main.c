@@ -15,6 +15,7 @@
 #include "stringop.h"
 #include "ipc-client.h"
 #include "log.h"
+#include "tilewin-version.h"
 
 static bool success_object(json_object *result) {
 	json_object *success;

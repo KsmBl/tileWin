@@ -273,7 +273,7 @@ endif
 
 executable(
 	'tilewin',
-	sway_sources + wl_protos_src,
+	sway_sources + wl_protos_src + [tilewin_version_h],
 	include_directories: [sway_inc],
 	dependencies: sway_deps,
 	link_with: [lib_sway_common],

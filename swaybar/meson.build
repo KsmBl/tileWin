@@ -33,6 +33,7 @@ executable(
 		'status_line.c',
 		tray_files,
 		wl_protos_src,
+		tilewin_version_h,
 	],
 	include_directories: [sway_inc],
 	dependencies: swaybar_deps,

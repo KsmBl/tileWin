@@ -9,6 +9,7 @@
 #include "swaynag/types.h"
 #include "util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "tilewin-version.h"
 
 static char *read_and_trim_stdin(void) {
 	char *buffer = NULL, *line = NULL;

@@ -6,6 +6,7 @@
 #include "swaybar/bar.h"
 #include "ipc-client.h"
 #include "log.h"
+#include "tilewin-version.h"
 
 static struct swaybar swaybar;
 

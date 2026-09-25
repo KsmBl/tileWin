@@ -22,6 +22,7 @@
 #include "sway/input/seat.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 #include "sway/desktop/idle_inhibit_v1.h"
+#include "tilewin-version.h"
 
 #if WLR_HAS_LIBINPUT_BACKEND
 #include <wlr/backend/libinput.h>

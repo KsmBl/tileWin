@@ -1,6 +1,7 @@
 executable(
 	'tilewin-nag', [
 		'config.c',
+		tilewin_version_h,
 		'main.c',
 		'render.c',
 		'swaynag.c',

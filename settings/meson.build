@@ -24,6 +24,7 @@ executable(
 		'reorder.c',
 		'ui.c',
 		'widgets.c',
+		tilewin_version_h,
 	],
 	include_directories: [sway_inc, include_directories('../screensaver')],
 	dependencies: [gtk4, dependency('gio-unix-2.0'), jsonc, cairo, gdk_pixbuf, math, rsvg, pango],

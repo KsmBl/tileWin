@@ -142,10 +142,18 @@ setup_args=(--prefix "$PREFIX" --buildtype "$BUILDTYPE" -Dman-pages=disabled -Dw
 if [ "$BUILDTYPE" = release ]; then
 	setup_args+=(-Db_lto=true)
 fi
-if [ -d "$BUILD_DIR" ]; then
+# Set up again only when the options changed: meson notices changed build files
+# itself, and a needless reconfigure costs time on every update.
+setup_stamp="$BUILD_DIR/.install-setup-args"
+if [ -f "$BUILD_DIR/build.ninja" ] && [ -f "$setup_stamp" ] &&
+		[ "$(cat "$setup_stamp")" = "${setup_args[*]}" ]; then
+	msg "Build directory is set up already; building only what changed"
+elif [ -d "$BUILD_DIR" ]; then
 	"$MESON" setup --reconfigure "$BUILD_DIR" "${setup_args[@]}" >/dev/null
+	printf '%s' "${setup_args[*]}" > "$setup_stamp"
 else
 	"$MESON" setup "$BUILD_DIR" "${setup_args[@]}" >/dev/null
+	printf '%s' "${setup_args[*]}" > "$setup_stamp"
 fi
 
 msg "Building"

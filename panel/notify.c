@@ -39,6 +39,7 @@
 #include "popup.h"
 #include "tw_desktop.h"
 #include "tw_paths.h"
+#include "tilewin-version.h"
 
 #define MAX_HISTORY 50
 #define MAX_TOASTS 3

@@ -1,0 +1,11 @@
+#ifndef _TILEWIN_VERSION_H
+#define _TILEWIN_VERSION_H
+
+/*
+ * Written by the build (include/meson.build): the version, and the commit and
+ * branch it was built from. It is a header of its own instead of a compiler
+ * flag, so a new commit rebuilds only the few files that print the version.
+ */
+#define SWAY_VERSION "@VERSION@@VCS_TAG@ (" __DATE__ ")"
+
+#endif

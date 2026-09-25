@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
+#include "tilewin-version.h"
 
 /*
  * About page: what a fetch tool prints in a terminal, laid out as a page

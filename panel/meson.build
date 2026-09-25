@@ -61,6 +61,7 @@ executable(
 		'widgets/tray.c',
 		panel_tray_files,
 		wl_protos_src,
+		tilewin_version_h,
 	],
 	include_directories: [sway_inc, include_directories('.')],
 	dependencies: panel_deps,

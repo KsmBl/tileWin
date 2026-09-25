@@ -23,6 +23,7 @@
 #include "stringop.h"
 #include "tw_desktop.h"
 #include "tw_paths.h"
+#include "tilewin-version.h"
 
 enum tw_mode tw_mode = TW_MODE_WINDOW;
 struct tw_theme *tw_theme = NULL;

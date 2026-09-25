@@ -26,6 +26,7 @@
 #include "log.h"
 #include "stringop.h"
 #include "util.h"
+#include "tilewin-version.h"
 
 static bool terminate_request = false;
 static int exit_value = 0;

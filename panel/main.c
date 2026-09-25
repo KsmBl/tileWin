@@ -13,6 +13,7 @@
 #include "tw_desktop.h"
 #include "stringop.h"
 #include "tw_paths.h"
+#include "tilewin-version.h"
 
 static struct panel panel;
 static volatile sig_atomic_t signal_flags = 0;
