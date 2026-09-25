@@ -18,6 +18,9 @@ static const char css[] =
 	".tw-status { padding: 6px 12px; }\n"
 	"image.tw-avatar { border-radius: 9999px; }\n"
 	".tw-found { background-color: alpha(@theme_selected_bg_color, 0.28); }\n"
+	".tw-dragged { opacity: 0.4; }\n"
+	"row.tw-drop-above { box-shadow: inset 0 2px @theme_selected_bg_color; }\n"
+	"row.tw-drop-below { box-shadow: inset 0 -2px @theme_selected_bg_color; }\n"
 	".tw-logo { font-size: 0.8em; line-height: 0.95; color: @theme_selected_bg_color; }\n";
 
 static struct settings settings;

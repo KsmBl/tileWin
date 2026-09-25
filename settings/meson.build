@@ -19,6 +19,7 @@ executable(
 		'page_theme.c',
 		'page_wallpaper.c',
 		'page_window.c',
+		'reorder.c',
 		'ui.c',
 	],
 	include_directories: [sway_inc],

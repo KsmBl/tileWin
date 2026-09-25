@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include "reorder.h"
 #include "settings.h"
 #include "tw_desktop.h"
 #include "tw_disks.h"
@@ -814,8 +815,6 @@ static void on_create_custom(GtkWidget *widget, gpointer data) {
 /* ---------- layout sections ---------- */
 
 enum {
-	OP_UP,
-	OP_DOWN,
 	OP_LEFT,
 	OP_RIGHT,
 	OP_REMOVE,
@@ -839,25 +838,7 @@ static void on_widget_action(GtkButton *button, gpointer data) {
 		return;
 	}
 	char *name = g_strdup(names->pdata[i]);
-	gpointer *d = names->pdata;
-	gpointer tmp;
 	switch (a->op) {
-	case OP_UP:
-		if (i > 0) {
-			tmp = d[i];
-			d[i] = d[i - 1];
-			d[i - 1] = tmp;
-			write_section(p, a->section, names);
-		}
-		break;
-	case OP_DOWN:
-		if (i + 1 < names->len) {
-			tmp = d[i];
-			d[i] = d[i + 1];
-			d[i + 1] = tmp;
-			write_section(p, a->section, names);
-		}
-		break;
 	case OP_REMOVE:
 		g_ptr_array_remove_index(names, i);
 		write_section(p, a->section, names);
@@ -994,6 +975,182 @@ static GtkWidget *add_widget_button(struct taskbar_page *p, int section) {
 	return menu;
 }
 
+/* ---------- moving widgets by their handle ---------- */
+
+/*
+ * What a dragged row carries: its section, its place in it and its name, e.g.
+ * "2:4:clock". The name makes sure a drop never moves another widget than the
+ * one that was picked up.
+ */
+static GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y,
+		gpointer data) {
+	GtkWidget *row = gtk_widget_get_ancestor(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source)), GTK_TYPE_LIST_BOX_ROW);
+	const char *name = row ? g_object_get_data(G_OBJECT(row), "widget") : NULL;
+	if (!name) {
+		return NULL;
+	}
+	char *text = g_strdup_printf("%d:%d:%s",
+		GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "section")),
+		gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row)), name);
+	GdkContentProvider *content = gdk_content_provider_new_typed(G_TYPE_STRING, text);
+	g_free(text);
+	return content;
+}
+
+static void on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer data) {
+	GtkWidget *row = gtk_widget_get_ancestor(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source)), GTK_TYPE_LIST_BOX_ROW);
+	if (row) {
+		// the whole row follows the pointer, not only the handle; a still picture
+		// of it, so the row fading while it is away does not fade the picture too
+		GdkPaintable *live = gtk_widget_paintable_new(row);
+		GdkPaintable *picture = gdk_paintable_get_current_image(live);
+		gtk_drag_source_set_icon(source, picture, 0, 0);
+		g_object_unref(picture);
+		g_object_unref(live);
+		gtk_widget_add_css_class(row, "tw-dragged");
+	}
+}
+
+static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_data,
+		gpointer data) {
+	GtkWidget *row = gtk_widget_get_ancestor(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source)), GTK_TYPE_LIST_BOX_ROW);
+	if (row) {
+		gtk_widget_remove_css_class(row, "tw-dragged");
+	}
+}
+
+static GtkWidget *drag_handle(void) {
+	GtkWidget *handle = gtk_image_new_from_icon_name("list-drag-handle-symbolic");
+	gtk_widget_set_tooltip_text(handle, "Drag to move the widget");
+	gtk_widget_set_cursor_from_name(handle, "grab");
+	gtk_widget_set_valign(handle, GTK_ALIGN_CENTER);
+	gtk_widget_add_css_class(handle, "dim-label");
+	GtkDragSource *source = gtk_drag_source_new();
+	gtk_drag_source_set_actions(source, GDK_ACTION_MOVE);
+	g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), NULL);
+	g_signal_connect(source, "drag-begin", G_CALLBACK(on_drag_begin), NULL);
+	g_signal_connect(source, "drag-end", G_CALLBACK(on_drag_end), NULL);
+	gtk_widget_add_controller(handle, GTK_EVENT_CONTROLLER(source));
+	return handle;
+}
+
+/*
+ * Where in a section a drop at y lands: in front of the widget row under the
+ * pointer, or behind it on its lower half. Rows without a widget, like the
+ * Add widget row, stand for the end. Also returns the row that marks the
+ * spot, and whether the mark goes below it.
+ */
+static guint drop_position(GtkListBox *list, double y, guint count, GtkWidget **mark,
+		bool *below) {
+	GtkListBoxRow *row = gtk_list_box_get_row_at_y(list, (int)y);
+	*mark = NULL;
+	*below = false;
+	if (row && g_object_get_data(G_OBJECT(row), "widget")) {
+		graphene_rect_t bounds;
+		guint index = gtk_list_box_row_get_index(row);
+		*mark = GTK_WIDGET(row);
+		if (gtk_widget_compute_bounds(GTK_WIDGET(row), GTK_WIDGET(list), &bounds) &&
+				y > bounds.origin.y + bounds.size.height / 2) {
+			*below = true;
+			return index + 1;
+		}
+		return index;
+	}
+	// past the widgets: the mark goes below the last one
+	if (count > 0) {
+		*mark = GTK_WIDGET(gtk_list_box_get_row_at_index(list, count - 1));
+		*below = true;
+	}
+	return count;
+}
+
+static void clear_drop_mark(GtkListBox *list) {
+	for (GtkWidget *row = gtk_widget_get_first_child(GTK_WIDGET(list)); row;
+			row = gtk_widget_get_next_sibling(row)) {
+		gtk_widget_remove_css_class(row, "tw-drop-above");
+		gtk_widget_remove_css_class(row, "tw-drop-below");
+	}
+}
+
+static guint section_count(GtkListBox *list) {
+	guint count = 0;
+	GtkListBoxRow *row;
+	while ((row = gtk_list_box_get_row_at_index(list, count)) &&
+			g_object_get_data(G_OBJECT(row), "widget")) {
+		count++;
+	}
+	return count;
+}
+
+static GdkDragAction on_drop_motion(GtkDropTarget *target, double x, double y,
+		gpointer data) {
+	GtkListBox *list = GTK_LIST_BOX(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)));
+	GtkWidget *mark;
+	bool below;
+	drop_position(list, y, section_count(list), &mark, &below);
+	clear_drop_mark(list);
+	if (mark) {
+		gtk_widget_add_css_class(mark, below ? "tw-drop-below" : "tw-drop-above");
+	}
+	return GDK_ACTION_MOVE;
+}
+
+static void on_drop_leave(GtkDropTarget *target, gpointer data) {
+	clear_drop_mark(GTK_LIST_BOX(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target))));
+}
+
+static gboolean on_drop(GtkDropTarget *target, const GValue *value, double x, double y,
+		gpointer data) {
+	struct taskbar_page *p = data;
+	GtkListBox *list = GTK_LIST_BOX(
+		gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)));
+	clear_drop_mark(list);
+	const char *text = G_VALUE_HOLDS_STRING(value) ? g_value_get_string(value) : NULL;
+	int from_section, from_index, consumed = 0;
+	if (!text || sscanf(text, "%d:%d:%n", &from_section, &from_index, &consumed) != 2 ||
+			consumed == 0 || from_section < 0 || from_section >= SECTION_COUNT ||
+			from_index < 0) {
+		return FALSE;
+	}
+	const char *name = text + consumed;
+	int to_section = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(list), "section"));
+
+	GPtrArray *from = read_section(p, from_section);
+	if ((guint)from_index >= from->len || strcmp(from->pdata[from_index], name) != 0) {
+		g_ptr_array_unref(from); // the layout changed under the drag
+		return FALSE;
+	}
+	GPtrArray *to = to_section == from_section ? g_ptr_array_ref(from) :
+		read_section(p, to_section);
+	GtkWidget *mark;
+	bool below;
+	guint before = drop_position(list, y, to->len, &mark, &below);
+	if (reorder_move(from, from_index, to, before)) {
+		write_section(p, from_section, from);
+		if (to != from) {
+			write_section(p, to_section, to);
+		}
+		schedule_rebuild(p);
+	}
+	g_ptr_array_unref(to);
+	g_ptr_array_unref(from);
+	return TRUE;
+}
+
+static void accept_drops(struct taskbar_page *p, GtkWidget *list, int section) {
+	g_object_set_data(G_OBJECT(list), "section", GINT_TO_POINTER(section));
+	GtkDropTarget *target = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_MOVE);
+	g_signal_connect(target, "motion", G_CALLBACK(on_drop_motion), p);
+	g_signal_connect(target, "enter", G_CALLBACK(on_drop_motion), p);
+	g_signal_connect(target, "leave", G_CALLBACK(on_drop_leave), p);
+	g_signal_connect(target, "drop", G_CALLBACK(on_drop), p);
+	gtk_widget_add_controller(list, GTK_EVENT_CONTROLLER(target));
+}
+
 static void rebuild_sections(struct taskbar_page *p) {
 	for (int s = 0; s < SECTION_COUNT; s++) {
 		GtkWidget *list = p->sections[s];
@@ -1006,10 +1163,9 @@ static void rebuild_sections(struct taskbar_page *p) {
 			gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
 			gtk_widget_set_tooltip_text(row, "Click to change the settings of this widget");
 			g_object_set_data_full(G_OBJECT(row), "widget", g_strdup(name), g_free);
+			g_object_set_data(G_OBJECT(row), "section", GINT_TO_POINTER(s));
 			GtkWidget *box = ui_row_box(row);
-			add_action_button(p, box, "go-up-symbolic", "Move up", i > 0, s, i, OP_UP);
-			add_action_button(p, box, "go-down-symbolic", "Move down", i + 1 < names->len, s, i,
-				OP_DOWN);
+			gtk_box_prepend(GTK_BOX(box), drag_handle());
 			add_action_button(p, box, "go-previous-symbolic", "Move to the previous section",
 				s > 0, s, i, OP_LEFT);
 			add_action_button(p, box, "go-next-symbolic", "Move to the next section",
@@ -1422,9 +1578,11 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	for (int i = 0; i < SECTION_COUNT; i++) {
 		char *title = g_strdup_printf("%s section", section_titles[i]);
 		p->sections[i] = ui_group(content, title, i == SECTION_LEFT ?
-			"The Windows 11 theme centers the left section. Click a widget to change its settings." :
+			"The Windows 11 theme centers the left section. Click a widget to change its settings; "
+			"drag it by its handle to move it, also into another section." :
 			NULL);
 		g_signal_connect(p->sections[i], "row-activated", G_CALLBACK(on_row_activated), p);
+		accept_drops(p, p->sections[i], i);
 		g_free(title);
 	}
 

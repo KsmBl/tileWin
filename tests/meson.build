@@ -36,6 +36,17 @@ test(
 	suite: 'unit',
 )
 
+test(
+	'reorder',
+	executable(
+		'test-reorder',
+		['test_reorder.c', '../settings/reorder.c'],
+		include_directories: include_directories('../settings'),
+		dependencies: [glib],
+	),
+	suite: 'unit',
+)
+
 virtual_keyboard_xml = '../protocols/virtual-keyboard-unstable-v1.xml'
 keyboard_tool = executable(
 	'keyboard-tool',
@@ -153,6 +164,16 @@ test(
 	suite: 'gui',
 	# each of these starts a compositor of its own and finds it by the socket
 	# it adds, so two of them at once would find each other's
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
+	'settings-drag-widget',
+	find_program('settings_drag_widget.sh'),
+	args: [meson.project_build_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
 	is_parallel: false,
 	timeout: 300,
 )

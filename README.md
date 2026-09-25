@@ -131,7 +131,7 @@ Start tileWin:
 ### Tests
 
 ```sh
-meson test -C build-release --suite unit   # the config parser, the config editor and the settings coverage
+meson test -C build-release --suite unit   # the config parser, the config editor, the disk list, moving taskbar widgets and the settings coverage
 meson test -C build-release --suite gui    # drives a nested tileWin and looks at what it does
 ```
 
@@ -143,6 +143,8 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   that lays itself out to nothing cannot pass unnoticed;
 - clicks a switch with a pointer of its own and reads the config file back, to
   check that it really saves what it was set to;
+- drags a widget of the Taskbar page by its handle to another place and reads
+  `taskbar.conf` back, to check that the new order is what was saved;
 - copies texts and pictures and reads the clipboard history back over the
   socket of `tilewin-clipboard`, then weighs both processes to check that a
   copied picture is held by that program and not by the taskbar;
@@ -377,7 +379,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | Sound | Output and input device with volume and mute, the volume of every app playing sound, a link to pavucontrol |
 | Date & time | The clock of the computer: time server on or off, the time zone from a list or by clicking a map of every zone tzdata knows, setting date and time by hand, asking a list of time servers directly (all at once, taking the first answer, the quickest one or the middle of all of them), and the format of the taskbar clock, with every code offered as you type |
 | Bluetooth | Bluetooth on/off, paired devices (connect, disconnect, remove), search and pair nearby devices |
-| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections), settings of each widget, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
+| Taskbar | Font, layouts of both modes (position, height, widgets in the left/center/right sections, put in order by dragging each one by its handle, also from one section into another), settings of each widget, custom script widgets, quick launch apps and the icon of each of them, and the right-click menus of the taskbar, of the taskbar buttons and of the start button (with submenus) |
 | Start menu | The style of the start menu, its pinned apps, its places and its power entries |
 | Launcher & apps | Built-in launcher, rofi, wofi, fuzzel, tofi, bemenu or any command; terminal, file manager, task manager, locker and screenshot programs |
 | Keyboard | Keyboard layouts and variants, layout switch shortcut, Caps Lock and Compose key, Num Lock, key repeat, and the shortcuts of window mode and tile mode (with a key recorder) |

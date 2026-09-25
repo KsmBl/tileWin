@@ -11,6 +11,8 @@
  *   shake <swings> <steps> <px> <ms>   swing it back and forth
  *   throw <x1> <y1> <x2> <y2>     press at the first point, sweep to the second
  *                                 and let go while still moving
+ *   drag <x1> <y1> <x2> <y2>      press at the first point, carry it slowly to
+ *                                 the second, hold still there and let go
  *
  * The width and height are those of the screen the coordinates are in.
  */
@@ -111,6 +113,31 @@ static void throw_window(int x1, int y1, int x2, int y2) {
 	rest(200);
 }
 
+/* Press, carry and release after a pause: a drag and drop, which the app only
+ * takes once the pointer has crossed its threshold and rested over the target. */
+static void drag(int x1, int y1, int x2, int y2) {
+	move(x1, y1);
+	move(x1, y1);
+	zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+		WL_POINTER_BUTTON_STATE_PRESSED);
+	zwlr_virtual_pointer_v1_frame(pointer);
+	wl_display_flush(display);
+	rest(150);
+	for (int i = 1; i <= 30; i++) {
+		zwlr_virtual_pointer_v1_motion_absolute(pointer, now_ms(),
+			x1 + (x2 - x1) * i / 30, y1 + (y2 - y1) * i / 30, width, height);
+		zwlr_virtual_pointer_v1_frame(pointer);
+		wl_display_flush(display);
+		rest(30);
+	}
+	rest(500);
+	zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+		WL_POINTER_BUTTON_STATE_RELEASED);
+	zwlr_virtual_pointer_v1_frame(pointer);
+	wl_display_flush(display);
+	rest(900);
+}
+
 static void shake(int swings, int steps, int pixels, int ms) {
 	for (int swing = 0; swing < swings; swing++) {
 		int direction = swing % 2 ? -1 : 1;
@@ -162,6 +189,9 @@ int main(int argc, char **argv) {
 		} else if (strcmp(argv[i], "throw") == 0 && i + 4 < argc) {
 			throw_window(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]),
 				atoi(argv[i + 4]));
+			i += 5;
+		} else if (strcmp(argv[i], "drag") == 0 && i + 4 < argc) {
+			drag(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]), atoi(argv[i + 4]));
 			i += 5;
 		} else if (strcmp(argv[i], "shake") == 0 && i + 4 < argc) {
 			shake(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]),
