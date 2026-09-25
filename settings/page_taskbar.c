@@ -1022,8 +1022,32 @@ static void on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_da
 	}
 }
 
+/*
+ * The grip of the handle: two columns of three dots in the text color. It is
+ * drawn rather than taken from the icon theme, because list-drag-handle-symbolic
+ * only comes with Adwaita and the icon themes of tileWin inherit from breeze.
+ */
+static void draw_grip(GtkDrawingArea *area, cairo_t *cr, int width, int height,
+		gpointer data) {
+	GdkRGBA color;
+	gtk_widget_get_color(GTK_WIDGET(area), &color);
+	gdk_cairo_set_source_rgba(cr, &color);
+	double r = 1.5, gap = 5;
+	double x = width / 2.0 - gap / 2, y = height / 2.0 - gap;
+	for (int column = 0; column < 2; column++) {
+		for (int row = 0; row < 3; row++) {
+			cairo_new_sub_path(cr);
+			cairo_arc(cr, x + column * gap, y + row * gap, r, 0, 2 * G_PI);
+		}
+	}
+	cairo_fill(cr);
+}
+
 static GtkWidget *drag_handle(void) {
-	GtkWidget *handle = gtk_image_new_from_icon_name("list-drag-handle-symbolic");
+	GtkWidget *handle = gtk_drawing_area_new();
+	gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(handle), 16);
+	gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(handle), 16);
+	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(handle), draw_grip, NULL, NULL);
 	gtk_widget_set_tooltip_text(handle, "Drag to move the widget");
 	gtk_widget_set_cursor_from_name(handle, "grab");
 	gtk_widget_set_valign(handle, GTK_ALIGN_CENTER);
