@@ -15,6 +15,7 @@ struct saver_options {
 	const char *text;      // 3D Text: the words, or "time" for the clock
 	const char *photos;    // Photos: the folder of the slideshow, NULL for Pictures
 	int photo_seconds;     // Photos: how long each picture stays
+	const char *output;    // the screen it is shown on, NULL for a preview
 };
 
 struct saver {

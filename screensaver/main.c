@@ -32,6 +32,7 @@
 struct output {
 	struct wl_output *wl_output;
 	uint32_t global_name;
+	char *name;
 	struct wl_surface *surface;
 	struct zwlr_layer_surface_v1 *layer;
 	struct pool_buffer buffers[2];
@@ -101,7 +102,9 @@ static void render(struct output *o) {
 	double dt = o->run ? ms_between(&o->last_frame, &now) / 1000.0 : 0;
 	o->last_frame = now;
 	if (!o->run) {
-		o->run = saver_run_new(ss.saver, o->width, o->height, &ss.options);
+		struct saver_options options = ss.options;
+		options.output = o->name; // Diggers asks tileWin for the windows on it
+		o->run = saver_run_new(ss.saver, o->width, o->height, &options);
 	}
 	saver_run_draw(o->run, buffer->cairo, dt);
 	cairo_surface_flush(buffer->surface);
@@ -168,8 +171,43 @@ static void destroy_output(struct output *o) {
 		wl_surface_destroy(o->surface);
 	}
 	wl_output_destroy(o->wl_output);
+	free(o->name);
 	free(o);
 }
+
+static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y,
+		int32_t pw, int32_t ph, int32_t subpixel, const char *make, const char *model,
+		int32_t transform) {
+}
+
+static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
+		int32_t width, int32_t height, int32_t refresh) {
+}
+
+static void output_done(void *data, struct wl_output *wl_output) {
+}
+
+static void output_scale(void *data, struct wl_output *wl_output, int32_t factor) {
+}
+
+static void output_name(void *data, struct wl_output *wl_output, const char *name) {
+	struct output *o = data;
+	free(o->name);
+	o->name = strdup(name);
+}
+
+static void output_description(void *data, struct wl_output *wl_output,
+		const char *description) {
+}
+
+static const struct wl_output_listener output_listener = {
+	.geometry = output_geometry,
+	.mode = output_mode,
+	.done = output_done,
+	.scale = output_scale,
+	.name = output_name,
+	.description = output_description,
+};
 
 /* ---------- input ---------- */
 
@@ -308,7 +346,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
 	} else if (strcmp(interface, wl_output_interface.name) == 0) {
 		struct output *o = calloc(1, sizeof(*o));
 		o->global_name = name;
-		o->wl_output = wl_registry_bind(registry, name, &wl_output_interface, 1);
+		o->wl_output = wl_registry_bind(registry, name, &wl_output_interface,
+			version < 4 ? version : 4);
+		wl_output_add_listener(o->wl_output, &output_listener, o);
 		wl_list_insert(ss.outputs.prev, &o->link);
 		create_surface(o); // a screen plugged in while the saver runs
 	}

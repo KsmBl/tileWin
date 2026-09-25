@@ -27,6 +27,7 @@ const struct saver *const savers[] = {
 	&saver_aurora,
 	&saver_wordclock,
 	&saver_tiling,
+	&saver_diggers,
 };
 
 const int saver_count = sizeof(savers) / sizeof(savers[0]);

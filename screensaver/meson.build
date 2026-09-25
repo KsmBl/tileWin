@@ -3,13 +3,14 @@ lib_savers = static_library(
 	'tilewin-savers', [
 		'savers.c',
 		'saver_classic.c',
+		'saver_diggers.c',
 		'saver_maze.c',
 		'saver_new.c',
 		'saver_pipes.c',
 		'saver_win7.c',
 	],
 	include_directories: [sway_inc],
-	dependencies: [cairo, gdk_pixbuf, math, pango, pangocairo],
+	dependencies: [cairo, gdk_pixbuf, jsonc, math, pango, pangocairo],
 	link_with: [lib_sway_common],
 )
 
