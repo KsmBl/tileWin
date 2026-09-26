@@ -2260,10 +2260,10 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 			diggers_refresh(s);
 		}
 	}
-	// after a long while, or with half of it dug out, the windows are renewed: the
+	// after two minutes, or with a third of it dug out, the windows are renewed: the
 	// drilling machine clears it all away and the helicopters bring them back
 	if (s->reno == RENO_NONE && s->soil_cells &&
-			(s->dug_cells > s->soil_cells / 2 || s->age > 300)) {
+			(s->dug_cells > s->soil_cells / 3 || s->age > 120)) {
 		start_renovation(s);
 	}
 	if (s->reno == RENO_DRILL) {
