@@ -7,6 +7,7 @@
  * It draws only while it runs, at most 30 times a second and only when the
  * compositor has shown the last picture, so a screen that is off costs nothing.
  */
+#define _GNU_SOURCE // memfd_create
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <getopt.h>
@@ -21,13 +22,17 @@
 #include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <sys/mman.h>
 #include "pool-buffer.h"
 #include "savers.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "wlr-screencopy-unstable-v1-client-protocol.h"
 
 #define FRAME_MS 33
 #define GRACE_MS 1000    // input right after the start is the input that started it
 #define MOVE_PIXELS 12   // a pointer that drifts less is not someone coming back
+#define DESKTOP_WAIT_MS 500 // how long the picture of the screen may take before it starts
+#define DESKTOP_SETTLE_MS 150 // for the windows to draw themselves without the focus
 
 struct output {
 	struct wl_output *wl_output;
@@ -40,6 +45,12 @@ struct output {
 	int width, height;
 	bool configured, frame_pending;
 	struct timespec last_frame;
+	cairo_surface_t *desktop; // the screen before the saver covered it
+	struct zwlr_screencopy_frame_v1 *copy;
+	struct wl_buffer *copy_buffer;
+	void *copy_data;
+	size_t copy_size;
+	uint32_t copy_format, copy_width, copy_height, copy_stride, copy_flags;
 	struct wl_list link;
 };
 
@@ -48,6 +59,7 @@ static struct {
 	struct wl_compositor *compositor;
 	struct wl_shm *shm;
 	struct zwlr_layer_shell_v1 *layer_shell;
+	struct zwlr_screencopy_manager_v1 *screencopy;
 	struct wl_seat *seat;
 	struct wl_pointer *pointer;
 	struct wl_keyboard *keyboard;
@@ -104,6 +116,7 @@ static void render(struct output *o) {
 	if (!o->run) {
 		struct saver_options options = ss.options;
 		options.output = o->name; // Diggers asks tileWin for the windows on it
+		options.desktop = o->desktop; // and brings back pieces of them
 		o->run = saver_run_new(ss.saver, o->width, o->height, &options);
 	}
 	saver_run_draw(o->run, buffer->cairo, dt);
@@ -114,6 +127,176 @@ static void render(struct output *o) {
 	wl_callback_add_listener(callback, &frame_listener, o);
 	o->frame_pending = true;
 	wl_surface_commit(o->surface);
+}
+
+/* ---------- the picture of the screen ---------- */
+
+/*
+ * Taken once, before the saver covers the screen, for a saver that shows the
+ * windows (Diggers flies pieces of them in). Only shm formats cairo knows.
+ */
+static void copy_done(struct output *o) {
+	if (o->copy) {
+		zwlr_screencopy_frame_v1_destroy(o->copy);
+		o->copy = NULL;
+	}
+	if (o->copy_buffer) {
+		wl_buffer_destroy(o->copy_buffer);
+		o->copy_buffer = NULL;
+	}
+	if (o->copy_data) {
+		munmap(o->copy_data, o->copy_size);
+		o->copy_data = NULL;
+	}
+}
+
+static void copy_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t format,
+		uint32_t width, uint32_t height, uint32_t stride) {
+	struct output *o = data;
+	if (o->copy_buffer || (format != WL_SHM_FORMAT_XRGB8888 &&
+			format != WL_SHM_FORMAT_ARGB8888)) {
+		return;
+	}
+	size_t size = (size_t)stride * height;
+	int fd = memfd_create("tilewin-screensaver", MFD_CLOEXEC);
+	if (fd < 0 || ftruncate(fd, size) < 0) {
+		if (fd >= 0) {
+			close(fd);
+		}
+		return;
+	}
+	void *mem = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (mem == MAP_FAILED) {
+		close(fd);
+		return;
+	}
+	struct wl_shm_pool *pool = wl_shm_create_pool(ss.shm, fd, size);
+	o->copy_buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, format);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+	o->copy_data = mem;
+	o->copy_size = size;
+	o->copy_format = format;
+	o->copy_width = width;
+	o->copy_height = height;
+	o->copy_stride = stride;
+}
+
+static void copy_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t flags) {
+	struct output *o = data;
+	o->copy_flags = flags;
+}
+
+static void copy_ready(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t sec_hi,
+		uint32_t sec_lo, uint32_t nsec) {
+	struct output *o = data;
+	cairo_surface_t *shot = cairo_image_surface_create_for_data(o->copy_data,
+		CAIRO_FORMAT_RGB24, o->copy_width, o->copy_height, o->copy_stride);
+	o->desktop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, o->copy_width, o->copy_height);
+	cairo_t *cr = cairo_create(o->desktop);
+	if (o->copy_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT) {
+		cairo_translate(cr, 0, o->copy_height);
+		cairo_scale(cr, 1, -1);
+	}
+	cairo_set_source_surface(cr, shot, 0, 0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(shot);
+	copy_done(o);
+}
+
+static void copy_failed(void *data, struct zwlr_screencopy_frame_v1 *frame) {
+	copy_done(data);
+}
+
+static void copy_buffer_done(void *data, struct zwlr_screencopy_frame_v1 *frame) {
+	struct output *o = data;
+	if (o->copy_buffer) {
+		zwlr_screencopy_frame_v1_copy(frame, o->copy_buffer);
+	} else {
+		copy_done(o); // nothing cairo can read
+	}
+}
+
+static void copy_damage(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t x,
+		uint32_t y, uint32_t width, uint32_t height) {
+}
+
+static void copy_linux_dmabuf(void *data, struct zwlr_screencopy_frame_v1 *frame,
+		uint32_t format, uint32_t width, uint32_t height) {
+}
+
+static const struct zwlr_screencopy_frame_v1_listener copy_listener = {
+	.buffer = copy_buffer,
+	.flags = copy_flags,
+	.ready = copy_ready,
+	.failed = copy_failed,
+	.damage = copy_damage,
+	.linux_dmabuf = copy_linux_dmabuf,
+	.buffer_done = copy_buffer_done,
+};
+
+/* Handles what comes in for up to ms, or until done() says so. */
+static void dispatch_for(long ms, bool (*done)(void)) {
+	struct timespec start;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	for (;;) {
+		long left = ms - ms_since(&start);
+		if ((done && done()) || left <= 0) {
+			return;
+		}
+		wl_display_flush(ss.display);
+		struct pollfd fd = { wl_display_get_fd(ss.display), POLLIN, 0 };
+		if (poll(&fd, 1, left) > 0 && wl_display_dispatch(ss.display) < 0) {
+			return;
+		}
+	}
+}
+
+static bool copies_done(void) {
+	struct output *o;
+	wl_list_for_each(o, &ss.outputs, link) {
+		if (o->copy) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+ * Pictures of all screens, waited for a moment; a screen without one gets none.
+ * The saver's surfaces are up first, but clear: the keyboard has gone to them
+ * and the windows had a moment to draw themselves unfocused, so the picture
+ * shows them as they look under the saver.
+ */
+static void capture_desktops(void) {
+	if (!ss.screencopy || !ss.saver->wants_desktop) {
+		return;
+	}
+	struct output *o;
+	wl_list_for_each(o, &ss.outputs, link) {
+		struct pool_buffer *buffer = o->configured ?
+			get_next_buffer(ss.shm, o->buffers, o->width, o->height) : NULL;
+		if (buffer) {
+			cairo_save(buffer->cairo);
+			cairo_set_operator(buffer->cairo, CAIRO_OPERATOR_CLEAR);
+			cairo_paint(buffer->cairo);
+			cairo_restore(buffer->cairo);
+			cairo_surface_flush(buffer->surface);
+			wl_surface_attach(o->surface, buffer->buffer, 0, 0);
+			wl_surface_damage_buffer(o->surface, 0, 0, o->width, o->height);
+			wl_surface_commit(o->surface);
+		}
+	}
+	dispatch_for(DESKTOP_SETTLE_MS, NULL);
+	wl_list_for_each(o, &ss.outputs, link) {
+		o->copy = zwlr_screencopy_manager_v1_capture_output(ss.screencopy, 0, o->wl_output);
+		zwlr_screencopy_frame_v1_add_listener(o->copy, &copy_listener, o);
+	}
+	dispatch_for(DESKTOP_WAIT_MS, copies_done);
+	wl_list_for_each(o, &ss.outputs, link) {
+		copy_done(o); // too slow: without a picture
+	}
 }
 
 /* ---------- the surfaces ---------- */
@@ -162,6 +345,10 @@ static void create_surface(struct output *o) {
 static void destroy_output(struct output *o) {
 	wl_list_remove(&o->link);
 	saver_run_free(o->run);
+	copy_done(o);
+	if (o->desktop) {
+		cairo_surface_destroy(o->desktop);
+	}
 	destroy_buffer(&o->buffers[0]);
 	destroy_buffer(&o->buffers[1]);
 	if (o->layer) {
@@ -340,6 +527,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
 		ss.shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
 	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
 		ss.layer_shell = wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1);
+	} else if (strcmp(interface, zwlr_screencopy_manager_v1_interface.name) == 0) {
+		ss.screencopy = wl_registry_bind(registry, name, &zwlr_screencopy_manager_v1_interface,
+			version < 3 ? version : 3);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0 && !ss.seat) {
 		ss.seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
 		wl_seat_add_listener(ss.seat, &seat_listener, NULL);
@@ -350,7 +540,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
 			version < 4 ? version : 4);
 		wl_output_add_listener(o->wl_output, &output_listener, o);
 		wl_list_insert(ss.outputs.prev, &o->link);
-		create_surface(o); // a screen plugged in while the saver runs
+		if (ss.running) {
+			create_surface(o); // a screen plugged in while the saver runs
+		}
 	}
 }
 
@@ -438,6 +630,7 @@ int main(int argc, char **argv) {
 		create_surface(o);
 	}
 	wl_display_roundtrip(ss.display);
+	capture_desktops();
 	clock_gettime(CLOCK_MONOTONIC, &ss.started);
 
 	ss.running = true;

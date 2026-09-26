@@ -16,12 +16,14 @@ struct saver_options {
 	const char *photos;    // Photos: the folder of the slideshow, NULL for Pictures
 	int photo_seconds;     // Photos: how long each picture stays
 	const char *output;    // the screen it is shown on, NULL for a preview
+	cairo_surface_t *desktop; // that screen as it was before the saver covered it, or NULL
 };
 
 struct saver {
 	const char *name, *title, *description;
 	bool transparent;      // drawn over the desktop, which shows through
 	double resolution;     // drawn at this part of the size and scaled up, for soft ones
+	bool wants_desktop;    // gets a picture of the screen from before it started
 	void *(*create)(int width, int height, const struct saver_options *options);
 	/* Draws the next picture over black (or the desktop); dt is seconds, sped up. */
 	void (*draw)(void *state, cairo_t *cr, int width, int height, double dt);

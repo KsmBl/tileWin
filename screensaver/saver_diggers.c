@@ -25,7 +25,8 @@
  * and dig their way in from there. When the windows are dug out enough, a huge
  * drilling machine pushes in from a side and grinds all of it away, throwing
  * the miners off the screen; then helicopters fly the windows back in, slab by
- * slab, and the miners parachute in again one by one.
+ * slab, and the miners parachute in again one by one. The slabs are the real
+ * windows, cut from a picture of the screen taken before the saver started.
  *
  * The windows are the real ones: tileWin tells where they are, the saver is
  * drawn over the desktop, and the tunnels are dark holes in the windows.
@@ -215,6 +216,9 @@ struct diggers {
 	int slab_count, slab_next, slabs_placed;
 	struct heli helis[HELIS_MAX];
 	double heli_wait;       // until the next helicopter takes off
+	cairo_surface_t *desktop; // the screen before the saver: the real pieces of the windows
+	struct window_box pictured[WINDOWS_MAX]; // the windows as they were on it
+	int pictured_count;
 };
 
 struct man;
@@ -2069,6 +2073,18 @@ static void draw_drill(struct diggers *s, cairo_t *cr) {
 	}
 }
 
+/* Whether the picture of the screen shows that window where it is now. */
+static bool window_pictured(struct diggers *s, int i) {
+	struct window_box *b = &s->windows[i];
+	for (int k = 0; s->desktop && k < s->pictured_count; k++) {
+		struct window_box *p = &s->pictured[k];
+		if (p->x == b->x && p->y == b->y && p->w == b->w && p->h == b->h) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void draw_heli(struct diggers *s, cairo_t *cr, struct heli *hl) {
 	double k = s->h * 1.35, x = hl->x, y = hl->y, d = hl->dir;
 	struct slab *sl = &s->slabs[hl->slab];
@@ -2086,7 +2102,16 @@ static void draw_heli(struct diggers *s, cairo_t *cr, struct heli *hl) {
 		cairo_rectangle(cr, sx, sy, sl->w, sl->h);
 		cairo_clip(cr);
 		cairo_translate(cr, sx - sl->x, sy - sl->y);
-		draw_window(s, cr, sl->window);
+		if (window_pictured(s, sl->window)) {
+			// the real piece: just what shows there once it is set down
+			cairo_scale(cr, (double)s->width / cairo_image_surface_get_width(s->desktop),
+				(double)s->height / cairo_image_surface_get_height(s->desktop));
+			cairo_set_source_surface(cr, s->desktop, 0, 0);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+			cairo_paint(cr);
+		} else {
+			draw_window(s, cr, sl->window); // one opened since: a drawn stand-in
+		}
 		cairo_restore(cr);
 		cairo_rectangle(cr, sx + 0.5, sy + 0.5, sl->w - 1, sl->h - 1);
 		cairo_set_source_rgb(cr, 0.3, 0.35, 0.45);
@@ -2187,6 +2212,10 @@ static void *diggers_create(int width, int height, const struct saver_options *o
 	s->fake = !read_windows(s);
 	if (s->fake) {
 		make_windows(s);
+	} else if (options->desktop) {
+		s->desktop = cairo_surface_reference(options->desktop);
+		memcpy(s->pictured, s->windows, sizeof(s->pictured));
+		s->pictured_count = s->window_count;
 	}
 	build_soil(s);
 	s->men_max = (int)saver_clamp(width * (double)height / (1920.0 * 1080.0) * 22, 8, MEN_MAX);
@@ -2434,11 +2463,15 @@ static void diggers_destroy(void *state) {
 	cairo_surface_destroy(s->mask_band);
 	cairo_surface_destroy(s->mask_line);
 	cairo_pattern_destroy(s->pebbles);
+	if (s->desktop) {
+		cairo_surface_destroy(s->desktop);
+	}
 	free(s);
 }
 
 const struct saver saver_diggers = {
 	.name = "diggers",
+	.wants_desktop = true,
 	.title = "Diggers",
 	.description = "Little miners running over the desktop and digging into your windows "
 		"to see what is inside",
