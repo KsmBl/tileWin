@@ -32,8 +32,11 @@
  * means something, a list of rows (some of which can be clicked) and links at
  * the bottom. Each widget type only says where its figures come from.
  *
- * Nothing runs while no flyout is open; an open one reads its figures again
- * every second or so, and stops the moment it closes.
+ * Nothing runs while no flyout is open, but for the widgets whose flyout has
+ * a chart (disk activity, GPU, network usage, power draw): those keep reading
+ * in the background, as long as the widget is on the taskbar, so the chart
+ * shows the last minute the moment it opens rather than starting empty. An
+ * open flyout reads its figures again every second or so.
  */
 
 #define WIDTH 360
@@ -104,6 +107,30 @@ struct info_flyout {
 };
 
 static struct info_flyout *current;
+static list_t *recorders; // struct info_flyout *: kept reading while closed, one a widget
+
+/* Whether the flyout still exists: open, or recording in the background. */
+static bool alive(struct info_flyout *f) {
+	if (f == current) {
+		return true;
+	}
+	for (int i = 0; recorders && i < recorders->length; i++) {
+		if (recorders->items[i] == f) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static struct info_flyout *recorder_of(struct widget *w) {
+	for (int i = 0; recorders && i < recorders->length; i++) {
+		struct info_flyout *f = recorders->items[i];
+		if (f->widget == w) {
+			return f;
+		}
+	}
+	return NULL;
+}
 
 static void refill(struct info_flyout *f);
 
@@ -332,7 +359,7 @@ static void gpu_find(struct info_flyout *f, struct gpu_state *s) {
 
 static void gpu_nvidia_done(void *data, const char *output) {
 	struct info_flyout *f = data;
-	if (current != f || !f->state) {
+	if (!alive(f) || !f->state) {
 		return;
 	}
 	struct gpu_state *s = f->state;
@@ -940,7 +967,7 @@ struct git_state {
 
 static void git_log_done(void *data, const char *output) {
 	struct info_flyout *f = data;
-	if (current != f || !f->state) {
+	if (!alive(f) || !f->state) {
 		return;
 	}
 	struct git_state *s = f->state;
@@ -1300,10 +1327,25 @@ static void info_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32
 	}
 }
 
+static void info_free(struct info_flyout *f) {
+	if (f->tick) {
+		loop_remove_timer(f->panel->loop, f->tick);
+	}
+	clear_content(f);
+	if (f->state) {
+		f->source->free_state(f->state);
+	}
+	free(f);
+}
+
 static void info_destroy(struct popup *p) {
 	struct info_flyout *f = p->data;
 	if (current == f) {
 		current = NULL;
+	}
+	f->popup = NULL;
+	if (recorder_of(f->widget) == f) {
+		return; // it goes on reading, for the chart the next time
 	}
 	if (f->tick) {
 		loop_remove_timer(p->panel->loop, f->tick);
@@ -1340,11 +1382,16 @@ void info_flyout_toggle(struct widget *w, struct popup_anchor anchor) {
 		return;
 	}
 	popup_close_all(panel);
-	struct info_flyout *f = calloc(1, sizeof(*f));
-	f->panel = panel;
-	f->widget = w;
+	struct info_flyout *f = recorder_of(w);
+	bool recording = f != NULL;
+	if (!f) {
+		f = calloc(1, sizeof(*f));
+		f->panel = panel;
+		f->widget = w;
+		f->source = source;
+	}
 	f->anchor = anchor;
-	f->source = source;
+	f->inside = false;
 	current = f;
 	refill(f);
 	int x, y, width, height;
@@ -1353,14 +1400,55 @@ void info_flyout_toggle(struct widget *w, struct popup_anchor anchor) {
 		&info_vtable, f);
 	if (!f->popup) {
 		current = NULL;
-		clear_content(f);
-		if (f->state) {
-			source->free_state(f->state);
+		if (!recording) {
+			info_free(f);
 		}
-		free(f);
 		return;
 	}
-	if (source->interval_ms > 0) {
+	if (source->interval_ms > 0 && !f->tick) {
 		f->tick = loop_add_timer(panel->loop, source->interval_ms, tick, f);
+	}
+}
+
+void info_flyout_record(struct widget *w) {
+	if (recorder_of(w)) {
+		return;
+	}
+	const struct info_source *source = NULL;
+	for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+		if (strcmp(sources[i].type, w->impl->type) == 0) {
+			source = &sources[i];
+		}
+	}
+	if (!source || source->interval_ms <= 0) {
+		return;
+	}
+	struct info_flyout *f = calloc(1, sizeof(*f));
+	f->panel = w->panel;
+	f->widget = w;
+	f->source = source;
+	if (!recorders) {
+		recorders = create_list();
+	}
+	list_add(recorders, f);
+	refill(f);
+	f->tick = loop_add_timer(w->panel->loop, source->interval_ms, tick, f);
+}
+
+void info_flyout_forget(struct widget *w) {
+	struct info_flyout *f = recorder_of(w);
+	if (!f) {
+		return;
+	}
+	for (int i = 0; i < recorders->length; i++) {
+		if (recorders->items[i] == f) {
+			list_del(recorders, i);
+			break;
+		}
+	}
+	if (f->popup) {
+		popup_close_all(f->panel); // frees it, now that it is no recorder
+	} else {
+		info_free(f);
 	}
 }

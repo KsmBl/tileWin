@@ -47,6 +47,19 @@ double wifi_phy_rate(int gen, int streams, int width);
 double wifi_pair_rate(const struct wifi_adapter *adapter, const struct wifi_ap *ap, int width,
 	struct wifi_link_caps *pair);
 
+/* The link a connected interface has now. */
+struct wifi_link {
+	int freq;          // MHz of the channel
+	int width;         // MHz wide
+	double tx, rx;     // Mbit/s it sends and receives at, 0 when not known
+};
+
+/* The channel and the current rates of a connected interface; false when not connected. */
+bool wifi_link_info(const char *ifname, struct wifi_link *out);
+
+/* The channel number of a frequency in MHz. */
+int wifi_channel(int freq);
+
 /* "aa:bb:cc:dd:ee:ff" to bytes. */
 bool wifi_parse_bssid(const char *text, uint8_t out[6]);
 

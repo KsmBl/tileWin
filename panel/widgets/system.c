@@ -84,6 +84,17 @@ static void poll_destroy(struct widget *w) {
 	free(p);
 }
 
+/* A widget whose flyout has a chart: its figures are kept while it is closed. */
+static void charted_destroy(struct widget *w) {
+	info_flyout_forget(w);
+	poll_destroy(w);
+}
+
+static void history_destroy(struct widget *w) {
+	flyout_history_release();
+	poll_destroy(w);
+}
+
 static bool read_file(const char *path, char *buf, size_t size) {
 	FILE *f = fopen(path, "r");
 	if (!f) {
@@ -477,6 +488,7 @@ static void cpu_update(struct widget *w) {
 
 static void cpu_init(struct widget *w) {
 	poll_init(w, 2, cpu_update, sizeof(struct cpu_state));
+	flyout_history_hold(w->panel); // the chart of its flyout
 }
 
 static char *cpu_text(struct widget *w) {
@@ -545,7 +557,7 @@ static char *cpu_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_cpu = {
 	.type = "cpu",
 	.init = cpu_init,
-	.destroy = poll_destroy,
+	.destroy = history_destroy,
 	.measure = cpu_measure,
 	.render = cpu_render,
 	.click = cpu_click,
@@ -579,6 +591,7 @@ static void memory_update(struct widget *w) {
 
 static void memory_init(struct widget *w) {
 	poll_init(w, 5, memory_update, sizeof(struct mem_state));
+	flyout_history_hold(w->panel);
 }
 
 static char *memory_text(struct widget *w) {
@@ -638,7 +651,7 @@ static char *memory_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_memory = {
 	.type = "memory",
 	.init = memory_init,
-	.destroy = poll_destroy,
+	.destroy = history_destroy,
 	.measure = memory_measure,
 	.render = memory_render,
 	.click = memory_click,
@@ -750,6 +763,7 @@ static void disk_update(struct widget *w) {
 
 static void disk_init(struct widget *w) {
 	poll_init(w, 1, disk_update, sizeof(struct disk_state));
+	info_flyout_record(w);
 }
 
 static void disk_rate_text(double kbps, char *buffer, size_t size) {
@@ -840,7 +854,7 @@ static char *disk_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_disk = {
 	.type = "disk",
 	.init = disk_init,
-	.destroy = poll_destroy,
+	.destroy = charted_destroy,
 	.measure = disk_measure,
 	.render = disk_render,
 	.tooltip = disk_tooltip,
@@ -923,6 +937,7 @@ static void gpu_update(struct widget *w) {
 
 static void gpu_init(struct widget *w) {
 	poll_init(w, 2, gpu_update, sizeof(struct gpu_state));
+	info_flyout_record(w);
 }
 
 static char *gpu_text(struct widget *w) {
@@ -963,7 +978,7 @@ static char *gpu_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_gpu = {
 	.type = "gpu",
 	.init = gpu_init,
-	.destroy = poll_destroy,
+	.destroy = charted_destroy,
 	.measure = gpu_measure,
 	.render = gpu_render,
 	.tooltip = gpu_tooltip,
@@ -1058,6 +1073,7 @@ static void nm_update(struct widget *w) {
 
 static void nm_init(struct widget *w) {
 	poll_init(w, 2, nm_update, sizeof(struct nm_state));
+	info_flyout_record(w);
 }
 
 static void nm_rate_text(double kbps, char *buffer, size_t size) {
@@ -1120,7 +1136,7 @@ static char *nm_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_net = {
 	.type = "net",
 	.init = nm_init,
-	.destroy = poll_destroy,
+	.destroy = charted_destroy,
 	.measure = nm_measure,
 	.render = nm_render,
 	.tooltip = nm_tooltip,
@@ -1271,6 +1287,7 @@ static void power_update(struct widget *w) {
 
 static void power_init(struct widget *w) {
 	poll_init(w, 5, power_update, sizeof(struct power_state));
+	info_flyout_record(w);
 }
 
 static char *power_text(struct widget *w) {
@@ -1318,7 +1335,7 @@ static char *power_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_power = {
 	.type = "power",
 	.init = power_init,
-	.destroy = poll_destroy,
+	.destroy = charted_destroy,
 	.measure = power_measure,
 	.render = power_render,
 	.tooltip = power_tooltip,

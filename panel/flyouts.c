@@ -332,6 +332,7 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 #define NET_SECRET 26 // the line showing the password of a saved network
 #define NET_MESSAGE 56
 #define NET_DETAILS 46
+#define NET_LINK 20 // the line of the Wi-Fi link below them
 
 enum {
 	NET_HS_TOGGLE = 1,
@@ -391,6 +392,8 @@ struct net_flyout {
 	double rx_rate, tx_rate; // bytes per second
 	bool have_rate;
 	struct loop_timer *stats_timer;
+	struct wifi_link link; // the Wi-Fi connection now: channel and rates
+	bool have_link;
 	char copied[INET6_ADDRSTRLEN]; // the address just copied, shown for a moment
 	struct timespec copied_at;
 };
@@ -447,7 +450,8 @@ static int net_visible_rows(struct net_flyout *f) {
 }
 
 static int net_height(struct net_flyout *f) {
-	int h = NET_HEADER + 1 + (f->iface[0] ? NET_DETAILS + 1 : 0);
+	int h = NET_HEADER + 1 + (f->iface[0] ? NET_DETAILS + 1 : 0) +
+		(f->iface[0] && f->have_link ? NET_LINK : 0);
 	if (net_list_shown(f)) {
 		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
 			(net_secret_shown(f) ? NET_SECRET : 0);
@@ -987,6 +991,9 @@ static void net_stats_sample(struct net_flyout *f) {
 	f->rx_bytes = rx;
 	f->tx_bytes = tx;
 	f->sampled = now;
+	// the Wi-Fi link: the channel it is on and the rates it runs at right now
+	f->have_link = f->wifi_device && f->wifi_enabled &&
+		wifi_link_info(f->wifi_device, &f->link);
 }
 
 static void net_stats_tick(void *data) {
@@ -1103,6 +1110,19 @@ static void net_render(struct popup *p, cairo_t *cr) {
 			snprintf(usage, sizeof(usage), "↓ %s    ↑ %s    %s", down, up, f->iface);
 		}
 		pd_text(cr, st.font, usage, x0, y + 23, cw, 20, st.dim, PD_LEFT);
+		if (f->have_link) {
+			char link[160], tx[32] = "", rx[32] = "";
+			if (f->link.tx > 0) {
+				snprintf(tx, sizeof(tx), "  \u2191 %.0f", f->link.tx);
+			}
+			if (f->link.rx > 0) {
+				snprintf(rx, sizeof(rx), "  \u2193 %.0f", f->link.rx);
+			}
+			snprintf(link, sizeof(link), "%.1f GHz \u00b7 channel %d \u00b7 %d MHz    Link%s%s Mbit/s",
+				f->link.freq / 1000.0, wifi_channel(f->link.freq), f->link.width, rx, tx);
+			pd_text(cr, st.font, link, x0, y + 43, cw, 20, st.dim, PD_LEFT);
+			y += NET_LINK;
+		}
 		y += NET_DETAILS;
 		draw_line(cr, &st, p, y);
 		y += 1;
@@ -2876,6 +2896,80 @@ static char *default_task_manager(struct panel *panel) {
 	return strdup("exec $taskmanager");
 }
 
+/*
+ * The last minute of CPU and memory use, read once a second for as long as a
+ * CPU or memory widget is on the taskbar (the whole processor and /proc/meminfo
+ * only, which costs next to nothing), so their charts are full the moment the
+ * flyouts open instead of starting from nothing.
+ */
+static struct {
+	int users;
+	struct panel *panel;
+	struct loop_timer *timer;
+	unsigned long long total, idle;
+	int cpu[CPU_HISTORY_LEN], cpu_len;
+	int mem[CPU_HISTORY_LEN], mem_len;
+} rec;
+
+static void rec_push(int *history, int *len, int value) {
+	if (*len == CPU_HISTORY_LEN) {
+		memmove(history, history + 1, (CPU_HISTORY_LEN - 1) * sizeof(int));
+		(*len)--;
+	}
+	history[(*len)++] = value;
+}
+
+static void rec_tick(void *data) {
+	rec.timer = NULL;
+	FILE *file = fopen("/proc/stat", "r");
+	unsigned long long v[8] = { 0 };
+	if (file) {
+		if (fscanf(file, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2],
+				&v[3], &v[4], &v[5], &v[6], &v[7]) >= 4) {
+			unsigned long long idle = v[3] + v[4], total = 0;
+			for (int i = 0; i < 8; i++) {
+				total += v[i];
+			}
+			if (rec.total && total > rec.total) {
+				unsigned long long di = idle >= rec.idle ? idle - rec.idle : 0;
+				rec_push(rec.cpu, &rec.cpu_len,
+					(int)(100 - di * 100 / (total - rec.total)));
+			}
+			rec.total = total;
+			rec.idle = idle;
+		}
+		fclose(file);
+	}
+	file = fopen("/proc/meminfo", "r");
+	if (file) {
+		char line[128];
+		long long total = 0, available = -1;
+		while (fgets(line, sizeof(line), file) && (total == 0 || available < 0)) {
+			sscanf(line, "MemTotal: %lld", &total);
+			sscanf(line, "MemAvailable: %lld", &available);
+		}
+		fclose(file);
+		if (total > 0 && available >= 0) {
+			rec_push(rec.mem, &rec.mem_len, (int)((total - available) * 100 / total));
+		}
+	}
+	rec.timer = loop_add_timer(rec.panel->loop, 1000, rec_tick, NULL);
+}
+
+void flyout_history_hold(struct panel *panel) {
+	if (rec.users++ == 0) {
+		rec.panel = panel;
+		rec_tick(NULL);
+	}
+}
+
+void flyout_history_release(void) {
+	if (rec.users > 0 && --rec.users == 0 && rec.timer) {
+		loop_remove_timer(rec.panel->loop, rec.timer);
+		rec.timer = NULL;
+	}
+}
+
 void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const char *task_manager) {
 	if (popup_is_open(panel, POPUP_CPU)) {
 		popup_close_all(panel);
@@ -2885,6 +2979,8 @@ void flyout_cpu_toggle(struct panel *panel, struct popup_anchor anchor, const ch
 	f->base.panel = panel;
 	f->base.anchor = anchor;
 	f->base.settings = task_manager ? strdup(task_manager) : default_task_manager(panel);
+	memcpy(f->history, rec.cpu, sizeof(int) * rec.cpu_len); // the last minute, kept meanwhile
+	f->history_len = rec.cpu_len;
 	cpu_sample(f);
 	if (!flyout_open(&f->base, POPUP_CPU, cpu_height(f), &cpu_vtable, f)) {
 		free(f->samples);
@@ -3294,6 +3390,9 @@ void flyout_memory_toggle(struct panel *panel, struct popup_anchor anchor,
 	f->base.panel = panel;
 	f->base.anchor = anchor;
 	f->base.settings = task_manager ? strdup(task_manager) : default_task_manager(panel);
+	int kept = rec.mem_len < MEM_HISTORY_LEN ? rec.mem_len : MEM_HISTORY_LEN;
+	memcpy(f->history, rec.mem + rec.mem_len - kept, sizeof(int) * kept);
+	f->history_len = kept;
 	mem_sample(f);
 	if (!flyout_open(&f->base, POPUP_MEMORY, mem_height(f), &mem_vtable, f)) {
 		free(f->base.settings);

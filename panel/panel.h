@@ -588,6 +588,12 @@ void flyout_memory_toggle(struct panel *panel, struct popup_anchor anchor,
  * (disk, gpu, net, storage, power, keyboard, title, git and script widgets).
  */
 void info_flyout_toggle(struct widget *w, struct popup_anchor anchor);
+/* Keeps reading the figures of a widget's flyout while it is closed, for its chart. */
+void info_flyout_record(struct widget *w);
+void info_flyout_forget(struct widget *w);
+/* The last minute of CPU and memory use, kept while their widgets are on the taskbar. */
+void flyout_history_hold(struct panel *panel);
+void flyout_history_release(void);
 /* custom.c and git.c, for their flyouts */
 void custom_run_now(struct widget *w);
 const char *custom_output(struct widget *w);

@@ -108,6 +108,9 @@ static struct nlattr *put_attr(struct nlmsghdr *msg, uint16_t type, const void *
 }
 
 static bool nl_send(struct nl *nl, int type, int flags, int cmd, int ifindex, bool split) {
+	if (nl->family <= 0 && type != GENL_ID_CTRL) {
+		return false;
+	}
 	char buf[256] = { 0 };
 	struct nlmsghdr *msg = (struct nlmsghdr *)buf;
 	msg->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
@@ -480,4 +483,95 @@ int wifi_scan_aps(const char *ifname, struct wifi_ap **out) {
 	close(nl.fd);
 	*out = ctx.aps;
 	return ctx.count;
+}
+
+/* ---------- the link now ---------- */
+
+int wifi_channel(int freq) {
+	if (freq == 2484) {
+		return 14;
+	}
+	if (freq >= 5955) {
+		return (freq - 5950) / 5;
+	}
+	if (freq >= 4900) {
+		return (freq - 5000) / 5;
+	}
+	return (freq - 2407) / 5;
+}
+
+static int width_mhz(uint32_t width) {
+	switch (width) {
+	case NL80211_CHAN_WIDTH_40: return 40;
+	case NL80211_CHAN_WIDTH_80: return 80;
+	case NL80211_CHAN_WIDTH_80P80:
+	case NL80211_CHAN_WIDTH_160: return 160;
+	case NL80211_CHAN_WIDTH_320: return 320;
+	default: return 20;
+	}
+}
+
+static void interface_handler(struct nlattr *attrs, int len, void *data) {
+	struct wifi_link *link = data;
+	FOR_ATTRS(a, attrs, len) {
+		if (attr_type(a) == NL80211_ATTR_WIPHY_FREQ && attr_len(a) >= 4) {
+			memcpy(&link->freq, attr_data(a), 4);
+		} else if (attr_type(a) == NL80211_ATTR_CHANNEL_WIDTH && attr_len(a) >= 4) {
+			uint32_t w;
+			memcpy(&w, attr_data(a), 4);
+			link->width = width_mhz(w);
+		}
+	}
+}
+
+/* A rate of NL80211_STA_INFO_[TR]X_BITRATE, in Mbit/s. */
+static double bitrate(struct nlattr *rate) {
+	double mbit = 0;
+	FOR_ATTRS(r, attr_data(rate), attr_len(rate)) {
+		if (attr_type(r) == NL80211_RATE_INFO_BITRATE32 && attr_len(r) >= 4) {
+			uint32_t v;
+			memcpy(&v, attr_data(r), 4);
+			mbit = v / 10.0; // in 100 kbit/s
+		} else if (attr_type(r) == NL80211_RATE_INFO_BITRATE && attr_len(r) >= 2 && mbit == 0) {
+			uint16_t v;
+			memcpy(&v, attr_data(r), 2);
+			mbit = v / 10.0;
+		}
+	}
+	return mbit;
+}
+
+static void station_handler(struct nlattr *attrs, int len, void *data) {
+	struct wifi_link *link = data;
+	FOR_ATTRS(a, attrs, len) {
+		if (attr_type(a) != NL80211_ATTR_STA_INFO) {
+			continue;
+		}
+		FOR_ATTRS(i, attr_data(a), attr_len(a)) {
+			if (attr_type(i) == NL80211_STA_INFO_TX_BITRATE) {
+				link->tx = bitrate(i);
+			} else if (attr_type(i) == NL80211_STA_INFO_RX_BITRATE) {
+				link->rx = bitrate(i);
+			}
+		}
+	}
+}
+
+bool wifi_link_info(const char *ifname, struct wifi_link *out) {
+	memset(out, 0, sizeof(*out));
+	int ifindex = (int)if_nametoindex(ifname);
+	struct nl nl;
+	if (!ifindex || !nl_open(&nl)) {
+		return false;
+	}
+	if (nl_send(&nl, nl.family, 0, NL80211_CMD_GET_INTERFACE, ifindex, false)) {
+		nl_receive(&nl, interface_handler, out);
+	}
+	// the station of a client is the access point it is connected to
+	if (out->freq && nl_send(&nl, nl.family, NLM_F_DUMP, NL80211_CMD_GET_STATION, ifindex,
+			false)) {
+		nl_receive(&nl, station_handler, out);
+	}
+	close(nl.fd);
+	return out->freq > 0 && (out->tx > 0 || out->rx > 0);
 }
