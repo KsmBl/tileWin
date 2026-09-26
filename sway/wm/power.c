@@ -407,6 +407,50 @@ static void set_inhibitor(int *fd, bool want, const char *what, const char *why,
 
 /* ---------- actions ---------- */
 
+/* Whether logind can do a sleep verb (CanHibernate etc.); true when there is nobody to ask. */
+static bool logind_can(const char *method) {
+#if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
+	sd_bus *bus = system_bus();
+	if (!bus) {
+		return true;
+	}
+	sd_bus_message *reply = NULL;
+	sd_bus_error error = SD_BUS_ERROR_NULL;
+	const char *answer = NULL;
+	bool can = true;
+	if (sd_bus_call_method(bus, "org.freedesktop.login1", "/org/freedesktop/login1",
+			"org.freedesktop.login1.Manager", method, &error, &reply, "") >= 0 &&
+			sd_bus_message_read(reply, "s", &answer) >= 0 && answer) {
+		// "challenge" asks for a password, which systemctl does
+		can = strcmp(answer, "yes") == 0 || strcmp(answer, "challenge") == 0;
+		if (!can) {
+			sway_log(SWAY_ERROR, "logind says %s: %s", method, answer);
+		}
+	}
+	sd_bus_error_free(&error);
+	sd_bus_message_unref(reply);
+	handle_bus(-1, 0, NULL);
+	return can;
+#else
+	return true;
+#endif
+}
+
+/* Hibernate or hybrid sleep, or sleep when the computer cannot save to disk (no swap
+ * partition or file big enough, no resume device, secure boot lockdown...), so the key
+ * or the lid still does something and the work stays in memory. The "||" catches a
+ * refusal logind did not foresee. */
+static void sleep_to_disk(const char *method, const char *verb) {
+	if (!logind_can(method)) {
+		sway_log(SWAY_ERROR, "This computer cannot %s, sleeping instead", verb);
+		spawn("systemctl suspend");
+		return;
+	}
+	char *cmd = format_str("systemctl %s || systemctl suspend", verb);
+	spawn(cmd);
+	free(cmd);
+}
+
 /* The actions the lid and the power key share; false for screen_off, which differs. */
 static bool run_action(enum tw_power_action action) {
 	switch (action) {
@@ -417,10 +461,10 @@ static bool run_action(enum tw_power_action action) {
 		spawn("systemctl suspend");
 		return true;
 	case TW_POWER_HIBERNATE:
-		spawn("systemctl hibernate");
+		sleep_to_disk("CanHibernate", "hibernate");
 		return true;
 	case TW_POWER_HYBRID_SLEEP:
-		spawn("systemctl hybrid-sleep");
+		sleep_to_disk("CanHybridSleep", "hybrid-sleep");
 		return true;
 	case TW_POWER_LOCK:
 		spawn(config->tw_lock_command);

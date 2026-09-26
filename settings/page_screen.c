@@ -879,6 +879,42 @@ static const char *const lid_labels[] = { "System default", "Do nothing", "Sleep
 	"Hibernate", "Hybrid sleep", "Lock the screen", "Turn off the screen", "Shut down", NULL };
 static const char *const lid_names[2] = { "closed", "docked" };
 
+/* Whether logind can do a sleep verb; true when there is nobody to ask. */
+static bool logind_can(const char *method) {
+	GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
+	if (!bus) {
+		return true;
+	}
+	GVariant *reply = g_dbus_connection_call_sync(bus, "org.freedesktop.login1",
+		"/org/freedesktop/login1", "org.freedesktop.login1.Manager", method, NULL,
+		G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 1000, NULL, NULL);
+	g_object_unref(bus);
+	if (!reply) {
+		return true;
+	}
+	const char *answer = NULL;
+	g_variant_get(reply, "(&s)", &answer);
+	bool can = strcmp(answer, "yes") == 0 || strcmp(answer, "challenge") == 0;
+	g_variant_unref(reply);
+	return can;
+}
+
+/* The lid and power key choices; what the computer cannot do says that it sleeps instead,
+ * which is what tileWin does then (e.g. hibernate without a swap partition or file). */
+static GtkWidget *power_action_dropdown(void) {
+	static const char *labels[G_N_ELEMENTS(lid_labels)];
+	if (!labels[0]) { // logind is asked once
+		memcpy(labels, lid_labels, sizeof(labels));
+		if (!logind_can("CanHibernate")) {
+			labels[3] = "Hibernate (not set up here, sleeps)";
+		}
+		if (!logind_can("CanHybridSleep")) {
+			labels[4] = "Hybrid sleep (not set up here, sleeps)";
+		}
+	}
+	return gtk_drop_down_new_from_strings(labels);
+}
+
 static void on_idle(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	struct screen_page *p = data;
 	if (p->updating) {
@@ -1286,7 +1322,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 		"Sleep keeps the work in memory and wakes up at once. Hibernate saves it to the disk "
 		"and turns the computer off. Hybrid sleep does both, so the work survives when the "
 		"battery runs out.");
-	p->power_key_dd = gtk_drop_down_new_from_strings(lid_labels);
+	p->power_key_dd = power_action_dropdown();
 	g_signal_connect(p->power_key_dd, "notify::selected", G_CALLBACK(on_power_key), p);
 	ui_row(lid, "When I press the power button", "System default usually is shut down",
 		p->power_key_dd);
@@ -1294,7 +1330,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 		const char *titles[2] = { "When I close the lid",
 			"When I close the lid with a screen connected" };
 		for (int i = 0; i < 2; i++) {
-			p->lid_dd[i] = gtk_drop_down_new_from_strings(lid_labels);
+			p->lid_dd[i] = power_action_dropdown();
 			g_object_set_data(G_OBJECT(p->lid_dd[i]), "which", GINT_TO_POINTER(i));
 			g_signal_connect(p->lid_dd[i], "notify::selected", G_CALLBACK(on_lid), p);
 			ui_row(lid, titles[i], i == 0 ? "System default usually is sleep" :
