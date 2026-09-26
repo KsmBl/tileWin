@@ -16,9 +16,14 @@
 #define FADE 0.8
 #define FONT "Segoe UI, Inter, Noto Sans, Cantarell, sans-serif"
 
+#define BLOOM_SCALE 8 // the background is drawn this much smaller, and scaled up
+
 struct ad {
 	int width, height;
 	double u, t;
+	cairo_surface_t *bloom; // the soft background, small
+	cairo_surface_t *backdrop; // and scaled up to the screen, made again now and then
+	double backdrop_t;
 };
 
 /* ---------- helpers ---------- */
@@ -89,7 +94,33 @@ static void rounded(cairo_t *cr, double x, double y, double w, double h, double 
 
 /* ---------- the background: the soft coloured bloom every ad has ---------- */
 
-static void draw_background(struct ad *s, cairo_t *cr) {
+/*
+ * The soft coloured glow behind it all. It has no edges, so it is drawn an
+ * eighth of the size and scaled up: full size, four gradients over the whole
+ * screen took the software renderer longer than a frame lasts. It drifts so
+ * slowly that making it four times a second is as good as every frame; the
+ * frames between only copy it.
+ */
+static void draw_background(struct ad *s, cairo_t *screen) {
+	if (s->backdrop && s->t - s->backdrop_t < 0.25 && s->t >= s->backdrop_t) {
+		cairo_save(screen);
+		cairo_set_source_surface(screen, s->backdrop, 0, 0);
+		cairo_set_operator(screen, CAIRO_OPERATOR_SOURCE);
+		cairo_paint(screen);
+		cairo_restore(screen);
+		return;
+	}
+	s->backdrop_t = s->t;
+	if (!s->backdrop) {
+		s->backdrop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, s->width, s->height);
+	}
+	cairo_t *out = cairo_create(s->backdrop);
+	if (!s->bloom) {
+		s->bloom = cairo_image_surface_create(CAIRO_FORMAT_RGB24,
+			s->width / BLOOM_SCALE + 2, s->height / BLOOM_SCALE + 2);
+	}
+	cairo_t *cr = cairo_create(s->bloom);
+	cairo_scale(cr, 1.0 / BLOOM_SCALE, 1.0 / BLOOM_SCALE);
 	double W = s->width, H = s->height, t = s->t;
 	cairo_pattern_t *bg = cairo_pattern_create_linear(0, 0, W, H);
 	cairo_pattern_add_color_stop_rgb(bg, 0, 0.03, 0.05, 0.14);
@@ -113,7 +144,17 @@ static void draw_background(struct ad *s, cairo_t *cr) {
 		cairo_paint(cr);
 		cairo_pattern_destroy(p);
 	}
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	cairo_destroy(cr);
+	cairo_surface_mark_dirty(s->bloom);
+	cairo_save(out);
+	cairo_scale(out, BLOOM_SCALE, BLOOM_SCALE);
+	cairo_set_source_surface(out, s->bloom, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(out), CAIRO_FILTER_BILINEAR);
+	cairo_set_operator(out, CAIRO_OPERATOR_SOURCE);
+	cairo_paint(out);
+	cairo_restore(out);
+	cairo_destroy(out);
+	draw_background(s, screen); // and onto the screen
 }
 
 /* ---------- scene 1: the logo, melting ---------- */
@@ -491,7 +532,14 @@ static void ad_draw(void *state, cairo_t *cr, int width, int height, double dt) 
 }
 
 static void ad_destroy(void *state) {
-	free(state);
+	struct ad *s = state;
+	if (s->bloom) {
+		cairo_surface_destroy(s->bloom);
+	}
+	if (s->backdrop) {
+		cairo_surface_destroy(s->backdrop);
+	}
+	free(s);
 }
 
 const struct saver saver_ad = {
