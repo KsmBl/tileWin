@@ -13,16 +13,19 @@
  * Diggers: little miners in yellow helmets run about over the desktop and dig
  * into the windows that are open on it, looking for what is inside. They
  * walk on the tops of the windows and on the bottom of the screen, fall off
- * edges, and tunnel down, sideways and at a slant with their picks; now and
- * then one strikes something (a page, a letter of the window's title, a gem,
+ * edges, and dig like a real mine: level drifts one above the other, joined
+ * by straight shafts. Now and then one strikes something (a page, a letter of the window's title, a gem,
  * a folder, a note, a picture) and carries it off in triumph. A miner done
  * digging deep in a window hammers a wooden staircase together, step by step,
- * to climb back up to its top. One of them always carries dynamite: he plants
+ * up a narrow stairwell to its top. One of them always carries dynamite: he plants
  * a bundle against a window, runs, and the blast tears a crater into it,
  * knocks the others off their feet and now and then turns up a find. The
  * taskbar is solid ground: they walk on it, but no pick, stair or blast gets
  * through it. When the windows leave no room to walk, they climb in at the edges of the screen
- * and dig their way in from there.
+ * and dig their way in from there. When the windows are dug out enough, a huge
+ * drilling machine pushes in from a side and grinds all of it away, throwing
+ * the miners off the screen; then helicopters fly the windows back in, slab by
+ * slab, and the miners parachute in again one by one.
  *
  * The windows are the real ones: tileWin tells where they are, the saver is
  * drawn over the desktop, and the tunnels are dark holes in the windows.
@@ -40,6 +43,12 @@
 #define FALLING_MAX 60
 #define TARGET_PATIENCE 30 // seconds before a miner gives up on a spot
 #define BLAST_TIME 1.8
+#define MINE_LEVEL 2.6         // miner heights between the drifts of a mine
+#define MINE_COLUMN 5.0        // and between its shafts
+#define STAIRWELL 1.9          // how wide a staircase's shaft is, in miner heights
+#define SLABS_MAX 256          // the pieces the helicopters bring the windows back in
+#define HELIS_MAX 4
+#define DRILL_TIME 7.0         // seconds the drilling machine takes across the screen
 
 enum man_state {
 	MAN_FALL,
@@ -89,6 +98,34 @@ struct man {
 	int stair;         // the staircase it builds, -1 for none
 	double hx, hy;     // where the grappling hook caught, on the edge of a ledge
 	double ledge_x;    // where to step off the rope onto the ledge
+	bool flung;        // hit by the drilling machine: off the screen and gone
+};
+
+/* A piece of a window the helicopters bring back: a band of it across its width. */
+struct slab {
+	int window;
+	double x, y, w, h;
+};
+
+enum heli_phase {
+	HELI_IN,     // flying in with the slab under it
+	HELI_LOWER,  // letting it down into its place
+	HELI_OUT,    // and away, lighter
+};
+
+struct heli {
+	bool alive;
+	enum heli_phase phase;
+	int slab;
+	int dir;           // the way it flies
+	double t, time;    // into the phase, and how long it takes
+	double x0, y0, x, y;
+};
+
+enum renovation {
+	RENO_NONE,
+	RENO_DRILL,  // the drilling machine grinds everything away
+	RENO_HELIS,  // the helicopters bring the windows back
 };
 
 struct plank {
@@ -171,6 +208,13 @@ struct diggers {
 	struct falling falling[FALLING_MAX];
 	double clock;           // seconds since the start, never reset
 	int dirt_next;
+	enum renovation reno;
+	double drill_x;         // the tip of the drilling machine
+	int drill_dir;          // the way it goes
+	struct slab slabs[SLABS_MAX];
+	int slab_count, slab_next, slabs_placed;
+	struct heli helis[HELIS_MAX];
+	double heli_wait;       // until the next helicopter takes off
 };
 
 struct man;
@@ -669,6 +713,16 @@ static bool start_build(struct diggers *s, struct man *m, double goal_y) {
 	if (room < needed && (m->dir > 0 ? room_left : room_right) > room) {
 		m->dir = -m->dir;
 	}
+	// the flights turn in a narrow stairwell, a straight shaft up, instead of cutting
+	// across the whole window
+	double well = s->h * STAIRWELL, margin = s->h * 0.45;
+	if (m->dir > 0) {
+		right = fmin(right, m->x + well + margin);
+		left = fmax(left, right - well - 2 * margin - s->h * 0.2);
+	} else {
+		left = fmax(left, m->x - well - margin);
+		right = fmin(right, left + well + 2 * margin + s->h * 0.2);
+	}
 	m->state = MAN_BUILD;
 	m->top = top;
 	m->left = left;
@@ -827,7 +881,16 @@ static void build_step(struct diggers *s, struct man *m) {
 		nx = m->x + m->dir * step_w;
 	}
 	double ny = m->y - step_h;
-	dig(s, nx, ny - h * 0.55, h * 0.55); // through the window, where the stairs cut it
+	if (m->right > m->left) {
+		// the whole width of the stairwell, so it is one straight shaft up through the
+		// window and not a zigzag of diagonal cuts
+		for (double x = m->left + margin - h * 0.15; x <= m->right - margin + h * 0.15;
+				x += h * 0.35) {
+			dig(s, x, ny - h * 0.55, h * 0.55);
+		}
+	} else {
+		dig(s, nx, ny - h * 0.55, h * 0.55); // through the window, where the stairs cut it
+	}
 	if (m->stair < 0) {
 		m->stair = new_stair(s, m);
 	}
@@ -931,8 +994,16 @@ static void pick_target(struct diggers *s, struct man *m) {
 	double best = -1;
 	for (int tries = 0; tries < 40 && s->window_count; tries++) {
 		struct window_box *b = &s->windows[(int)(saver_random() * s->window_count)];
-		double x = b->x + saver_between(0.1, 0.9) * b->w;
-		double y = b->y + saver_between(0.25, 0.95) * b->h;
+		// like a mine: level drifts one above the other, joined by shafts in columns, so
+		// the tunnels run straight and in parallel
+		int columns = (int)((b->w - s->h * 1.4) / (s->h * MINE_COLUMN)) + 1;
+		int levels = (int)((b->h - s->h * 1.6) / (s->h * MINE_LEVEL)) + 1;
+		double x = b->x + s->h * 0.7 + (int)(saver_random() * columns) * s->h * MINE_COLUMN;
+		double y = b->y + s->h * 1.6 + (int)(saver_random() * levels) * s->h * MINE_LEVEL -
+			s->h * 0.56;
+		if (x > b->x + b->w - s->h * 0.5) {
+			continue; // a window too narrow for a column
+		}
 		if (!soil_at(s, x, y) || rock_at(s, x, y)) {
 			continue;
 		}
@@ -1071,6 +1142,12 @@ static void man_step(struct diggers *s, struct man *m, double dt) {
 	switch (m->state) {
 	case MAN_FALL:
 		m->vy += s->u * 700 * dt;
+		if (m->flung) {
+			// through the air, through everything, off the screen
+			m->x += m->vx * dt;
+			m->y += m->vy * dt;
+			break;
+		}
 		if (m->vy > 0) {
 			m->fall += m->vy * dt;
 		}
@@ -1189,10 +1266,9 @@ static void man_step(struct diggers *s, struct man *m, double dt) {
 					start_hook(s, m)) {
 				// the spot is up there: over the wall by rope
 			} else if (soil_at(s, front, m->y - h * 0.5)) {
-				// on through the wall, slanting towards the spot it digs for
-				double slope = m->target ? (m->ty - (m->y - h * 0.5)) /
-					fmax(fabs(m->tx - m->x), h) : 0;
-				start_dig(s, m, m->dir, saver_clamp(slope, -0.6, 0.8));
+				// on through the wall, level like a drift of a mine; up or down to the spot
+				// it goes by a shaft when it is right above or below it
+				start_dig(s, m, m->dir, 0);
 			} else {
 				m->dir = -m->dir;
 				m->target_age += 4; // in the way: sooner another spot
@@ -1673,9 +1749,9 @@ static void draw_man(struct diggers *s, cairo_t *cr, struct man *m) {
 	}
 }
 
-static void draw_windows(struct diggers *s, cairo_t *cr) {
+static void draw_window(struct diggers *s, cairo_t *cr, int i) {
 	double u = s->u;
-	for (int i = 0; i < s->window_count; i++) {
+	{
 		struct window_box *b = &s->windows[i];
 		double bar = u * 26;
 		cairo_rectangle(cr, b->x, b->y, b->w, b->h);
@@ -1704,6 +1780,386 @@ static void draw_windows(struct diggers *s, cairo_t *cr) {
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 	}
+}
+
+static void draw_windows(struct diggers *s, cairo_t *cr) {
+	for (int i = 0; i < s->window_count; i++) {
+		draw_window(s, cr, i);
+	}
+}
+
+/* ---------- the renovation: the drilling machine and the helicopters ---------- */
+
+static double drill_length(struct diggers *s) {
+	return s->h * 9; // the cutter and the body behind it
+}
+
+static void start_renovation(struct diggers *s) {
+	s->reno = RENO_DRILL;
+	s->drill_dir = saver_random() < 0.5 ? 1 : -1;
+	s->drill_x = s->drill_dir > 0 ? 0 : s->width;
+	for (int i = 0; i < BOMBS_MAX; i++) {
+		s->bombs[i].alive = false;
+	}
+}
+
+/* Everything behind the tip: soil ground away, stairs torn down, miners thrown off. */
+static void drill_step(struct diggers *s, double dt) {
+	int d = s->drill_dir;
+	double from = s->drill_x;
+	s->drill_x += d * (s->width + drill_length(s)) / DRILL_TIME * dt;
+	double x0 = fmin(from, s->drill_x), x1 = fmax(from, s->drill_x);
+	int taken = 0;
+	int cx0 = (int)floor(x0 / s->cell), cx1 = (int)ceil(x1 / s->cell);
+	for (int cx = cx0 < 0 ? 0 : cx0; cx < cx1 && cx < s->gw; cx++) {
+		for (int cy = 0; cy < s->gh; cy++) {
+			int k = cell_index(s, cx, cy);
+			if (s->soil[k] && !s->dug[k]) {
+				s->dug[k] = 1;
+				taken++;
+			}
+		}
+	}
+	if (taken) {
+		s->dug_cells += taken;
+		cairo_surface_t *masks[3] = { s->mask_hole, s->mask_band, s->mask_line };
+		for (int i = 0; i < 3; i++) {
+			cairo_t *mc = cairo_create(masks[i]);
+			cairo_rectangle(mc, floor(x0) - 1, 0, ceil(x1) - floor(x0) + 2, s->height);
+			cairo_fill(mc);
+			cairo_destroy(mc);
+		}
+		redraw_tunnels(s, floor(x0) - 2, 0, ceil(x1) - floor(x0) + 4, s->height);
+		// the dirt flies from the teeth where they bite
+		for (int n = 0; n < 4; n++) {
+			double y = saver_random() * s->height;
+			if (s->soil[cell_index(s, (int)saver_clamp(s->drill_x / s->cell, 0, s->gw - 1),
+					(int)saver_clamp(y / s->cell, 0, s->gh - 1))]) {
+				dirt_spray(s, s->drill_x, y, 2);
+			}
+		}
+	}
+	for (int i = 0; i < STAIRS_MAX; i++) {
+		struct stair *st = &s->stairs[i];
+		for (int k = 0; st->alive && k < st->count; k++) {
+			double px = (st->planks[k].x0 + st->planks[k].x1) / 2;
+			if ((px - s->drill_x) * d < 0) {
+				remove_stair(s, i, true);
+				break;
+			}
+		}
+	}
+	for (int i = 0; i < s->men_count; i++) {
+		struct man *m = &s->men[i];
+		if (!m->flung && (m->x - s->drill_x) * d < s->h * 0.3) {
+			m->flung = true;
+			m->state = MAN_FALL;
+			m->carry = -1;
+			m->chute = 0;
+			m->vy = -s->u * saver_between(450, 750);
+			m->vx = d * s->u * saver_between(350, 600);
+		}
+	}
+	if ((s->drill_x - d * drill_length(s)) * d > (d > 0 ? s->width : 0) * d) {
+		// through and out on the other side: the windows come back in pieces
+		s->reno = RENO_HELIS;
+		s->slab_count = s->slab_next = s->slabs_placed = 0;
+		for (int i = 0; i < s->window_count; i++) {
+			struct window_box *b = &s->windows[i];
+			int n = (int)saver_clamp(ceil(b->h / (s->h * 4)), 1, 8);
+			for (int k = n - 1; k >= 0 && s->slab_count < SLABS_MAX; k--) {
+				// from the bottom up, each piece resting on the last
+				s->slabs[s->slab_count++] = (struct slab){ i, b->x, b->y + b->h * k / n, b->w,
+					b->h / n };
+			}
+		}
+		s->heli_wait = 0.5;
+	}
+}
+
+/* A slab set into its place: that band of the window is whole again. */
+static void place_slab(struct diggers *s, struct slab *sl) {
+	int x0 = (int)floor(sl->x / s->cell), x1 = (int)ceil((sl->x + sl->w) / s->cell);
+	int y0 = (int)floor(sl->y / s->cell), y1 = (int)ceil((sl->y + sl->h) / s->cell);
+	for (int cy = y0 < 0 ? 0 : y0; cy < y1 && cy < s->gh; cy++) {
+		for (int cx = x0 < 0 ? 0 : x0; cx < x1 && cx < s->gw; cx++) {
+			int k = cell_index(s, cx, cy);
+			if (s->soil[k] && s->dug[k]) {
+				s->dug[k] = 0;
+				s->dug_cells--;
+			}
+		}
+	}
+	cairo_surface_t *masks[3] = { s->mask_hole, s->mask_band, s->mask_line };
+	for (int i = 0; i < 3; i++) {
+		cairo_t *mc = cairo_create(masks[i]);
+		cairo_set_operator(mc, CAIRO_OPERATOR_CLEAR);
+		cairo_rectangle(mc, round(sl->x), round(sl->y), round(sl->w), ceil(sl->h));
+		cairo_fill(mc);
+		cairo_destroy(mc);
+	}
+	redraw_tunnels(s, sl->x - 2, sl->y - 2, sl->w + 4, sl->h + 4);
+	dirt_spray(s, sl->x + sl->w * 0.2, sl->y + sl->h, 3); // a puff of dust as it sets down
+	dirt_spray(s, sl->x + sl->w * 0.8, sl->y + sl->h, 3);
+}
+
+/* How far under the helicopter the slab hangs. */
+static double cable(struct diggers *s) {
+	return s->h * 1.6;
+}
+
+static void helis_step(struct diggers *s, double dt) {
+	double speed = s->width / 3.2;
+	s->heli_wait -= dt;
+	for (int i = 0; i < HELIS_MAX && s->heli_wait <= 0 && s->slab_next < s->slab_count; i++) {
+		struct heli *hl = &s->helis[i];
+		if (hl->alive) {
+			continue;
+		}
+		struct slab *sl = &s->slabs[s->slab_next];
+		*hl = (struct heli){ .alive = true, .phase = HELI_IN, .slab = s->slab_next++ };
+		double tx = sl->x + sl->w / 2, ty = sl->y - cable(s) - s->h * 2;
+		// in from the nearer side, high up, and down to just above the spot
+		hl->dir = tx < s->width / 2 ? 1 : -1;
+		hl->x0 = hl->dir > 0 ? -sl->w / 2 - s->h * 3 : s->width + sl->w / 2 + s->h * 3;
+		hl->y0 = fmin(ty, s->h * 1.5) - s->h * 2;
+		hl->x = hl->x0;
+		hl->y = hl->y0;
+		hl->time = fmax(1.2, fabs(tx - hl->x0) / speed);
+		s->heli_wait = saver_between(0.5, 0.9);
+	}
+	for (int i = 0; i < HELIS_MAX; i++) {
+		struct heli *hl = &s->helis[i];
+		if (!hl->alive) {
+			continue;
+		}
+		struct slab *sl = &s->slabs[hl->slab];
+		double tx = sl->x + sl->w / 2, ty = sl->y - cable(s);
+		hl->t += dt;
+		double f = saver_clamp(hl->t / hl->time, 0, 1), ease = f * f * (3 - 2 * f);
+		switch (hl->phase) {
+		case HELI_IN:
+			hl->x = hl->x0 + (tx - hl->x0) * ease;
+			hl->y = hl->y0 + (ty - s->h * 2 - hl->y0) * ease;
+			if (f >= 1) {
+				hl->phase = HELI_LOWER;
+				hl->t = 0;
+				hl->time = 0.9;
+			}
+			break;
+		case HELI_LOWER:
+			hl->y = ty - s->h * 2 * (1 - ease);
+			if (f >= 1) {
+				place_slab(s, sl);
+				s->slabs_placed++;
+				hl->phase = HELI_OUT;
+				hl->t = 0;
+				hl->x0 = hl->x;
+				hl->y0 = hl->y;
+			}
+			break;
+		case HELI_OUT:
+			// up and away the way it was going
+			hl->x = hl->x0 + hl->dir * speed * hl->t * hl->t * 0.8;
+			hl->y = hl->y0 - s->h * 3 * hl->t;
+			if (hl->x < -s->h * 4 || hl->x > s->width + s->h * 4) {
+				hl->alive = false;
+			}
+			break;
+		}
+	}
+	bool flying = false;
+	for (int i = 0; i < HELIS_MAX; i++) {
+		flying |= s->helis[i].alive;
+	}
+	if (s->slabs_placed >= s->slab_count && !flying) {
+		// all whole again: a fresh start for the miners, who come back one by one
+		s->reno = RENO_NONE;
+		s->age = 0;
+		build_soil(s);
+		s->spawn = 1;
+	}
+}
+
+static void draw_drill(struct diggers *s, cairo_t *cr) {
+	double h = s->h, d = s->drill_dir, tip = s->drill_x, H = s->height;
+	double head = h * 2.2, body = drill_length(s) - head;
+	double back = tip - d * head; // where the cutter meets the body
+	// the body: a big yellow machine with hazard stripes and rivets
+	double bx = d > 0 ? back - body : back;
+	cairo_rectangle(cr, bx, h * 0.6, body, H - h * 1.2);
+	cairo_set_source_rgb(cr, 0.93, 0.72, 0.1);
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgb(cr, 0.3, 0.22, 0.05);
+	cairo_set_line_width(cr, fmax(1.5, s->u * 3));
+	cairo_stroke(cr);
+	for (int band = 0; band < 2; band++) {
+		double by = band == 0 ? h * 0.9 : H - h * 1.5;
+		cairo_save(cr);
+		cairo_rectangle(cr, bx, by, body, h * 0.6);
+		cairo_clip(cr);
+		cairo_set_source_rgb(cr, 0.12, 0.12, 0.12);
+		cairo_paint(cr);
+		cairo_set_source_rgb(cr, 0.98, 0.8, 0.1);
+		for (double x = bx - h; x < bx + body + h; x += h * 0.7) {
+			cairo_move_to(cr, x, by);
+			cairo_line_to(cr, x + h * 0.35, by);
+			cairo_line_to(cr, x + h * 0.95, by + h * 0.6);
+			cairo_line_to(cr, x + h * 0.6, by + h * 0.6);
+			cairo_close_path(cr);
+		}
+		cairo_fill(cr);
+		cairo_restore(cr);
+	}
+	// panels with rivets, and a porthole with the driver in it
+	for (double y = h * 2; y < H - h * 2; y += h * 2.5) {
+		for (int k = 0; k < 3; k++) {
+			cairo_arc(cr, bx + body * (0.2 + 0.3 * k), y, s->u * 3, 0, 2 * M_PI);
+			cairo_set_source_rgb(cr, 0.55, 0.42, 0.08);
+			cairo_fill(cr);
+		}
+	}
+	double px = back - d * body * 0.35, py = H * 0.4;
+	cairo_arc(cr, px, py, h * 0.7, 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 0.3, 0.3, 0.32);
+	cairo_fill(cr);
+	cairo_arc(cr, px, py, h * 0.55, 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 0.55, 0.8, 0.95);
+	cairo_fill(cr);
+	cairo_arc(cr, px, py + h * 0.1, h * 0.22, 0, 2 * M_PI); // the driver, in a helmet
+	cairo_set_source_rgb(cr, 0.95, 0.78, 0.6);
+	cairo_fill(cr);
+	cairo_arc(cr, px, py - h * 0.05, h * 0.24, M_PI, 2 * M_PI);
+	cairo_set_source_rgb(cr, 1, 0.85, 0.1);
+	cairo_fill(cr);
+	// the cutter: a steel drum with teeth that run round and round
+	cairo_rectangle(cr, fmin(back, tip - d * h * 0.6), 0, head - h * 0.6, H);
+	cairo_pattern_t *steel = cairo_pattern_create_linear(back, 0, tip, 0);
+	cairo_pattern_add_color_stop_rgb(steel, 0, 0.35, 0.36, 0.4);
+	cairo_pattern_add_color_stop_rgb(steel, 0.5, 0.75, 0.77, 0.8);
+	cairo_pattern_add_color_stop_rgb(steel, 1, 0.45, 0.46, 0.5);
+	cairo_set_source(cr, steel);
+	cairo_fill(cr);
+	cairo_pattern_destroy(steel);
+	double pitch = h * 0.55, shift = fmod(s->clock * h * 6, pitch);
+	cairo_set_line_width(cr, fmax(1, s->u * 2));
+	for (double y = -pitch + shift; y < H + pitch; y += pitch) {
+		// a groove across the drum, and a tooth sticking out in front
+		double gx = tip - d * h * 0.6;
+		cairo_move_to(cr, back, y + pitch * 0.4);
+		cairo_line_to(cr, gx, y);
+		cairo_set_source_rgba(cr, 0.2, 0.2, 0.24, 0.8);
+		cairo_stroke(cr);
+		cairo_move_to(cr, gx, y - pitch * 0.35);
+		cairo_line_to(cr, tip, y);
+		cairo_line_to(cr, gx, y + pitch * 0.35);
+		cairo_close_path(cr);
+		cairo_set_source_rgb(cr, 0.82, 0.84, 0.88);
+		cairo_fill_preserve(cr);
+		cairo_set_source_rgb(cr, 0.25, 0.25, 0.3);
+		cairo_stroke(cr);
+	}
+	// dust in front of it
+	for (int k = 0; k < 10; k++) {
+		double y = fmod(k * 0.137 * H + s->clock * h * 2 * (k % 3 + 1), H);
+		double r = h * (0.4 + 0.3 * sin(s->clock * 3 + k));
+		cairo_arc(cr, tip + d * h * 0.3, y, r, 0, 2 * M_PI);
+		cairo_set_source_rgba(cr, 0.6, 0.5, 0.38, 0.35);
+		cairo_fill(cr);
+	}
+}
+
+static void draw_heli(struct diggers *s, cairo_t *cr, struct heli *hl) {
+	double k = s->h * 1.35, x = hl->x, y = hl->y, d = hl->dir;
+	struct slab *sl = &s->slabs[hl->slab];
+	if (hl->phase != HELI_OUT) {
+		// the slab on its cables: the piece of the window as it will be
+		double sx = x - sl->w / 2, sy = y + cable(s);
+		cairo_set_source_rgb(cr, 0.2, 0.2, 0.22);
+		cairo_set_line_width(cr, fmax(1, s->u * 1.5));
+		cairo_move_to(cr, x, y + k * 0.62);
+		cairo_line_to(cr, sx + s->u * 4, sy);
+		cairo_move_to(cr, x, y + k * 0.62);
+		cairo_line_to(cr, sx + sl->w - s->u * 4, sy);
+		cairo_stroke(cr);
+		cairo_save(cr);
+		cairo_rectangle(cr, sx, sy, sl->w, sl->h);
+		cairo_clip(cr);
+		cairo_translate(cr, sx - sl->x, sy - sl->y);
+		draw_window(s, cr, sl->window);
+		cairo_restore(cr);
+		cairo_rectangle(cr, sx + 0.5, sy + 0.5, sl->w - 1, sl->h - 1);
+		cairo_set_source_rgb(cr, 0.3, 0.35, 0.45);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	}
+	cairo_set_line_width(cr, fmax(1, s->u * 2));
+	// skids
+	cairo_set_source_rgb(cr, 0.2, 0.2, 0.22);
+	cairo_move_to(cr, x - k * 0.6, y + k * 0.62);
+	cairo_line_to(cr, x + k * 0.7, y + k * 0.62);
+	cairo_move_to(cr, x - k * 0.35, y + k * 0.3);
+	cairo_line_to(cr, x - k * 0.4, y + k * 0.62);
+	cairo_move_to(cr, x + k * 0.35, y + k * 0.3);
+	cairo_line_to(cr, x + k * 0.4, y + k * 0.62);
+	cairo_stroke(cr);
+	// the tail boom, its fin and the rotor on it
+	double tx = x - d * k * 1.9, ty = y - k * 0.2;
+	cairo_move_to(cr, x - d * k * 0.5, y - k * 0.12);
+	cairo_line_to(cr, tx, ty - k * 0.06);
+	cairo_line_to(cr, tx, ty + k * 0.1);
+	cairo_line_to(cr, x - d * k * 0.5, y + k * 0.12);
+	cairo_close_path(cr);
+	cairo_set_source_rgb(cr, 0.8, 0.18, 0.12);
+	cairo_fill(cr);
+	cairo_move_to(cr, tx, ty);
+	cairo_line_to(cr, tx - d * k * 0.15, ty - k * 0.4);
+	cairo_line_to(cr, tx + d * k * 0.15, ty);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+	cairo_arc(cr, tx, ty - k * 0.05, k * 0.3, 0, 2 * M_PI);
+	cairo_set_source_rgba(cr, 0.3, 0.3, 0.3, 0.3);
+	cairo_fill(cr);
+	double a = s->clock * 50;
+	cairo_move_to(cr, tx + cos(a) * k * 0.3, ty - k * 0.05 + sin(a) * k * 0.3);
+	cairo_line_to(cr, tx - cos(a) * k * 0.3, ty - k * 0.05 - sin(a) * k * 0.3);
+	cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
+	cairo_stroke(cr);
+	// the body and the cockpit
+	cairo_save(cr);
+	cairo_translate(cr, x, y);
+	cairo_scale(cr, k * 0.9, k * 0.45);
+	cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
+	cairo_restore(cr);
+	cairo_set_source_rgb(cr, 0.88, 0.22, 0.14);
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgb(cr, 0.4, 0.08, 0.05);
+	cairo_stroke(cr);
+	cairo_save(cr);
+	cairo_translate(cr, x + d * k * 0.42, y - k * 0.06);
+	cairo_scale(cr, k * 0.38, k * 0.28);
+	cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
+	cairo_restore(cr);
+	cairo_set_source_rgb(cr, 0.6, 0.85, 0.98);
+	cairo_fill(cr);
+	// the mast and the main rotor, a blur with a blade going round
+	cairo_move_to(cr, x, y - k * 0.42);
+	cairo_line_to(cr, x, y - k * 0.62);
+	cairo_set_source_rgb(cr, 0.2, 0.2, 0.22);
+	cairo_stroke(cr);
+	cairo_save(cr);
+	cairo_translate(cr, x, y - k * 0.64);
+	cairo_scale(cr, k * 1.7, k * 0.09);
+	cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
+	cairo_restore(cr);
+	cairo_set_source_rgba(cr, 0.3, 0.3, 0.32, 0.3);
+	cairo_fill(cr);
+	double blade = cos(s->clock * 35) * k * 1.7;
+	cairo_move_to(cr, x - blade, y - k * 0.64);
+	cairo_line_to(cr, x + blade, y - k * 0.64);
+	cairo_set_line_width(cr, fmax(1.5, s->u * 3));
+	cairo_set_source_rgb(cr, 0.15, 0.15, 0.17);
+	cairo_stroke(cr);
 }
 
 /* ---------- the saver ---------- */
@@ -1752,6 +2208,9 @@ static void diggers_refresh(struct diggers *s) {
 	}
 	if (!same) {
 		build_soil(s);
+		// other windows: whatever the machine and the helicopters were doing is off
+		s->reno = RENO_NONE;
+		memset(s->helis, 0, sizeof(s->helis));
 	}
 }
 
@@ -1772,13 +2231,19 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 			diggers_refresh(s);
 		}
 	}
-	// after a long while, or with half of it dug out, the windows are whole again
-	if (s->soil_cells && (s->dug_cells > s->soil_cells / 2 || s->age > 300)) {
-		s->age = 0;
-		build_soil(s);
+	// after a long while, or with half of it dug out, the windows are renewed: the
+	// drilling machine clears it all away and the helicopters bring them back
+	if (s->reno == RENO_NONE && s->soil_cells &&
+			(s->dug_cells > s->soil_cells / 2 || s->age > 300)) {
+		start_renovation(s);
+	}
+	if (s->reno == RENO_DRILL) {
+		drill_step(s, dt);
+	} else if (s->reno == RENO_HELIS) {
+		helis_step(s, dt);
 	}
 	s->spawn -= dt;
-	if (s->men_count < s->men_max && s->spawn <= 0) {
+	if (s->reno == RENO_NONE && s->men_count < s->men_max && s->spawn <= 0) {
 		s->spawn = saver_between(0.5, 1.4);
 		man_place(s, &s->men[s->men_count++]);
 	}
@@ -1789,6 +2254,13 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 			double step = fmin(left, 1 / 60.0);
 			man_step(s, &s->men[i], step);
 			left -= step;
+		}
+	}
+	// those the machine threw off the screen are gone
+	for (int i = 0; i < s->men_count; i++) {
+		struct man *m = &s->men[i];
+		if (m->flung && (m->x < -s->h || m->x > s->width + s->h || m->y > s->height + s->h * 2)) {
+			s->men[i--] = s->men[--s->men_count];
 		}
 	}
 
@@ -1851,6 +2323,14 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 	}
 	for (int i = 0; i < s->men_count; i++) {
 		draw_man(s, cr, &s->men[i]);
+	}
+	if (s->reno == RENO_DRILL) {
+		draw_drill(s, cr);
+	}
+	for (int i = 0; i < HELIS_MAX; i++) {
+		if (s->helis[i].alive) {
+			draw_heli(s, cr, &s->helis[i]);
+		}
 	}
 	for (int i = 0; i < BOMBS_MAX; i++) {
 		struct blast *b = &s->blasts[i];
