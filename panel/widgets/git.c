@@ -9,6 +9,14 @@
  * foreground process of its terminal, whose /proc/<pid>/cwd is where the user
  * is. Nothing has to be sourced into a shell, so every shell behaves the same.
  *
+ * Many terminals (xfce4-terminal, GNOME Terminal, Konsole, kitty, foot's
+ * server) run all their windows from one process, with a shell for each. Which
+ * of those shells belongs to the focused window then comes from its title,
+ * which shells set to where they are, whole ("/home/me/src") or shortened the
+ * way fish does it ("~/s/project"): the shell whose directory the title names
+ * wins, or the command it runs when the title names that; failing both, the
+ * one no other window of the terminal claims.
+ *
  * The reading stays on the last repository it saw. Focusing a browser, an
  * editor or a terminal outside a repository leaves what was there on screen,
  * so a diff can be read on one screen while the outstanding work stays legible
@@ -119,33 +127,164 @@ static char *cwd_of(pid_t pid) {
 	return strdup(target);
 }
 
-/* Walks the children of pid, deepest first, for the one holding the terminal. */
-static char *foreground_cwd(pid_t pid, int depth) {
+#define CANDIDATES_MAX 32
+
+/* A process in the foreground of a terminal of the window: one per shell. */
+struct candidate {
+	char *cwd;
+	char comm[32];
+};
+
+/*
+ * Walks the children of pid, deepest first, for those holding a terminal: the
+ * deepest foreground process of each branch, one per shell.
+ */
+static void foreground_candidates(pid_t pid, int depth, struct candidate *out, int *count) {
 	if (depth > 8) {
-		return NULL;
+		return;
 	}
 	char path[64];
 	snprintf(path, sizeof(path), "/proc/%d/task/%d/children", (int)pid, (int)pid);
 	char line[4096] = "";
 	read_first_line(path, line, sizeof(line));
-	for (char *save = NULL, *tok = strtok_r(line, " ", &save); tok;
+	for (char *save = NULL, *tok = strtok_r(line, " ", &save); tok && *count < CANDIDATES_MAX;
 			tok = strtok_r(NULL, " ", &save)) {
 		pid_t child = atoi(tok);
 		if (child <= 0) {
 			continue;
 		}
-		char *deeper = foreground_cwd(child, depth + 1);
-		if (deeper) {
-			return deeper;
+		int before = *count;
+		foreground_candidates(child, depth + 1, out, count);
+		if (*count > before || !is_foreground(child)) {
+			continue; // something deeper holds this terminal
 		}
-		if (is_foreground(child)) {
-			char *dir = cwd_of(child);
-			if (dir) {
-				return dir;
+		char *dir = cwd_of(child);
+		if (dir) {
+			out[*count].cwd = dir;
+			snprintf(path, sizeof(path), "/proc/%d/comm", (int)child);
+			if (!read_first_line(path, out[*count].comm, sizeof(out[*count].comm))) {
+				out[*count].comm[0] = '\0';
 			}
+			(*count)++;
 		}
 	}
-	return NULL;
+}
+
+/*
+ * How well a window title names a directory: the number of path components of
+ * the longest path in the title that fits it, 0 for none. A component fits
+ * when it is the same, or shortened to its start the way fish does; "~" is home.
+ */
+static int title_names_dir(const char *title, const char *dir) {
+	const char *home = getenv("HOME");
+	int best = 0;
+	for (const char *p = title; p && *p; p++) {
+		if ((*p != '/' && *p != '~') || (p > title && !isspace((unsigned char)p[-1]) &&
+				p[-1] != ':' && p[-1] != '(' && p[-1] != '[')) {
+			continue; // a path starts a word
+		}
+		// the path in the title: up to a space, or the end
+		size_t len = strcspn(p, " \t)]");
+		char *path = strndup(p, len);
+		char *full = path[0] == '~' && home ? format_str("%s%s", home, path + 1) : strdup(path);
+		free(path);
+		// component by component against the directory
+		const char *a = full, *b = dir;
+		int parts = 0;
+		bool fits = true;
+		while (*a && fits) {
+			while (*a == '/') {
+				a++;
+			}
+			while (*b == '/') {
+				b++;
+			}
+			if (!*a) {
+				break;
+			}
+			size_t la = strcspn(a, "/"), lb = strcspn(b, "/");
+			// the same, or the start of it (shortened) when it is not the last one
+			fits = lb > 0 && ((la == lb && strncmp(a, b, la) == 0) ||
+				(la < lb && a[la] == '/' && strncmp(a, b, la) == 0));
+			a += la;
+			b += lb;
+			parts += fits;
+		}
+		while (*b == '/') {
+			b++;
+		}
+		if (fits && !*b && parts > best) {
+			best = parts; // the whole directory, nothing left over
+		}
+		free(full);
+	}
+	return best;
+}
+
+/* How well a title fits a candidate: its directory, else the command it runs. */
+static int title_score(const char *title, struct candidate *c) {
+	if (!title) {
+		return 0;
+	}
+	int score = title_names_dir(title, c->cwd) * 2;
+	if (!score && c->comm[0] && strlen(c->comm) > 2 && strcasestr(title, c->comm)) {
+		score = 1;
+	}
+	return score;
+}
+
+/*
+ * Where the focused window is working: the directory of the foreground process
+ * of its terminal, told apart by the title when the terminal process has more.
+ */
+static char *window_cwd(struct panel *panel, struct pwindow *win) {
+	struct candidate cands[CANDIDATES_MAX];
+	int count = 0;
+	foreground_candidates(win->pid, 0, cands, &count);
+	int pick = count == 1 ? 0 : -1;
+	if (count > 1) {
+		// the title names one of them
+		int best = 0;
+		bool tie = false;
+		for (int i = 0; i < count; i++) {
+			int score = title_score(win->title, &cands[i]);
+			if (score > best) {
+				best = score;
+				pick = i;
+				tie = false;
+			} else if (score == best && score > 0 && strcmp(cands[i].cwd, cands[pick].cwd) != 0) {
+				tie = true;
+			}
+		}
+		if (tie) {
+			pick = -1;
+		}
+		if (pick < 0) {
+			// or it is the one that no other window of the same terminal claims
+			int left = -1, unclaimed = 0;
+			for (int i = 0; i < count; i++) {
+				bool claimed = false;
+				for (int k = 0; k < panel->state.windows->length && !claimed; k++) {
+					struct pwindow *other = panel->state.windows->items[k];
+					claimed = other != win && other->pid == win->pid &&
+						title_score(other->title, &cands[i]) > 0;
+				}
+				if (!claimed) {
+					left = i;
+					unclaimed++;
+				}
+			}
+			pick = unclaimed == 1 ? left : -1;
+		}
+	}
+	char *dir = pick >= 0 ? strdup(cands[pick].cwd) : NULL;
+	for (int i = 0; i < count; i++) {
+		free(cands[i].cwd);
+	}
+	if (!dir && count == 0) {
+		dir = cwd_of(win->pid); // no terminal: where the app itself is
+	}
+	return dir;
 }
 
 /* The repository a directory is in, or NULL: the first parent holding .git. */
@@ -224,8 +363,17 @@ static const char *const GIT_SCRIPT =
 
 static void git_start(struct widget *w, const char *repo) {
 	struct git_state *g = w->data;
+	if (g->pid > 0 && g->pending && strcmp(g->pending, repo) != 0) {
+		// asking about a repository that is no longer wanted: that one goes
+		loop_remove_fd(w->panel->loop, g->fd);
+		close(g->fd);
+		g->fd = -1;
+		kill(g->pid, SIGTERM);
+		waitpid(g->pid, NULL, 0);
+		g->pid = 0;
+	}
 	if (g->pid > 0) {
-		return; // one at a time; the next tick picks the newest repository up
+		return; // one at a time; the next tick asks again
 	}
 	int fds[2];
 	if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
@@ -362,10 +510,7 @@ static void follow_focus(struct widget *w) {
 	if (!win || win->pid <= 0) {
 		return;
 	}
-	char *dir = foreground_cwd(win->pid, 0);
-	if (!dir) {
-		dir = cwd_of(win->pid);
-	}
+	char *dir = window_cwd(w->panel, win);
 	char *repo = repo_of(dir);
 	free(dir);
 	if (!repo) {
@@ -387,7 +532,12 @@ static void git_tick(void *data) {
 	if (!w->active) {
 		return;
 	}
-	if (g->last_seen) {
+	char *before = g->last_seen ? strdup(g->last_seen) : NULL;
+	follow_focus(w); // a cd in the focused window, which is no event of the compositor
+	bool changed = (before == NULL) != (g->last_seen == NULL) ||
+		(before && strcmp(before, g->last_seen) != 0);
+	free(before);
+	if (g->last_seen && !changed) {
 		struct stat st;
 		if (stat(g->last_seen, &st) == 0) {
 			git_start(w, g->last_seen);
