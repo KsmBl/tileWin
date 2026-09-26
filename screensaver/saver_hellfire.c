@@ -13,7 +13,9 @@
  * sheet, while flames, sparks and smoke rise. The shock wave follows and tears
  * the charred windows away as ash. What is left are scraps of the window
  * decorations and the taskbar, smouldering for ever at their edges and slowly
- * turning brown and red, on scorched ground under falling ash.
+ * turning brown and red, on scorched ground under falling ash. Pieces of the
+ * burning decoration break off, tumble down and pile up, glowing out, at the
+ * bottom of the screen.
  *
  * The windows are the real ones: the picture of the screen taken before the
  * saver started. Without it (the preview of the settings) it brings its own.
@@ -30,6 +32,8 @@
 #define SMOKE_MAX 90
 #define SPARKS_MAX 260
 #define ASH_MAX 420
+#define DEBRIS_MAX 90      // pieces of the decoration falling at once
+#define EMBERS_MAX 80      // where fallen pieces still glow
 #define FLASH_AT 1.0       // seconds of the desktop as it was
 #define SHOCK_AT 6.5       // seconds after the flash the shock wave comes
 #define SHOCK_TIME 1.7     // and how long it takes over the screen
@@ -60,6 +64,19 @@ struct spark {
 
 struct ash {
 	float x, y, vx, vy, life, age, size, spin, angle, shade;
+};
+
+/* A piece broken off the decoration: its own picture, falling and tumbling. */
+struct debris {
+	cairo_surface_t *img;    // NULL when the slot is free
+	float x, y, vx, vy, w, h;
+	float angle, spin, flip, flip_speed;
+	float heat;              // 1 just off the fire, glowing, cooling to 0
+};
+
+/* A fallen piece still glowing on the heap. */
+struct ember {
+	float x, y, size, life, age;
 };
 
 struct hellfire {
@@ -97,6 +114,14 @@ struct hellfire {
 	struct spark sparks[SPARKS_MAX];
 	struct ash ash[ASH_MAX];
 	int flame_next, smoke_next, spark_next, ash_next;
+	struct debris debris[DEBRIS_MAX];
+	struct ember embers[EMBERS_MAX];
+	int ember_next;
+	cairo_surface_t *base_surface; // the desktop, to cut the pieces from
+	cairo_surface_t *heap;   // what has fallen, along the bottom of the screen
+	int heap_h;
+	float *pile;             // per pixel column: how high the heap is there
+	double heap_aged;        // when the heap last charred a little further
 	cairo_surface_t *flame_sprite, *core_sprite, *smoke_sprite;
 	double wind;
 };
@@ -634,6 +659,197 @@ static void blend(struct hellfire *s, double t) {
 	cairo_surface_mark_dirty(s->frame);
 }
 
+/* ---------- debris ---------- */
+
+static void draw_sprite(cairo_t *cr, cairo_surface_t *sprite, double x, double y, double size,
+	double tall, double alpha);
+
+/* A jagged outline around the middle of a w by h box. */
+static void jagged_path(cairo_t *cr, double cx, double cy, double w, double h, uint32_t seed) {
+	int n = 5 + (int)(hash2((int)seed, 1, 3) % 5); // broken, not rounded: few corners
+	for (int k = 0; k < n; k++) {
+		double a = (k + ((hash2((int)seed, k, 4) & 0xff) / 255.0 - 0.5) * 0.6) * 2 * M_PI / n;
+		double r = 0.4 + 0.6 * ((hash2((int)seed, k, 5) & 0xff) / 255.0);
+		double px = cx + cos(a) * w / 2 * r, py = cy + sin(a) * h / 2 * r;
+		if (k == 0) {
+			cairo_move_to(cr, px, py);
+		} else {
+			cairo_line_to(cr, px, py);
+		}
+	}
+	cairo_close_path(cr);
+}
+
+/*
+ * Breaks a piece off the decoration at x, y: cut from the desktop there,
+ * browned, charred as far as that spot is, with a dark scorched rim.
+ */
+static void break_off(struct hellfire *s, double x, double y, double size, double charred,
+		double vx, double vy) {
+	struct debris *d = NULL;
+	for (int i = 0; i < DEBRIS_MAX && !d; i++) {
+		d = s->debris[i].img ? NULL : &s->debris[i];
+	}
+	if (!d) {
+		return;
+	}
+	double u = s->u;
+	double w = fmax(4, size), h = fmax(3, size * saver_between(0.3, 0.65));
+	int iw = (int)ceil(w) + 2, ih = (int)ceil(h) + 2;
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
+	cairo_t *cr = cairo_create(img);
+	uint32_t seed = (uint32_t)(saver_random() * 1e9);
+	jagged_path(cr, iw / 2.0, ih / 2.0, w, h, seed);
+	cairo_clip_preserve(cr);
+	cairo_set_source_surface(cr, s->base_surface, iw / 2.0 - x, ih / 2.0 - y);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_MULTIPLY);
+	cairo_set_source_rgb(cr, 0.88, 0.56, 0.32); // browned by the heat
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	cairo_set_source_rgba(cr, 0.07, 0.04, 0.03, fmin(0.85, charred));
+	cairo_paint(cr);
+	cairo_reset_clip(cr);
+	cairo_set_line_width(cr, fmax(1, u * 1.6));
+	cairo_set_source_rgba(cr, 0.16, 0.06, 0.02, 0.9);
+	cairo_stroke(cr);
+	cairo_destroy(cr);
+	*d = (struct debris){ img, (float)x, (float)y, (float)vx, (float)vy, (float)w, (float)h,
+		(float)saver_between(0, 6.28), (float)saver_between(-5, 5), (float)saver_between(0, 6.28),
+		(float)saver_between(2, 7), 1 };
+}
+
+/* How high the heap is under a piece at x, w wide: the highest point beneath it. */
+static float pile_under(struct hellfire *s, float x, float w) {
+	int x0 = (int)fmaxf(0, x - w * 0.35f), x1 = (int)fminf(s->width - 1, x + w * 0.35f);
+	float top = 0;
+	for (int k = x0; k <= x1; k++) {
+		top = fmaxf(top, s->pile[k]);
+	}
+	return top;
+}
+
+/* A piece comes to rest: lying flat on the heap, drawn into it for good. */
+static void land(struct hellfire *s, struct debris *d, float floor_y) {
+	// it slides off a peak to the lowest spot close by, so the heap spreads
+	float best = pile_under(s, d->x, d->w);
+	for (int k = -3; k <= 3; k++) {
+		float x = d->x + k * d->w * 0.4f;
+		if (x < d->w / 2 || x > s->width - d->w / 2) {
+			continue;
+		}
+		float under = pile_under(s, x, d->w);
+		if (under < best - d->h * 0.3f) {
+			best = under;
+			d->x = x;
+		}
+	}
+	floor_y = s->height - best;
+	double tilt = saver_between(-0.15, 0.15);
+	double y = floor_y - d->h * 0.45;
+	double heap_top = s->height - s->heap_h;
+	cairo_t *cr = cairo_create(s->heap);
+	cairo_translate(cr, d->x, y - heap_top);
+	cairo_rotate(cr, (saver_random() < 0.5 ? 0 : M_PI) + tilt);
+	int iw = cairo_image_surface_get_width(d->img), ih = cairo_image_surface_get_height(d->img);
+	cairo_set_source_surface(cr, d->img, -iw / 2.0, -ih / 2.0);
+	cairo_paint(cr);
+	cairo_destroy(cr);
+	// the heap grows where it lies, never over the strip it is kept in
+	float raise = s->height - (float)(y - d->h * 0.35);
+	for (int k = (int)fmaxf(0, d->x - d->w * 0.45f); k <= (int)fminf(s->width - 1, d->x + d->w * 0.45f); k++) {
+		s->pile[k] = fminf(fmaxf(s->pile[k], raise), s->heap_h * 0.6f);
+	}
+	if (d->heat > 0.15f) {
+		struct ember *e = &s->embers[s->ember_next];
+		s->ember_next = (s->ember_next + 1) % EMBERS_MAX;
+		*e = (struct ember){ d->x, (float)y, d->w, 4 + d->heat * 10, 0 };
+		for (int k = 0; k < 4; k++) {
+			struct spark *sp = &s->sparks[s->spark_next];
+			s->spark_next = (s->spark_next + 1) % SPARKS_MAX;
+			*sp = (struct spark){ d->x, (float)y, (float)(saver_between(-90, 90) * s->u),
+				(float)(-saver_between(60, 180) * s->u), (float)saver_between(0.4, 1.2), 0 };
+		}
+	}
+	cairo_surface_destroy(d->img);
+	d->img = NULL;
+}
+
+static void draw_debris(struct hellfire *s, cairo_t *cr, double dt) {
+	double u = s->u;
+	for (int i = 0; i < DEBRIS_MAX; i++) {
+		struct debris *d = &s->debris[i];
+		if (!d->img) {
+			continue;
+		}
+		d->vy += (float)(650 * u * dt);
+		d->vx += (float)((s->wind * u - d->vx) * fmin(1, dt * 0.8));
+		d->vy -= (float)(d->vy * fmin(1, dt * 0.35)); // the air holds it back a little
+		d->x += (float)(d->vx * dt);
+		d->y += (float)(d->vy * dt);
+		d->angle += (float)(d->spin * dt);
+		d->flip += (float)(d->flip_speed * dt);
+		d->heat = fmaxf(0, d->heat - (float)dt * 0.22f);
+		if (d->x < -d->w || d->x > s->width + d->w) {
+			cairo_surface_destroy(d->img); // blown off the screen
+			d->img = NULL;
+			continue;
+		}
+		float floor_y = s->height - pile_under(s, d->x, d->w);
+		if (d->y + d->h * 0.45f >= floor_y && d->vy > 0) {
+			land(s, d, floor_y);
+			continue;
+		}
+		if (d->heat > 0.3f && saver_random() < dt * 6 * d->heat) {
+			struct spark *sp = &s->sparks[s->spark_next]; // a trail of sparks while hot
+			s->spark_next = (s->spark_next + 1) % SPARKS_MAX;
+			*sp = (struct spark){ d->x, d->y, (float)(saver_between(-20, 20) * u),
+				(float)(-saver_between(10, 60) * u), (float)saver_between(0.3, 0.8), 0 };
+		}
+		int iw = cairo_image_surface_get_width(d->img), ih = cairo_image_surface_get_height(d->img);
+		cairo_save(cr);
+		cairo_translate(cr, d->x, d->y);
+		cairo_rotate(cr, d->angle);
+		cairo_scale(cr, 1, 0.25 + 0.75 * fabs(cos(d->flip))); // tumbling
+		cairo_set_source_surface(cr, d->img, -iw / 2.0, -ih / 2.0);
+		cairo_paint(cr);
+		cairo_restore(cr);
+		if (d->heat > 0.05f) {
+			cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+			draw_sprite(cr, s->flame_sprite, d->x, d->y, fmax(d->w, d->h) * 1.3, 1, 0.45 * d->heat);
+			cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		}
+	}
+}
+
+/* The heap at the bottom, and the glow of what has just fallen on it. */
+static void draw_heap(struct hellfire *s, cairo_t *cr, double t, double dt) {
+	if (t - s->heap_aged > 2) {
+		// charring on, a little at a time, only where something lies
+		s->heap_aged = t;
+		cairo_t *hc = cairo_create(s->heap);
+		cairo_set_operator(hc, CAIRO_OPERATOR_ATOP);
+		cairo_set_source_rgba(hc, 0.06, 0.035, 0.025, 0.035);
+		cairo_paint(hc);
+		cairo_destroy(hc);
+	}
+	cairo_set_source_surface(cr, s->heap, 0, s->height - s->heap_h);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+	for (int i = 0; i < EMBERS_MAX; i++) {
+		struct ember *e = &s->embers[i];
+		if (e->age >= e->life) {
+			continue;
+		}
+		e->age += (float)dt;
+		float k = 1 - e->age / e->life;
+		float flicker = 0.7f + 0.3f * sinf(e->age * 7 + i) * sinf(e->age * 2.3f + i * 3);
+		draw_sprite(cr, s->flame_sprite, e->x, e->y, e->size * 1.4, 0.6, 0.5 * k * flicker);
+		draw_sprite(cr, s->core_sprite, e->x, e->y, e->size * 0.6, 0.5, 0.35 * k * k * flicker);
+	}
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+}
+
 /* ---------- flames, smoke, sparks and ash ---------- */
 
 static void spawn(struct hellfire *s, double t, double dt) {
@@ -665,6 +881,21 @@ static void spawn(struct hellfire *s, double t, double dt) {
 					(float)(-saver_between(18, 40) * u), (float)saver_between(5, 9), 0,
 					(float)(saver_between(40, 80) * u), (float)saver_between(0.1, 0.25) };
 			}
+		}
+		// the decoration breaks into pieces as it burns away, and the scraps shed some
+		bool above_heap = y < s->height - s->heap_h; // what is down there already lies there
+		if (s->kind[i] == KIND_DECO && above_heap && gn > 10 && gn < 170 &&
+				saver_random() < 0.6) {
+			double dx = x - s->ox, dy = y - s->oy, d = hypot(dx, dy);
+			bool wave = fabs(t - s->gone_at[i]) < 1 && s->gone_at[i] < SHOCK_AT + SHOCK_TIME + 1;
+			double v = wave ? saver_between(150, 380) * u : 0;
+			// still showing what it was, browned: a bit of title bar, frame or taskbar
+			break_off(s, x, y, saver_between(18, 46) * u, s->ch[CH_CHAR][i] / 255.0 * 0.4,
+				dx / d * v + saver_between(-40, 40) * u, dy / d * v - saver_between(0, 80) * u);
+		} else if (s->kind[i] == KIND_REMNANT && above_heap && em > 120 &&
+				saver_random() < 0.03) {
+			break_off(s, x, y, saver_between(6, 16) * u, 0.3 + s->ch[CH_CHAR][i] / 400.0,
+				saver_between(-20, 20) * u, saver_between(-20, 10) * u);
 		}
 		// what crumbles goes up as ash, and what the wave tears off flies with it
 		if (gn > 20 && gn < 200 && saver_random() < 0.35) {
@@ -876,6 +1107,11 @@ static void *hellfire_create(int width, int height, const struct saver_options *
 	}
 	make_hell(s);
 	plan(s, wins, count, bars, bar_count);
+	s->base_surface = cairo_image_surface_create_for_data((unsigned char *)s->base,
+		CAIRO_FORMAT_RGB24, width, height, width * 4);
+	s->heap_h = (int)fmax(24, height * 0.22);
+	s->heap = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, s->heap_h);
+	s->pile = calloc(width, sizeof(float));
 
 	static const double flame[][4] = { { 1, 0.55, 0.12, 0.9 }, { 0.95, 0.3, 0.05, 0.55 },
 		{ 0.6, 0.08, 0.02, 0.2 }, { 0.3, 0.02, 0, 0 } };
@@ -907,6 +1143,8 @@ static void hellfire_draw(void *state, cairo_t *cr, int width, int height, doubl
 	cairo_paint(cr);
 	if (t > 0) {
 		spawn(s, t, dt);
+		draw_heap(s, cr, t, dt);
+		draw_debris(s, cr, dt);
 		draw_particles(s, cr, dt);
 	}
 	cairo_restore(cr);
@@ -934,9 +1172,17 @@ static void hellfire_destroy(void *state) {
 	free(s->fire_lut);
 	free(s->ring_lut);
 	free(s->dust_lut);
+	cairo_surface_destroy(s->base_surface); // before the pixels it shows
 	free(s->base);
 	free(s->hell);
 	free(s->grain);
+	for (int i = 0; i < DEBRIS_MAX; i++) {
+		if (s->debris[i].img) {
+			cairo_surface_destroy(s->debris[i].img);
+		}
+	}
+	cairo_surface_destroy(s->heap);
+	free(s->pile);
 	cairo_surface_destroy(s->frame);
 	cairo_surface_destroy(s->flame_sprite);
 	cairo_surface_destroy(s->core_sprite);
