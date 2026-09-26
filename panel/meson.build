@@ -59,6 +59,7 @@ executable(
 		'widgets/system.c',
 		'widgets/taskbar.c',
 		'widgets/tray.c',
+		'wifi_caps.c',
 		panel_tray_files,
 		wl_protos_src,
 		tilewin_version_h,

@@ -18,6 +18,7 @@
 #include "popup.h"
 #include "textfield.h"
 #include "stringop.h"
+#include "wifi_caps.h"
 
 /*
  * Flyouts of the network, volume and battery widgets. They only exist while
@@ -351,6 +352,12 @@ struct wifi_net {
 	char *uuid; // connection of a saved network, whose name may differ from the SSID
 	int signal;
 	bool active, known;
+	int bands;         // bit per enum wifi_band it is seen on
+	int band;          // the band shown: the one connected on, else the fastest
+	double rate;       // Mbit/s this PC and that access point reach together at most
+	struct wifi_link_caps pair; // how: the standard, streams and width both have
+	bool pair_known;   // from the capabilities of both, not only the access point's
+	bool active_bss;   // band and rate are those of the access point connected to
 };
 
 /* A saved connection of NetworkManager and the SSID it is for. */
@@ -501,6 +508,85 @@ static int wifi_net_cmp(const void *a, const void *b) {
 
 static void net_query(struct net_flyout *f, bool rescan);
 
+/*
+ * One access point of a network: the band it is on, and the most this PC and
+ * it reach together, from the capabilities of both (the older standard, the
+ * fewer streams, the narrower of its channel now and what both support). Not
+ * in the kernel's scan list, the access point's own rate from nmcli is taken,
+ * as far as this PC's adapter goes. The network shows the one connected to,
+ * else the fastest.
+ */
+static void net_add_bss(struct wifi_net *n, bool active, const char *bssid, int freq,
+		int ap_rate, int width, const struct wifi_adapter *adapter, const struct wifi_ap *aps,
+		int ap_count) {
+	if (freq <= 0) {
+		return;
+	}
+	enum wifi_band band = wifi_band_of(freq);
+	n->bands |= 1 << band;
+	uint8_t mac[6];
+	const struct wifi_ap *ap = NULL;
+	if (wifi_parse_bssid(bssid, mac)) {
+		for (int i = 0; i < ap_count && !ap; i++) {
+			ap = memcmp(aps[i].bssid, mac, 6) == 0 ? &aps[i] : NULL;
+		}
+	}
+	struct wifi_link_caps pair = { 0 };
+	double rate = 0;
+	bool known = false;
+	if (adapter && ap) {
+		rate = wifi_pair_rate(adapter, ap, width, &pair);
+		known = rate > 0;
+	}
+	if (!known && ap_rate > 0) {
+		rate = ap_rate;
+		const struct wifi_link_caps *mine = adapter ? &adapter->band[band] : NULL;
+		if (mine && mine->gen) {
+			int w = width > 0 && width < mine->width ? width : mine->width;
+			double best = wifi_phy_rate(mine->gen, mine->streams, w);
+			rate = rate < best ? rate : best;
+		}
+	}
+	if (rate <= 0 || (n->active_bss && !active)) {
+		n->bands |= 1 << band;
+		return;
+	}
+	if (active || rate > n->rate) {
+		n->band = band;
+		n->rate = rate;
+		n->pair = pair;
+		n->pair_known = known;
+		n->active_bss = active;
+	}
+}
+
+/* "5 GHz", or the bands a network is seen on: "2.4 · 5 GHz". */
+static void net_band_text(const struct wifi_net *n, char *out, size_t size) {
+	static const char *const names[WIFI_BANDS] = { "2.4", "5", "6" };
+	if (n->active_bss || !(n->bands & (n->bands - 1))) {
+		int band = n->active_bss ? n->band : __builtin_ctz(n->bands ? n->bands : 1);
+		snprintf(out, size, "%s GHz", names[band]);
+		return;
+	}
+	out[0] = '\0';
+	for (int b = 0; b < WIFI_BANDS; b++) {
+		if (n->bands & (1 << b)) {
+			size_t len = strlen(out);
+			snprintf(out + len, size - len, "%s%s", len ? " \u00b7 " : "", names[b]);
+		}
+	}
+	size_t len = strlen(out);
+	snprintf(out + len, size - len, " GHz");
+}
+
+static void net_rate_text(double mbit, char *out, size_t size) {
+	if (mbit >= 1000) {
+		snprintf(out, size, "up to %.1f Gbit/s", mbit / 1000);
+	} else {
+		snprintf(out, size, "up to %.0f Mbit/s", mbit);
+	}
+}
+
 static void net_query_done(void *data, const char *output) {
 	struct net_flyout *f = net_current;
 	if (!f) {
@@ -508,6 +594,10 @@ static void net_query_done(void *data, const char *output) {
 	}
 	net_clear(f);
 	f->have_nmcli = !strstr(output, "--missing");
+	struct wifi_adapter adapter;
+	struct wifi_ap *aps = NULL;
+	int ap_count = 0;
+	bool asked_caps = false, have_adapter = false;
 	enum { S_RADIO, S_DEVICES, S_WIFI, S_KNOWN } section = S_RADIO;
 	list_t *known = create_list();
 	char *copy = strdup(output);
@@ -549,6 +639,12 @@ static void net_query_done(void *data, const char *output) {
 				f->wired_connection = strdup(v[3]);
 			}
 		} else if (section == S_WIFI && fields->length >= 4 && v[3][0]) {
+			if (!asked_caps && f->wifi_device) {
+				// what this PC's adapter and the access points around can do, once a query
+				asked_caps = true;
+				have_adapter = wifi_adapter_caps(f->wifi_device, &adapter);
+				ap_count = have_adapter ? wifi_scan_aps(f->wifi_device, &aps) : 0;
+			}
 			struct wifi_net *found = NULL;
 			for (int i = 0; i < f->nets->length && !found; i++) {
 				struct wifi_net *n = f->nets->items[i];
@@ -566,10 +662,15 @@ static void net_query_done(void *data, const char *output) {
 				found->signal = atoi(v[1]);
 			}
 			found->active |= strcmp(v[0], "*") == 0;
+			if (fields->length >= 8) {
+				net_add_bss(found, strcmp(v[0], "*") == 0, v[4], atoi(v[5]), atoi(v[6]), atoi(v[7]),
+					have_adapter ? &adapter : NULL, aps, ap_count);
+			}
 		}
 		list_free_items_and_destroy(fields);
 	}
 	free(copy);
+	free(aps);
 	for (int i = 0; i < f->nets->length; i++) {
 		struct wifi_net *n = f->nets->items[i];
 		for (int j = 0; j < known->length && !n->known; j++) {
@@ -600,7 +701,8 @@ static void net_query(struct net_flyout *f, bool rescan) {
 	char *cmd = format_str("command -v nmcli >/dev/null || { echo --missing; exit 0; }; "
 		"nmcli radio wifi 2>/dev/null; echo --dev; "
 		"nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device 2>/dev/null; echo --wifi; "
-		"nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID device wifi list --rescan %s 2>/dev/null; "
+		"nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID,BSSID,FREQ,RATE,BANDWIDTH device wifi list "
+		"--rescan %s 2>/dev/null; "
 		// the name of a connection need not be the SSID, so ask every Wi-Fi
 		// connection for the network it is for and remember its uuid
 		"echo --known; nmcli -t -f UUID,TYPE connection show 2>/dev/null | "
@@ -1019,14 +1121,26 @@ static void net_render(struct popup *p, cairo_t *cr) {
 				fill_hover(cr, &st, row);
 			}
 			ti_network(p->panel, cr, x0, y + 14, 20, signal_bars(n->signal), true, true, st.fg);
-			pd_text(cr, n->active ? st.bold : st.font, n->ssid, x0 + 34, y + 6, cw - 34, 20,
+			// the band on the right, and the most it goes with this PC under it
+			int tag = 0;
+			if (n->bands) {
+				char band[48], rate[48];
+				net_band_text(n, band, sizeof(band));
+				tag = 118;
+				pd_text(cr, st.font, band, x0 + cw - tag, y + 6, tag, 20, st.fg, PD_RIGHT);
+				if (n->rate > 0) {
+					net_rate_text(n->rate, rate, sizeof(rate));
+					pd_text(cr, st.font, rate, x0 + cw - tag, y + 25, tag, 18, st.dim, PD_RIGHT);
+				}
+			}
+			pd_text(cr, n->active ? st.bold : st.font, n->ssid, x0 + 34, y + 6, cw - 34 - tag, 20,
 				st.fg, PD_LEFT);
 			bool secured = n->security[0] && strcmp(n->security, "--") != 0;
 			char sub[96];
 			snprintf(sub, sizeof(sub), "%s%s%s", n->active ? "Connected, " : "",
 				secured ? "secured" : "open", n->known && !n->active ? ", saved" : "");
 			sub[0] = toupper((unsigned char)sub[0]);
-			pd_text(cr, st.font, sub, x0 + 34, y + 25, cw - 34, 18, st.dim, PD_LEFT);
+			pd_text(cr, st.font, sub, x0 + 34, y + 25, cw - 34 - tag, 18, st.dim, PD_LEFT);
 			psurface_add_hotspot(p->surface, row.x, row.y, row.width, NET_ROW, NULL,
 				NET_HS_ROW, i, NULL);
 			if (expanded) {
@@ -1051,6 +1165,17 @@ static void net_render(struct popup *p, cairo_t *cr) {
 						button.height, NULL, n->active ? NET_HS_DISCONNECT : NET_HS_CONNECT, i,
 						NULL);
 					bool asked = f->secret_ssid && strcmp(f->secret_ssid, n->ssid) == 0;
+					int left = cw - 110 - (n->known && secured ? 134 : 0) - 34 - 8;
+					if (n->pair_known && left > 60) {
+						// how the speed comes about: what both of them can do
+						char how[96];
+						char gen[16];
+						snprintf(gen, sizeof(gen), n->pair.gen < 4 ? "802.11a/g" : "Wi-Fi %d",
+							n->pair.gen);
+						snprintf(how, sizeof(how), "%s \u00b7 %d\u00d7%d \u00b7 %d MHz", gen,
+							n->pair.streams, n->pair.streams, n->pair.width);
+						pd_text(cr, st.font, how, x0 + 34, by, left, bh, st.dim, PD_LEFT);
+					}
 					if (n->known && secured) {
 						struct pbox show = { x0 + cw - 110 - 134, by, 130, bh };
 						draw_button(cr, &st, show, asked ? "Hide password" : "Show password",
