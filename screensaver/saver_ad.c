@@ -4,15 +4,16 @@
 #include "saver_util.h"
 
 /*
- * Microslop: a parody commercial for Copilot− PCs, $16.05 per 6 days. Five
- * scenes, fading into each other and round again: the melting logo, the
- * product, a laptop full of features nobody asked for, the price, and the
- * button to upgrade next to a "Not now" that will not be clicked. All the
- * while a "Skip ad" in the corner counts down and never lets you.
+ * Microslop: a parody commercial for Copilot− PCs, $16.05 per 6 days, about
+ * two minutes and round again. The melting logo; Brenda, a satisfied customer
+ * who does not exist; the product; a laptop full of features nobody asked for;
+ * Recall− playing back your day; Slippy the paperclip, who would like to help
+ * you stay; your PC against a Copilot− PC; the blue screen, smiling; the
+ * price; your privacy, which is worth a lot; the button to upgrade next to a
+ * "Not now" that will not be clicked; and the end card. All the while a "Skip
+ * ad" counts down and never lets you, and now and then updates are ready.
  */
 
-#define SCENE_TIME 9.0
-#define SCENES 5
 #define FADE 0.8
 #define FONT "Segoe UI, Inter, Noto Sans, Cantarell, sans-serif"
 
@@ -54,6 +55,9 @@ static PangoLayout *layout_for(cairo_t *cr, const char *text, const char *weight
 static double text(cairo_t *cr, const char *markup, const char *weight, double px, double x,
 		double y, double anchor, double r, double g, double b, double a) {
 	PangoLayout *layout = layout_for(cr, markup, weight, px);
+	// the lines of a text anchored at a side line up on that side
+	pango_layout_set_alignment(layout, anchor == 0 ? PANGO_ALIGN_LEFT :
+		anchor == 1 ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_CENTER);
 	int w, h;
 	pango_layout_get_pixel_size(layout, &w, &h);
 	cairo_move_to(cr, x - w * anchor, y);
@@ -63,21 +67,40 @@ static double text(cairo_t *cr, const char *markup, const char *weight, double p
 	return w;
 }
 
-/* Text filled with a gradient from one colour to the other, left to right. */
-static double gradient_text(cairo_t *cr, const char *markup, const char *weight, double px,
-		double x, double y, double anchor, const double c0[3], const double c1[3], double a) {
+/*
+ * A headline: a soft shadow under it, a gradient in it, and now and then a
+ * streak of light passing over it (shine from 0 to 1 while it passes).
+ */
+static double headline(cairo_t *cr, const char *markup, const char *weight, double px, double x,
+		double y, double anchor, const double c0[3], const double c1[3], double a, double shine) {
 	PangoLayout *layout = layout_for(cr, markup, weight, px);
 	int w, h;
 	pango_layout_get_pixel_size(layout, &w, &h);
 	double left = x - w * anchor;
+	for (int k = 3; k >= 1; k--) {
+		cairo_move_to(cr, left, y + px * 0.02 * k);
+		cairo_set_source_rgba(cr, 0, 0, 0.05, a * 0.12);
+		pango_cairo_show_layout(cr, layout);
+	}
 	cairo_move_to(cr, left, y);
 	pango_cairo_layout_path(cr, layout);
 	cairo_pattern_t *p = cairo_pattern_create_linear(left, y, left + w, y + h);
 	cairo_pattern_add_color_stop_rgba(p, 0, c0[0], c0[1], c0[2], a);
 	cairo_pattern_add_color_stop_rgba(p, 1, c1[0], c1[1], c1[2], a);
 	cairo_set_source(cr, p);
-	cairo_fill(cr);
+	cairo_fill_preserve(cr);
 	cairo_pattern_destroy(p);
+	if (shine > 0 && shine < 1) {
+		double sx = left - w * 0.3 + (w * 1.6) * shine;
+		cairo_pattern_t *streak = cairo_pattern_create_linear(sx - px, y, sx + px, y + h * 0.3);
+		cairo_pattern_add_color_stop_rgba(streak, 0, 1, 1, 1, 0);
+		cairo_pattern_add_color_stop_rgba(streak, 0.5, 1, 1, 1, 0.55 * a);
+		cairo_pattern_add_color_stop_rgba(streak, 1, 1, 1, 1, 0);
+		cairo_set_source(cr, streak);
+		cairo_fill(cr);
+		cairo_pattern_destroy(streak);
+	}
+	cairo_new_path(cr);
 	g_object_unref(layout);
 	return w;
 }
@@ -271,8 +294,8 @@ static void scene_product(struct ad *s, cairo_t *cr, double t) {
 	swirl_icon(cr, W / 2, H * 0.43, u * 120 * (0.7 + 0.3 * b), s->t, b);
 	double c = in(t, 1.6, 0.9);
 	static const double c0[3] = { 0.35, 0.8, 1 }, c1[3] = { 0.85, 0.5, 1 };
-	gradient_text(cr, "Copilot− PCs", "Bold", u * 130, W / 2, H * 0.58 + (1 - c) * u * 30, 0.5,
-		c0, c1, c);
+	headline(cr, "Copilot− PCs", "Bold", u * 130, W / 2, H * 0.58 + (1 - c) * u * 30, 0.5,
+		c0, c1, c, (t - 2.6) / 1.2);
 	double d = in(t, 3.0, 0.9);
 	text(cr, "All the AI you didn't ask for. <b>Now with less.</b>", "Light", u * 40, W / 2,
 		H * 0.58 + u * 180, 0.5, 1, 1, 1, d);
@@ -385,8 +408,8 @@ static void scene_price(struct ad *s, cairo_t *cr, double t) {
 	char price[64];
 	snprintf(price, sizeof(price), "$%.2f", 16.05 * roll);
 	static const double c0[3] = { 1, 1, 1 }, c1[3] = { 0.7, 0.85, 1 };
-	double pw = gradient_text(cr, price, "Bold", u * 220, W / 2 - u * 90, H * 0.26, 0.5, c0, c1,
-		in(t, 0.6, 0.4));
+	double pw = headline(cr, price, "Bold", u * 220, W / 2 - u * 90, H * 0.26, 0.5, c0, c1,
+		in(t, 0.6, 0.4), (t - 2.6) / 1.1);
 	text(cr, "/ 6 days*", "Semi-Light", u * 64, W / 2 - u * 90 + pw / 2 + u * 20, H * 0.26 + u * 150,
 		0, 0.85, 0.9, 1, in(t, 2.2, 0.6));
 	// the old price, crossed out: a whole cent less
@@ -412,6 +435,14 @@ static void scene_price(struct ad *s, cairo_t *cr, double t) {
 	text(cr, timer, "Light", u * 30, W / 2, H * 0.62 + u * 80, 0.5, 1, 0.75, 0.3, in(t, 4.2, 0.6));
 	text(cr, "*Billed every 6 days, in advance. Also in arrears.", "Light", u * 20, W / 2,
 		H * 0.62 + u * 140, 0.5, 0.6, 0.65, 0.75, in(t, 5, 0.6));
+	double e = in(t, 6.3, 0.6);
+	rounded(cr, W / 2 - u * 330, H * 0.62 + u * 195, u * 660, u * 66, u * 33);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.1 * e);
+	cairo_fill(cr);
+	text(cr, "New: <b>Copilot−− PCs</b>, $32.10 per 12 days. Best value!*", "Light", u * 26, W / 2,
+		H * 0.62 + u * 211, 0.5, 1, 1, 1, e);
+	text(cr, "*Same value.", "Light", u * 18, W / 2, H * 0.62 + u * 275, 0.5, 0.6, 0.65, 0.75,
+		in(t, 7.6, 0.5));
 }
 
 /* ---------- scene 5: the call to action ---------- */
@@ -476,10 +507,445 @@ static void scene_upgrade(struct ad *s, cairo_t *cr, double t) {
 	g_object_unref(layout);
 }
 
+/* ---------- a satisfied customer ---------- */
+
+static void scene_testimonial(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	double a = in(t, 0.2, 0.8);
+	double ax = W * 0.27, ay = H * 0.45, ar = u * 150;
+	// her portrait: soft light behind, a figure in front
+	cairo_pattern_t *halo = cairo_pattern_create_radial(ax, ay, 0, ax, ay, ar * 1.6);
+	cairo_pattern_add_color_stop_rgba(halo, 0, 1, 0.8, 0.6, 0.35 * a);
+	cairo_pattern_add_color_stop_rgba(halo, 1, 1, 0.8, 0.6, 0);
+	cairo_set_source(cr, halo);
+	cairo_arc(cr, ax, ay, ar * 1.6, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_pattern_destroy(halo);
+	cairo_save(cr);
+	cairo_arc(cr, ax, ay, ar, 0, 2 * M_PI);
+	cairo_clip(cr);
+	cairo_pattern_t *bg = cairo_pattern_create_linear(ax, ay - ar, ax, ay + ar);
+	cairo_pattern_add_color_stop_rgba(bg, 0, 0.95, 0.7, 0.55, a);
+	cairo_pattern_add_color_stop_rgba(bg, 1, 0.7, 0.35, 0.6, a);
+	cairo_set_source(cr, bg);
+	cairo_paint(cr);
+	cairo_pattern_destroy(bg);
+	cairo_set_source_rgba(cr, 0.18, 0.12, 0.22, a);
+	cairo_arc(cr, ax, ay - ar * 0.15, ar * 0.36, 0, 2 * M_PI); // head
+	cairo_fill(cr);
+	cairo_arc(cr, ax, ay + ar * 0.95, ar * 0.72, M_PI, 2 * M_PI); // shoulders
+	cairo_fill(cr);
+	// a smile that is just a little too wide
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.8 * a);
+	cairo_set_line_width(cr, u * 4);
+	cairo_arc(cr, ax, ay - ar * 0.15, ar * 0.2, 0.15 * M_PI, 0.85 * M_PI);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+	// the quote, typed out
+	double qx = W * 0.45;
+	text(cr, "“", "Bold", u * 180, qx - u * 20, H * 0.14, 0, 0.55, 0.75, 1, in(t, 0.6, 0.5));
+	const char *quote = "I used to think for myself. Now Copilot− does it for me. Slightly worse.";
+	long n = g_utf8_strlen(quote, -1);
+	long shown = (long)saver_clamp((t - 1.0) * 22, 0, n);
+	char *part = g_strndup(quote, g_utf8_offset_to_pointer(quote, shown) - quote);
+	PangoLayout *layout = layout_for(cr, "", "Light", u * 46);
+	pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+	pango_layout_set_width(layout, (int)(W * 0.46 * PANGO_SCALE));
+	pango_layout_set_text(layout, part, -1);
+	cairo_move_to(cr, qx + u * 40, H * 0.3);
+	cairo_set_source_rgba(cr, 1, 1, 1, a);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+	g_free(part);
+	double b = in(t, 4.8, 0.6);
+	text(cr, "— Brenda, 34, a real customer*", "Semi-Bold", u * 28, qx + u * 40, H * 0.58, 0,
+		0.85, 0.9, 1, b);
+	// her rating
+	double c = in(t, 5.6, 0.6);
+	for (int i = 0; i < 5; i++) {
+		double sx = qx + u * 52 + i * u * 44, sy = H * 0.66 + u * 18;
+		cairo_new_path(cr);
+		for (int k = 0; k < 10; k++) {
+			double ang = -M_PI / 2 + k * M_PI / 5, rr = k % 2 ? u * 8 : u * 19;
+			cairo_line_to(cr, sx + cos(ang) * rr, sy + sin(ang) * rr);
+		}
+		cairo_close_path(cr);
+		double fill = i < 4 ? 1 : 0.2;
+		cairo_set_source_rgba(cr, 1, 0.78, 0.15, c * fill + c * 0.15);
+		cairo_fill(cr);
+	}
+	text(cr, "4.2 from 3 reviews, 2 of them by us", "Light", u * 24, qx + u * 280, H * 0.66, 0,
+		0.8, 0.82, 0.9, c);
+	text(cr, "*Brenda is AI-generated. Any resemblance to real Brendas is a feature.", "Light",
+		u * 20, W / 2, H * 0.84, 0.5, 0.6, 0.65, 0.75, in(t, 6.6, 0.6));
+}
+
+/* ---------- Recall−: your day, played back ---------- */
+
+static void scene_recall(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	static const double c0[3] = { 0.5, 0.9, 1 }, c1[3] = { 0.6, 0.55, 1 };
+	double a = in(t, 0.1, 0.7);
+	headline(cr, "Recall−", "Bold", u * 100, W / 2, H * 0.08, 0.5, c0, c1, a, (t - 1) / 1.2);
+	text(cr, "Never forget. Never be allowed to.", "Light", u * 36, W / 2, H * 0.08 + u * 130, 0.5,
+		0.85, 0.9, 1, in(t, 0.8, 0.7));
+	// a strip of little screenshots, gliding by
+	double cw = u * 230, ch = u * 140, gap = u * 30, sy = H * 0.42;
+	double shift = fmod(s->t * u * 60, cw + gap);
+	static const double tint[5][3] = { { 0.2, 0.45, 0.85 }, { 0.85, 0.35, 0.3 }, { 0.3, 0.7, 0.45 },
+		{ 0.6, 0.35, 0.8 }, { 0.9, 0.65, 0.2 } };
+	double b = in(t, 0.6, 0.8);
+	for (int i = -1; i < (int)(W / (cw + gap)) + 2; i++) {
+		double x = i * (cw + gap) - shift;
+		int k = (i + (int)(s->t * u * 60 / (cw + gap)) + 50) % 5;
+		rounded(cr, x, sy, cw, ch, u * 10);
+		cairo_set_source_rgba(cr, 0.95, 0.96, 0.98, 0.9 * b);
+		cairo_fill(cr);
+		cairo_rectangle(cr, x + u * 8, sy + u * 8, cw - u * 16, u * 16);
+		cairo_set_source_rgba(cr, tint[k][0], tint[k][1], tint[k][2], b);
+		cairo_fill(cr);
+		for (int l = 0; l < 4; l++) {
+			cairo_rectangle(cr, x + u * 14, sy + u * (40 + l * 22), (cw - u * 28) * (0.5 + 0.1 * ((k + l) % 5)), u * 9);
+			cairo_set_source_rgba(cr, 0.6, 0.62, 0.7, 0.8 * b);
+			cairo_fill(cr);
+		}
+	}
+	// the timeline, and the playhead going through the day
+	double ty = sy + ch + u * 40;
+	cairo_rectangle(cr, W * 0.1, ty, W * 0.8, u * 4);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.25 * b);
+	cairo_fill(cr);
+	double head = W * 0.1 + W * 0.8 * saver_clamp((t - 1) / 7.5, 0, 1);
+	cairo_rectangle(cr, W * 0.1, ty, head - W * 0.1, u * 4);
+	cairo_set_source_rgba(cr, 0.45, 0.8, 1, b);
+	cairo_fill(cr);
+	cairo_arc(cr, head, ty + u * 2, u * 11, 0, 2 * M_PI);
+	cairo_set_source_rgba(cr, 1, 1, 1, b);
+	cairo_fill(cr);
+	static const char *const moments[] = {
+		"<b>3:14 pm</b>  You searched “how to uninstall Copilot−”",
+		"<b>3:15 pm</b>  Copilot− reinstalled itself",
+		"<b>3:16 pm</b>  Recall− saved your bank password, for convenience",
+	};
+	for (int i = 0; i < 3; i++) {
+		double m = in(t, 2 + i * 2.1, 0.5) * (1 - in(t, 3.9 + i * 2.1, 0.4) * (i < 2));
+		text(cr, moments[i], "Light", u * 34, W / 2, ty + u * 50 + (1 - m) * u * 16, 0.5, 1, 1, 1, m);
+	}
+}
+
+/* ---------- Slippy, who would like to help ---------- */
+
+static void paperclip(cairo_t *cr, double x, double y, double s, double a, double t) {
+	cairo_save(cr);
+	cairo_translate(cr, x, y);
+	cairo_rotate(cr, sin(t * 1.3) * 0.06);
+	// the wire: three loops inside each other
+	cairo_new_path(cr);
+	cairo_move_to(cr, s * 0.1, s * 1.2);
+	cairo_line_to(cr, s * 0.1, s * 0.25);
+	cairo_arc(cr, s * 0.4, s * 0.25, s * 0.3, M_PI, 2 * M_PI);
+	cairo_line_to(cr, s * 0.7, s * 1.35);
+	cairo_arc(cr, s * 0.45, s * 1.35, s * 0.25, 0, M_PI);
+	cairo_line_to(cr, s * 0.2 + 0, s * 0.45);
+	cairo_arc(cr, s * 0.4, s * 0.45, s * 0.2, M_PI, 2 * M_PI);
+	cairo_line_to(cr, s * 0.6, s * 1.15);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_width(cr, s * 0.1);
+	cairo_set_source_rgba(cr, 0.25, 0.27, 0.32, a);
+	cairo_stroke_preserve(cr);
+	cairo_set_line_width(cr, s * 0.06);
+	cairo_pattern_t *metal = cairo_pattern_create_linear(0, 0, s, s);
+	cairo_pattern_add_color_stop_rgba(metal, 0, 0.95, 0.96, 1, a);
+	cairo_pattern_add_color_stop_rgba(metal, 0.5, 0.62, 0.65, 0.72, a);
+	cairo_pattern_add_color_stop_rgba(metal, 1, 0.9, 0.92, 0.96, a);
+	cairo_set_source(cr, metal);
+	cairo_stroke(cr);
+	cairo_pattern_destroy(metal);
+	// the eyes, and the eyebrows that give it away
+	double blink = fmod(t, 3.7) < 0.12 ? 0.15 : 1;
+	for (int e = 0; e < 2; e++) {
+		double ex = s * (0.22 + e * 0.38), ey = s * 0.58;
+		cairo_save(cr);
+		cairo_translate(cr, ex, ey);
+		cairo_scale(cr, 1, blink);
+		cairo_arc(cr, 0, 0, s * 0.14, 0, 2 * M_PI);
+		cairo_restore(cr);
+		cairo_set_source_rgba(cr, 1, 1, 1, a);
+		cairo_fill(cr);
+		cairo_arc(cr, ex + s * 0.03, ey + s * 0.02, s * 0.06 * blink, 0, 2 * M_PI);
+		cairo_set_source_rgba(cr, 0.05, 0.05, 0.1, a);
+		cairo_fill(cr);
+		cairo_move_to(cr, ex - s * 0.12, ey - s * 0.2 - e * s * 0.04);
+		cairo_line_to(cr, ex + s * 0.12, ey - s * 0.24 + e * s * 0.04);
+		cairo_set_line_width(cr, s * 0.035);
+		cairo_stroke(cr);
+	}
+	cairo_restore(cr);
+}
+
+static void bubble(cairo_t *cr, double x, double y, double w, double h, double u, double a) {
+	rounded(cr, x, y, w, h, u * 18);
+	cairo_move_to(cr, x + u * 30, y + h);
+	cairo_line_to(cr, x - u * 30, y + h + u * 40);
+	cairo_line_to(cr, x + u * 80, y + h);
+	cairo_set_source_rgba(cr, 1, 0.98, 0.84, 0.97 * a);
+	cairo_fill(cr);
+}
+
+static void button(cairo_t *cr, const char *label, double x, double y, double w, double u,
+		double a, bool primary) {
+	rounded(cr, x, y, w, u * 52, u * 8);
+	if (primary) {
+		cairo_set_source_rgba(cr, 0.1, 0.45, 0.9, a);
+	} else {
+		cairo_set_source_rgba(cr, 0.88, 0.89, 0.92, a);
+	}
+	cairo_fill(cr);
+	text(cr, label, "Semi-Bold", u * 22, x + w / 2, y + u * 12, 0.5, primary ? 1 : 0.1,
+		primary ? 1 : 0.1, primary ? 1 : 0.15, a);
+}
+
+static void scene_slippy(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	double a = in(t, 0.1, 0.6);
+	double bounce = t < 1.2 ? (1 - in(t, 0.1, 1.1)) * -u * 300 + sin(t * 9) * u * 20 * (1 - in(t, 0.1, 1.1)) : 0;
+	paperclip(cr, W * 0.2, H * 0.36 + bounce, u * 230, a, s->t);
+	text(cr, "Slippy", "Semi-Bold", u * 30, W * 0.2 + u * 100, H * 0.36 + u * 390, 0.5, 1, 1, 1,
+		in(t, 1, 0.5));
+	double b = in(t, 1.2, 0.5);
+	double bx = W * 0.42, by = H * 0.2, bw = W * 0.46, bh = u * 250;
+	bubble(cr, bx, by, bw, bh, u, b);
+	bool second = t > 5.2;
+	const char *line = second ?
+		"I'm back! Now powered by AI, and still without an off switch." :
+		"It looks like you're trying to leave. Would you like help staying?";
+	PangoLayout *layout = layout_for(cr, line, "Normal", u * 34);
+	pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+	pango_layout_set_width(layout, (int)((bw - u * 60) * PANGO_SCALE));
+	cairo_move_to(cr, bx + u * 30, by + u * 30);
+	double la = second ? in(t, 5.2, 0.4) : b * (1 - in(t, 4.9, 0.3));
+	cairo_set_source_rgba(cr, 0.1, 0.1, 0.12, la);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+	double c = in(t, 2.4, 0.4) * (1 - in(t, 4.9, 0.3));
+	button(cr, "Yes", bx + u * 30, by + bh - u * 80, u * 140, u, c, true);
+	button(cr, "Yes, but later", bx + u * 190, by + bh - u * 80, u * 230, u, c, false);
+	text(cr, "Slippy is on by default. Slippy is also on by other means.", "Light", u * 22, W / 2,
+		H * 0.84, 0.5, 0.6, 0.65, 0.75, in(t, 6.3, 0.6));
+}
+
+/* ---------- your PC against a Copilot− PC ---------- */
+
+static void scene_compare(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	static const double c0[3] = { 1, 1, 1 }, c1[3] = { 0.75, 0.85, 1 };
+	headline(cr, "Why upgrade?", "Semi-Bold", u * 70, W / 2, H * 0.08, 0.5, c0, c1, in(t, 0.1, 0.6),
+		(t - 0.8) / 1.2);
+	static const char *const rows[][3] = {
+		{ "Starts up in", "3 minutes", "4 seconds*" },
+		{ "Asks you to sign in", "Never", "Every start, twice" },
+		{ "Remembers", "Nothing", "Everything, for ever" },
+		{ "Blue screens", "Blue", "Copilot− Blue™" },
+		{ "Can be turned off", "Yes", "Define “off”" },
+	};
+	double tx = W * 0.14, tw = W * 0.72, col1 = tx + tw * 0.42, col2 = tx + tw * 0.74;
+	double ty = H * 0.25, rh = u * 78;
+	double a = in(t, 0.5, 0.6);
+	// the Copilot− column, lifted out
+	rounded(cr, col2 - tw * 0.15, ty - u * 20, tw * 0.3, rh * 6 + u * 30, u * 18);
+	cairo_pattern_t *p = cairo_pattern_create_linear(0, ty, 0, ty + rh * 6);
+	cairo_pattern_add_color_stop_rgba(p, 0, 0.25, 0.5, 1, 0.45 * a);
+	cairo_pattern_add_color_stop_rgba(p, 1, 0.55, 0.3, 0.95, 0.35 * a);
+	cairo_set_source(cr, p);
+	cairo_fill(cr);
+	cairo_pattern_destroy(p);
+	text(cr, "Your PC", "Semi-Bold", u * 30, col1, ty, 0.5, 0.75, 0.78, 0.85, a);
+	text(cr, "Copilot− PC", "Bold", u * 30, col2, ty, 0.5, 1, 1, 1, a);
+	for (int i = 0; i < 5; i++) {
+		double r = in(t, 1.2 + i * 0.9, 0.5);
+		double y = ty + rh * (i + 1);
+		cairo_rectangle(cr, tx, y - u * 12, tw, u * 1);
+		cairo_set_source_rgba(cr, 1, 1, 1, 0.15 * r);
+		cairo_fill(cr);
+		text(cr, rows[i][0], "Light", u * 28, tx, y, 0, 0.9, 0.92, 1, r);
+		text(cr, rows[i][1], "Light", u * 28, col1, y, 0.5, 0.7, 0.72, 0.8, r);
+		text(cr, rows[i][2], "Semi-Bold", u * 28, col2, y, 0.5, 1, 1, 1, r);
+	}
+	text(cr, "*after 11 updates.  Comparison performed by Copilot−. Copilot− won.", "Light",
+		u * 22, W / 2, H * 0.86, 0.5, 0.6, 0.65, 0.75, in(t, 6.2, 0.6));
+}
+
+/* ---------- the blue screen, smiling ---------- */
+
+static void scene_bluescreen(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	double a = in(t, 0, 0.25);
+	cairo_set_source_rgba(cr, 0.0, 0.46, 0.84, a);
+	cairo_paint(cr);
+	double x = W * 0.12;
+	text(cr, ":)", "Light", u * 200, x, H * 0.08, 0, 1, 1, 1, a);
+	text(cr, "Your PC ran into Copilot− and needs to upgrade. We're just collecting some\n"
+		"of your data, and then we'll collect some more.", "Light", u * 40, x, H * 0.38, 0, 1, 1,
+		1, a);
+	int pct = -(int)(saver_clamp(t - 1.5, 0, 10) * 7);
+	char progress[64];
+	snprintf(progress, sizeof(progress), "%d%% complete", pct);
+	PangoLayout *layout = layout_for(cr, progress, "Light", u * 40);
+	pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
+	cairo_move_to(cr, x, H * 0.55);
+	cairo_set_source_rgba(cr, 1, 1, 1, a);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+	// a code to scan, leading nowhere
+	double qs = u * 150, qx = x, qy = H * 0.68, cell = qs / 21;
+	cairo_rectangle(cr, qx - cell, qy - cell, qs + 2 * cell, qs + 2 * cell);
+	cairo_set_source_rgba(cr, 1, 1, 1, a);
+	cairo_fill(cr);
+	for (int yy = 0; yy < 21; yy++) {
+		for (int xx = 0; xx < 21; xx++) {
+			bool finder = (xx < 7 && yy < 7) || (xx > 13 && yy < 7) || (xx < 7 && yy > 13);
+			bool on = finder ? (xx % 20 == 0 || yy % 20 == 0 || xx == 6 || yy == 6 || xx == 14 ||
+				yy == 14 || ((xx % 14 >= 2 && xx % 14 <= 4) && (yy % 14 >= 2 && yy % 14 <= 4))) :
+				((xx * 7 + yy * 13 + xx * yy) % 3 == 0);
+			if (on) {
+				cairo_rectangle(cr, qx + xx * cell, qy + yy * cell, cell + 0.5, cell + 0.5);
+			}
+		}
+	}
+	cairo_set_source_rgba(cr, 0, 0.46, 0.84, a);
+	cairo_fill(cr);
+	PangoLayout *info = layout_for(cr, "For more information about this issue and possible fixes, "
+		"you can't.\n\nIf you call a support person, give them this info:\nStop code: "
+		"CUSTOMER_TOO_SATISFIED", "Light", u * 24);
+	pango_layout_set_alignment(info, PANGO_ALIGN_LEFT);
+	cairo_move_to(cr, qx + qs + u * 40, qy);
+	cairo_set_source_rgba(cr, 1, 1, 1, a * in(t, 2.5, 0.5));
+	pango_cairo_show_layout(cr, info);
+	g_object_unref(info);
+}
+
+/* ---------- your privacy ---------- */
+
+static void scene_privacy(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	double a = in(t, 0.1, 0.7);
+	double lx = W * 0.26, ly = H * 0.5, lw = u * 230, lh = u * 190;
+	// a padlock with a window in it
+	cairo_set_line_width(cr, u * 26);
+	cairo_arc(cr, lx, ly - lh * 0.5, lw * 0.32, M_PI, 2 * M_PI);
+	cairo_set_source_rgba(cr, 0.8, 0.82, 0.88, a);
+	cairo_stroke(cr);
+	rounded(cr, lx - lw / 2, ly - lh * 0.5, lw, lh, u * 22);
+	cairo_pattern_t *p = cairo_pattern_create_linear(lx - lw / 2, ly, lx + lw / 2, ly + lh);
+	cairo_pattern_add_color_stop_rgba(p, 0, 1, 0.8, 0.25, a);
+	cairo_pattern_add_color_stop_rgba(p, 1, 0.9, 0.55, 0.1, a);
+	cairo_set_source(cr, p);
+	cairo_fill(cr);
+	cairo_pattern_destroy(p);
+	rounded(cr, lx - lw * 0.32, ly - lh * 0.3, lw * 0.64, lh * 0.55, u * 12);
+	cairo_set_source_rgba(cr, 0.7, 0.85, 1, 0.55 * a);
+	cairo_fill(cr);
+	// and someone looking in
+	double look = sin(s->t * 1.4) * lw * 0.1;
+	cairo_save(cr);
+	cairo_translate(cr, lx + look, ly - lh * 0.03);
+	cairo_scale(cr, 1, 0.55);
+	cairo_arc(cr, 0, 0, lw * 0.18, 0, 2 * M_PI);
+	cairo_restore(cr);
+	cairo_set_source_rgba(cr, 1, 1, 1, a);
+	cairo_fill(cr);
+	cairo_arc(cr, lx + look, ly - lh * 0.03, lw * 0.07, 0, 2 * M_PI);
+	cairo_set_source_rgba(cr, 0.1, 0.2, 0.45, a);
+	cairo_fill(cr);
+	double x = W * 0.46;
+	static const double c0[3] = { 1, 1, 1 }, c1[3] = { 0.8, 0.9, 1 };
+	headline(cr, "Your privacy matters to us.", "Semi-Bold", u * 56, x, H * 0.24, 0, c0, c1,
+		in(t, 0.5, 0.6), (t - 1.2) / 1.2);
+	text(cr, "It's worth a lot.", "Light", u * 44, x, H * 0.24 + u * 80, 0, 0.9, 0.92, 1,
+		in(t, 2.2, 0.6));
+	// the switch that springs back
+	double b = in(t, 3.2, 0.5);
+	double sy = H * 0.5, sx = x;
+	text(cr, "Telemetry", "Light", u * 32, sx, sy, 0, 1, 1, 1, b);
+	double knob = 1;
+	if (t > 4.2 && t < 5.4) {
+		knob = 1 - in(t, 4.2, 0.25); // off...
+	} else if (t >= 5.4) {
+		knob = in(t, 5.4, 0.2); // ...and on again
+	}
+	double tx = sx + u * 260, tw = u * 90, th = u * 46;
+	rounded(cr, tx, sy - u * 2, tw, th, th / 2);
+	cairo_set_source_rgba(cr, 0.2 + 0.0 * knob, 0.45 + 0.1 * knob, 0.5 + 0.45 * knob, b);
+	cairo_fill(cr);
+	cairo_arc(cr, tx + th / 2 + (tw - th) * knob, sy - u * 2 + th / 2, th * 0.38, 0, 2 * M_PI);
+	cairo_set_source_rgba(cr, 1, 1, 1, b);
+	cairo_fill(cr);
+	text(cr, knob > 0.5 ? "On" : "Off", "Semi-Bold", u * 28, tx + tw + u * 24, sy, 0, 1, 1, 1, b);
+	text(cr, "Optional diagnostic data: <b>Required</b>", "Light", u * 30, sx, sy + u * 80, 0, 0.85,
+		0.88, 0.95, in(t, 6, 0.5));
+	text(cr, "We never sell your data. We rent it.", "Light", u * 22, W / 2, H * 0.84, 0.5, 0.6,
+		0.65, 0.75, in(t, 6.8, 0.5));
+}
+
+/* ---------- the end card ---------- */
+
+static void scene_endcard(struct ad *s, cairo_t *cr, double t) {
+	double W = s->width, H = s->height, u = s->u;
+	static const double colors[4][3] = { { 0.95, 0.33, 0.13 }, { 0.5, 0.75, 0.1 },
+		{ 0.0, 0.64, 0.94 }, { 1, 0.73, 0.02 } };
+	double a = in(t, 0.2, 0.8);
+	double size = u * 42, gap = u * 5, lx = W / 2 - u * 230, ly = H * 0.3;
+	for (int i = 0; i < 4; i++) {
+		cairo_set_source_rgba(cr, colors[i][0], colors[i][1], colors[i][2], a);
+		sloppy_square(cr, lx + (i % 2) * (size + gap), ly + (i / 2) * (size + gap), size, s->t,
+			i + 3, 0.25);
+	}
+	text(cr, "Microslop", "Semi-Light", u * 76, lx + 2 * size + gap + u * 26, ly - u * 2, 0, 1, 1, 1,
+		a);
+	text(cr, "Empowering every person on the planet to watch more ads.", "Light", u * 34, W / 2,
+		H * 0.52, 0.5, 0.88, 0.9, 0.98, in(t, 1.2, 0.7));
+	text(cr, "#CopilotMinus   ·   microslop.example/minus", "Semi-Bold", u * 28, W / 2,
+		H * 0.52 + u * 70, 0.5, 0.55, 0.8, 1, in(t, 2.2, 0.6));
+	text(cr, "Copilot− PCs require Windows 12. Windows 12 is not available. Made with 100% "
+		"recycled training data. No paperclips were harmed.", "Light", u * 18, W / 2, H * 0.84, 0.5,
+		0.55, 0.6, 0.7, in(t, 3.2, 0.6));
+}
+
+/* ---------- now and then: updates are ready ---------- */
+
+static void draw_update_toast(struct ad *s, cairo_t *cr, double cycle) {
+	static const double shows[] = { 38, 92 };
+	double u = s->u, W = s->width;
+	for (int i = 0; i < 2; i++) {
+		double k = cycle - shows[i];
+		if (k < 0 || k > 7) {
+			continue;
+		}
+		double slide = in(k, 0, 0.5) * (1 - in(k, 6.4, 0.5));
+		double tw = u * 440, th = u * 190;
+		double x = W - (tw + u * 30) * slide, y = u * 80;
+		rounded(cr, x, y, tw, th, u * 12);
+		cairo_set_source_rgba(cr, 0.13, 0.14, 0.18, 0.96);
+		cairo_fill_preserve(cr);
+		cairo_set_source_rgba(cr, 1, 1, 1, 0.12);
+		cairo_set_line_width(cr, u * 1.5);
+		cairo_stroke(cr);
+		text(cr, "<b>Updates are ready</b>", "Normal", u * 24, x + u * 24, y + u * 20, 0, 1, 1, 1, 1);
+		int left = 10 - (int)(k * 1.6);
+		char line[96];
+		snprintf(line, sizeof(line), "Your PC will restart in %d seconds.", left < 0 ? 0 : left);
+		text(cr, line, "Light", u * 20, x + u * 24, y + u * 60, 0, 0.85, 0.87, 0.92, 1);
+		button(cr, "Restart now", x + u * 24, y + th - u * 72, u * 185, u, 1, true);
+		button(cr, "Restart now", x + u * 225, y + th - u * 72, u * 190, u, 1, false);
+	}
+}
+
 /* ---------- always there: the "Ad" tag, and a skip button that never skips ---------- */
 
 static void draw_chrome(struct ad *s, cairo_t *cr) {
 	double W = s->width, u = s->u;
+	cairo_new_path(cr);
 	rounded(cr, u * 24, u * 24, u * 56, u * 30, u * 6);
 	cairo_set_source_rgba(cr, 1, 0.8, 0.1, 0.95);
 	cairo_fill(cr);
@@ -504,8 +970,26 @@ static void draw_chrome(struct ad *s, cairo_t *cr) {
 /* ---------- the saver ---------- */
 
 typedef void (*scene_fn)(struct ad *s, cairo_t *cr, double t);
-static const scene_fn scenes[SCENES] = { scene_logo, scene_product, scene_features, scene_price,
-	scene_upgrade };
+
+/* The commercial, scene by scene, and how long each runs. */
+static const struct {
+	scene_fn draw;
+	double time;
+} scenes[] = {
+	{ scene_logo, 8 },
+	{ scene_testimonial, 9 },
+	{ scene_product, 9 },
+	{ scene_features, 10 },
+	{ scene_recall, 10 },
+	{ scene_slippy, 9 },
+	{ scene_compare, 9 },
+	{ scene_bluescreen, 8 },
+	{ scene_price, 10 },
+	{ scene_privacy, 9 },
+	{ scene_upgrade, 10 },
+	{ scene_endcard, 7 },
+};
+#define SCENES (int)(sizeof(scenes) / sizeof(scenes[0]))
 
 static void *ad_create(int width, int height, const struct saver_options *options) {
 	struct ad *s = calloc(1, sizeof(*s));
@@ -519,15 +1003,24 @@ static void ad_draw(void *state, cairo_t *cr, int width, int height, double dt) 
 	struct ad *s = state;
 	s->t += dt;
 	draw_background(s, cr);
-	double cycle = fmod(s->t, SCENE_TIME * SCENES);
-	int scene = (int)(cycle / SCENE_TIME);
-	double local = cycle - scene * SCENE_TIME;
-	// each scene fades in and out, over the one before for a moment
-	double alpha = saver_clamp(local / FADE, 0, 1) * saver_clamp((SCENE_TIME - local) / FADE, 0, 1);
+	double total = 0;
+	for (int i = 0; i < SCENES; i++) {
+		total += scenes[i].time;
+	}
+	double cycle = fmod(s->t, total), local = cycle;
+	int scene = 0;
+	while (scene < SCENES - 1 && local >= scenes[scene].time) {
+		local -= scenes[scene++].time;
+	}
+	double len = scenes[scene].time;
+	// each scene fades in and out; no zooming, so the letters are drawn from the cache
+	double alpha = saver_clamp(local / FADE, 0, 1) * saver_clamp((len - local) / FADE, 0, 1);
 	cairo_push_group(cr);
-	scenes[scene](s, cr, local);
+	cairo_new_path(cr); // nothing left over from the text drawn last
+	scenes[scene].draw(s, cr, local);
 	cairo_pop_group_to_source(cr);
 	cairo_paint_with_alpha(cr, alpha);
+	draw_update_toast(s, cr, cycle);
 	draw_chrome(s, cr);
 }
 
