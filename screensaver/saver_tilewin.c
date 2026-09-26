@@ -13,6 +13,7 @@
 #include "ipc-client.h"
 #include "ipc.h"
 #include "saver_util.h"
+#include "tw_desktop.h"
 
 #define FAKE_MAX 8
 
@@ -160,8 +161,7 @@ bool saver_tilewin_windows(const char *output, struct saver_window *wins, int ma
 /* ---------- windows of its own ---------- */
 
 /* Windows of its own, for the preview or when there is no picture of the screen. */
-static void draw_fake_desktop(cairo_t *cr, int width, int height, struct saver_window *wins,
-		int count, struct saver_window *bars, int bar_count) {
+void saver_fake_wallpaper(cairo_t *cr, int width, int height) {
 	cairo_pattern_t *sky = cairo_pattern_create_linear(0, 0, 0, height);
 	cairo_pattern_add_color_stop_rgb(sky, 0, 0.18, 0.45, 0.78);
 	cairo_pattern_add_color_stop_rgb(sky, 0.7, 0.45, 0.7, 0.9);
@@ -169,6 +169,11 @@ static void draw_fake_desktop(cairo_t *cr, int width, int height, struct saver_w
 	cairo_set_source(cr, sky);
 	cairo_paint(cr);
 	cairo_pattern_destroy(sky);
+}
+
+static void draw_fake_desktop(cairo_t *cr, int width, int height, struct saver_window *wins,
+		int count, struct saver_window *bars, int bar_count) {
+	saver_fake_wallpaper(cr, width, height);
 	double u = saver_unit(width, height);
 	for (int i = 0; i < count; i++) {
 		struct saver_window *b = &wins[i];
@@ -268,4 +273,90 @@ cairo_surface_t *saver_desktop(const struct saver_options *options, int width, i
 	cairo_destroy(cr);
 	cairo_surface_flush(picture);
 	return picture;
+}
+
+/* ---------- the wallpaper ---------- */
+
+static void set_hex(cairo_pattern_t *p, double offset, const char *hex) {
+	unsigned v = 0;
+	if (hex && hex[0] == '#') {
+		v = (unsigned)strtoul(hex + 1, NULL, 16);
+	}
+	cairo_pattern_add_color_stop_rgb(p, offset, (v >> 16 & 255) / 255.0, (v >> 8 & 255) / 255.0,
+		(v & 255) / 255.0);
+}
+
+static const char *jstring(json_object *o, const char *key) {
+	json_object *v;
+	return o && json_object_object_get_ex(o, key, &v) ? json_object_get_string(v) : NULL;
+}
+
+cairo_surface_t *saver_wallpaper(const char *output, int width, int height) {
+	if (!output || !*output) {
+		return NULL;
+	}
+	int fd = connect_tilewin();
+	if (fd < 0) {
+		return NULL;
+	}
+	uint32_t len = 0;
+	char *reply = ipc_single_command(fd, IPC_GET_OUTPUTS, NULL, &len);
+	close(fd);
+	json_object *outputs = reply ? json_tokener_parse(reply) : NULL;
+	free(reply);
+	json_object *wall = NULL;
+	for (size_t i = 0; outputs && i < json_object_array_length(outputs); i++) {
+		json_object *o = json_object_array_get_idx(outputs, i);
+		const char *name = jstring(o, "name");
+		if (name && strcmp(name, output) == 0) {
+			json_object_object_get_ex(o, "tw_wallpaper", &wall);
+		}
+	}
+	if (!wall) {
+		json_object_put(outputs);
+		return NULL;
+	}
+	cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+	cairo_t *cr = cairo_create(out);
+	const char *type = jstring(wall, "type"), *image = jstring(wall, "image");
+	const char *mode = jstring(wall, "mode");
+	json_object *v;
+	bool vertical = !json_object_object_get_ex(wall, "vertical", &v) || json_object_get_boolean(v);
+	cairo_pattern_t *fill = type && strcmp(type, "gradient") == 0 ?
+		(vertical ? cairo_pattern_create_linear(0, 0, 0, height) :
+			cairo_pattern_create_linear(0, 0, width, 0)) :
+		cairo_pattern_create_linear(0, 0, 0, 1);
+	set_hex(fill, 0, jstring(wall, "color"));
+	set_hex(fill, 1, type && strcmp(type, "gradient") == 0 ? jstring(wall, "color2") :
+		jstring(wall, "color"));
+	cairo_set_source(cr, fill);
+	cairo_paint(cr);
+	cairo_pattern_destroy(fill);
+	if (type && strcmp(type, "image") == 0 && image) {
+		bool cover = !mode || strcmp(mode, "fill") == 0;
+		cairo_surface_t *picture = cover ? tw_image_render_cover(image, width, height) :
+			tw_image_load(image);
+		if (picture) {
+			int iw = cairo_image_surface_get_width(picture), ih = cairo_image_surface_get_height(picture);
+			if (cover) {
+				cairo_scale(cr, (double)width / iw, (double)height / ih);
+			} else if (strcmp(mode, "stretch") == 0) {
+				cairo_scale(cr, (double)width / iw, (double)height / ih);
+			} else if (strcmp(mode, "fit") == 0) {
+				double k = fmin((double)width / iw, (double)height / ih);
+				cairo_translate(cr, (width - iw * k) / 2, (height - ih * k) / 2);
+				cairo_scale(cr, k, k);
+			} else { // center
+				cairo_translate(cr, (width - iw) / 2.0, (height - ih) / 2.0);
+			}
+			cairo_set_source_surface(cr, picture, 0, 0);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+			cairo_paint(cr);
+			cairo_surface_destroy(picture);
+		}
+	}
+	cairo_destroy(cr);
+	cairo_surface_flush(out);
+	json_object_put(outputs);
+	return out;
 }

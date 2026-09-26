@@ -173,6 +173,8 @@ void tw_double_click_time_changed(void);
 json_object *tw_describe_state(void);
 void tw_wallpaper_update(struct sway_output *output);
 void tw_wallpaper_invalidate(void);
+/* The wallpaper of a screen as JSON for the IPC (json_object *). */
+struct json_object *tw_wallpaper_describe(struct sway_output *output);
 
 /* reload.c */
 void reload_config_now(void);

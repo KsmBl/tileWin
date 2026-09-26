@@ -12,6 +12,7 @@
 #include "log.h"
 #include "sway/config.h"
 #include "sway/ipc-json.h"
+#include "sway/tilewin.h"
 #include "sway/server.h"
 #include "sway/tree/container.h"
 #include "sway/tree/view.h"
@@ -339,6 +340,7 @@ static void ipc_json_describe_enabled_output(struct sway_output *output,
 	ipc_json_describe_output(output, object);
 
 	struct wlr_output *wlr_output = output->wlr_output;
+	json_object_object_add(object, "tw_wallpaper", tw_wallpaper_describe(output));
 	json_object_object_add(object, "non_desktop", json_object_new_boolean(false));
 	json_object_object_add(object, "active", json_object_new_boolean(true));
 	json_object_object_add(object, "dpms",

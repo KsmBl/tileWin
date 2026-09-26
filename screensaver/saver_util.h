@@ -54,11 +54,19 @@ bool saver_tilewin_windows(const char *output, struct saver_window *wins, int ma
 cairo_surface_t *saver_desktop(const struct saver_options *options, int width, int height,
 	struct saver_window *wins, int max, int *count, struct saver_window *bars, int *bar_count);
 
+/*
+ * The wallpaper of that screen as tileWin draws it, width by height, RGB24;
+ * NULL without tileWin to ask (the preview).
+ */
+cairo_surface_t *saver_wallpaper(const char *output, int width, int height);
+/* The wallpaper of the windows of its own that savers bring without tileWin. */
+void saver_fake_wallpaper(cairo_t *cr, int width, int height);
+
 /* The savers, in the files that draw them. */
 extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbons,
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
-	saver_maze, saver_matrix, saver_hellfire, saver_ad, saver_storm;
+	saver_maze, saver_matrix, saver_hellfire, saver_ad, saver_storm, saver_gravity;
 
 #endif

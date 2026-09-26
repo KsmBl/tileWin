@@ -1,3 +1,4 @@
+#include <json.h>
 #include <malloc.h>
 #include <math.h>
 #include <stdlib.h>
@@ -930,6 +931,31 @@ void tw_wallpaper_update(struct sway_output *output) {
 		}
 	}
 	wallpaper_spec_finish(&spec);
+}
+
+/*
+ * The wallpaper of a screen as data, for the IPC: its type, colours as
+ * #rrggbb, and for an image the file and how it is placed. Clients drawing the
+ * desktop themselves (the screen savers) draw the same one from it.
+ */
+json_object *tw_wallpaper_describe(struct sway_output *output) {
+	struct wallpaper_spec spec;
+	wallpaper_spec_get(&spec, output);
+	static const char *const types[] = { "none", "solid", "gradient", "image" };
+	json_object *o = json_object_new_object();
+	json_object_object_add(o, "type", json_object_new_string(types[spec.type]));
+	char color[16];
+	snprintf(color, sizeof(color), "#%06x", spec.color1 >> 8);
+	json_object_object_add(o, "color", json_object_new_string(color));
+	snprintf(color, sizeof(color), "#%06x", spec.color2 >> 8);
+	json_object_object_add(o, "color2", json_object_new_string(color));
+	json_object_object_add(o, "vertical", json_object_new_boolean(spec.vertical));
+	if (spec.image) {
+		json_object_object_add(o, "image", json_object_new_string(spec.image));
+		json_object_object_add(o, "mode", json_object_new_string(spec.mode ? spec.mode : "fill"));
+	}
+	wallpaper_spec_finish(&spec);
+	return o;
 }
 
 void tw_wallpaper_invalidate(void) {
