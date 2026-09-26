@@ -133,8 +133,53 @@ static void render(struct output *o) {
 
 /*
  * Taken once, before the saver covers the screen, for a saver that shows the
- * windows (Diggers flies pieces of them in). Only shm formats cairo knows.
+ * windows (Diggers flies pieces of them in, Hellfire burns them). Compositors
+ * hand it over in the byte order of their renderer: XRGB, or XBGR with a GPU,
+ * or ten bits a colour on a deep screen; all of them become cairo's RGB24.
  */
+static bool copy_format_known(uint32_t format) {
+	switch (format) {
+	case WL_SHM_FORMAT_XRGB8888:
+	case WL_SHM_FORMAT_ARGB8888:
+	case WL_SHM_FORMAT_XBGR8888:
+	case WL_SHM_FORMAT_ABGR8888:
+	case WL_SHM_FORMAT_XRGB2101010:
+	case WL_SHM_FORMAT_ARGB2101010:
+	case WL_SHM_FORMAT_XBGR2101010:
+	case WL_SHM_FORMAT_ABGR2101010:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* One pixel of the copy as cairo's 0xffRRGGBB. */
+static uint32_t copy_pixel(uint32_t format, uint32_t p) {
+	uint32_t r, g, b;
+	switch (format) {
+	case WL_SHM_FORMAT_XBGR8888:
+	case WL_SHM_FORMAT_ABGR8888:
+		r = p & 0xff;
+		g = (p >> 8) & 0xff;
+		b = (p >> 16) & 0xff;
+		break;
+	case WL_SHM_FORMAT_XRGB2101010:
+	case WL_SHM_FORMAT_ARGB2101010:
+		r = (p >> 22) & 0xff;
+		g = (p >> 12) & 0xff;
+		b = (p >> 2) & 0xff;
+		break;
+	case WL_SHM_FORMAT_XBGR2101010:
+	case WL_SHM_FORMAT_ABGR2101010:
+		r = (p >> 2) & 0xff;
+		g = (p >> 12) & 0xff;
+		b = (p >> 22) & 0xff;
+		break;
+	default: // XRGB8888, ARGB8888: already cairo's
+		return p | 0xff000000u;
+	}
+	return 0xff000000u | r << 16 | g << 8 | b;
+}
 static void copy_done(struct output *o) {
 	if (o->copy) {
 		zwlr_screencopy_frame_v1_destroy(o->copy);
@@ -153,8 +198,7 @@ static void copy_done(struct output *o) {
 static void copy_buffer(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t format,
 		uint32_t width, uint32_t height, uint32_t stride) {
 	struct output *o = data;
-	if (o->copy_buffer || (format != WL_SHM_FORMAT_XRGB8888 &&
-			format != WL_SHM_FORMAT_ARGB8888)) {
+	if (o->copy_buffer || !copy_format_known(format)) {
 		return;
 	}
 	size_t size = (size_t)stride * height;
@@ -190,18 +234,19 @@ static void copy_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uint3
 static void copy_ready(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t sec_hi,
 		uint32_t sec_lo, uint32_t nsec) {
 	struct output *o = data;
-	cairo_surface_t *shot = cairo_image_surface_create_for_data(o->copy_data,
-		CAIRO_FORMAT_RGB24, o->copy_width, o->copy_height, o->copy_stride);
 	o->desktop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, o->copy_width, o->copy_height);
-	cairo_t *cr = cairo_create(o->desktop);
-	if (o->copy_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT) {
-		cairo_translate(cr, 0, o->copy_height);
-		cairo_scale(cr, 1, -1);
+	uint32_t *dst = (uint32_t *)cairo_image_surface_get_data(o->desktop);
+	int dst_stride = cairo_image_surface_get_stride(o->desktop) / 4;
+	bool invert = o->copy_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT;
+	for (uint32_t y = 0; y < o->copy_height; y++) {
+		const uint32_t *src = (const uint32_t *)((const char *)o->copy_data +
+			(size_t)(invert ? o->copy_height - 1 - y : y) * o->copy_stride);
+		uint32_t *row = dst + (size_t)y * dst_stride;
+		for (uint32_t x = 0; x < o->copy_width; x++) {
+			row[x] = copy_pixel(o->copy_format, src[x]);
+		}
 	}
-	cairo_set_source_surface(cr, shot, 0, 0);
-	cairo_paint(cr);
-	cairo_destroy(cr);
-	cairo_surface_destroy(shot);
+	cairo_surface_mark_dirty(o->desktop);
 	copy_done(o);
 }
 
