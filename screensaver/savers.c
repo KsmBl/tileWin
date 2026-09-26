@@ -30,6 +30,7 @@ const struct saver *const savers[] = {
 	&saver_diggers,
 	&saver_matrix,
 	&saver_hellfire,
+	&saver_ad,
 };
 
 const int saver_count = sizeof(savers) / sizeof(savers[0]);

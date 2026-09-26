@@ -51,6 +51,6 @@ extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbo
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
-	saver_maze, saver_matrix, saver_hellfire;
+	saver_maze, saver_matrix, saver_hellfire, saver_ad;
 
 #endif

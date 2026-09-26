@@ -3,6 +3,7 @@ lib_savers = static_library(
 	'tilewin-savers', [
 		'savers.c',
 		'saver_tilewin.c',
+		'saver_ad.c',
 		'saver_classic.c',
 		'saver_diggers.c',
 		'saver_hellfire.c',
