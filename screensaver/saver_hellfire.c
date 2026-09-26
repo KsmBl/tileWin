@@ -168,83 +168,6 @@ static float smooth01(float v) {
 
 /* ---------- the pictures ---------- */
 
-/* Windows of its own, for the preview or when there is no picture of the screen. */
-static void draw_fake_desktop(struct hellfire *s, cairo_t *cr, struct saver_window *wins,
-		int count, struct saver_window *bars, int bar_count) {
-	cairo_pattern_t *sky = cairo_pattern_create_linear(0, 0, 0, s->height);
-	cairo_pattern_add_color_stop_rgb(sky, 0, 0.18, 0.45, 0.78);
-	cairo_pattern_add_color_stop_rgb(sky, 0.7, 0.45, 0.7, 0.9);
-	cairo_pattern_add_color_stop_rgb(sky, 1, 0.3, 0.6, 0.25);
-	cairo_set_source(cr, sky);
-	cairo_paint(cr);
-	cairo_pattern_destroy(sky);
-	double u = s->u;
-	for (int i = 0; i < count; i++) {
-		struct saver_window *b = &wins[i];
-		cairo_rectangle(cr, b->x, b->y, b->w, b->h);
-		cairo_set_source_rgb(cr, 0.97, 0.97, 0.98);
-		cairo_fill(cr);
-		cairo_rectangle(cr, b->x, b->y, b->w, b->title_h);
-		cairo_pattern_t *title = cairo_pattern_create_linear(0, b->y, 0, b->y + b->title_h);
-		cairo_pattern_add_color_stop_rgb(title, 0, 0.2, 0.45, 0.85);
-		cairo_pattern_add_color_stop_rgb(title, 1, 0.1, 0.3, 0.7);
-		cairo_set_source(cr, title);
-		cairo_fill(cr);
-		cairo_pattern_destroy(title);
-		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-		cairo_set_font_size(cr, u * 13);
-		cairo_move_to(cr, b->x + u * 8, b->y + b->title_h * 0.7);
-		cairo_set_source_rgb(cr, 1, 1, 1);
-		cairo_show_text(cr, b->title);
-		cairo_select_font_face(cr, "serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-		cairo_set_font_size(cr, u * 12);
-		static const char *const words[] = { "The", "windows", "were", "open", "and", "the",
-			"work", "of", "the", "day", "lay", "in", "them", "line", "by", "line," };
-		int k = i * 5;
-		for (double ly = b->y + b->title_h + u * 22; ly < b->y + b->h - u * 8; ly += u * 17) {
-			double lx = b->x + u * 12;
-			while (lx < b->x + b->w - u * 60) {
-				const char *wd = words[k++ % 16];
-				cairo_text_extents_t e;
-				cairo_text_extents(cr, wd, &e);
-				cairo_move_to(cr, lx, ly);
-				cairo_set_source_rgb(cr, 0.15, 0.17, 0.22);
-				cairo_show_text(cr, wd);
-				lx += e.x_advance + u * 5;
-			}
-		}
-		cairo_rectangle(cr, b->x + 0.5, b->y + 0.5, b->w - 1, b->h - 1);
-		cairo_set_source_rgb(cr, 0.25, 0.3, 0.4);
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-	}
-	for (int i = 0; i < bar_count; i++) {
-		cairo_rectangle(cr, bars[i].x, bars[i].y, bars[i].w, bars[i].h);
-		cairo_set_source_rgb(cr, 0.12, 0.13, 0.16);
-		cairo_fill(cr);
-	}
-}
-
-static void make_fake_windows(struct hellfire *s, struct saver_window *wins, int *count,
-		struct saver_window *bars, int *bar_count) {
-	static const char *const titles[] = { "Documents", "Notes - Editor", "Music",
-		"Holiday photos", "Terminal" };
-	*count = 3 + (int)(saver_random() * 2);
-	for (int i = 0; i < *count; i++) {
-		struct saver_window *b = &wins[i];
-		b->w = s->width * saver_between(0.25, 0.4);
-		b->h = s->height * saver_between(0.3, 0.5);
-		b->x = saver_between(0.03, 0.97) * (s->width - b->w);
-		b->y = saver_between(0.05, 0.85) * (s->height * 0.93 - b->h);
-		b->title_h = fmax(8, s->u * 26);
-		b->border = 1;
-		snprintf(b->title, sizeof(b->title), "%s", titles[i % 5]);
-	}
-	double bar = fmax(8, s->height * 0.05);
-	bars[0] = (struct saver_window){ .x = 0, .y = s->height - bar, .w = s->width, .h = bar };
-	*bar_count = 1;
-}
-
 /* The burnt ground: charcoal with cracks, lit red from below. */
 static void make_hell(struct hellfire *s) {
 	for (int y = 0; y < s->height; y++) {
@@ -1072,27 +995,8 @@ static void *hellfire_create(int width, int height, const struct saver_options *
 	// the desktop: the real one, or windows of its own
 	struct saver_window wins[WINDOWS_MAX], bars[4];
 	int count = 0, bar_count = 0;
-	bool real = saver_tilewin_windows(options->output, wins, WINDOWS_MAX, &count, bars,
+	s->frame = saver_desktop(options, width, height, wins, WINDOWS_MAX, &count, bars,
 		&bar_count);
-	if (!real) {
-		make_fake_windows(s, wins, &count, bars, &bar_count);
-	}
-	s->frame = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
-	cairo_t *cr = cairo_create(s->frame);
-	if (options->desktop && real) {
-		cairo_scale(cr, (double)width / cairo_image_surface_get_width(options->desktop),
-			(double)height / cairo_image_surface_get_height(options->desktop));
-		cairo_set_source_surface(cr, options->desktop, 0, 0);
-		cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
-		cairo_paint(cr);
-	} else {
-		for (int i = 0; i < count; i++) {
-			wins[i].title_h = wins[i].title_h > 0 ? wins[i].title_h : fmax(8, s->u * 26);
-		}
-		draw_fake_desktop(s, cr, wins, count, bars, bar_count);
-	}
-	cairo_destroy(cr);
-	cairo_surface_flush(s->frame);
 	s->base = malloc((size_t)width * height * 4);
 	s->hell = malloc((size_t)width * height * 4);
 	s->grain = malloc((size_t)width * height);

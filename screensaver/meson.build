@@ -11,6 +11,7 @@ lib_savers = static_library(
 		'saver_maze.c',
 		'saver_new.c',
 		'saver_pipes.c',
+		'saver_storm.c',
 		'saver_win7.c',
 	],
 	include_directories: [sway_inc],

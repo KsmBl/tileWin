@@ -541,7 +541,8 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(pick), p->preview_button);
 	p->saver_row = ui_row(group, "Screen saver", "Bubbles, Mystify, Ribbons, 3D Text and "
 		"Photos from Windows 7, Starfield, 3D Pipes, 3D Maze and Flying Windows from before, "
-		"Aurora, Word Clock, Tiling, Diggers and Hellfire of tileWin's own, the Matrix, and "
+		"Aurora, Word Clock, Tiling, Diggers, Hellfire and Thunderstorm of tileWin's own, the "
+		"Matrix, and "
 		"a word from Microslop", pick);
 
 	p->wait_dd = gtk_drop_down_new_from_strings(wait_labels);

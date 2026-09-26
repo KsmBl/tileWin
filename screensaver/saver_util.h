@@ -46,11 +46,19 @@ struct saver_window {
 bool saver_tilewin_windows(const char *output, struct saver_window *wins, int max,
 	int *count, struct saver_window *bars, int *bar_count);
 
+/*
+ * The desktop a saver is drawn over: its windows and taskbars, from tileWin or
+ * made up without it (the preview), and a picture of it: the screen as it was
+ * before the saver, or drawn stand-ins. An RGB24 surface of width by height.
+ */
+cairo_surface_t *saver_desktop(const struct saver_options *options, int width, int height,
+	struct saver_window *wins, int max, int *count, struct saver_window *bars, int *bar_count);
+
 /* The savers, in the files that draw them. */
 extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbons,
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
-	saver_maze, saver_matrix, saver_hellfire, saver_ad;
+	saver_maze, saver_matrix, saver_hellfire, saver_ad, saver_storm;
 
 #endif
