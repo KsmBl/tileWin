@@ -2,6 +2,7 @@
 #define _TW_SAVER_UTIL_H
 #include <cairo.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include "savers.h"
 
@@ -31,11 +32,25 @@ static inline double saver_clamp(double v, double low, double high) {
 	return v < low ? low : v > high ? high : v;
 }
 
+/* A window on the screen, from tileWin: the title bar is its top title_h pixels. */
+struct saver_window {
+	double x, y, w, h;
+	char title[64];
+	double title_h, border;
+};
+
+/*
+ * The windows tileWin shows on that screen, bottom first, in its coordinates,
+ * and its taskbars (bars may be NULL); false without tileWin to ask.
+ */
+bool saver_tilewin_windows(const char *output, struct saver_window *wins, int max,
+	int *count, struct saver_window *bars, int *bar_count);
+
 /* The savers, in the files that draw them. */
 extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbons,
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
-	saver_maze, saver_matrix;
+	saver_maze, saver_matrix, saver_hellfire;
 
 #endif

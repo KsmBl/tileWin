@@ -1,12 +1,6 @@
-#include <json.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-#include "ipc-client.h"
-#include "ipc.h"
 #include "saver_util.h"
 
 /*
@@ -173,11 +167,6 @@ struct dirt {
 	double shade;
 };
 
-struct window_box {
-	double x, y, w, h;
-	char title[64];
-};
-
 struct diggers {
 	int width, height;
 	double u, h;            // unit, and how tall a miner is
@@ -192,13 +181,13 @@ struct diggers {
 	cairo_pattern_t *pebbles;
 	unsigned char *built;   // 1: a plank of a staircase
 	unsigned char *rock;    // 1: the taskbar, walked on and never dug
-	struct window_box bars[4]; // where the taskbars are
+	struct saver_window bars[4]; // where the taskbars are
 	int bar_count, rock_cells;
 	double sky;             // below the taskbars at the top: where they drop in
 	cairo_surface_t *planks;
 	struct bomb bombs[BOMBS_MAX];
 	struct blast blasts[BOMBS_MAX];
-	struct window_box windows[WINDOWS_MAX];
+	struct saver_window windows[WINDOWS_MAX];
 	int window_count;
 	bool fake;              // windows of its own, drawn by the saver
 	char output[64];
@@ -220,7 +209,7 @@ struct diggers {
 	struct heli helis[HELIS_MAX];
 	double heli_wait;       // until the next helicopter takes off
 	cairo_surface_t *desktop; // the screen before the saver: the real pieces of the windows
-	struct window_box pictured[WINDOWS_MAX]; // the windows as they were on it
+	struct saver_window pictured[WINDOWS_MAX]; // the windows as they were on it
 	int pictured_count;
 };
 
@@ -230,137 +219,10 @@ static int stair_nearby(struct diggers *s, struct man *m, double goal_y);
 
 /* ---------- the windows ---------- */
 
-static int rect_int(json_object *rect, const char *key) {
-	json_object *v;
-	return rect && json_object_object_get_ex(rect, key, &v) ? json_object_get_int(v) : 0;
-}
-
-static void collect_windows(struct diggers *s, json_object *node, int ox, int oy) {
-	json_object *v;
-	bool view = json_object_object_get_ex(node, "pid", &v) && json_object_get_int(v) > 0;
-	if (view) {
-		bool visible = json_object_object_get_ex(node, "visible", &v) &&
-			json_object_get_boolean(v);
-		bool minimized = json_object_object_get_ex(node, "minimized", &v) &&
-			json_object_get_boolean(v);
-		json_object *rect = NULL, *deco = NULL;
-		json_object_object_get_ex(node, "rect", &rect);
-		json_object_object_get_ex(node, "deco_rect", &deco);
-		if (visible && !minimized && s->window_count < WINDOWS_MAX) {
-			// the rect is what the app draws; the title bar sits on top of it
-			int title = rect_int(deco, "height");
-			struct window_box *b = &s->windows[s->window_count++];
-			b->x = rect_int(rect, "x") - ox;
-			b->y = rect_int(rect, "y") - title - oy;
-			b->w = rect_int(rect, "width");
-			b->h = rect_int(rect, "height") + title;
-			const char *name = json_object_object_get_ex(node, "name", &v) ?
-				json_object_get_string(v) : NULL;
-			snprintf(b->title, sizeof(b->title), "%s", name ? name : "");
-		}
-	}
-	static const char *const children[] = { "nodes", "floating_nodes" };
-	for (int k = 0; k < 2; k++) {
-		json_object *list;
-		if (!json_object_object_get_ex(node, children[k], &list)) {
-			continue;
-		}
-		for (size_t i = 0; i < json_object_array_length(list); i++) {
-			collect_windows(s, json_object_array_get_idx(list, i), ox, oy);
-		}
-	}
-}
-
-/* The socket of tileWin, or -1; unlike ipc_open_socket, not being able to is no end. */
-static int connect_tilewin(void) {
-	const char *path = getenv("TILEWINSOCK");
-	path = path ? path : getenv("SWAYSOCK");
-	if (!path) {
-		return -1;
-	}
-	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	struct sockaddr_un addr = { .sun_family = AF_UNIX };
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
-	if (fd >= 0 && connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-		close(fd);
-		fd = -1;
-	}
-	return fd;
-}
-
-/*
- * The taskbars of the screen: what its workspaces leave free of it, at the
- * top, the bottom or a side. tileWin lists no taskbar, but a workspace is as
- * big as the screen less the taskbars.
- */
-static void find_bars(struct diggers *s, json_object *output, int ox, int oy, int ow, int oh) {
-	s->bar_count = 0;
-	json_object *workspaces, *v, *rect;
-	if (!json_object_object_get_ex(output, "nodes", &workspaces)) {
-		return;
-	}
-	for (size_t i = 0; i < json_object_array_length(workspaces); i++) {
-		json_object *ws = json_object_array_get_idx(workspaces, i);
-		if (!json_object_object_get_ex(ws, "type", &v) ||
-				strcmp(json_object_get_string(v), "workspace") != 0 ||
-				!json_object_object_get_ex(ws, "rect", &rect)) {
-			continue;
-		}
-		double x = rect_int(rect, "x") - ox, y = rect_int(rect, "y") - oy;
-		double w = rect_int(rect, "width"), h = rect_int(rect, "height");
-		if (w <= 0 || h <= 0) {
-			continue;
-		}
-		struct window_box strips[4] = {
-			{ 0, 0, ow, y, "" },                 // above
-			{ 0, y + h, ow, oh - (y + h), "" },  // below
-			{ 0, 0, x, oh, "" },                 // left
-			{ x + w, 0, ow - (x + w), oh, "" },  // right
-		};
-		for (int k = 0; k < 4; k++) {
-			if (strips[k].w > 0 && strips[k].h > 0) {
-				s->bars[s->bar_count++] = strips[k];
-			}
-		}
-		return; // every workspace of a screen has the same size
-	}
-}
-
 /* The windows on this screen, from tileWin; false when it cannot tell. */
 static bool read_windows(struct diggers *s) {
-	if (!s->output[0]) {
-		return false;
-	}
-	int fd = connect_tilewin();
-	if (fd < 0) {
-		return false;
-	}
-	uint32_t len = 0;
-	char *reply = ipc_single_command(fd, IPC_GET_TREE, NULL, &len);
-	close(fd);
-	json_object *tree = reply ? json_tokener_parse(reply) : NULL;
-	free(reply);
-	if (!tree) {
-		return false;
-	}
-	s->window_count = 0;
-	bool found = false;
-	json_object *outputs;
-	if (json_object_object_get_ex(tree, "nodes", &outputs)) {
-		for (size_t i = 0; i < json_object_array_length(outputs); i++) {
-			json_object *o = json_object_array_get_idx(outputs, i), *name, *rect;
-			if (json_object_object_get_ex(o, "name", &name) &&
-					strcmp(json_object_get_string(name), s->output) == 0 &&
-					json_object_object_get_ex(o, "rect", &rect)) {
-				int ox = rect_int(rect, "x"), oy = rect_int(rect, "y");
-				collect_windows(s, o, ox, oy);
-				find_bars(s, o, ox, oy, rect_int(rect, "width"), rect_int(rect, "height"));
-				found = true;
-			}
-		}
-	}
-	json_object_put(tree);
-	return found;
+	return saver_tilewin_windows(s->output, s->windows, WINDOWS_MAX, &s->window_count,
+		s->bars, &s->bar_count);
 }
 
 /* Windows of its own, for the preview: a few, overlapping, leaving room to run. */
@@ -369,7 +231,7 @@ static void make_windows(struct diggers *s) {
 		"Holiday photos", "Terminal" };
 	s->window_count = 3 + (int)(saver_random() * 2);
 	for (int i = 0; i < s->window_count; i++) {
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		b->w = s->width * saver_between(0.22, 0.36);
 		b->h = s->height * saver_between(0.25, 0.42);
 		b->x = saver_between(0.04, 0.96) * (s->width - b->w);
@@ -378,7 +240,7 @@ static void make_windows(struct diggers *s) {
 	}
 	// and a taskbar along the bottom
 	double bar = fmax(8, s->height * 0.07);
-	s->bars[0] = (struct window_box){ 0, s->height - bar, s->width, bar, "" };
+	s->bars[0] = (struct saver_window){ .x = 0, .y = s->height - bar, .w = s->width, .h = bar };
 	s->bar_count = 1;
 }
 
@@ -392,7 +254,7 @@ static void build_soil(struct diggers *s) {
 	memset(s->dug, 0, s->gw * s->gh);
 	s->soil_cells = s->dug_cells = 0;
 	for (int i = 0; i < s->window_count; i++) {
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		int x0 = (int)floor(b->x / s->cell), x1 = (int)ceil((b->x + b->w) / s->cell);
 		int y0 = (int)floor(b->y / s->cell), y1 = (int)ceil((b->y + b->h) / s->cell);
 		for (int cy = y0 < 0 ? 0 : y0; cy < y1 && cy < s->gh; cy++) {
@@ -420,7 +282,7 @@ static void build_soil(struct diggers *s) {
 	s->rock_cells = 0;
 	s->sky = -s->h * 0.2;
 	for (int i = 0; i < s->bar_count; i++) {
-		struct window_box *b = &s->bars[i];
+		struct saver_window *b = &s->bars[i];
 		int x0 = (int)floor(b->x / s->cell), x1 = (int)ceil((b->x + b->w) / s->cell);
 		int y0 = (int)floor(b->y / s->cell), y1 = (int)ceil((b->y + b->h) / s->cell);
 		for (int cy = y0 < 0 ? 0 : y0; cy < y1 && cy < s->gh; cy++) {
@@ -509,7 +371,7 @@ static void redraw_tunnels(struct diggers *s, double x, double y, double w, doub
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	for (int i = 0; i < s->window_count; i++) {
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		cairo_rectangle(cr, round(b->x), round(b->y), round(b->w), round(b->h));
 	}
 	cairo_clip(cr);
@@ -681,7 +543,7 @@ static void start_dig(struct diggers *s, struct man *m, double dx, double dy) {
 static double window_top(struct diggers *s, struct man *m, double *left, double *right) {
 	double top = 0;
 	for (int i = 0; i < s->window_count; i++) {
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		if (m->x < b->x + s->h * 0.3 || m->x > b->x + b->w - s->h * 0.3) {
 			continue;
 		}
@@ -1011,7 +873,7 @@ static void pick_target(struct diggers *s, struct man *m) {
 	m->wx = -1;
 	double best = -1;
 	for (int tries = 0; tries < 40 && s->window_count; tries++) {
-		struct window_box *b = &s->windows[(int)(saver_random() * s->window_count)];
+		struct saver_window *b = &s->windows[(int)(saver_random() * s->window_count)];
 		// like a mine: level drifts one above the other, joined by shafts in columns, so
 		// the tunnels run straight and in parallel
 		int columns = (int)((b->w - s->h * 1.4) / (s->h * MINE_COLUMN)) + 1;
@@ -1041,7 +903,7 @@ static void find_something(struct diggers *s, struct man *m) {
 	m->letter = 'A' + (char)(saver_random() * 26);
 	// a letter of the window it was found in
 	for (int i = 0; i < s->window_count; i++) {
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		size_t n = strlen(b->title);
 		if (n && m->x >= b->x && m->x < b->x + b->w && m->y >= b->y && m->y <= b->y + b->h + 2) {
 			char c = b->title[(size_t)(saver_random() * n)];
@@ -1839,7 +1701,7 @@ static void draw_man(struct diggers *s, cairo_t *cr, struct man *m) {
 static void draw_window(struct diggers *s, cairo_t *cr, int i) {
 	double u = s->u;
 	{
-		struct window_box *b = &s->windows[i];
+		struct saver_window *b = &s->windows[i];
 		double bar = u * 26;
 		cairo_rectangle(cr, b->x, b->y, b->w, b->h);
 		cairo_set_source_rgb(cr, 0.96, 0.96, 0.97);
@@ -1952,7 +1814,7 @@ static void drill_step(struct diggers *s, double dt) {
 		s->reno = RENO_HELIS;
 		s->slab_count = s->slab_next = s->slabs_placed = 0;
 		for (int i = 0; i < s->window_count; i++) {
-			struct window_box *b = &s->windows[i];
+			struct saver_window *b = &s->windows[i];
 			int n = (int)saver_clamp(ceil(b->h / (s->h * 4)), 1, 8);
 			for (int k = n - 1; k >= 0 && s->slab_count < SLABS_MAX; k--) {
 				// from the bottom up, each piece resting on the last
@@ -2158,9 +2020,9 @@ static void draw_drill(struct diggers *s, cairo_t *cr) {
 
 /* Whether the picture of the screen shows that window where it is now. */
 static bool window_pictured(struct diggers *s, int i) {
-	struct window_box *b = &s->windows[i];
+	struct saver_window *b = &s->windows[i];
 	for (int k = 0; s->desktop && k < s->pictured_count; k++) {
-		struct window_box *p = &s->pictured[k];
+		struct saver_window *p = &s->pictured[k];
 		if (p->x == b->x && p->y == b->y && p->w == b->w && p->h == b->h) {
 			return true;
 		}
@@ -2307,7 +2169,7 @@ static void *diggers_create(int width, int height, const struct saver_options *o
 
 /* The windows moved, opened or closed: dig into what is there now. */
 static void diggers_refresh(struct diggers *s) {
-	struct window_box before[WINDOWS_MAX];
+	struct saver_window before[WINDOWS_MAX];
 	int count = s->window_count;
 	memcpy(before, s->windows, sizeof(before));
 	if (!read_windows(s)) {
@@ -2379,7 +2241,7 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 	if (s->fake) {
 		draw_windows(s, cr);
 		for (int i = 0; i < s->bar_count; i++) {
-			struct window_box *b = &s->bars[i];
+			struct saver_window *b = &s->bars[i];
 			cairo_rectangle(cr, b->x, b->y, b->w, b->h);
 			cairo_set_source_rgba(cr, 0.1, 0.1, 0.12, 0.92);
 			cairo_fill(cr);
