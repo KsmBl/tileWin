@@ -43,6 +43,7 @@
 #define STAIR_ROT 45       // seconds a staircase lasts nobody walks on it
 #define FALLING_MAX 60
 #define TARGET_PATIENCE 30 // seconds before a miner gives up on a spot
+#define STUCK_TIME 3       // seconds on one spot before a miner gets himself out
 #define BLAST_TIME 1.8
 #define MINE_LEVEL 2.6         // miner heights between the drifts of a mine
 #define MINE_COLUMN 5.0        // and between its shafts
@@ -100,6 +101,8 @@ struct man {
 	double hx, hy;     // where the grappling hook caught, on the edge of a ledge
 	double ledge_x;    // where to step off the rope onto the ledge
 	bool flung;        // hit by the drilling machine: off the screen and gone
+	double anchor_x, anchor_y, stuck; // where it was a while ago, and how long it stayed near
+	double turned;     // when it last turned from a wall
 };
 
 /* A piece of a window the helicopters bring back: a band of it across its width. */
@@ -941,7 +944,18 @@ static void explode(struct diggers *s, struct bomb *bomb) {
 				st->planks[kept++] = *p;
 			}
 		}
-		st->count = kept;
+		if (st->alive && kept < st->count) {
+			// what is left goes only as high as its top plank, so nobody walks to it
+			// for a climb it no longer makes
+			st->count = kept;
+			st->top_y = st->base_y;
+			for (int k = 0; k < kept; k++) {
+				st->top_y = fmin(st->top_y, st->planks[k].y);
+			}
+			if (!kept && !st->building) {
+				st->alive = false;
+			}
+		}
 	}
 	redraw_planks(s);
 	for (int i = 0; i < 60; i++) {
@@ -1133,10 +1147,75 @@ static bool start_hook(struct diggers *s, struct man *m) {
 	return false;
 }
 
+/*
+ * A miner who stayed on one spot too long, walled in or turning back and
+ * forth: out by whatever way there is, and after another spot.
+ */
+static void unstick(struct diggers *s, struct man *m) {
+	double h = s->h;
+	pick_target(s, m);
+	m->wx = -1;
+	if (!body_free(s, m->x, m->y)) {
+		// in the planks of a staircase or in soil put back around him: up out of it
+		for (double up = s->cell; up < h * 4; up += s->cell) {
+			if (body_free(s, m->x, m->y - up)) {
+				m->y -= up;
+				m->state = MAN_FALL;
+				m->vy = 0;
+				return;
+			}
+		}
+		dig(s, m->x, m->y - h * 0.5, h * 0.62);
+	}
+	// planks right beside him: the staircase goes
+	for (int k = -1; k <= 1; k += 2) {
+		int cx = (int)floor((m->x + k * h * 0.4) / s->cell);
+		for (double part = 0.2; part < 1; part += 0.3) {
+			int cy = (int)floor((m->y - h * part) / s->cell);
+			if (cx >= 0 && cy >= 0 && cx < s->gw && cy < s->gh && s->built[cell_index(s, cx, cy)]) {
+				remove_stair(s, s->built[cell_index(s, cx, cy)] - 1, true);
+				break;
+			}
+		}
+	}
+	// then on by the pick where there is soil, the way the next spot is if it can
+	bool below = soil_at(s, m->x, m->y + s->cell), above = soil_at(s, m->x, m->y - h * 1.3);
+	bool side[2] = { soil_at(s, m->x - h * 0.6, m->y - h * 0.5),
+		soil_at(s, m->x + h * 0.6, m->y - h * 0.5) };
+	int way = m->target && m->tx > m->x ? 1 : -1;
+	if (m->target && m->ty > m->y && below) {
+		start_dig(s, m, 0, 1);
+	} else if (side[way > 0]) {
+		start_dig(s, m, way, 0);
+	} else if (side[way < 0]) {
+		start_dig(s, m, -way, 0);
+	} else if (above) {
+		start_dig(s, m, 0, -1);
+	} else if (below) {
+		start_dig(s, m, 0, 1);
+	} else {
+		// nothing to dig: a hop over whatever is in the way
+		m->dir = saver_random() < 0.5 ? -1 : 1;
+		m->state = MAN_FALL;
+		m->vy = -s->u * 330;
+		m->vx = m->dir * s->u * 110;
+	}
+}
+
 static void man_step(struct diggers *s, struct man *m, double dt) {
 	double h = s->h, speed = s->u * 42;
 	m->phase += dt;
 	m->cooldown -= dt;
+	if ((m->state != MAN_WALK && m->state != MAN_DIG) || m->flung ||
+			hypot(m->x - m->anchor_x, m->y - m->anchor_y) > h * 1.2) {
+		m->anchor_x = m->x;
+		m->anchor_y = m->y;
+		m->stuck = 0;
+	} else if ((m->stuck += dt) > STUCK_TIME) {
+		m->stuck = 0;
+		unstick(s, m);
+		return;
+	}
 	if (m->state != MAN_FALL) {
 		int cx = (int)floor(m->x / s->cell), cy = (int)floor((m->y + 1) / s->cell);
 		if (cx >= 0 && cy >= 0 && cx < s->gw && cy < s->gh && s->built[cell_index(s, cx, cy)]) {
@@ -1273,9 +1352,12 @@ static void man_step(struct diggers *s, struct man *m, double dt) {
 				// on through the wall, level like a drift of a mine; up or down to the spot
 				// it goes by a shaft when it is right above or below it
 				start_dig(s, m, m->dir, 0);
+			} else if (s->clock - m->turned < 0.05) {
+				unstick(s, m); // walls both ways and nothing to dig: out another way
 			} else {
 				m->dir = -m->dir;
 				m->target_age += 4; // in the way: sooner another spot
+				m->turned = s->clock;
 			}
 			break;
 		}
@@ -1292,9 +1374,10 @@ static void man_step(struct diggers *s, struct man *m, double dt) {
 				m->timer = 0.9;
 			} else if (m->target && fabs(m->tx - m->x) <= h * 0.4) {
 				// right above, below or at the spot: down to it, up to it, or into it
-				if (m->ty > m->y + h * 0.3 && on_soil) {
+				// below where the pick reaches level: down to it
+				if (m->ty > m->y - h * 0.3 && on_soil) {
 					start_dig(s, m, 0, 1);
-				} else if (m->ty > m->y + h * 0.3) {
+				} else if (m->ty > m->y - h * 0.3) {
 					pick_target(s, m); // below, but not through what it stands on
 				} else if (m->ty < m->y - h * 1.2) {
 					if (saver_random() < 0.6 && start_hook(s, m)) {
