@@ -899,6 +899,221 @@ static bool logind_can(const char *method) {
 	return can;
 }
 
+/* ---------- hibernation setup ---------- */
+
+/* The first line of a file, or NULL. */
+static char *read_line(const char *path) {
+	char *text = NULL;
+	if (!g_file_get_contents(path, &text, NULL, NULL)) {
+		return NULL;
+	}
+	text[strcspn(text, "\n")] = '\0';
+	return text;
+}
+
+/* The HOOKS of mkinitcpio include what resumes from the disk (resume, or systemd). */
+static bool mkinitcpio_resumes(const char *conf) {
+	char *text = NULL;
+	if (!g_file_get_contents(conf, &text, NULL, NULL)) {
+		return true;
+	}
+	bool resumes = false;
+	char **lines = g_strsplit(text, "\n", -1);
+	for (char **l = lines; *l; l++) {
+		const char *line = *l + strspn(*l, " \t");
+		if (g_str_has_prefix(line, "HOOKS=")) {
+			// the last HOOKS= counts; a word of it, not a part of one (sd-resume is none)
+			char **words = g_strsplit_set(line + 6, "() \t\"'", -1);
+			resumes = false;
+			for (char **w = words; *w; w++) {
+				resumes |= strcmp(*w, "resume") == 0 || strcmp(*w, "systemd") == 0;
+			}
+			g_strfreev(words);
+		}
+	}
+	g_strfreev(lines);
+	g_free(text);
+	return resumes;
+}
+
+static void step(GString *out, int *n, const char *text, const char *commands) {
+	g_string_append_printf(out, "%s%d. %s", *n > 1 ? "\n\n" : "", *n, text);
+	if (commands) {
+		char *escaped = g_markup_escape_text(commands, -1);
+		g_string_append_printf(out, "\n<tt>%s</tt>", escaped);
+		g_free(escaped);
+	}
+	(*n)++;
+}
+
+/*
+ * Why this computer cannot hibernate, and the steps that set it up, found by
+ * looking at the kernel, the swap and the initramfs. NULL when logind says it can.
+ * *cause gets a short reason.
+ */
+static char *hibernate_steps(char **cause) {
+	if (logind_can("CanHibernate")) {
+		return NULL;
+	}
+	GString *out = g_string_new(NULL);
+	int n = 1;
+	// Secure Boot locks the kernel down, and a locked down kernel does not hibernate
+	char *lockdown = read_line("/sys/kernel/security/lockdown");
+	char *states = read_line("/sys/power/state");
+	bool locked = lockdown && !strstr(lockdown, "[none]");
+	bool kernel = states && strstr(states, "disk");
+	g_free(lockdown);
+	g_free(states);
+	// the memory, and the swap on a disk: zram is in the memory, of no use for it
+	long mem_kib = 0, disk_kib = 0;
+	bool zram = false;
+	char *text = NULL;
+	if (g_file_get_contents("/proc/meminfo", &text, NULL, NULL)) {
+		sscanf(text, "MemTotal: %ld", &mem_kib);
+		g_free(text);
+	}
+	if (g_file_get_contents("/proc/swaps", &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l && l[1]; l++) {
+			char name[256];
+			long size;
+			if (l != lines && sscanf(*l, "%255s %*s %ld", name, &size) == 2) {
+				if (g_str_has_prefix(name, "/dev/zram")) {
+					zram = true;
+				} else {
+					disk_kib += size;
+				}
+			}
+		}
+		g_strfreev(lines);
+		g_free(text);
+	}
+	int gib = (int)((mem_kib + 1048575) / 1048576);
+	bool swap_ok = disk_kib >= mem_kib;
+	char *root_fs = NULL;
+	if (g_file_get_contents("/proc/mounts", &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			char dev[256], dir[256], type[64];
+			if (sscanf(*l, "%255s %255s %63s", dev, dir, type) == 3 && strcmp(dir, "/") == 0) {
+				g_free(root_fs);
+				root_fs = g_strdup(type);
+			}
+		}
+		g_strfreev(lines);
+		g_free(text);
+	}
+	bool btrfs = root_fs && strcmp(root_fs, "btrfs") == 0;
+	g_free(root_fs);
+	bool efi = g_file_test("/sys/firmware/efi", G_FILE_TEST_IS_DIR);
+	bool mkinitcpio = g_file_test("/etc/mkinitcpio.conf", G_FILE_TEST_EXISTS);
+	bool initramfs_ok = !mkinitcpio || mkinitcpio_resumes("/etc/mkinitcpio.conf");
+
+	if (locked) {
+		*cause = g_strdup("Secure Boot locks the kernel down, which does not allow it");
+		step(out, &n, "Turn off Secure Boot in the firmware settings (the setup of the "
+			"computer, opened with a key like F2 or Del while it starts). A kernel locked "
+			"down by Secure Boot does not hibernate.", NULL);
+	} else if (!kernel) {
+		*cause = g_strdup("The kernel cannot hibernate");
+		step(out, &n, "Start a kernel built with hibernation (CONFIG_HIBERNATION), like the "
+			"standard kernel of the distribution.", NULL);
+	}
+	if (!swap_ok) {
+		if (!*cause) {
+			*cause = disk_kib ? g_strdup_printf("The swap on the disk (%.1f GB) is smaller "
+				"than the memory (%d GB)", disk_kib / 1048576.0, gib) :
+				g_strdup(zram ? "There is no swap on the disk, only zram, which is in "
+				"the memory" : "There is no swap on the disk");
+		}
+		char *text2 = g_strdup_printf("Make a swap file of %d GB, as big as the memory, "
+			"where the memory is saved to%s:", gib, zram ? " (zram stays, it is used first)" : "");
+		char *commands = btrfs ?
+			g_strdup_printf("sudo btrfs subvolume create /swap\n"
+				"sudo btrfs filesystem mkswapfile --size %dg --uuid clear /swap/swapfile\n"
+				"sudo swapon /swap/swapfile", gib) :
+			g_strdup_printf("sudo mkswap --file /swapfile --size %dG\n"
+				"sudo swapon /swapfile", gib);
+		step(out, &n, text2, commands);
+		g_free(text2);
+		g_free(commands);
+		step(out, &n, "Turn it on at every start as well:", btrfs ?
+			"echo '/swap/swapfile none swap defaults 0 0' | sudo tee -a /etc/fstab" :
+			"echo '/swapfile none swap defaults 0 0' | sudo tee -a /etc/fstab");
+	}
+	if (!initramfs_ok) {
+		if (!*cause) {
+			*cause = g_strdup("The initramfs does not resume from the disk");
+		}
+		step(out, &n, "Let the initramfs resume: in /etc/mkinitcpio.conf add resume to "
+			"HOOKS, after filesystems, and build it again:",
+			"sudo sed -i '/^HOOKS=/s/filesystems/filesystems resume/' /etc/mkinitcpio.conf\n"
+			"sudo mkinitcpio -P");
+	} else if (!mkinitcpio && !swap_ok) {
+		step(out, &n, "Build the initramfs again, so it finds the swap file:",
+			g_file_test("/usr/bin/dracut", G_FILE_TEST_EXISTS) ? "sudo dracut -f --regenerate-all" :
+			"sudo update-initramfs -u -k all");
+	}
+	if (!efi && !swap_ok) {
+		step(out, &n, "Without UEFI the kernel has to be told where the swap file is: add "
+			"resume=UUID=<the UUID> resume_offset=<the offset> to the kernel parameters of the "
+			"boot loader, with what these print:", btrfs ?
+			"findmnt -no UUID -T /swap/swapfile\n"
+			"sudo btrfs inspect-internal map-swapfile -r /swap/swapfile" :
+			"findmnt -no UUID -T /swapfile\n"
+			"sudo filefrag -v /swapfile | awk 'NR==4 {print $4+0}'");
+	}
+	if (n == 1) {
+		*cause = g_strdup("logind does not allow it");
+		step(out, &n, "Everything needed looks right, but logind still says no. Its log "
+			"says why:", "journalctl -b -u systemd-logind");
+	} else {
+		step(out, &n, "Restart the computer. Then Hibernate and Hybrid sleep work, and "
+			"this note is gone.", NULL);
+	}
+	return g_string_free(out, FALSE);
+}
+
+/* A row under the power button and the lid: why it cannot hibernate, and how to set it up. */
+static void add_hibernate_help(GtkWidget *group) {
+	char *cause = NULL;
+	char *steps = hibernate_steps(&cause);
+	if (!steps) {
+		return;
+	}
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+	gtk_widget_set_margin_start(box, 12);
+	gtk_widget_set_margin_end(box, 12);
+	gtk_widget_set_margin_top(box, 8);
+	gtk_widget_set_margin_bottom(box, 8);
+	GtkWidget *title = gtk_label_new("This computer cannot hibernate yet, so Hibernate and "
+		"Hybrid sleep put it to sleep");
+	gtk_label_set_xalign(GTK_LABEL(title), 0);
+	gtk_label_set_wrap(GTK_LABEL(title), TRUE);
+	gtk_box_append(GTK_BOX(box), title);
+	GtkWidget *why = gtk_label_new(cause);
+	gtk_label_set_xalign(GTK_LABEL(why), 0);
+	gtk_label_set_wrap(GTK_LABEL(why), TRUE);
+	gtk_widget_add_css_class(why, "dim-label");
+	gtk_widget_add_css_class(why, "tw-caption");
+	gtk_box_append(GTK_BOX(box), why);
+	GtkWidget *expander = gtk_expander_new("How to set up hibernation");
+	GtkWidget *list = gtk_label_new(NULL);
+	gtk_label_set_markup(GTK_LABEL(list), steps);
+	gtk_label_set_xalign(GTK_LABEL(list), 0);
+	gtk_label_set_wrap(GTK_LABEL(list), TRUE);
+	gtk_label_set_selectable(GTK_LABEL(list), TRUE); // the commands, to copy
+	gtk_widget_set_margin_top(list, 6);
+	gtk_expander_set_child(GTK_EXPANDER(expander), list);
+	gtk_box_append(GTK_BOX(box), expander);
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+	gtk_list_box_append(GTK_LIST_BOX(group), row);
+	g_free(cause);
+	g_free(steps);
+}
+
 /* The lid and power key choices; what the computer cannot do says that it sleeps instead,
  * which is what tileWin does then (e.g. hibernate without a swap partition or file). */
 static GtkWidget *power_action_dropdown(void) {
@@ -1337,6 +1552,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 				"\"Turn off the screen\" turns off only the built-in screen", p->lid_dd[i]);
 		}
 	}
+	add_hibernate_help(lid);
 
 	GtkWidget *lock = ui_group(content, "Lock screen", NULL);
 	p->lock_entry = gtk_entry_new();
