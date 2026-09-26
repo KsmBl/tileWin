@@ -163,6 +163,52 @@ void saver_run_free(struct saver_run *run) {
 
 /* ---------- options ---------- */
 
+/* What is written for a setting of a saver, or NULL. */
+static const char *setting(const struct saver_options *options, const struct saver *saver,
+		const char *key) {
+	size_t name_len = strlen(saver->name);
+	for (int i = 0; options && i + 1 < options->setting_count; i += 2) {
+		const char *name = options->settings[i];
+		if (strncmp(name, saver->name, name_len) == 0 && name[name_len] == '_' &&
+				strcmp(name + name_len + 1, key) == 0) {
+			return options->settings[i + 1];
+		}
+	}
+	return NULL;
+}
+
+static const struct saver_option *find_option(const struct saver *saver, const char *key) {
+	for (const struct saver_option *o = saver->options; o && o->key; o++) {
+		if (strcmp(o->key, key) == 0) {
+			return o;
+		}
+	}
+	return NULL;
+}
+
+int saver_choice(const struct saver_options *options, const struct saver *saver,
+		const char *key) {
+	const struct saver_option *o = find_option(saver, key);
+	const char *value = setting(options, saver, key);
+	for (int i = 0; o && value && o->values[i]; i++) {
+		if (strcasecmp(o->values[i], value) == 0) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+bool saver_toggle(const struct saver_options *options, const struct saver *saver,
+		const char *key) {
+	const struct saver_option *o = find_option(saver, key);
+	const char *value = setting(options, saver, key);
+	if (!value) {
+		return o ? o->on : false;
+	}
+	return strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0 ||
+		strcasecmp(value, "true") == 0;
+}
+
 char *saver_options_load(struct saver_options *options) {
 	*options = (struct saver_options){ .speed = 1, .photo_seconds = 8 };
 	char *dir = tw_config_dir();
@@ -189,6 +235,19 @@ char *saver_options_load(struct saver_options *options) {
 		if (value && atoi(value) >= 2) {
 			options->photo_seconds = atoi(value);
 		}
+		// the savers' own settings, whatever they are: each saver looks for its own
+		int count = twconf_count(block);
+		const char **settings = calloc(2 * count + 1, sizeof(char *));
+		int n = 0;
+		for (int i = 0; i < count; i++) {
+			struct twconf_node *node = twconf_at(block, i);
+			if (node->argc >= 1 && strchr(node->name, '_')) {
+				settings[n++] = strdup(node->name);
+				settings[n++] = strdup(node->argv[0]);
+			}
+		}
+		options->settings = settings;
+		options->setting_count = n;
 	}
 	twconf_free(root);
 	return name;
@@ -198,4 +257,10 @@ void saver_options_finish(struct saver_options *options) {
 	free((char *)options->text);
 	free((char *)options->photos);
 	options->text = options->photos = NULL;
+	for (int i = 0; i < options->setting_count; i++) {
+		free((char *)options->settings[i]);
+	}
+	free((void *)options->settings);
+	options->settings = NULL;
+	options->setting_count = 0;
 }

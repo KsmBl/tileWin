@@ -30,6 +30,7 @@ struct matrix {
 	cairo_surface_t *canvas;
 	struct drop *drops;
 	int frames;
+	double color[3];         // of the trails; the heads are nearly white
 };
 
 /* The characters, and whether a font has them: katakana only where one does. */
@@ -88,6 +89,9 @@ static void *matrix_create(int width, int height, const struct saver_options *op
 	struct matrix *m = calloc(1, sizeof(*m));
 	m->width = width;
 	m->height = height;
+	static const double colors[][3] = { { 0.35, 1, 0.5 }, { 0.35, 0.7, 1 }, { 1, 0.3, 0.3 },
+		{ 1, 0.72, 0.2 }, { 0.9, 0.9, 0.95 } };
+	memcpy(m->color, colors[saver_choice(options, &saver_matrix, "color")], sizeof(m->color));
 	double u = saver_unit(width, height);
 	m->ch = fmax(8, round(u * 23));
 	m->cw = round(m->ch * 0.72);
@@ -147,8 +151,9 @@ static void matrix_draw(void *state, cairo_t *cr, int width, int height, double 
 		int head = (int)floor(d->y);
 		for (int row = d->last + 1; row <= head; row++) {
 			// the head moves on: the cell it left turns green, the new one is white
-			put_glyph(m, c, i, row - 1, 0.35, 1, 0.5);
-			put_glyph(m, c, i, row, 0.85, 1, 0.88);
+			put_glyph(m, c, i, row - 1, m->color[0], m->color[1], m->color[2]);
+			put_glyph(m, c, i, row, 0.75 + 0.25 * m->color[0], 0.75 + 0.25 * m->color[1],
+				0.75 + 0.25 * m->color[2]);
 		}
 		d->last = head;
 		if (d->y - d->speed / FADE * 2 > m->rows) {
@@ -162,7 +167,8 @@ static void matrix_draw(void *state, cairo_t *cr, int width, int height, double 
 		struct drop *d = &m->drops[col];
 		int back = 2 + (int)(saver_random() * d->speed * 1.2);
 		double light = exp(-FADE * back / d->speed);
-		put_glyph(m, c, col, (int)floor(d->y) - back, 0.2 * light, 0.9 * light, 0.35 * light);
+		put_glyph(m, c, col, (int)floor(d->y) - back, 0.7 * m->color[0] * light,
+			0.9 * m->color[1] * light, 0.7 * m->color[2] * light);
 	}
 	cairo_destroy(c);
 	if (++m->frames % 12 == 0) {
@@ -180,11 +186,20 @@ static void matrix_destroy(void *state) {
 	free(m);
 }
 
+static const char *const matrix_values[] = { "green", "blue", "red", "amber", "white", NULL };
+static const char *const matrix_labels[] = { "Green", "Blue", "Red", "Amber", "White", NULL };
+static const struct saver_option matrix_options[] = {
+	{ "color", "Colour", "Green, as in the film, or another", SAVER_CHOICE, matrix_values,
+		matrix_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_matrix = {
 	.name = "matrix",
 	.title = "Matrix",
 	.description = "Green code raining down the screen, as in the film",
 	.create = matrix_create,
 	.draw = matrix_draw,
+	.options = matrix_options,
 	.destroy = matrix_destroy,
 };

@@ -10,7 +10,7 @@
 
 /* ================= Starfield ================= */
 
-#define STARS_MAX 900
+#define STARS_MAX 1800
 
 struct star {
 	double x, y, z, px, py; // px, py: where it was drawn last, for the streak
@@ -33,7 +33,9 @@ static void star_reset(struct star *s, bool anywhere) {
 static void *starfield_create(int width, int height, const struct saver_options *options) {
 	struct starfield *f = calloc(1, sizeof(*f));
 	f->u = saver_unit(width, height);
-	f->count = (int)saver_clamp(width * (double)height / 3000, 150, STARS_MAX);
+	static const double densities[] = { 1, 0.45, 2 };
+	double density = densities[saver_choice(options, &saver_starfield, "stars")];
+	f->count = (int)saver_clamp(width * (double)height / 3000 * density, 60, STARS_MAX);
 	for (int i = 0; i < f->count; i++) {
 		star_reset(&f->s[i], true);
 	}
@@ -64,24 +66,33 @@ static void starfield_draw(void *state, cairo_t *cr, int width, int height, doub
 	}
 }
 
+static const char *const stars_values[] = { "normal", "sparse", "dense", NULL };
+static const char *const stars_labels[] = { "Normal", "Sparse", "Dense", NULL };
+static const struct saver_option starfield_options[] = {
+	{ "stars", "Stars", NULL, SAVER_CHOICE, stars_values, stars_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_starfield = {
 	.name = "starfield",
 	.title = "Starfield",
 	.description = "Flying through the stars, from Windows 3.1 and 95",
 	.create = starfield_create,
 	.draw = starfield_draw,
+	.options = starfield_options,
 	.destroy = free,
 };
 
 /* ================= Flying Windows ================= */
 
-#define FLAGS 48
+#define FLAGS 96 // at most: the setting says how many
 
 struct flag {
 	double x, y, z, phase;
 };
 
 struct flying {
+	int count;
 	struct flag f[FLAGS];
 	int order[FLAGS];
 	double u;
@@ -97,7 +108,9 @@ static void flag_reset(struct flag *f, bool anywhere) {
 static void *flying_create(int width, int height, const struct saver_options *options) {
 	struct flying *s = calloc(1, sizeof(*s));
 	s->u = saver_unit(width, height);
-	for (int i = 0; i < FLAGS; i++) {
+	static const int counts[] = { 48, 16, 96 };
+	s->count = counts[saver_choice(options, &saver_flying, "windows")];
+	for (int i = 0; i < s->count; i++) {
 		flag_reset(&s->f[i], true);
 		s->order[i] = i;
 	}
@@ -138,7 +151,7 @@ static void flag_draw(cairo_t *cr, double x, double y, double size, double phase
 static void flying_draw(void *state, cairo_t *cr, int width, int height, double dt) {
 	struct flying *s = state;
 	double cx = width / 2.0, cy = height / 2.0, spread = fmax(width, height) * 0.55;
-	for (int i = 0; i < FLAGS; i++) {
+	for (int i = 0; i < s->count; i++) {
 		struct flag *f = &s->f[i];
 		f->z -= dt * 0.22;
 		f->phase += dt * 5;
@@ -149,8 +162,8 @@ static void flying_draw(void *state, cairo_t *cr, int width, int height, double 
 		}
 	}
 	sorting = s;
-	qsort(s->order, FLAGS, sizeof(int), flag_cmp);
-	for (int k = 0; k < FLAGS; k++) {
+	qsort(s->order, s->count, sizeof(int), flag_cmp);
+	for (int k = 0; k < s->count; k++) {
 		struct flag *f = &s->f[s->order[k]];
 		double sx = cx + f->x / f->z * spread, sy = cy + f->y / f->z * spread;
 		double alpha = saver_clamp((1 - f->z) * 4, 0, 1); // out of the dark
@@ -158,11 +171,19 @@ static void flying_draw(void *state, cairo_t *cr, int width, int height, double 
 	}
 }
 
+static const char *const windows_values[] = { "normal", "few", "many", NULL };
+static const char *const windows_labels[] = { "Normal", "Few", "Many", NULL };
+static const struct saver_option flying_options[] = {
+	{ "windows", "Windows", NULL, SAVER_CHOICE, windows_values, windows_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_flying = {
 	.name = "flyingwindows",
 	.title = "Flying Windows",
 	.description = "Waving Windows flags flying towards you, from Windows 3.1",
 	.create = flying_create,
 	.draw = flying_draw,
+	.options = flying_options,
 	.destroy = free,
 };

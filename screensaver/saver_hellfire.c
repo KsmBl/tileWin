@@ -82,6 +82,8 @@ struct ember {
 struct hellfire {
 	int width, height;
 	double u, t;
+	bool flash, falling;     // the white flash; pieces falling down
+	float keep_at;           // decoration over this keeps: lower, more scraps are left
 	int gw, gh;
 	uint32_t *base;          // the desktop
 	uint32_t *hell;          // the burnt ground behind the windows
@@ -362,7 +364,7 @@ static void plan(struct hellfire *s, struct saver_window *wins, int count,
 			float keep = fbm(px * 0.02f, py * 0.02f, 77) - (s->kind[i] == KIND_BAR ? 0.1f : 0);
 			s->kind[i] = KIND_DECO;
 			s->keep[i] = keep;
-			if (keep > 0.47f) {
+			if (keep > s->keep_at) {
 				s->kind[i] = KIND_REMNANT;
 				s->burn[i] += 3 + keep * 6;
 				s->crawl[i] = s->burn[i] + 12 + fbm(px * 0.03f, py * 0.03f, 41) * 240;
@@ -423,7 +425,7 @@ static void update_cells(struct hellfire *s, double t) {
 			float crawl = c > -3 && c < 3 ? expf(-c * c) : 0;
 			ember = fmaxf(front * 0.6f, crawl * 0.7f) * flicker;
 			// its outline where the rest burns away, between the cells of the grid
-			float edge = smooth01((s->keep[i] - 0.47f) / 0.07f);
+			float edge = smooth01((s->keep[i] - s->keep_at) / 0.07f);
 			gone = (1 - edge) * smooth01((ft - s->gone_at[i]) / 0.5f);
 			hot = smooth01(a * (1.6f - pace) / 90) * (0.16f + 0.1f * sinf(ft * 0.7f + ph)) +
 				afterglow * 0.3f;
@@ -608,7 +610,8 @@ static void *blend_band(void *data) {
 static void blend(struct hellfire *s, double t) {
 	cairo_surface_flush(s->frame);
 	// the flash: white, then a hot orange that dims towards the end
-	double flash = t < 0 ? 0 : t < 0.08 ? t / 0.08 : t < 0.35 ? 1 : exp(-(t - 0.35) / 0.7);
+	double flash = t < 0 || !s->flash ? 0 : t < 0.08 ? t / 0.08 : t < 0.35 ? 1 :
+		exp(-(t - 0.35) / 0.7);
 	double heat = smooth01((float)(t / 3));
 	double dusk = smooth01((float)((t - 18) / 40));
 	// the fireball beyond the top of the screen, dimming to a red glare
@@ -884,7 +887,7 @@ static void spawn(struct hellfire *s, double t, double dt) {
 		}
 		// the decoration breaks into pieces as it burns away, and the scraps shed some
 		bool above_heap = y < s->height - s->heap_h; // what is down there already lies there
-		if (s->kind[i] == KIND_DECO && above_heap && gn > 10 && gn < 170 &&
+		if (s->falling && s->kind[i] == KIND_DECO && above_heap && gn > 10 && gn < 170 &&
 				saver_random() < 0.6) {
 			double dx = x - s->ox, dy = y - s->oy, d = hypot(dx, dy);
 			bool wave = fabs(t - s->gone_at[i]) < 1 && s->gone_at[i] < SHOCK_AT + SHOCK_TIME + 1;
@@ -892,7 +895,7 @@ static void spawn(struct hellfire *s, double t, double dt) {
 			// still showing what it was, browned: a bit of title bar, frame or taskbar
 			break_off(s, x, y, saver_between(18, 46) * u, s->ch[CH_CHAR][i] / 255.0 * 0.4,
 				dx / d * v + saver_between(-40, 40) * u, dy / d * v - saver_between(0, 80) * u);
-		} else if (s->kind[i] == KIND_REMNANT && above_heap && em > 120 &&
+		} else if (s->falling && s->kind[i] == KIND_REMNANT && above_heap && em > 120 &&
 				saver_random() < 0.03) {
 			break_off(s, x, y, saver_between(6, 16) * u, 0.3 + s->ch[CH_CHAR][i] / 400.0,
 				saver_between(-20, 20) * u, saver_between(-20, 10) * u);
@@ -1106,6 +1109,10 @@ static void *hellfire_create(int width, int height, const struct saver_options *
 		memcpy(s->base + y * width, data + y * stride, width * 4);
 	}
 	make_hell(s);
+	static const float keeps[] = { 0.47f, 0.56f, 0.4f };
+	s->keep_at = keeps[saver_choice(options, &saver_hellfire, "scraps")];
+	s->flash = saver_toggle(options, &saver_hellfire, "flash");
+	s->falling = saver_toggle(options, &saver_hellfire, "debris");
 	plan(s, wins, count, bars, bar_count);
 	s->base_surface = cairo_image_surface_create_for_data((unsigned char *)s->base,
 		CAIRO_FORMAT_RGB24, width, height, width * 4);
@@ -1190,6 +1197,18 @@ static void hellfire_destroy(void *state) {
 	free(s);
 }
 
+static const char *const scraps_values[] = { "some", "few", "many", NULL };
+static const char *const scraps_labels[] = { "Some", "Few", "Many", NULL };
+static const struct saver_option hellfire_options[] = {
+	{ "flash", "White flash", "The blast at the start; off for anyone sensitive to flashes",
+		SAVER_TOGGLE, NULL, NULL, true },
+	{ "debris", "Falling pieces", "Pieces of the decoration break off and pile up at the bottom",
+		SAVER_TOGGLE, NULL, NULL, true },
+	{ "scraps", "What is left", "Scraps of the title bars, borders and taskbar that smoulder on",
+		SAVER_CHOICE, scraps_values, scraps_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_hellfire = {
 	.name = "hellfire",
 	.title = "Hellfire",
@@ -1198,5 +1217,6 @@ const struct saver saver_hellfire = {
 	.wants_desktop = true,
 	.create = hellfire_create,
 	.draw = hellfire_draw,
+	.options = hellfire_options,
 	.destroy = hellfire_destroy,
 };

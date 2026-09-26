@@ -40,6 +40,7 @@ struct thing {
 };
 
 struct maze {
+	bool rats, stones;     // what else is in it
 	unsigned char map[MAP_H][MAP_W]; // 1: wall
 	uint32_t wall[TEX * TEX], floor[TEX * TEX], ceiling[TEX * TEX];
 	int bw, bh;            // the picture it is cast into
@@ -146,11 +147,11 @@ static void new_maze(struct maze *m) {
 	m->things[0].x = 1.5 - step_x[m->dir] * 0.45;
 	m->things[0].y = 1.5 - step_y[m->dir] * 0.45;
 	thing_add(m, THING_SMILEY, m->exit_x, m->exit_y);
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; m->rats && i < 3; i++) {
 		thing_add(m, THING_RAT, 2 + (int)(saver_random() * (CELLS_W - 2)),
 			(int)(saver_random() * CELLS_H));
 	}
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; m->stones && i < 3; i++) {
 		thing_add(m, THING_STONE, 1 + (int)(saver_random() * (CELLS_W - 1)),
 			1 + (int)(saver_random() * (CELLS_H - 1)));
 	}
@@ -453,6 +454,8 @@ static void *maze_create(int width, int height, const struct saver_options *opti
 	m->pixels = (uint32_t *)cairo_image_surface_get_data(m->picture);
 	m->depth = calloc(m->bw, sizeof(double));
 	make_textures(m);
+	m->rats = saver_toggle(options, &saver_maze, "rats");
+	m->stones = saver_toggle(options, &saver_maze, "stones");
 	new_maze(m);
 	return m;
 }
@@ -499,6 +502,13 @@ static void maze_destroy(void *state) {
 	free(m);
 }
 
+static const struct saver_option maze_options[] = {
+	{ "rats", "Rats", NULL, SAVER_TOGGLE, NULL, NULL, true },
+	{ "stones", "Grey stones", "Walking into one turns the world upside down", SAVER_TOGGLE, NULL,
+		NULL, true },
+	{ 0 },
+};
+
 const struct saver saver_maze = {
 	.name = "maze",
 	.title = "3D Maze",
@@ -506,5 +516,6 @@ const struct saver saver_maze = {
 		"upside down and a smiley at the way out, as in Windows 95",
 	.create = maze_create,
 	.draw = maze_draw,
+	.options = maze_options,
 	.destroy = maze_destroy,
 };

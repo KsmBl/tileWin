@@ -22,6 +22,7 @@
 struct ad {
 	int width, height;
 	double u, t;
+	bool updates, skip;     // the update notifications; the skip button
 	cairo_surface_t *bloom; // the soft background, small
 	cairo_surface_t *backdrop; // and scaled up to the screen, made again now and then
 	double backdrop_t;
@@ -950,6 +951,9 @@ static void draw_chrome(struct ad *s, cairo_t *cr) {
 	cairo_set_source_rgba(cr, 1, 0.8, 0.1, 0.95);
 	cairo_fill(cr);
 	text(cr, "Ad", "Bold", u * 20, u * 52, u * 26, 0.5, 0.1, 0.1, 0.1, 1);
+	if (!s->skip) {
+		return;
+	}
 	int n = 5 - (int)fmod(s->t, 6);
 	char skip[64];
 	if (n > 0) {
@@ -996,6 +1000,8 @@ static void *ad_create(int width, int height, const struct saver_options *option
 	s->width = width;
 	s->height = height;
 	s->u = saver_unit(width, height) * (width > height * 1.2 ? 1 : 0.8);
+	s->updates = saver_toggle(options, &saver_ad, "updates");
+	s->skip = saver_toggle(options, &saver_ad, "skip");
 	return s;
 }
 
@@ -1020,7 +1026,9 @@ static void ad_draw(void *state, cairo_t *cr, int width, int height, double dt) 
 	scenes[scene].draw(s, cr, local);
 	cairo_pop_group_to_source(cr);
 	cairo_paint_with_alpha(cr, alpha);
-	draw_update_toast(s, cr, cycle);
+	if (s->updates) {
+		draw_update_toast(s, cr, cycle);
+	}
 	draw_chrome(s, cr);
 }
 
@@ -1035,11 +1043,19 @@ static void ad_destroy(void *state) {
 	free(s);
 }
 
+static const struct saver_option ad_options[] = {
+	{ "updates", "Update notifications", "Updates are ready, twice a round: Restart now or "
+		"Restart now", SAVER_TOGGLE, NULL, NULL, true },
+	{ "skip", "Skip ad button", "Counts down and never lets you", SAVER_TOGGLE, NULL, NULL, true },
+	{ 0 },
+};
+
 const struct saver saver_ad = {
 	.name = "microslop",
 	.title = "Microslop Ad",
 	.description = "A commercial for Copilot− PCs, only $16.05 per 6 days",
 	.create = ad_create,
 	.draw = ad_draw,
+	.options = ad_options,
 	.destroy = ad_destroy,
 };

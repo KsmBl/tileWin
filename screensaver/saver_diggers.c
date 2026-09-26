@@ -27,7 +27,7 @@
  * Without tileWin (the preview of the settings) it brings windows of its own.
  */
 
-#define MEN_MAX 28
+#define MEN_MAX 44
 #define ITEMS_MAX 32
 #define DIRT_MAX 400
 #define WINDOWS_MAX 48
@@ -170,6 +170,8 @@ struct dirt {
 struct diggers {
 	int width, height;
 	double u, h;            // unit, and how tall a miner is
+	bool dynamite;          // one of them carries it
+	double renew_after;     // seconds before the windows are renewed, 0 never
 	int cell, gw, gh;       // the grid the soil is kept in
 	unsigned char *soil;    // 1: inside a window
 	unsigned char *dug;     // 1: dug out
@@ -472,7 +474,7 @@ static void man_place(struct diggers *s, struct man *m) {
 	m->phase = saver_random() * 10;
 	m->think = saver_between(1, 3);
 	m->dir = saver_random() < 0.5 ? -1 : 1;
-	m->tnt = m == &s->men[0]; // the first one in carries the dynamite
+	m->tnt = s->dynamite && m == &s->men[0]; // the first one in carries the dynamite
 	m->stair = -1;
 	m->wx = -1;
 	pick_target(s, m);
@@ -2163,7 +2165,12 @@ static void *diggers_create(int width, int height, const struct saver_options *o
 		s->pictured_count = s->window_count;
 	}
 	build_soil(s);
-	s->men_max = (int)saver_clamp(width * (double)height / (1920.0 * 1080.0) * 22, 8, MEN_MAX);
+	static const double crews[] = { 1, 0.5, 1.7 }, renewals[] = { 120, 300, 0 };
+	double crew = crews[saver_choice(options, &saver_diggers, "miners")];
+	s->men_max = (int)saver_clamp(width * (double)height / (1920.0 * 1080.0) * 22 * crew, 4,
+		MEN_MAX);
+	s->dynamite = saver_toggle(options, &saver_diggers, "dynamite");
+	s->renew_after = renewals[saver_choice(options, &saver_diggers, "renew")];
 	return s;
 }
 
@@ -2205,10 +2212,11 @@ static void diggers_draw(void *state, cairo_t *cr, int width, int height, double
 			diggers_refresh(s);
 		}
 	}
-	// after two minutes, or with a third of it dug out, the windows are renewed: the
-	// drilling machine clears it all away and the helicopters bring them back
-	if (s->reno == RENO_NONE && s->soil_cells &&
-			(s->dug_cells > s->soil_cells / 3 || s->age > 120)) {
+	// after a while (two minutes unless set otherwise), or with a third of it dug out,
+	// the windows are renewed: the drilling machine clears it all away and the
+	// helicopters bring them back
+	if (s->reno == RENO_NONE && s->soil_cells && s->renew_after > 0 &&
+			(s->dug_cells > s->soil_cells / 3 || s->age > s->renew_after)) {
 		start_renovation(s);
 	}
 	if (s->reno == RENO_DRILL) {
@@ -2414,6 +2422,19 @@ static void diggers_destroy(void *state) {
 	free(s);
 }
 
+static const char *const miners_values[] = { "normal", "few", "many", NULL };
+static const char *const miners_labels[] = { "Normal", "Few", "Many", NULL };
+static const char *const renew_values[] = { "two", "five", "never", NULL };
+static const char *const renew_labels[] = { "After 2 minutes", "After 5 minutes", "Never", NULL };
+static const struct saver_option diggers_options[] = {
+	{ "miners", "Miners", NULL, SAVER_CHOICE, miners_values, miners_labels, false },
+	{ "dynamite", "Dynamite", "One of them carries it and blasts craters", SAVER_TOGGLE, NULL,
+		NULL, true },
+	{ "renew", "Renew the windows", "The drill clears them and helicopters bring them back; "
+		"sooner when a third is dug out", SAVER_CHOICE, renew_values, renew_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_diggers = {
 	.name = "diggers",
 	.wants_desktop = true,
@@ -2423,5 +2444,6 @@ const struct saver saver_diggers = {
 	.transparent = true,
 	.create = diggers_create,
 	.draw = diggers_draw,
+	.options = diggers_options,
 	.destroy = diggers_destroy,
 };

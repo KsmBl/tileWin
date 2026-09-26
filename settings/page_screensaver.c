@@ -31,10 +31,19 @@ struct screensaver_page {
 	GtkWidget *saver_dd, *saver_row, *wait_dd, *wait_row, *lock_switch, *lock_row;
 	GtkWidget *speed_dd, *speed_row, *text_entry, *text_row, *photos_entry, *photos_row;
 	GtkWidget *seconds_spin, *seconds_row, *preview_button, *preview, *options;
+	GPtrArray *own;       // struct own_row *: the rows of the savers' own settings
 	struct saver_run *run;
 	const struct saver *shown; // what the preview runs
 	gint64 last_frame;
 	char *preview_options; // what it was made with, to start over when they change
+};
+
+/* A row of one saver's own settings, and the control in it. */
+struct own_row {
+	const struct saver *saver;
+	const struct saver_option *option;
+	GtkWidget *row, *control;
+	char *key;            // "<saver>_<key>"
 };
 
 /* ---------- reading and writing ---------- */
@@ -83,14 +92,37 @@ static void write_timeout(struct screensaver_page *p) {
 
 /* ---------- the preview ---------- */
 
-static void preview_options(struct screensaver_page *p, struct saver_options *o) {
+/* The savers' own settings in the block, name and value after each other; and as one string. */
+static GPtrArray *own_settings(struct screensaver_page *p, GString *state) {
+	GPtrArray *pairs = g_ptr_array_new();
+	struct cstmt *block = saver_block(p, false);
+	for (guint i = 0; block && block->children && i < block->children->len; i++) {
+		struct cstmt *c = block->children->pdata[i];
+		const char *value = cstmt_arg(c, 0);
+		if (value && strchr(c->name, '_')) {
+			g_ptr_array_add(pairs, c->name);
+			g_ptr_array_add(pairs, (gpointer)value);
+			if (state) {
+				g_string_append_printf(state, "|%s=%s", c->name, value);
+			}
+		}
+	}
+	return pairs;
+}
+
+/* The options for the preview; the settings in *own, to be freed after it started. */
+static void preview_options(struct screensaver_page *p, struct saver_options *o,
+		GPtrArray **own) {
 	const char *speed = saver_value(p, "speed");
 	const char *seconds = saver_value(p, "photo_seconds");
+	*own = own_settings(p, NULL);
 	*o = (struct saver_options){
 		.speed = speed ? g_ascii_strtod(speed, NULL) : 1,
 		.text = saver_value(p, "text"),
 		.photos = saver_value(p, "photos"),
 		.photo_seconds = seconds ? atoi(seconds) : 8,
+		.settings = (const char *const *)(*own)->pdata,
+		.setting_count = (int)(*own)->len,
 	};
 }
 
@@ -106,7 +138,8 @@ static void preview_restart(struct screensaver_page *p) {
 	}
 	if (p->shown) {
 		struct saver_options o;
-		preview_options(p, &o);
+		GPtrArray *own;
+		preview_options(p, &o, &own);
 		char *expanded = o.photos && o.photos[0] == '~' ?
 			g_build_filename(g_get_home_dir(), o.photos + 1, NULL) : NULL;
 		if (expanded) {
@@ -114,6 +147,7 @@ static void preview_restart(struct screensaver_page *p) {
 		}
 		p->run = saver_run_new(p->shown, PREVIEW_W, PREVIEW_H, &o);
 		g_free(expanded);
+		g_ptr_array_free(own, TRUE); // the savers read their settings as they start
 	}
 	p->last_frame = 0;
 	gtk_widget_queue_draw(p->preview);
@@ -214,6 +248,10 @@ static void update_rows(struct screensaver_page *p) {
 	gtk_widget_set_visible(p->seconds_row, any && (random || strcmp(name, "photos") == 0));
 	gtk_widget_set_sensitive(p->preview_button, any);
 	gtk_widget_set_visible(p->options, any && strcmp(name, "blank") != 0);
+	for (guint i = 0; i < p->own->len; i++) {
+		struct own_row *r = p->own->pdata[i];
+		gtk_widget_set_visible(r->row, any && strcmp(name, r->saver->name) == 0);
+	}
 }
 
 static void refresh(struct screensaver_page *p) {
@@ -266,11 +304,31 @@ static void refresh(struct screensaver_page *p) {
 	const char *photo_seconds = saver_value(p, "photo_seconds");
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->seconds_spin),
 		photo_seconds ? atoi(photo_seconds) : 8);
+	for (guint i = 0; i < p->own->len; i++) {
+		struct own_row *r = p->own->pdata[i];
+		const char *v = saver_value(p, r->key);
+		if (r->option->type == SAVER_TOGGLE) {
+			bool on = v ? g_ascii_strcasecmp(v, "yes") == 0 || g_ascii_strcasecmp(v, "on") == 0 ||
+				g_ascii_strcasecmp(v, "true") == 0 : r->option->on;
+			gtk_switch_set_active(GTK_SWITCH(r->control), on);
+		} else {
+			guint k = 0;
+			for (guint j = 0; v && r->option->values[j]; j++) {
+				if (g_ascii_strcasecmp(r->option->values[j], v) == 0) {
+					k = j;
+				}
+			}
+			gtk_drop_down_set_selected(GTK_DROP_DOWN(r->control), k);
+		}
+	}
 	p->updating = false;
 	update_rows(p);
 	// the preview starts over only when what it shows changed
-	char *state = g_strdup_printf("%u|%s|%s|%s|%s", sel, speed ? speed : "", text ? text : "",
-		photos ? photos : "", photo_seconds ? photo_seconds : "");
+	GString *own_state = g_string_new(NULL);
+	g_ptr_array_free(own_settings(p, own_state), TRUE);
+	char *state = g_strdup_printf("%u|%s|%s|%s|%s%s", sel, speed ? speed : "", text ? text : "",
+		photos ? photos : "", photo_seconds ? photo_seconds : "", own_state->str);
+	g_string_free(own_state, TRUE);
 	if (!p->preview_options || strcmp(state, p->preview_options) != 0) {
 		g_free(p->preview_options);
 		p->preview_options = state;
@@ -353,6 +411,61 @@ static void on_seconds(GtkSpinButton *spin, gpointer data) {
 	snprintf(value, sizeof(value), "%d", seconds);
 	saver_write(p, "photo_seconds", seconds == 8 ? NULL : value);
 	refresh(p);
+}
+
+/* One of a saver's own settings changed: written, or taken out when it is the default. */
+static void own_changed(struct screensaver_page *p, struct own_row *r) {
+	if (p->updating) {
+		return;
+	}
+	const char *value = NULL;
+	if (r->option->type == SAVER_TOGGLE) {
+		bool on = gtk_switch_get_active(GTK_SWITCH(r->control));
+		value = on == r->option->on ? NULL : on ? "yes" : "no";
+	} else {
+		guint k = gtk_drop_down_get_selected(GTK_DROP_DOWN(r->control));
+		value = k == 0 || k == GTK_INVALID_LIST_POSITION ? NULL : r->option->values[k];
+	}
+	saver_write(p, r->key, value);
+	refresh(p);
+}
+
+static void on_own_choice(GObject *object, GParamSpec *pspec, gpointer data) {
+	own_changed(g_object_get_data(object, "page"), data);
+}
+
+static void on_own_toggle(GObject *object, GParamSpec *pspec, gpointer data) {
+	own_changed(g_object_get_data(object, "page"), data);
+}
+
+static void own_row_free(gpointer data) {
+	struct own_row *r = data;
+	g_free(r->key);
+	g_free(r);
+}
+
+/* The rows of every saver's own settings, shown only while that saver is picked. */
+static void add_own_rows(struct screensaver_page *p, GtkWidget *group) {
+	p->own = g_ptr_array_new_with_free_func(own_row_free);
+	for (int i = 0; i < saver_count; i++) {
+		const struct saver *sv = savers[i];
+		for (const struct saver_option *o = sv->options; o && o->key; o++) {
+			struct own_row *r = g_new0(struct own_row, 1);
+			r->saver = sv;
+			r->option = o;
+			r->key = g_strdup_printf("%s_%s", sv->name, o->key);
+			if (o->type == SAVER_TOGGLE) {
+				r->control = gtk_switch_new();
+				g_signal_connect(r->control, "notify::active", G_CALLBACK(on_own_toggle), r);
+			} else {
+				r->control = gtk_drop_down_new_from_strings(o->labels);
+				g_signal_connect(r->control, "notify::selected", G_CALLBACK(on_own_choice), r);
+			}
+			g_object_set_data(G_OBJECT(r->control), "page", p);
+			r->row = ui_row(group, o->label, o->help, r->control);
+			g_ptr_array_add(p->own, r);
+		}
+	}
 }
 
 static void on_folder_chosen(GObject *source, GAsyncResult *result, gpointer data) {
@@ -468,6 +581,7 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	g_signal_connect(p->seconds_spin, "value-changed", G_CALLBACK(on_seconds), p);
 	p->seconds_row = ui_row(options, "Slide show speed", "Seconds each photo stays",
 		p->seconds_spin);
+	add_own_rows(p, options);
 
 	s->screensaver_page = p;
 	refresh(p);

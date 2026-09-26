@@ -26,6 +26,8 @@ struct aurora {
 	cairo_pattern_t *curtain[AURORA_MOODS][AURORA_LEVELS];
 	double t, load, target, since_cpu;
 	unsigned long long cpu_total, cpu_idle;
+	int mood;         // 0 follows the processor, 1 always calm, 2 always stormy
+	bool stars;
 };
 
 /* How busy the processor was since the last look, 0 to 1. */
@@ -84,6 +86,8 @@ static void *aurora_create(int width, int height, const struct saver_options *op
 	}
 	aurora_sample_cpu(a);
 	a->load = a->target = 0.2;
+	a->mood = saver_choice(options, &saver_aurora, "mood");
+	a->stars = saver_toggle(options, &saver_aurora, "stars");
 	return a;
 }
 
@@ -91,7 +95,9 @@ static void aurora_draw(void *state, cairo_t *cr, int width, int height, double 
 	struct aurora *a = state;
 	a->t += dt;
 	a->since_cpu += dt;
-	if (a->since_cpu >= 1) {
+	if (a->mood == 1 || a->mood == 2) {
+		a->target = a->mood == 1 ? 0.15 : 0.9;
+	} else if (a->since_cpu >= 1) {
 		a->since_cpu = 0;
 		aurora_sample_cpu(a);
 	}
@@ -104,7 +110,7 @@ static void aurora_draw(void *state, cairo_t *cr, int width, int height, double 
 	cairo_set_source(cr, sky);
 	cairo_paint(cr);
 	cairo_pattern_destroy(sky);
-	for (int i = 0; i < AURORA_STARS; i++) {
+	for (int i = 0; a->stars && i < AURORA_STARS; i++) {
 		double twinkle = 0.6 + 0.4 * sin(a->t * 2 + a->sp[i]);
 		cairo_rectangle(cr, a->sx[i] * width, a->sy[i] * height, 1.2, 1.2);
 		cairo_set_source_rgba(cr, 1, 1, 1, a->sb[i] * twinkle * 0.8);
@@ -163,6 +169,16 @@ static void aurora_destroy(void *state) {
 	free(a);
 }
 
+static const char *const mood_values[] = { "cpu", "calm", "stormy", NULL };
+static const char *const mood_labels[] = { "Follows the processor", "Always calm", "Always stormy",
+	NULL };
+static const struct saver_option aurora_options[] = {
+	{ "mood", "Northern lights", "Following the processor, they grow wilder the harder it works",
+		SAVER_CHOICE, mood_values, mood_labels, false },
+	{ "stars", "Stars", NULL, SAVER_TOGGLE, NULL, NULL, true },
+	{ 0 },
+};
+
 const struct saver saver_aurora = {
 	.name = "aurora",
 	.title = "Aurora",
@@ -171,6 +187,7 @@ const struct saver saver_aurora = {
 	.resolution = 0.5,
 	.create = aurora_create,
 	.draw = aurora_draw,
+	.options = aurora_options,
 	.destroy = aurora_destroy,
 };
 
@@ -221,6 +238,7 @@ static const struct word words[] = {
 };
 
 struct wordclock {
+	double color[3];       // of the lit letters
 	double glow[WORD_ROWS][WORD_COLS], dots[4];
 	cairo_surface_t *dim, *lit; // the whole grid, unlit and lit
 	double cell, t;
@@ -248,10 +266,11 @@ static void wordclock_render_grid(struct wordclock *s, cairo_surface_t *target, 
 				for (int k = 0; k < 8; k++) {
 					double a = k * M_PI / 4, d = s->cell * 0.035;
 					cairo_move_to(cr, x + cos(a) * d, y + sin(a) * d);
-					cairo_set_source_rgba(cr, 0.75, 0.85, 1, 0.12);
+					cairo_set_source_rgba(cr, s->color[0] * 0.8, s->color[1] * 0.85, s->color[2],
+						0.12);
 					pango_cairo_show_layout(cr, layout);
 				}
-				cairo_set_source_rgb(cr, 1, 1, 1);
+				cairo_set_source_rgb(cr, s->color[0], s->color[1], s->color[2]);
 			} else {
 				cairo_set_source_rgb(cr, 0.13, 0.14, 0.16);
 			}
@@ -267,6 +286,9 @@ static void *wordclock_create(int width, int height, const struct saver_options 
 	struct wordclock *s = calloc(1, sizeof(*s));
 	s->width = width;
 	s->height = height;
+	static const double colors[][3] = { { 1, 1, 1 }, { 0.45, 1, 0.55 }, { 0.45, 0.75, 1 },
+		{ 1, 0.72, 0.25 }, { 1, 0.45, 0.6 } };
+	memcpy(s->color, colors[saver_choice(options, &saver_wordclock, "color")], sizeof(s->color));
 	s->cell = floor(fmin(width * 0.7 / WORD_COLS, height * 0.7 / WORD_ROWS));
 	if (s->cell < 4) {
 		s->cell = 4;
@@ -356,8 +378,9 @@ static void wordclock_draw(void *state, cairo_t *cr, int width, int height, doub
 	double dy[4] = { -0.35, -0.35, gh / s->cell + 0.35, gh / s->cell + 0.35 };
 	for (int i = 0; i < 4; i++) {
 		cairo_arc(cr, ox + dx[i] * s->cell, oy + dy[i] * s->cell, s->cell * 0.07, 0, 2 * M_PI);
-		double b = 0.13 + 0.87 * s->dots[i];
-		cairo_set_source_rgb(cr, b, b, b * 1.03 > 1 ? 1 : b * 1.03);
+		double b = s->dots[i];
+		cairo_set_source_rgb(cr, 0.13 + (s->color[0] - 0.13) * b, 0.13 + (s->color[1] - 0.13) * b,
+			0.14 + (s->color[2] - 0.14) * b);
 		cairo_fill(cr);
 	}
 }
@@ -369,12 +392,20 @@ static void wordclock_destroy(void *state) {
 	free(s);
 }
 
+static const char *const color_values[] = { "white", "green", "blue", "amber", "pink", NULL };
+static const char *const color_labels[] = { "White", "Green", "Blue", "Amber", "Pink", NULL };
+static const struct saver_option wordclock_options[] = {
+	{ "color", "Colour", NULL, SAVER_CHOICE, color_values, color_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_wordclock = {
 	.name = "wordclock",
 	.title = "Word Clock",
 	.description = "The time spelled out in a grid of letters, \"it is twenty past ten\"",
 	.create = wordclock_create,
 	.draw = wordclock_draw,
+	.options = wordclock_options,
 	.destroy = wordclock_destroy,
 };
 
@@ -415,6 +446,7 @@ struct tile {
 struct tiling {
 	struct tile *root, *focus;
 	double t, next_change, u;
+	int max;               // windows at most
 };
 
 static struct tile *tile_new(enum tile_kind kind, double born) {
@@ -458,6 +490,8 @@ static void *tiling_create(int width, int height, const struct saver_options *op
 	s->root->h = height;
 	s->focus = s->root;
 	s->next_change = 0.8;
+	static const int maxes[] = { TILES_MAX, 4, 2 };
+	s->max = maxes[saver_choice(options, &saver_tiling, "windows")];
 	return s;
 }
 
@@ -725,7 +759,8 @@ static void tiling_draw(void *state, cairo_t *cr, int width, int height, double 
 		}
 		if (!busy) {
 			// a busy desk most of the time, now and then an empty one
-			bool open = count < 3 || (count < TILES_MAX && saver_random() < 0.55);
+			bool open = count < (s->max < 3 ? s->max : 3) ||
+				(count < s->max && saver_random() < 0.55);
 			struct tile *pick = leaves[(int)(saver_random() * count)];
 			if (open) {
 				tiling_split(s, pick);
@@ -750,6 +785,13 @@ static void tiling_destroy(void *state) {
 	free(s);
 }
 
+static const char *const tiles_values[] = { "nine", "four", "two", NULL };
+static const char *const tiles_labels[] = { "Up to nine", "Up to four", "Up to two", NULL };
+static const struct saver_option tiling_options[] = {
+	{ "windows", "Windows", NULL, SAVER_CHOICE, tiles_values, tiles_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_tiling = {
 	.name = "tiling",
 	.title = "Tiling",
@@ -757,5 +799,6 @@ const struct saver saver_tiling = {
 		"mode arranges them",
 	.create = tiling_create,
 	.draw = tiling_draw,
+	.options = tiling_options,
 	.destroy = tiling_destroy,
 };

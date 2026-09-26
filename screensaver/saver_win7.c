@@ -41,6 +41,11 @@ struct bubble {
 	double x, y, vx, vy, r, hue, spin;
 };
 
+static const char *const amount_values[] = { "normal", "few", "many", NULL };
+static const char *const amount_labels[] = { "Normal", "Few", "Many", NULL };
+static const char *const size_values[] = { "normal", "small", "large", NULL };
+static const char *const size_labels[] = { "Normal", "Small", "Large", NULL };
+
 struct bubbles {
 	int count;
 	struct bubble b[BUBBLES_MAX];
@@ -49,10 +54,14 @@ struct bubbles {
 static void *bubbles_create(int width, int height, const struct saver_options *options) {
 	struct bubbles *s = calloc(1, sizeof(*s));
 	double u = saver_unit(width, height);
-	s->count = (int)saver_clamp(width * (double)height / (1920.0 * 1080.0) * 12, 6, BUBBLES_MAX);
+	static const double amounts[] = { 1, 0.5, 1.8 }, sizes[] = { 1, 0.65, 1.4 };
+	double amount = amounts[saver_choice(options, &saver_bubbles, "count")];
+	double size = sizes[saver_choice(options, &saver_bubbles, "size")];
+	s->count = (int)saver_clamp(width * (double)height / (1920.0 * 1080.0) * 12 * amount, 3,
+		BUBBLES_MAX);
 	for (int i = 0; i < s->count; i++) {
 		struct bubble *b = &s->b[i];
-		b->r = u * saver_between(70, 150);
+		b->r = u * saver_between(70, 150) * size;
 		// a place of its own, so they do not start inside each other
 		for (int tries = 0; tries < 50; tries++) {
 			b->x = saver_between(b->r, width - b->r);
@@ -173,6 +182,12 @@ static void bubbles_draw(void *state, cairo_t *cr, int width, int height, double
 	}
 }
 
+static const struct saver_option bubbles_options[] = {
+	{ "count", "Bubbles", NULL, SAVER_CHOICE, amount_values, amount_labels, false },
+	{ "size", "Size", NULL, SAVER_CHOICE, size_values, size_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_bubbles = {
 	.name = "bubbles",
 	.title = "Bubbles",
@@ -180,13 +195,14 @@ const struct saver saver_bubbles = {
 	.transparent = true,
 	.create = bubbles_create,
 	.draw = bubbles_draw,
+	.options = bubbles_options,
 	.destroy = free,
 };
 
 /* ================= Mystify ================= */
 
 #define MYSTIFY_CORNERS 4
-#define MYSTIFY_ECHOES 14
+#define MYSTIFY_ECHOES 28 // at most: the setting says how many
 
 struct shape {
 	double x[MYSTIFY_CORNERS], y[MYSTIFY_CORNERS], vx[MYSTIFY_CORNERS], vy[MYSTIFY_CORNERS];
@@ -197,6 +213,7 @@ struct shape {
 
 struct mystify {
 	struct shape shapes[2];
+	int shape_count, trail;
 	double since_echo;
 	double u;
 };
@@ -204,7 +221,10 @@ struct mystify {
 static void *mystify_create(int width, int height, const struct saver_options *options) {
 	struct mystify *s = calloc(1, sizeof(*s));
 	s->u = saver_unit(width, height);
-	for (int k = 0; k < 2; k++) {
+	static const int trails[] = { 14, 5, 28 };
+	s->shape_count = saver_choice(options, &saver_mystify, "shapes") == 1 ? 1 : 2;
+	s->trail = trails[saver_choice(options, &saver_mystify, "trail")];
+	for (int k = 0; k < s->shape_count; k++) {
 		struct shape *p = &s->shapes[k];
 		p->hue = k * 0.5 + saver_random() * 0.2;
 		for (int i = 0; i < MYSTIFY_CORNERS; i++) {
@@ -225,7 +245,7 @@ static void mystify_draw(void *state, cairo_t *cr, int width, int height, double
 	if (echo) {
 		s->since_echo = 0;
 	}
-	for (int k = 0; k < 2; k++) {
+	for (int k = 0; k < s->shape_count; k++) {
 		struct shape *p = &s->shapes[k];
 		p->hue += dt * 0.04;
 		for (int i = 0; i < MYSTIFY_CORNERS; i++) {
@@ -242,7 +262,7 @@ static void mystify_draw(void *state, cairo_t *cr, int width, int height, double
 			memcpy(p->ex[p->head], p->x, sizeof(p->x));
 			memcpy(p->ey[p->head], p->y, sizeof(p->y));
 			p->head = (p->head + 1) % MYSTIFY_ECHOES;
-			p->echoes = p->echoes < MYSTIFY_ECHOES ? p->echoes + 1 : MYSTIFY_ECHOES;
+			p->echoes = p->echoes < s->trail ? p->echoes + 1 : s->trail;
 		}
 		cairo_set_line_width(cr, fmax(1.2, 1.6 * s->u));
 		cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
@@ -257,7 +277,7 @@ static void mystify_draw(void *state, cairo_t *cr, int width, int height, double
 				}
 			}
 			cairo_close_path(cr);
-			saver_set_hsva(cr, p->hue, 1, 1, 0.15 + 0.6 * (e + 1) / MYSTIFY_ECHOES);
+			saver_set_hsva(cr, p->hue, 1, 1, 0.15 + 0.6 * (e + 1) / s->trail);
 			cairo_stroke(cr);
 		}
 		for (int i = 0; i < MYSTIFY_CORNERS; i++) {
@@ -273,12 +293,24 @@ static void mystify_draw(void *state, cairo_t *cr, int width, int height, double
 	}
 }
 
+static const char *const shapes_values[] = { "two", "one", NULL };
+static const char *const shapes_labels[] = { "Two", "One", NULL };
+static const char *const trail_values[] = { "normal", "short", "long", NULL };
+static const char *const trail_labels[] = { "Normal", "Short", "Long", NULL };
+static const struct saver_option mystify_options[] = {
+	{ "shapes", "Shapes", NULL, SAVER_CHOICE, shapes_values, shapes_labels, false },
+	{ "trail", "Trail", "How many echoes follow each shape", SAVER_CHOICE, trail_values,
+		trail_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_mystify = {
 	.name = "mystify",
 	.title = "Mystify",
 	.description = "Two shapes of lines that bounce around and leave echoes of color",
 	.create = mystify_create,
 	.draw = mystify_draw,
+	.options = mystify_options,
 	.destroy = free,
 };
 
@@ -296,13 +328,16 @@ struct ribbon {
 
 struct ribbons {
 	struct ribbon r[RIBBONS];
+	int count;
 	double t, since_point, u;
 };
 
 static void *ribbons_create(int width, int height, const struct saver_options *options) {
 	struct ribbons *s = calloc(1, sizeof(*s));
 	s->u = saver_unit(width, height);
-	for (int i = 0; i < RIBBONS; i++) {
+	static const int counts[] = { RIBBONS, 3, 1 };
+	s->count = counts[saver_choice(options, &saver_ribbons, "ribbons")];
+	for (int i = 0; i < s->count; i++) {
 		struct ribbon *r = &s->r[i];
 		for (int k = 0; k < 6; k++) {
 			r->f[k] = saver_between(0.35, 0.9) * (k % 2 ? 1 : -1);
@@ -329,7 +364,7 @@ static void ribbons_draw(void *state, cairo_t *cr, int width, int height, double
 	if (add) {
 		s->since_point = 0;
 	}
-	for (int i = 0; i < RIBBONS; i++) {
+	for (int i = 0; i < s->count; i++) {
 		struct ribbon *r = &s->r[i];
 		r->hue += dt * 0.02;
 		if (add || r->count == 0) {
@@ -372,12 +407,20 @@ static void ribbons_draw(void *state, cairo_t *cr, int width, int height, double
 	}
 }
 
+static const char *const ribbons_values[] = { "five", "three", "one", NULL };
+static const char *const ribbons_labels[] = { "Five", "Three", "One", NULL };
+static const struct saver_option ribbons_options[] = {
+	{ "ribbons", "Ribbons", NULL, SAVER_CHOICE, ribbons_values, ribbons_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_ribbons = {
 	.name = "ribbons",
 	.title = "Ribbons",
 	.description = "Glowing ribbons that twist and weave through the dark",
 	.create = ribbons_create,
 	.draw = ribbons_draw,
+	.options = ribbons_options,
 	.destroy = free,
 };
 

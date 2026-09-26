@@ -18,7 +18,7 @@
 #define GRID_Y 10
 #define GRID_Z 10
 #define GRID_X_MAX 32
-#define PIPES_AT_ONCE 2
+#define PIPES_AT_ONCE 3 // at most: the setting says how many
 #define RADIUS 0.2
 #define BEND 0.36      // how far before a joint the elbow begins
 #define BALL 0.33
@@ -48,6 +48,8 @@ struct pipes {
 	struct pipe pipe[PIPES_AT_ONCE];
 	double since, fade, focal, eye;
 	int pieces, color_next;
+	int pipes;             // growing at once
+	double ball, teapot;   // how likely a joint is a ball, or the teapot
 };
 
 /* ---------- the camera ---------- */
@@ -386,7 +388,7 @@ static void grow(struct pipes *p, struct pipe *pipe) {
 		world_dir(pipe->dir, in);
 		world_dir(dir, out);
 		double r = saver_random();
-		bool ball = r < 0.14, teapot = r > 0.9965;
+		bool ball = r < p->ball, teapot = r > 1 - p->teapot;
 		double from[3], to[3];
 		run_point(p, pipe, pipe->drawn, from);
 		for (int i = 0; i < 3; i++) {
@@ -435,6 +437,15 @@ static void *pipes_create(int width, int height, const struct saver_options *opt
 	p->eye = GRID_Z * 1.35;
 	p->focal = fmin(width / (double)p->gx, height / (double)GRID_Y) * p->eye * 0.98;
 	p->color_next = (int)(saver_random() * 7);
+	static const double balls[] = { 0.14, 0, 1 }, teapots[] = { 0.0035, 0.12 };
+	static const int counts[] = { 2, 1, 3 };
+	int joints = saver_choice(options, &saver_pipes, "joints");
+	p->ball = balls[joints];
+	p->teapot = teapots[saver_choice(options, &saver_pipes, "teapot")];
+	if (joints == 2) {
+		p->ball = 1 - p->teapot; // all balls, but for the teapots
+	}
+	p->pipes = counts[saver_choice(options, &saver_pipes, "pipes")];
 	clear(p);
 	return p;
 }
@@ -454,7 +465,7 @@ static void pipes_draw(void *state, cairo_t *cr, int width, int height, double d
 	while (p->since >= STEP && steps++ < 6) {
 		p->since -= STEP;
 		int alive = 0;
-		for (int i = 0; i < PIPES_AT_ONCE; i++) {
+		for (int i = 0; i < p->pipes; i++) {
 			struct pipe *pipe = &p->pipe[i];
 			if (!pipe->alive && !start_pipe(p, pipe)) {
 				continue;
@@ -479,6 +490,20 @@ static void pipes_destroy(void *state) {
 	free(p);
 }
 
+static const char *const joints_values[] = { "mixed", "elbows", "balls", NULL };
+static const char *const joints_labels[] = { "Mixed", "Elbows", "Ball joints", NULL };
+static const char *const pipes_values[] = { "two", "one", "three", NULL };
+static const char *const pipes_labels[] = { "Two", "One", "Three", NULL };
+static const char *const teapot_values[] = { "rarely", "often", NULL };
+static const char *const teapot_labels[] = { "Very rarely", "Often", NULL };
+static const struct saver_option pipes_options[] = {
+	{ "joints", "Joint type", NULL, SAVER_CHOICE, joints_values, joints_labels, false },
+	{ "pipes", "Pipes at once", NULL, SAVER_CHOICE, pipes_values, pipes_labels, false },
+	{ "teapot", "Teapots", "In place of a joint, as in the Windows pipes", SAVER_CHOICE,
+		teapot_values, teapot_labels, false },
+	{ 0 },
+};
+
 const struct saver saver_pipes = {
 	.name = "pipes",
 	.title = "3D Pipes",
@@ -486,5 +511,6 @@ const struct saver saver_pipes = {
 		"(and once in a while a teapot), as in Windows 95 to XP",
 	.create = pipes_create,
 	.draw = pipes_draw,
+	.options = pipes_options,
 	.destroy = pipes_destroy,
 };
