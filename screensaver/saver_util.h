@@ -108,7 +108,8 @@ struct decay_stats {
 	double rubble, dust;             // mean height at the bottom, pixels
 	double untouched;                // the part of the screen not aged at all yet
 	double progress;                 // to dust, 1 all dust
-	bool inside;                     // no piece off the sides or lost
+	bool inside;                     // no piece off the sides, lost, or sunk in
+	long glass, wood, stone;         // samples of the screen made of each, now
 };
 void saver_decay_stats(void *state, struct decay_stats *out);
 

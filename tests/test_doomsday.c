@@ -3,13 +3,15 @@
  * fastest pace on a picture in memory with the windows they bring in the
  * preview, and looked at from inside and at what they drew.
  *
- * Decay: it ages from the start, cracks show before anything falls, the
- * windows and the taskbar come off in pieces that knock about and come to
- * rest (never off the sides), and at the end all is down, the rubble is
- * buried in dust, and the screen is the colour of dust.
+ * Decay: it ages from the start, the windows are glass in frames of wood or
+ * stone, cracks show before anything falls, the windows and the taskbar come
+ * off in pieces that knock about, break and come to rest (never off the
+ * sides or through the bottom, also at the fastest speed), and at the end all
+ * is down, no glass, wood or stone is left, the rubble is buried in dust, and
+ * the screen is the colour of dust.
  *
  * Jungle: it grows on and on (vines, leaves, flowers that open and close,
- * the giant fronds), moss covers the screen, the plants cover much of it,
+ * the giant fronds), smoothly, a little every frame and not in jumps, moss covers the screen, the plants cover much of it,
  * nights come unless turned off, the butterflies stay about, and at the end
  * the screen is green.
  *
@@ -50,11 +52,16 @@ static void start(struct run *r, const struct saver *saver, int w, int h, const 
 	r->state = saver->create(w, h, &r->options);
 }
 
-static void run(struct run *r, double seconds) {
-	for (int i = 0; i < (int)(seconds * 15); i++) {
-		r->saver->draw(r->state, r->cr, r->w, r->h, 1 / 15.0);
+/* Runs on for that many seconds in frames of dt seconds. */
+static void run_dt(struct run *r, double seconds, double dt) {
+	for (int i = 0; i < (int)(seconds / dt); i++) {
+		r->saver->draw(r->state, r->cr, r->w, r->h, dt);
 	}
 	cairo_surface_flush(r->surface);
+}
+
+static void run(struct run *r, double seconds) {
+	run_dt(r, seconds, 1 / 15.0);
 }
 
 static void finish(struct run *r) {
@@ -105,6 +112,7 @@ static void test_decay(void) {
 	printf("decay, 10 s: %d pieces, %d cracks, %.0f%% not aged\n", st.pieces, st.cracks,
 		st.untouched * 100);
 	check(st.pieces > 10 && st.cracks > 10, "the windows are not broken into pieces");
+	check(st.glass > 0 && st.wood + st.stone > 0, "the windows are not glass in frames of wood or stone");
 	check(st.fallen == 0, "pieces fall at once");
 	check(st.untouched < 0.97, "nothing ages at first");
 	bool inside = st.inside;
@@ -129,6 +137,8 @@ static void test_decay(void) {
 	check(st.flying <= 2, "the pieces do not come to rest");
 	check(st.rubble > 0 && st.dust > st.rubble, "the rubble is not buried in dust");
 	check(st.untouched < 0.01, "not everything aged");
+	check(st.shattered > 0, "nothing broke when it landed");
+	check(st.glass == 0 && st.wood == 0 && st.stone == 0, "glass, wood or stone is left at the end");
 	double spread;
 	colours(&r, mean, &spread);
 	printf("decay, the end: mean colour %.0f %.0f %.0f, spread %.1f (at the start %.1f)\n",
@@ -136,6 +146,40 @@ static void test_decay(void) {
 	check(mean[0] >= mean[2] && mean[0] - mean[2] < 60 && spread < spread_before * 0.6,
 		"the end is not plain dust");
 	finish(&r);
+}
+
+/* Decay at the fastest speed: frames of a twelfth of a second of it. */
+static void test_decay_fast(void) {
+	static const char *const set[] = { "doomsday_decay_pace", "fast" };
+	struct run r;
+	struct decay_stats st;
+	start(&r, &saver_decay, 480, 300, set, 2);
+	bool inside = true;
+	for (int k = 0; k < 20; k++) {
+		run_dt(&r, 10, 2.5 / 30);
+		saver_decay_stats(r.state, &st);
+		inside = inside && st.inside;
+	}
+	printf("decay at 2.5 times the speed: %d of %d pieces fell, %d shattered, %d in the air\n",
+		st.fallen, st.pieces, st.shattered, st.flying);
+	check(inside, "at the fastest speed a piece left the screen or sank through the bottom");
+	check(st.fallen == st.pieces && st.flying <= 2, "at the fastest speed the pieces do not come to rest");
+	finish(&r);
+}
+
+/* How many pixels of the picture changed since the copy in last, which is brought up to date. */
+static long changed(struct run *r, uint32_t *last) {
+	unsigned char *data = cairo_image_surface_get_data(r->surface);
+	int stride = cairo_image_surface_get_stride(r->surface);
+	long n = 0;
+	for (int y = 0; y < r->h; y++) {
+		uint32_t *row = (uint32_t *)(data + y * stride);
+		for (int x = 0; x < r->w; x++) {
+			n += row[x] != last[y * r->w + x];
+			last[y * r->w + x] = row[x];
+		}
+	}
+	return n;
 }
 
 static void test_jungle(void) {
@@ -181,12 +225,36 @@ static void test_jungle(void) {
 	check(mean[1] > mean[0] && mean[1] > mean[2], "the end is not green");
 	finish(&r);
 
-	// without nights and creatures
+	// without nights and creatures; and growing smoothly: about as much changes every
+	// frame, not all at once every few frames
 	static const char *const calm[] = { "doomsday_jungle_pace", "fast", "doomsday_jungle_nights",
 		"no", "doomsday_jungle_creatures", "no" };
 	start(&r, &saver_jungle, 320, 200, calm, 6);
 	most_night = 0;
-	for (int k = 0; k < 8; k++) {
+	for (int k = 0; k < 4; k++) {
+		run(&r, 10);
+		saver_jungle_stats(r.state, &st);
+		most_night = st.night > most_night ? st.night : most_night;
+	}
+	uint32_t *last = calloc((size_t)r.w * r.h, sizeof(uint32_t));
+	run_dt(&r, 1 / 30.0, 1 / 30.0);
+	changed(&r, last);
+	long counts[24], total = 0, most = 0;
+	for (int k = 0; k < 24; k++) {
+		run_dt(&r, 1 / 30.0, 1 / 30.0);
+		counts[k] = changed(&r, last);
+		total += counts[k];
+		most = counts[k] > most ? counts[k] : most;
+	}
+	long quiet = 0;
+	for (int k = 0; k < 24; k++) {
+		quiet += counts[k] < total / 24 / 4;
+	}
+	printf("jungle, a second of frames: %ld pixels change a frame on average, %ld at most, %ld "
+		"frames with next to nothing\n", total / 24, most, quiet);
+	check(most < total / 24 * 4 && quiet == 0, "the jungle grows in jumps, not smoothly");
+	free(last);
+	for (int k = 0; k < 4; k++) {
 		run(&r, 10);
 		saver_jungle_stats(r.state, &st);
 		most_night = st.night > most_night ? st.night : most_night;
@@ -197,6 +265,7 @@ static void test_jungle(void) {
 
 int main(void) {
 	test_decay();
+	test_decay_fast();
 	test_jungle();
 	// started and ended at once, and at tiny sizes
 	static const char *const fast[] = { "doomsday_decay_pace", "fast", "doomsday_jungle_pace",

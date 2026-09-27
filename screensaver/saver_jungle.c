@@ -36,6 +36,7 @@
 #define ROW_STEP 4
 #define SCENE_EVERY 6
 #define MOSS_RAMP 6.0f
+#define LEAF_GROWS 0.7   // seconds a leaf takes to unfold
 #define NEVER 1e9f
 
 struct vine {
@@ -87,6 +88,9 @@ struct jungle {
 	cairo_surface_t *leaf_img[LEAF_KINDS][LEAF_SHADES];
 	cairo_surface_t *frond_img[FROND_KINDS];
 	cairo_surface_t *glow;
+	cairo_surface_t *rays;
+	cairo_surface_t *flower_img[6][2][2]; // colour, five or six petals, fresh or wilted
+	int flower_px;
 	int leaf_size;                 // of the pictures of the leaves
 	struct saver_window wins[WINDOWS_MAX], bars[4];
 	int count, bar_count;
@@ -491,10 +495,9 @@ static void add_flower(struct jungle *s, float x, float y, float size) {
 		BUD };
 }
 
-/* A tendril: a little spiral off the vine. */
+/* A tendril: a little spiral off the vine, added to the path. */
 static void tendril(struct jungle *s, cairo_t *cr, float x, float y, float angle) {
 	double u = s->u, r = u * saver_between(3, 6);
-	cairo_new_path(cr);
 	cairo_move_to(cr, x, y);
 	double turn = saver_random() < 0.5 ? 1 : -1;
 	for (int k = 1; k <= 24; k++) {
@@ -502,8 +505,26 @@ static void tendril(struct jungle *s, cairo_t *cr, float x, float y, float angle
 		cairo_line_to(cr, x + cos(angle) * r * 1.5 * f + cos(a) * rr * f,
 			y + sin(angle) * r * 1.5 * f + sin(a) * rr * f);
 	}
-	cairo_set_line_width(cr, fmax(0.6, u * 0.7));
-	cairo_set_source_rgba(cr, 0.35, 0.55, 0.18, 0.9);
+}
+
+/*
+ * What grows is drawn at once where it stays (the plants) and into the ground
+ * shown now and the one being built, so it grows smoothly frame by frame.
+ */
+static void stroke_everywhere(struct jungle *s, cairo_t *cr) {
+	cairo_surface_t *also[2] = { s->scene, s->next };
+	cairo_path_t *path = cairo_copy_path(cr);
+	for (int k = 0; k < 2; k++) {
+		cairo_t *o = cairo_create(also[k]);
+		cairo_append_path(o, path);
+		cairo_set_line_cap(o, cairo_get_line_cap(cr));
+		cairo_set_line_join(o, cairo_get_line_join(cr));
+		cairo_set_line_width(o, cairo_get_line_width(cr));
+		cairo_set_source(o, cairo_get_source(cr));
+		cairo_stroke(o);
+		cairo_destroy(o);
+	}
+	cairo_path_destroy(path);
 	cairo_stroke(cr);
 }
 
@@ -513,6 +534,8 @@ static void grow_vines(struct jungle *s, double dt) {
 	cairo_t *cr = cairo_create(s->plants);
 	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	float curls[64][3];
+	int curl_count = 0;
 	for (int k = 0; k < s->vine_count; k++) {
 		struct vine *v = &s->vines[k];
 		if (!v->alive || s->t < v->start) {
@@ -556,15 +579,15 @@ static void grow_vines(struct jungle *s, double dt) {
 				if (r < 0.07) {
 					add_flower(s, v->x + cosf(v->angle + v->side) * size * 0.4f,
 						v->y + sinf(v->angle + v->side) * size * 0.4f, (float)(u * saver_between(8, 16)));
-				} else if (r < 0.12) {
-					tendril(s, cr, v->x, v->y, v->angle - v->side * 1.2f);
+				} else if (r < 0.12 && curl_count < 64) {
+					curls[curl_count][0] = v->x;
+					curls[curl_count][1] = v->y;
+					curls[curl_count++][2] = v->angle - v->side * 1.2f;
 				} else if (r < 0.26 && v->depth < 3 && v->max_len - v->len > u * 60) {
 					new_vine(s, v->x, v->y, v->angle + v->side * (float)saver_between(0.6, 1.4),
 						(v->max_len - v->len) * (float)saver_between(0.4, 0.8), v->depth + 1, v->down,
 						(float)s->t);
 				}
-				cairo_new_path(cr); // the leaf and the rest drew in between
-				cairo_move_to(cr, v->x, v->y);
 			}
 			if (v->len >= v->max_len || v->y < -20 || v->y > H + 20 || v->x < -20 || v->x > W + 20) {
 				v->alive = false;
@@ -575,7 +598,16 @@ static void grow_vines(struct jungle *s, double dt) {
 		cairo_set_line_width(cr, fmaxf(0.8f, v->width * taper));
 		double g = 0.28 + 0.1 * v->depth;
 		cairo_set_source_rgb(cr, 0.18 + 0.05 * v->depth, g + 0.08, 0.1);
-		cairo_stroke(cr);
+		stroke_everywhere(s, cr);
+	}
+	if (curl_count) {
+		cairo_new_path(cr);
+		for (int k = 0; k < curl_count; k++) {
+			tendril(s, cr, curls[k][0], curls[k][1], curls[k][2]);
+		}
+		cairo_set_line_width(cr, fmax(0.6, u * 0.7));
+		cairo_set_source_rgba(cr, 0.35, 0.55, 0.18, 0.9);
+		stroke_everywhere(s, cr);
 	}
 	cairo_destroy(cr);
 }
@@ -600,29 +632,36 @@ static void draw_leaf(struct jungle *s, cairo_t *cr, struct leaf *l, double grow
 	cairo_rotate(cr, l->angle);
 	cairo_scale(cr, k, k);
 	cairo_set_source_surface(cr, s->leaf_img[l->kind][l->shade], 0, -s->leaf_size / 2.0);
+	// (the default filter works out a scaled down picture far more carefully, and slowly)
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
 	cairo_paint(cr);
 	cairo_restore(cr);
 }
 
 /* Leaves grown in full go into the plants for good. */
 static void settle_leaves(struct jungle *s) {
-	cairo_t *cr = NULL;
+	cairo_t *cr[3] = { NULL };
+	cairo_surface_t *into[3] = { s->plants, s->scene, s->next };
 	int kept = 0;
 	for (int i = 0; i < s->leaf_count; i++) {
 		struct leaf *l = &s->leaves[i];
-		if (s->t - l->born >= 2.5) {
-			if (!cr) {
-				cr = cairo_create(s->plants);
+		if (s->t - l->born >= LEAF_GROWS) {
+			for (int k = 0; k < 3; k++) {
+				if (!cr[k]) {
+					cr[k] = cairo_create(into[k]);
+				}
+				draw_leaf(s, cr[k], l, 1);
 			}
-			draw_leaf(s, cr, l, 1);
 			s->leaves_grown++;
 		} else {
 			s->leaves[kept++] = *l;
 		}
 	}
 	s->leaf_count = kept;
-	if (cr) {
-		cairo_destroy(cr);
+	for (int k = 0; k < 3; k++) {
+		if (cr[k]) {
+			cairo_destroy(cr[k]);
+		}
 	}
 }
 
@@ -686,41 +725,65 @@ static void flower_look(struct flower *f, double *open, double *wilt) {
 	}
 }
 
+/* A flower open in full, of a colour and a number of petals, fresh or wilted. */
+static cairo_surface_t *make_flower(int size, int colour, int petals, bool wilted) {
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
+	cairo_t *cr = cairo_create(img);
+	cairo_translate(cr, size / 2.0, size / 2.0);
+	double r = size / 2.0 / 1.12, wilt = wilted ? 1 : 0;
+	const double *c = flower_colours[colour];
+	// the petals, drooping and darkening as it wilts
+	for (int k = 0; k < petals; k++) {
+		cairo_save(cr);
+		cairo_rotate(cr, k * 2 * M_PI / petals);
+		cairo_translate(cr, r * 0.5, 0);
+		cairo_scale(cr, r * 0.55, r * (0.3 - 0.12 * wilt));
+		cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
+		cairo_restore(cr);
+	}
+	double dim = 1 - 0.45 * wilt;
+	cairo_pattern_t *p = cairo_pattern_create_radial(0, 0, r * 0.1, 0, 0, r * 1.05);
+	cairo_pattern_add_color_stop_rgb(p, 0, c[0] * 0.55 * dim, c[1] * 0.4 * dim, c[2] * 0.4 * dim);
+	cairo_pattern_add_color_stop_rgb(p, 0.5, c[0] * dim, c[1] * dim, c[2] * dim);
+	cairo_pattern_add_color_stop_rgb(p, 1, fmin(1, c[0] * 1.15) * dim, fmin(1, c[1] * 1.15) * dim,
+		fmin(1, c[2] * 1.15) * dim);
+	cairo_set_source(cr, p);
+	cairo_fill(cr);
+	cairo_pattern_destroy(p);
+	// the heart of it
+	cairo_arc(cr, 0, 0, fmax(1, r * 0.18), 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 1, 0.85 * dim, 0.3 * dim);
+	cairo_fill(cr);
+	cairo_destroy(cr);
+	return img;
+}
+
+/* The flowers, from their pictures: opening, swaying, wilting into the wilted one. */
 static void draw_flowers(struct jungle *s, cairo_t *cr) {
+	int half = s->flower_px / 2;
 	for (int i = 0; i < s->flower_count; i++) {
 		struct flower *f = &s->flowers[i];
 		double open, wilt;
 		flower_look(f, &open, &wilt);
-		if (open <= 0) {
+		if (open <= 0.02) {
 			continue;
 		}
-		const double *c = flower_colours[f->colour];
-		double r = f->size * open, sway = sin(s->t * 1.3 + f->spin) * 0.08 * (1 + s->wind);
+		double k = f->size * open / (half / 1.12), sway = sin(s->t * 1.3 + f->spin) * 0.08 * (1 + s->wind);
+		int petals = f->petals > 5;
 		cairo_save(cr);
 		cairo_translate(cr, f->x, f->y + wilt * f->size * 0.4);
 		cairo_rotate(cr, f->spin + sway);
-		// the petals, drooping and darkening as it wilts
-		for (int k = 0; k < f->petals; k++) {
-			cairo_save(cr);
-			cairo_rotate(cr, k * 2 * M_PI / f->petals);
-			cairo_translate(cr, r * 0.5, 0);
-			cairo_scale(cr, r * 0.55, r * (0.3 - 0.12 * wilt));
-			cairo_arc(cr, 0, 0, 1, 0, 2 * M_PI);
-			cairo_restore(cr);
+		cairo_scale(cr, k, k * (1 - 0.35 * wilt));
+		if (wilt < 1) {
+			cairo_set_source_surface(cr, s->flower_img[f->colour][petals][0], -half, -half);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+			cairo_paint_with_alpha(cr, 1 - wilt);
 		}
-		double dim = 1 - 0.45 * wilt;
-		cairo_pattern_t *p = cairo_pattern_create_radial(0, 0, r * 0.1, 0, 0, r * 1.05);
-		cairo_pattern_add_color_stop_rgb(p, 0, c[0] * 0.55 * dim, c[1] * 0.4 * dim, c[2] * 0.4 * dim);
-		cairo_pattern_add_color_stop_rgb(p, 0.5, c[0] * dim, c[1] * dim, c[2] * dim);
-		cairo_pattern_add_color_stop_rgb(p, 1, fmin(1, c[0] * 1.15) * dim, fmin(1, c[1] * 1.15) * dim,
-			fmin(1, c[2] * 1.15) * dim);
-		cairo_set_source(cr, p);
-		cairo_fill(cr);
-		cairo_pattern_destroy(p);
-		// the heart of it
-		cairo_arc(cr, 0, 0, fmax(1, r * 0.18), 0, 2 * M_PI);
-		cairo_set_source_rgb(cr, 1, 0.85 * dim, 0.3 * dim);
-		cairo_fill(cr);
+		if (wilt > 0) {
+			cairo_set_source_surface(cr, s->flower_img[f->colour][petals][1], -half, -half);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+			cairo_paint_with_alpha(cr, wilt);
+		}
 		cairo_restore(cr);
 	}
 }
@@ -761,33 +824,47 @@ static void draw_fronds(struct jungle *s, cairo_t *cr, int from, int to) {
 		cairo_rotate(cr, f->angle + sway - (1 - grown) * 0.6); // unfurling up into place
 		cairo_scale(cr, k2, k2 * (0.35 + 0.65 * grown));
 		cairo_set_source_surface(cr, img, 0, -ih / 2.0);
-		cairo_paint_with_alpha(cr, fmin(1, grown * 3));
+		cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+		if (grown * 3 >= 1) {
+			cairo_paint(cr);
+		} else {
+			cairo_paint_with_alpha(cr, grown * 3);
+		}
 		cairo_restore(cr);
 	}
 }
 
 /* ---------- light ---------- */
 
+/* Shafts of light through the canopy, drawn once; they drift by sliding the picture. */
+static cairo_surface_t *make_rays(int width, int height) {
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	cairo_t *cr = cairo_create(img);
+	double W = width, H = height;
+	for (int k = 0; k < 4; k++) {
+		double x = W * (0.12 + 0.25 * k), w = W * (0.03 + 0.02 * (k % 2)), slant = H * (k % 2 ? -0.25 : 0.3);
+		cairo_pattern_t *p = cairo_pattern_create_linear(x, 0, x + slant, H);
+		cairo_pattern_add_color_stop_rgba(p, 0, 0.9, 1, 0.6, 0.16);
+		cairo_pattern_add_color_stop_rgba(p, 1, 0.9, 1, 0.6, 0);
+		cairo_move_to(cr, x, 0);
+		cairo_line_to(cr, x + w, 0);
+		cairo_line_to(cr, x + w * 2.5 + slant, H);
+		cairo_line_to(cr, x + slant, H);
+		cairo_close_path(cr);
+		cairo_set_source(cr, p);
+		cairo_fill(cr);
+		cairo_pattern_destroy(p);
+	}
+	cairo_destroy(cr);
+	return img;
+}
+
 static void draw_light(struct jungle *s, cairo_t *cr) {
-	double W = s->width, H = s->height, day = 1 - s->night;
+	double W = s->width, day = 1 - s->night;
 	if (day > 0.05) {
-		// shafts through the canopy, slowly moving
 		cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
-		for (int k = 0; k < 4; k++) {
-			double x = W * (0.12 + 0.25 * k) + sin(s->t * 0.07 + k * 1.7) * W * 0.05;
-			double w = W * (0.03 + 0.02 * (k % 2)), slant = H * (k % 2 ? -0.25 : 0.3);
-			cairo_pattern_t *p = cairo_pattern_create_linear(x, 0, x + slant, H);
-			cairo_pattern_add_color_stop_rgba(p, 0, 0.9, 1, 0.6, 0.16 * day);
-			cairo_pattern_add_color_stop_rgba(p, 1, 0.9, 1, 0.6, 0);
-			cairo_move_to(cr, x, 0);
-			cairo_line_to(cr, x + w, 0);
-			cairo_line_to(cr, x + w * 2.5 + slant, H);
-			cairo_line_to(cr, x + slant, H);
-			cairo_close_path(cr);
-			cairo_set_source(cr, p);
-			cairo_fill(cr);
-			cairo_pattern_destroy(p);
-		}
+		cairo_set_source_surface(cr, s->rays, round(sin(s->t * 0.07) * W * 0.04), 0);
+		cairo_paint_with_alpha(cr, day);
 		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	}
 	if (s->night > 0.02) {
@@ -808,18 +885,6 @@ static void build_scene(struct jungle *s, int part) {
 		cairo_paint(cr);
 	}
 	if (part < 0 || part == 1) {
-		for (int i = 0; i < s->leaf_count; i++) {
-			struct leaf *l = &s->leaves[i];
-			draw_leaf(s, cr, l, smooth(0, 2.5f, (float)(s->t - l->born)));
-		}
-		draw_flowers(s, cr);
-	}
-	if (part < 0 || part == 2) {
-		draw_fronds(s, cr, 0, FRONDS_MAX / 2);
-	}
-	if (part < 0 || part == 3) {
-		draw_fronds(s, cr, FRONDS_MAX / 2, FRONDS_MAX);
-		draw_light(s, cr);
 		cairo_surface_t *shown = s->scene;
 		s->scene = s->next;
 		s->next = shown;
@@ -859,6 +924,15 @@ static void *jungle_create(int width, int height, const struct saver_options *op
 		s->frond_img[k] = make_frond((int)fmax(40, u * 420), k);
 	}
 	s->glow = make_glow(fmax(2, u * 7));
+	s->rays = make_rays(width, height);
+	s->flower_px = (int)fmax(10, u * 40);
+	for (int c = 0; c < 6; c++) {
+		for (int p = 0; p < 2; p++) {
+			for (int w = 0; w < 2; w++) {
+				s->flower_img[c][p][w] = make_flower(s->flower_px, c, 5 + p, w);
+			}
+		}
+	}
 	size_t n = (size_t)width * height;
 	s->moss_at = malloc(sizeof(float) * n);
 	s->moss_tex = malloc(n);
@@ -931,15 +1005,21 @@ static void jungle_draw(void *state, cairo_t *cr, int width, int height, double 
 	update_rows(s);
 	grow_vines(s, dt);
 	flowers_step(s, dt);
-	if (s->frame % 15 == 0) {
-		settle_leaves(s);
-	}
-	if (s->part < 4) {
+	settle_leaves(s);
+	if (s->part < 2) {
 		build_scene(s, s->part); // the first part after the whole one built at the start
 	}
 	s->part = (s->part + 1) % SCENE_EVERY;
+	// the ground, mossed and grown over; then what moves on it, every frame
 	cairo_set_source_surface(cr, s->scene, 0, 0);
 	cairo_paint(cr);
+	for (int i = 0; i < s->leaf_count; i++) {
+		struct leaf *l = &s->leaves[i];
+		draw_leaf(s, cr, l, smooth(0, LEAF_GROWS, (float)(s->t - l->born)));
+	}
+	draw_flowers(s, cr);
+	draw_fronds(s, cr, 0, FRONDS_MAX);
+	draw_light(s, cr);
 	// leaves now and then let go of the canopy, and pollen drifts
 	if (saver_random() < dt * 0.8 * fmin(1, progress(s) * 3)) {
 		*new_bit(s) = (struct bit){ (float)(saver_random() * W), (float)(-u * 10),
@@ -983,6 +1063,7 @@ static void jungle_draw(void *state, cairo_t *cr, int width, int height, double 
 			cairo_scale(cr, k, k * fabs(cos(b->age * 2.5 + i)) + 0.05);
 			cairo_set_source_surface(cr, s->leaf_img[i % LEAF_KINDS][4], -s->leaf_size / 2.0,
 				-s->leaf_size / 2.0);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
 			cairo_paint_with_alpha(cr, fade);
 		} else {
 			cairo_scale(cr, b->size, b->size * 0.55 * (0.3 + 0.7 * fabs(cos(b->age * 3 + i))));
@@ -1070,6 +1151,14 @@ static void jungle_destroy(void *state) {
 	cairo_surface_destroy(s->scene);
 	cairo_surface_destroy(s->next);
 	cairo_surface_destroy(s->glow);
+	cairo_surface_destroy(s->rays);
+	for (int c = 0; c < 6; c++) {
+		for (int p = 0; p < 2; p++) {
+			for (int w = 0; w < 2; w++) {
+				cairo_surface_destroy(s->flower_img[c][p][w]);
+			}
+		}
+	}
 	for (int k = 0; k < LEAF_KINDS; k++) {
 		for (int c = 0; c < LEAF_SHADES; c++) {
 			cairo_surface_destroy(s->leaf_img[k][c]);
