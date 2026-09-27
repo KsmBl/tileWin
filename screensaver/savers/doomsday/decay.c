@@ -52,7 +52,7 @@
 #define GLINTS_MAX 60
 #define LAYERS 3             // pieces fall at different depths, in front of each other
 #define ROW_STEP 16          // the ageing is brought up to date on every 16th row a frame
-#define SCENE_EVERY 6        // frames to build the slow parts in (in 3 of them a part each)
+#define SCENE_EVERY 6        // frames to build the slow parts in (in 4 of them a part each)
 #define STEP_MAX (1 / 90.0)  // seconds of a step of the physics at most (five at most a frame)
 #define FLYING_MAX 150       // pieces in the air at once; more wait a moment before they come off
 #define RESTING_MAX 700      // pieces at rest kept in the way; the lowest are buried anyway
@@ -136,6 +136,15 @@ struct glint {
 
 enum { INTACT, CRUMBLING, GONE };
 
+/* A cobweb in a corner: of a window's glass, or of the screen (owner -1). */
+struct web {
+	float x, y, size, at;
+	int corner;              // 0 top left, 1 top right, 2 bottom right, 3 bottom left
+	int owner;
+};
+
+#define WEBS_MAX 120
+
 struct decay {
 	int width, height;
 	double u, t, span;       // span: seconds until all is dust
@@ -154,6 +163,8 @@ struct decay {
 	uint8_t *src;                 // per pixel: 0 the picture, 1 behind, 2 + k flat of k
 	uint8_t *mat;                 // per pixel: what it is made of
 	uint8_t *age_n, *stain_n, *grain_n, *wood_n; // per pixel noise
+	uint8_t *peel_n, *mould_n;    // where the plaster flakes off first, where mould grows
+	uint8_t *dirt;                // how much dirt the rain washes down the wall there
 	struct piece *pieces;
 	int piece_count;
 	int first[OWNERS_MAX], last[OWNERS_MAX];
@@ -178,6 +189,10 @@ struct decay {
 	bool years;
 	PangoLayout *layout;
 	float rubble_top;
+	struct web webs[WEBS_MAX];
+	int web_count;
+	cairo_surface_t *web_img;     // a cobweb in the top left corner of its picture
+	cairo_surface_t *puff;        // a soft round of dust
 };
 
 static double progress(struct decay *s) {
@@ -266,8 +281,8 @@ struct cutting {
 
 static void add_crack(struct decay *s, float x0, float y0, float x1, float y1, float at,
 		float grow, int owner, uint8_t mat) {
-	if (owner < 0) {
-		return;
+	if (owner < -1) {
+		return; // the cut of a piece in the air: no crack on anything
 	}
 	// in short stretches, each shown only where the one it runs through still shows
 	double len = hypot(x1 - x0, y1 - y0), most = fmax(4, s->u * 16);
@@ -477,6 +492,27 @@ static void break_frame(struct decay *s, int owner, uint8_t mat, float x0, float
 	free(c);
 }
 
+/* A crack in the plaster of the wall: wandering, branching now and then. */
+static void crack_wall(struct decay *s, float x, float y, float angle, float len, float at, int depth) {
+	double u = s->u;
+	float walked = 0;
+	while (walked < len) {
+		// plaster breaks in straight runs with a sharp turn now and then
+		float step = (float)(u * saver_between(8, 20));
+		angle += saver_random() < 0.25 ? (float)saver_between(-0.7, 0.7) : (float)saver_between(-0.12, 0.12);
+		float nx = x + cosf(angle) * step, ny = y + sinf(angle) * step;
+		add_crack(s, x, y, nx, ny, at + walked / len * (float)(s->span * 0.08), 0.6f, -1, WALL);
+		x = nx;
+		y = ny;
+		walked += step;
+		if (depth < 2 && saver_random() < 0.07) {
+			crack_wall(s, x, y, angle + (float)saver_between(0.5, 1.1) * (saver_random() < 0.5 ? -1 : 1),
+				(len - walked) * (float)saver_between(0.3, 0.6), at + walked / len * (float)(s->span * 0.08),
+				depth + 1);
+		}
+	}
+}
+
 /* When each window and taskbar falls apart: the top window first, one under another after it. */
 static void schedule(struct decay *s) {
 	double span = s->span;
@@ -586,8 +622,36 @@ static inline uint32_t greyish(uint32_t p, uint32_t tint, int k) {
 	return mix_px(p, mix_px(grey, tint, 70), k);
 }
 
+/* A brick of the wall under the plaster, mortar between, each brick its own. */
+static inline uint32_t brick(struct decay *s, int x, int y, uint8_t gr) {
+	int h = (int)fmax(4, s->u * 13), w = (int)(h * 2.3), m = (int)fmax(1, s->u * 1.8);
+	int row = y / h, bx = x + (row & 1) * w / 2, col = bx / w;
+	int yy = y % h, xx = bx % w;
+	if (yy < m || xx < m) {
+		return mix_px(0xffa09884, 0xff7a7262, gr);
+	}
+	uint32_t shade = hash2(col, row, 23) & 255;
+	uint32_t b = mix_px(0xff7a3e28, 0xffa4623e, (int)shade);
+	b = mix_px(b, 0xff4e2a1c, gr & 63);
+	if (yy < m + 2) {
+		b = mix_px(b, 0xffc07a50, 60); // lit along its top
+	} else if (yy > h - 3) {
+		b = mix_px(b, 0xff3a2016, 60);
+	}
+	return b;
+}
+
+/* The dust over it all at the end. */
+static inline uint32_t aged_more(struct decay *s, int i, uint32_t p, float k3) {
+	if (k3 > 0) {
+		uint32_t dust = mix_px(0xff9c907c, 0xff766c5c, (int)(s->age_n[i] * 0.8f + (s->grain_n[i] & 31)));
+		p = mix_px(p, dust, (int)(k3 * 256));
+	}
+	return p;
+}
+
 /* A pixel aged as what it is made of. */
-static inline uint32_t aged(struct decay *s, int i, int x, uint32_t p, float P) {
+static inline uint32_t aged(struct decay *s, int i, int x, int y, uint32_t p, float P) {
 	float a = P * 1.08f + (s->age_n[i] / 255.0f - 0.5f) * 0.24f;
 	if (a <= 0.01f) {
 		return p;
@@ -655,31 +719,52 @@ static inline uint32_t aged(struct decay *s, int i, int x, uint32_t p, float P) 
 		break;
 	}
 	default: {
-		// plaster: yellowed like old paper, stains with darker rims, grime
+		// plaster: it yellows and fades, unevenly
 		int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
 		int lum = (r * 77 + g * 150 + b * 29) >> 8;
 		uint32_t sepia = 0xff000000u | (uint32_t)(lum * 1.02f + 22 > 255 ? 255 : lum * 1.02f + 22) << 16 |
 			(uint32_t)(lum * 0.9f + 10) << 8 | (uint32_t)(lum * 0.68f + 4);
-		p = mix_px(p, sepia, (int)(k1 * 0.85f * 256));
-		p = mix_px(p, 0xffc4b28e, (int)(k1 * 0.28f * 256));
-		float thr = 1 - k2 * 0.32f;
-		if (st > thr) {
-			p = mix_px(p, 0xff6a5034, (int)(fminf(1, (st - thr) * 8) * 0.35f * 256));
-		} else if (st > thr - 0.02f && k2 > 0) {
-			p = mix_px(p, 0xff4e3a26, (int)(0.22f * k2 * 256));
+		p = mix_px(p, sepia, (int)(k1 * 0.8f * 256));
+		p = mix_px(p, 0xffc4b28e, (int)(k1 * 0.25f * 256));
+		p = mix_px(p, s->age_n[i] > 128 ? 0xffd8ccae : 0xff8a7a5c, (int)(k1 * abs(s->age_n[i] - 128) * 0.25f));
+		// the plaster flakes off: brickwork under it, the broken edge light, a shadow under it
+		float peel = s->peel_n[i] / 255.0f, off = 1 - k2 * 0.42f;
+		if (peel > off) {
+			return aged_more(s, i, brick(s, x, y, gr), k3);
 		}
-		if (gr < 12 * k2) {
-			p = mix_px(p, 0xff2c2218, 60);
+		if (peel > off - 0.012f) {
+			p = mix_px(p, 0xffeee6d4, (int)(0.8f * k2 * 256));
+		} else if (peel > off - 0.03f) {
+			p = mix_px(p, 0xff3a3024, (int)(0.3f * k2 * 256));
+		}
+		// water stains: pale inside, with a brown tide line wherever one dried, ring in ring
+		float thr = 1 - k2 * 0.38f;
+		if (st > thr) {
+			p = mix_px(p, 0xffa08058, (int)(fminf(1, (st - thr) * 10) * 0.2f * 256));
+			for (int ring = 1; ring <= 2; ring++) {
+				float at = thr + ring * 0.04f * ring;
+				if (fabsf(st - at) < 0.005f) {
+					p = mix_px(p, 0xff6a4a2a, (int)(0.35f * 256));
+				}
+			}
+		}
+		if (fabsf(st - thr) < 0.007f && k2 > 0) {
+			p = mix_px(p, 0xff5a3c20, (int)(0.5f * k2 * 256));
+		}
+		// dirt: washed down the wall under the windows, settled low and in the corners
+		p = mix_px(p, 0xff3a3226, (int)(s->dirt[i] * k2 * 0.6f));
+		// mould, spreading up from below: dark, speckled, greenish
+		float mould = s->mould_n[i] / 255.0f + (float)y / s->height * 0.25f;
+		if (mould > 1.18f - k2 * 0.3f) {
+			p = mix_px(p, gr < 150 ? 0xff242a1c : 0xff4a5234, gr < 150 ? 170 : 90);
+		}
+		if (gr < 10 * k2) {
+			p = mix_px(p, 0xff2c2218, 50);
 		}
 		break;
 	}
 	}
-	if (k3 > 0) {
-		// dust: soft drifts of lighter and darker, a fine grain
-		uint32_t dust = mix_px(0xff9c907c, 0xff766c5c, (int)(s->age_n[i] * 0.8f + (gr & 31)));
-		p = mix_px(p, dust, (int)(k3 * 256));
-	}
-	return p;
+	return aged_more(s, i, p, k3);
 }
 
 static void update_span(struct decay *s, int y, int x0, int x1) {
@@ -690,7 +775,7 @@ static void update_span(struct decay *s, int y, int x0, int x1) {
 	float P = (float)progress(s);
 	for (int x = x0; x < x1; x++) {
 		int i = y * W + x;
-		view[i] = aged(s, i, x, source_px(s, i, orig, bare), P);
+		view[i] = aged(s, i, x, y, source_px(s, i, orig, bare), P);
 	}
 }
 
@@ -846,8 +931,8 @@ static void finish_picture(struct decay *s, cairo_surface_t *img, const float *p
 	cairo_clip_preserve(cr);
 	if (mat == GLASS) {
 		// glass: a bright edge where the light runs along the break, a sheen across it
-		cairo_set_line_width(cr, fmax(1.2, u * 1.6));
-		cairo_set_source_rgba(cr, 0.92, 0.96, 1, 0.75);
+		cairo_set_line_width(cr, fmax(1.2, u * 1.8));
+		cairo_set_source_rgba(cr, 0.78, 0.96, 0.88, 0.8); // the green of glass seen edgewise
 		cairo_stroke(cr);
 		int w = cairo_image_surface_get_width(img), h = cairo_image_surface_get_height(img);
 		cairo_pattern_t *p = cairo_pattern_create_linear(0, 0, w, h);
@@ -1186,6 +1271,9 @@ static void separate(struct decay *s) {
 
 static void settle(struct decay *s, int index);
 static void shatter(struct decay *s, int index);
+static void draw_side(struct decay *s, cairo_t *cr, struct body *b);
+static void draw_ledge_dust(struct decay *s, cairo_t *cr);
+static void draw_webs(struct decay *s, cairo_t *cr);
 
 /* One step of all that falls: pulled down, colliding, pushed apart, moved on. */
 static void physics_step(struct decay *s, double h) {
@@ -1336,6 +1424,7 @@ static void physics(struct decay *s, double dt) {
 static void settle(struct decay *s, int index) {
 	struct body *b = &s->bodies[index];
 	cairo_t *cr = cairo_create(s->rubble);
+	draw_side(s, cr, b);
 	cairo_translate(cr, b->x, b->y);
 	cairo_rotate(cr, b->a);
 	cairo_set_source_surface(cr, b->img, -b->ox, -b->oy);
@@ -1394,7 +1483,7 @@ static void shatter(struct decay *s, int index) {
 		double base = saver_between(0, M_PI);
 		for (int k = 0; k < lines; k++) {
 			double a = base + k * M_PI / lines + saver_between(-0.2, 0.2);
-			cut_all(s, c, px, py, (float)-sin(a), (float)cos(a), 0, 0, -1, GLASS);
+			cut_all(s, c, px, py, (float)-sin(a), (float)cos(a), 0, 0, -2, GLASS);
 		}
 	} else if (parent.mat == WOOD) {
 		// along its longest edge: the grain
@@ -1409,16 +1498,16 @@ static void shatter(struct decay *s, int index) {
 			}
 		}
 		cut_all(s, c, (float)saver_between(-2, 2) * (float)u, (float)saver_between(-2, 2) * (float)u,
-			-gy, gx, 0, 0, -1, WOOD);
+			-gy, gx, 0, 0, -2, WOOD);
 		if (saver_random() < 0.5) {
-			cut_all(s, c, ix * 0.5f, iy * 0.5f, gx + (float)saver_between(-0.3, 0.3), gy, 0, 0, -1, WOOD);
+			cut_all(s, c, ix * 0.5f, iy * 0.5f, gx + (float)saver_between(-0.3, 0.3), gy, 0, 0, -2, WOOD);
 		}
 	} else {
 		int lines = 1 + (int)(saver_random() * 2);
 		for (int k = 0; k < lines; k++) {
 			double a = saver_between(0, M_PI);
 			cut_all(s, c, (float)saver_between(-0.3, 0.3) * parent.radius,
-				(float)saver_between(-0.3, 0.3) * parent.radius, (float)cos(a), (float)sin(a), 0, 0, -1,
+				(float)saver_between(-0.3, 0.3) * parent.radius, (float)cos(a), (float)sin(a), 0, 0, -2,
 				STONE);
 		}
 	}
@@ -1499,9 +1588,9 @@ static void draw_cracks(struct decay *s, cairo_t *cr) {
 		[WALL] = { 0.1, 0.07, 0.04, 0.85 }, [GLASS] = { 0.03, 0.03, 0.04, 0.55 },
 		[WOOD] = { 0.12, 0.07, 0.03, 0.85 }, [STONE] = { 0.08, 0.07, 0.06, 0.85 },
 	};
-	static const double width[4] = { 1.3, 0.9, 1.4, 1.8 };
-	static const double jag[4] = { 2.2, 0.4, 1.2, 3 };
-	for (int m = GLASS; m <= STONE; m++) {
+	static const double width[4] = { 1.1, 0.9, 1.4, 1.8 };
+	static const double jag[4] = { 1.2, 0.4, 1.2, 3 };
+	for (int m = WALL; m <= STONE; m++) {
 		cairo_new_path(cr);
 		for (int k = 0; k < s->crack_count; k++) {
 			struct crack *c = &s->cracks[k];
@@ -1620,6 +1709,10 @@ static void build_scene(struct decay *s, int part) {
 		draw_cracks(s, cr);
 	}
 	if (part < 0 || part == 2) {
+		draw_ledge_dust(s, cr);
+		draw_webs(s, cr);
+	}
+	if (part < 0 || part == 3) {
 		double P = progress(s);
 		if (P > 0.82 && part >= 0) {
 			// the rubble greys and crumbles away into the dust
@@ -1640,6 +1733,141 @@ static void build_scene(struct decay *s, int part) {
 		s->next = shown;
 	}
 	cairo_destroy(cr);
+}
+
+/* A cobweb spun into a corner: threads fanning out, the spiral sagging between them. */
+static cairo_surface_t *make_web(int size) {
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
+	cairo_t *cr = cairo_create(img);
+	int threads = 7;
+	double angle[9];
+	for (int k = 0; k < threads; k++) {
+		angle[k] = (M_PI / 2) * (k + saver_between(0.1, 0.4)) / (threads - 0.5);
+		cairo_move_to(cr, 0, 0);
+		cairo_line_to(cr, cos(angle[k]) * size, sin(angle[k]) * size);
+	}
+	for (double r = size * 0.1; r < size * 0.95; r *= saver_between(1.12, 1.22)) {
+		for (int k = 0; k + 1 < threads; k++) {
+			double a0 = angle[k], a1 = angle[k + 1];
+			double x0 = cos(a0) * r, y0 = sin(a0) * r, x1 = cos(a1) * r, y1 = sin(a1) * r;
+			double mx = cos((a0 + a1) / 2) * r * 0.86, my = sin((a0 + a1) / 2) * r * 0.86;
+			cairo_move_to(cr, x0, y0);
+			cairo_curve_to(cr, mx, my, mx, my, x1, y1);
+		}
+	}
+	cairo_set_line_width(cr, fmax(0.5, size / 220.0));
+	cairo_set_source_rgba(cr, 0.92, 0.9, 0.86, 0.5);
+	cairo_stroke(cr);
+	// a few strands torn loose, hanging
+	for (int k = 0; k < 3; k++) {
+		double x = size * saver_between(0.2, 0.7);
+		cairo_move_to(cr, x, x * saver_between(0.1, 0.4));
+		cairo_curve_to(cr, x + size * 0.05, size * 0.5, x - size * 0.03, size * 0.6, x, size * 0.75);
+	}
+	cairo_set_source_rgba(cr, 0.92, 0.9, 0.86, 0.25);
+	cairo_stroke(cr);
+	cairo_destroy(cr);
+	return img;
+}
+
+/* Where cobwebs will be spun: the upper corners of the glass of windows, the screen's corners. */
+static void make_webs(struct decay *s) {
+	double u = s->u;
+	s->web_img = make_web((int)fmax(16, u * 160));
+	for (int o = 0; o < s->count && s->web_count < WEBS_MAX - 4; o++) {
+		float x0, y0, x1, y1;
+		glass_of(s, o, &x0, &y0, &x1, &y1);
+		if (x1 - x0 < u * 60 || y1 - y0 < u * 60) {
+			continue;
+		}
+		for (int c = 0; c < 4; c++) {
+			if (saver_random() < (c < 2 ? 0.6 : 0.3)) {
+				s->webs[s->web_count++] = (struct web){ c == 0 || c == 3 ? x0 : x1, c < 2 ? y0 : y1,
+					(float)(u * saver_between(35, 90)), (float)(s->span * saver_between(0.15, 0.4)), c, o };
+			}
+		}
+	}
+	for (int c = 0; c < 4 && s->web_count < WEBS_MAX; c++) {
+		s->webs[s->web_count++] = (struct web){ c == 0 || c == 3 ? 0 : (float)s->width,
+			c < 2 ? 0 : (float)s->height, (float)(u * saver_between(90, 170)),
+			(float)(s->span * saver_between(0.1, 0.35)), c, -1 };
+	}
+}
+
+static void draw_webs(struct decay *s, cairo_t *cr) {
+	double P = progress(s);
+	int W = s->width, size = cairo_image_surface_get_width(s->web_img);
+	for (int k = 0; k < s->web_count; k++) {
+		struct web *w = &s->webs[k];
+		double grown = smooth(w->at, w->at + (float)(s->span * 0.12), (float)s->t);
+		if (grown <= 0.01) {
+			continue;
+		}
+		// a window's web goes when the glass there falls
+		if (w->owner >= 0) {
+			int x = (int)(w->x + (w->corner == 0 || w->corner == 3 ? 3 : -4));
+			int y = (int)(w->y + (w->corner < 2 ? 3 : -4));
+			if (x < 0 || y < 0 || x >= W || y >= s->height || s->owner[y * W + x] != w->owner) {
+				continue;
+			}
+		}
+		double fade = 1 - smooth(0.95f, 1.15f, (float)P); // gone into the dust at the end
+		cairo_save(cr);
+		cairo_translate(cr, w->x, w->y);
+		cairo_rotate(cr, w->corner * M_PI / 2);
+		double k2 = w->size * (0.4 + 0.6 * grown) / size;
+		cairo_scale(cr, k2, k2);
+		cairo_set_source_surface(cr, s->web_img, 0, 0);
+		cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+		cairo_paint_with_alpha(cr, grown * fade);
+		cairo_restore(cr);
+	}
+}
+
+/* Dust gathered on the tops of the windows and the taskbar, where they still stand. */
+static void draw_ledge_dust(struct decay *s, cairo_t *cr) {
+	double u = s->u, P = progress(s);
+	double deep = u * 5 * smooth(0.12f, 0.75f, (float)P);
+	if (deep < 0.4) {
+		return;
+	}
+	int W = s->width;
+	cairo_new_path(cr);
+	for (int o = 0; o < s->count + s->bar_count; o++) {
+		if (s->state[o] == GONE) {
+			continue;
+		}
+		struct saver_window *w = o < s->count ? &s->wins[o] : &s->bars[o - s->count];
+		int y = (int)w->y;
+		if (y < 2 || y + 2 >= s->height) {
+			continue;
+		}
+		for (int x = (int)fmax(0, w->x); x < (int)fmin(W, w->x + w->w); x += 2) {
+			if (s->owner[(y + 2) * W + x] != o) {
+				continue;
+			}
+			double h = deep * (0.5 + noise(x / (float)(u * 18), (float)o, 0, 151));
+			cairo_rectangle(cr, x, y - h, 2, h + 1);
+		}
+	}
+	cairo_set_source_rgba(cr, 0.64, 0.6, 0.52, 0.85);
+	cairo_fill(cr);
+}
+
+/* A soft round of dust, for the clouds breaking things throws up. */
+static cairo_surface_t *make_puff(int size) {
+	cairo_surface_t *img = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
+	cairo_t *cr = cairo_create(img);
+	double c = size / 2.0;
+	cairo_pattern_t *p = cairo_pattern_create_radial(c, c, 0, c, c, c);
+	cairo_pattern_add_color_stop_rgba(p, 0, 0.74, 0.68, 0.58, 0.7);
+	cairo_pattern_add_color_stop_rgba(p, 0.5, 0.7, 0.64, 0.54, 0.35);
+	cairo_pattern_add_color_stop_rgba(p, 1, 0.7, 0.64, 0.54, 0);
+	cairo_set_source(cr, p);
+	cairo_paint(cr);
+	cairo_pattern_destroy(p);
+	cairo_destroy(cr);
+	return img;
 }
 
 /* Shafts of light from a high window, drawn once; they drift by sliding the picture. */
@@ -1750,6 +1978,58 @@ static void *decay_create(int width, int height, const struct saver_options *opt
 	}
 	free(ag.v);
 	free(sg.v);
+	// the wall: where plaster flakes off, where mould grows, where dirt runs down
+	s->peel_n = malloc(n);
+	s->mould_n = malloc(n);
+	s->dirt = calloc(n, 1);
+	struct grid pg, mg;
+	grid_make(&pg, width, height, 4, (float)fmax(4, u * 70), 131);
+	grid_make(&mg, width, height, 4, (float)fmax(4, u * 25), 137);
+	float *streak = malloc(sizeof(float) * width);
+	for (int x = 0; x < width; x++) {
+		// a few runs, uneven in strength
+		float k = noise(x / (float)fmax(1, u * 3.5), 0.5f, 0, 139) * 0.55f +
+			noise(x / (float)fmax(1, u * 40), 1.5f, 0, 141) * 0.45f;
+		streak[x] = smooth(0.62f, 0.9f, k);
+	}
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			size_t i = (size_t)y * width + x;
+			float pn = grid_at(&pg, x, y);
+			s->peel_n[i] = (uint8_t)fminf(255, fmaxf(0, (pn - 0.3f) * 1.8f * 255));
+			s->mould_n[i] = (uint8_t)fminf(255, grid_at(&mg, x, y) * 255);
+			// settled low down and in the corners
+			float low = smooth(0.55f, 1, (float)y / height) * 0.35f;
+			float corner = (1 - smooth(0, 0.12f, fminf((float)x / width, 1 - (float)x / width))) * 0.2f;
+			s->dirt[i] = (uint8_t)fminf(255, (low + corner) * 255);
+		}
+	}
+	// under each window, what the rain washed off it runs down in streaks
+	for (int o = 0; o < s->count; o++) {
+		struct saver_window *w = &s->wins[o];
+		int y0 = (int)fmax(0, w->y + w->h);
+		for (int y = y0; y < height; y++) {
+			float fade = expf(-(y - y0) / (float)(u * 160));
+			if (fade < 0.02f) {
+				break;
+			}
+			// each run wavers as it goes down, and some stop sooner
+			int wave = (int)(noise((float)(y - y0) / (float)(u * 30), 0.5f, 0, 143) * u * 6);
+			for (int x = (int)fmax(0, w->x); x < (int)fmin(width, w->x + w->w); x++) {
+				int from = x + wave;
+				if (from < 0 || from >= width) {
+					continue;
+				}
+				float reach = 0.4f + 0.6f * (hash2(from / 3, 0, 145) & 255) / 255.0f;
+				float f = expf(-(y - y0) / (float)(u * 160 * reach));
+				size_t i = (size_t)y * width + x;
+				s->dirt[i] = (uint8_t)fminf(255, s->dirt[i] + streak[from] * f * 150);
+			}
+		}
+	}
+	free(streak);
+	free(pg.v);
+	free(mg.v);
 	s->view = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	cairo_t *cr = cairo_create(s->view);
 	cairo_set_source_surface(cr, s->orig, 0, 0);
@@ -1759,6 +2039,7 @@ static void *decay_create(int width, int height, const struct saver_options *opt
 	s->next = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
 	s->rubble = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
 	s->rays = make_rays(width, height);
+	s->puff = make_puff((int)fmax(8, u * 24));
 	s->heap = calloc(width, sizeof(float));
 	s->dust = calloc(width, sizeof(float));
 	s->dune = malloc(sizeof(float) * width);
@@ -1773,6 +2054,12 @@ static void *decay_create(int width, int height, const struct saver_options *opt
 	s->bucket_len = calloc(s->bucket_count, sizeof(int));
 	s->bucket_cap = calloc(s->bucket_count, sizeof(int));
 	make_pieces(s);
+	for (int k = 0; k < 14; k++) {
+		crack_wall(s, (float)(saver_random() * width), (float)(saver_random() * height * 0.8),
+			(float)saver_between(0, 2 * M_PI), (float)(u * saver_between(80, 280)),
+			(float)(s->span * saver_between(0.2, 0.65)), 0);
+	}
+	make_webs(s);
 	for (int i = 0; i < MOTES_MAX; i++) {
 		s->motes[i] = (struct mote){ (float)(saver_random() * width), (float)(saver_random() * height),
 			(float)saver_between(0, 6.3), (float)(u * saver_between(0.8, 2.2)) };
@@ -1780,6 +2067,19 @@ static void *decay_create(int width, int height, const struct saver_options *opt
 	s->light = 1;
 	build_scene(s, -1);
 	return s;
+}
+
+/* The side of a piece, its thickness, showing below and right of it as it turns. */
+static void draw_side(struct decay *s, cairo_t *cr, struct body *b) {
+	static const double side[4][3] = { [WALL] = { 0.3, 0.28, 0.24 }, [GLASS] = { 0.5, 0.72, 0.64 },
+		[WOOD] = { 0.3, 0.19, 0.1 }, [STONE] = { 0.36, 0.34, 0.3 } };
+	double d = s->u * (b->mat == GLASS ? 1.3 : 2.6);
+	cairo_save(cr);
+	cairo_translate(cr, b->x + d * 0.6, b->y + d);
+	cairo_rotate(cr, b->a);
+	cairo_set_source_rgba(cr, side[b->mat][0], side[b->mat][1], side[b->mat][2], 0.95);
+	cairo_mask_surface(cr, b->img, -b->ox, -b->oy);
+	cairo_restore(cr);
 }
 
 static void draw_body(struct decay *s, cairo_t *cr, struct body *b) {
@@ -1791,6 +2091,7 @@ static void draw_body(struct decay *s, cairo_t *cr, struct body *b) {
 	cairo_set_source_rgba(cr, 0.05, 0.04, 0.03, b->mat == GLASS ? 0.16 : 0.3);
 	cairo_mask_surface(cr, b->img, -b->ox, -b->oy);
 	cairo_restore(cr);
+	draw_side(s, cr, b);
 	cairo_save(cr);
 	cairo_translate(cr, b->x, b->y);
 	cairo_rotate(cr, b->a);
@@ -1918,7 +2219,7 @@ static void decay_draw(void *state, cairo_t *cr, int width, int height, double d
 			prev = here;
 		}
 	}
-	if (s->part < 3) {
+	if (s->part < 4) {
 		build_scene(s, s->part); // the first part after the whole one built at the start
 	}
 	s->part = (s->part + 1) % SCENE_EVERY;
@@ -1983,8 +2284,16 @@ static void decay_draw(void *state, cairo_t *cr, int width, int height, double d
 				double r = g->size * (0.5 + sparkle);
 				cairo_rectangle(cr, g->x - r / 2, g->y - r / 2, r, r);
 			} else {
-				double r = g->size * (0.6 + 0.4 * g->age / g->life);
-				cairo_rectangle(cr, g->x - r / 2, g->y - r / 2, r, r);
+				// dust: a soft round, growing as it spreads, fading
+				double r = g->size * (1.2 + 2 * g->age / g->life);
+				double k = r / cairo_image_surface_get_width(s->puff);
+				cairo_save(cr);
+				cairo_translate(cr, g->x - r / 2, g->y - r / 2);
+				cairo_scale(cr, k, k);
+				cairo_set_source_surface(cr, s->puff, 0, 0);
+				cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+				cairo_paint_with_alpha(cr, fade * 0.8);
+				cairo_restore(cr);
 			}
 		}
 		if (kind == FIBRE) {
@@ -1996,9 +2305,6 @@ static void decay_draw(void *state, cairo_t *cr, int width, int height, double d
 			cairo_set_source_rgba(cr, 0.85, 0.9, 1, 0.8);
 			cairo_fill(cr);
 			cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-		} else {
-			cairo_set_source_rgba(cr, 0.7, 0.64, 0.54, 0.35);
-			cairo_fill(cr);
 		}
 	}
 	// the shards in the heap glint
@@ -2041,7 +2347,9 @@ static void decay_draw(void *state, cairo_t *cr, int width, int height, double d
 	double day = s->light;
 	if (day > 0.05) {
 		cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
-		cairo_set_source_surface(cr, s->rays, round(sin(s->t * 0.05) * W * 0.04), 0);
+		// the sun moves across the room in a day
+		double across = fmod(s->day / (2 * M_PI) + 0.25, 1);
+		cairo_set_source_surface(cr, s->rays, round((across - 0.5) * W * 0.9), 0);
 		cairo_paint_with_alpha(cr, day);
 		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	}
@@ -2116,6 +2424,8 @@ static void decay_destroy(void *state) {
 	cairo_surface_destroy(s->next);
 	cairo_surface_destroy(s->rubble);
 	cairo_surface_destroy(s->rays);
+	cairo_surface_destroy(s->puff);
+	cairo_surface_destroy(s->web_img);
 	free(s->buckets);
 	free(s->bucket_len);
 	free(s->bucket_cap);
@@ -2128,6 +2438,9 @@ static void decay_destroy(void *state) {
 	free(s->stain_n);
 	free(s->grain_n);
 	free(s->wood_n);
+	free(s->peel_n);
+	free(s->mould_n);
+	free(s->dirt);
 	free(s->pieces);
 	free(s->cracks);
 	free(s->heap);
