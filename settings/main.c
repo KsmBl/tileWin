@@ -510,7 +510,7 @@ static void build_window(struct settings *s) {
 			"slideshow starfield pipes maze flying windows aurora word clock tiling diggers miners "
 			"doomsday end of the world apocalypse hellfire fire burn thunderstorm storm rain "
 			"lightning blizzard snow ice frost icicles winter gravity privacy falling matrix "
-			"microslop copilot ad commercial idle lock "
+			"microslop copilot ad commercial idle lock fps frames per second cpu usage "
 			"password resume", screensaver_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "

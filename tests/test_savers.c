@@ -7,12 +7,17 @@
  * catches a saver that writes where it should not. Each kind of Doomsday is run
  * the same way. Then the settings of the savers: that their tables make sense,
  * that they are read as written (and by the names they had before), and that
- * the kinds of Doomsday are found by their old names but not listed.
+ * the kinds of Doomsday are found by their old names but not listed. Last the
+ * frames a second and CPU use any saver can show: read from taskbar.conf, and
+ * drawn in the top left corner and nowhere else.
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 #include "savers.h"
 
 static int failures;
@@ -232,6 +237,83 @@ int main(int argc, char **argv) {
 		}
 		if (pipes && saver_choice(&o, pipes, "kind") != 0) {
 			fail("saver_choice", "reads the setting of another saver");
+		}
+	}
+
+	// the frames a second and the CPU, on Blank, which is black but for them
+	{
+		const int w = 480, h = 300;
+		for (int shown = 0; shown < 2; shown++) {
+			struct saver_options o = { .speed = 1, .photo_seconds = 8, .show_stats = shown };
+			cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+			cairo_t *cr = cairo_create(surface);
+			struct saver_run *run = saver_run_new(saver_find("blank"), w, h, &o);
+			saver_run_draw(run, cr, 1 / 30.0);
+			nanosleep(&(struct timespec){ 1, 100000000 }, NULL); // so the figures are worked out once
+			saver_run_draw(run, cr, 1 / 30.0);
+			cairo_surface_flush(surface);
+			long corner = 0, elsewhere = 0;
+			unsigned char *data = cairo_image_surface_get_data(surface);
+			int stride = cairo_image_surface_get_stride(surface);
+			for (int y = 0; y < h; y++) {
+				for (int x = 0; x < w; x++) {
+					bool lit = (*(uint32_t *)(data + y * stride + x * 4) & 0xffffff) != 0;
+					if (x < w / 2 && y < h / 4) {
+						corner += lit;
+					} else {
+						elsewhere += lit;
+					}
+				}
+			}
+			printf("figures %s: %ld pixels lit in the corner, %ld elsewhere\n",
+				shown ? "shown" : "not shown", corner, elsewhere);
+			if (shown && corner < 100) {
+				fail("show_stats", "shows no figures in the top left corner");
+			}
+			if (!shown && corner) {
+				fail("show_stats", "shows figures when not asked to");
+			}
+			if (elsewhere) {
+				fail("show_stats", "draws outside the top left corner");
+			}
+			saver_run_free(run);
+			cairo_destroy(cr);
+			cairo_surface_destroy(surface);
+		}
+	}
+
+	// read from taskbar.conf, like the rest of the block
+	{
+		char dir[] = "/tmp/tw-savers-XXXXXX";
+		if (mkdtemp(dir)) {
+			char path[256];
+			snprintf(path, sizeof(path), "%s/tileWin", dir);
+			mkdir(path, 0700);
+			static const char *const blocks[] = {
+				"screensaver {\n\tname doomsday\n\tstats yes\n\tdoomsday_kind blizzard\n}\n",
+				"screensaver {\n\tname blank\n\tstats no\n}\n",
+			};
+			setenv("XDG_CONFIG_HOME", dir, 1);
+			for (int k = 0; k < 2; k++) {
+				snprintf(path, sizeof(path), "%s/tileWin/taskbar.conf", dir);
+				FILE *f = fopen(path, "w");
+				fputs(blocks[k], f);
+				fclose(f);
+				struct saver_options o;
+				char *name = saver_options_load(&o);
+				bool want = k == 0;
+				if (!name || strcmp(name, want ? "doomsday" : "blank") != 0 || o.show_stats != want ||
+						(want && saver_choice(&o, doomsday, "kind") != 2)) {
+					fail("saver_options_load", "does not read the name, stats or a saver's setting");
+				}
+				free(name);
+				saver_options_finish(&o);
+				unlink(path);
+			}
+			snprintf(path, sizeof(path), "%s/tileWin", dir);
+			rmdir(path);
+			rmdir(dir);
+			setenv("XDG_CONFIG_HOME", "/nonexistent", 1);
 		}
 	}
 

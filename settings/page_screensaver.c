@@ -31,6 +31,7 @@ struct screensaver_page {
 	GtkWidget *saver_dd, *saver_row, *wait_dd, *wait_row, *lock_switch, *lock_row;
 	GtkWidget *speed_dd, *speed_row, *text_entry, *text_row, *photos_entry, *photos_row;
 	GtkWidget *seconds_spin, *seconds_row, *preview_button, *preview, *options;
+	GtkWidget *stats_switch, *stats_row;
 	GPtrArray *own;       // struct own_row *: the rows of the savers' own settings
 	struct saver_run *run;
 	const struct saver *shown; // what the preview runs
@@ -110,6 +111,11 @@ static GPtrArray *own_settings(struct screensaver_page *p, GString *state) {
 	return pairs;
 }
 
+static bool on_value(const char *v) {
+	return v && (g_ascii_strcasecmp(v, "yes") == 0 || g_ascii_strcasecmp(v, "on") == 0 ||
+		g_ascii_strcasecmp(v, "true") == 0);
+}
+
 /* The options for the preview; the settings in *own, to be freed after it started. */
 static void preview_options(struct screensaver_page *p, struct saver_options *o,
 		GPtrArray **own) {
@@ -121,6 +127,7 @@ static void preview_options(struct screensaver_page *p, struct saver_options *o,
 		.text = saver_value(p, "text"),
 		.photos = saver_value(p, "photos"),
 		.photo_seconds = seconds ? atoi(seconds) : 8,
+		.show_stats = on_value(saver_value(p, "stats")),
 		.settings = (const char *const *)(*own)->pdata,
 		.setting_count = (int)(*own)->len,
 	};
@@ -302,6 +309,8 @@ static void refresh(struct screensaver_page *p) {
 	gtk_switch_set_active(GTK_SWITCH(p->lock_switch), lock &&
 		(g_ascii_strcasecmp(lock, "yes") == 0 || g_ascii_strcasecmp(lock, "on") == 0 ||
 		g_ascii_strcasecmp(lock, "true") == 0));
+	const char *stats = saver_value(p, "stats");
+	gtk_switch_set_active(GTK_SWITCH(p->stats_switch), on_value(stats));
 	const char *speed = saver_value(p, "speed");
 	double sp = speed ? g_ascii_strtod(speed, NULL) : 1;
 	guint speed_sel = 1;
@@ -343,8 +352,8 @@ static void refresh(struct screensaver_page *p) {
 	// the preview starts over only when what it shows changed
 	GString *own_state = g_string_new(NULL);
 	g_ptr_array_free(own_settings(p, own_state), TRUE);
-	char *state = g_strdup_printf("%u|%s|%s|%s|%s%s", sel, speed ? speed : "", text ? text : "",
-		photos ? photos : "", photo_seconds ? photo_seconds : "", own_state->str);
+	char *state = g_strdup_printf("%u|%s|%s|%s|%s|%d%s", sel, speed ? speed : "", text ? text : "",
+		photos ? photos : "", photo_seconds ? photo_seconds : "", on_value(stats), own_state->str);
 	g_string_free(own_state, TRUE);
 	if (!p->preview_options || strcmp(state, p->preview_options) != 0) {
 		g_free(p->preview_options);
@@ -373,6 +382,15 @@ static void on_saver(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 		saver_write(p, "name", name);
 	}
 	write_timeout(p);
+	refresh(p);
+}
+
+static void on_stats(GObject *object, GParamSpec *pspec, gpointer data) {
+	struct screensaver_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	saver_write(p, "stats", gtk_switch_get_active(GTK_SWITCH(p->stats_switch)) ? "yes" : NULL);
 	refresh(p);
 }
 
@@ -545,6 +563,12 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(content), p->preview);
 
 	GtkWidget *group = ui_group(content, "Screen saver", NULL);
+	// above the choice of the saver: it goes for all of them, not only the one picked
+	p->stats_switch = gtk_switch_new();
+	g_signal_connect(p->stats_switch, "notify::active", G_CALLBACK(on_stats), p);
+	p->stats_row = ui_row(group, "Show frames per second and CPU use",
+		"For every screen saver, in the top left corner: how fast it draws, and how busy the "
+		"processor is and how much of that is the screen saver", p->stats_switch);
 	GtkStringList *names = gtk_string_list_new((const char *const[]){ "None", "Random", NULL });
 	for (int i = 0; i < saver_count; i++) {
 		gtk_string_list_append(names, savers[i]->title);

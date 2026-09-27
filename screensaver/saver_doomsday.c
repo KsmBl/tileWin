@@ -22,6 +22,7 @@ static void *doomsday_create(int width, int height, const struct saver_options *
 	// Doomsday is sped up already: the kind runs at its own pace within it
 	struct saver_options inner = *options;
 	inner.speed = 1;
+	inner.show_stats = false; // shown once, by Doomsday's own run
 	return saver_run_new(kind, width, height, &inner);
 }
 

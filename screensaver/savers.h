@@ -37,6 +37,7 @@ struct saver_options {
 	int photo_seconds;     // Photos: how long each picture stays
 	const char *output;    // the screen it is shown on, NULL for a preview
 	cairo_surface_t *desktop; // that screen as it was before the saver covered it, or NULL
+	bool show_stats;       // shows frames a second and the processor's use in a corner
 	const char *const *settings; // the savers' own settings: name, value, name, value...
 	int setting_count;           // names and values together
 };
@@ -76,7 +77,12 @@ const struct saver *saver_listed(const char *name);
 bool saver_option_shown(const struct saver_options *options, const struct saver *saver,
 	const struct saver_option *option);
 
-/* One saver running on one area, with the scaling and the clearing done for it. */
+/*
+ * One saver running on one area, with the scaling and the clearing done for
+ * it, and with show_stats the frames a second, the time a frame takes and the
+ * use of the processor (all of it, and of that this program's share) in its
+ * top left corner, for any saver.
+ */
 struct saver_run;
 struct saver_run *saver_run_new(const struct saver *saver, int width, int height,
 	const struct saver_options *options);

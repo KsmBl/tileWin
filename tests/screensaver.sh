@@ -7,6 +7,8 @@
 #    "screensaver_lock yes", runs the lock command;
 #  - "screensaver start" starts it at once and is not ended by input in the
 #    first moment (the keys that ran the command), but by input after that.
+#  - with "stats yes" the frames a second and CPU use show in the top left
+#    corner, and nothing else is drawn over Blank.
 #
 # usage: screensaver.sh <build dir> <source dir>
 set -u
@@ -145,6 +147,24 @@ sleep 1
 nudge 700
 sleep 1
 running && fail "input a moment after 'screensaver start' did not end it"
+
+# "stats yes": Blank, black but for the frames a second and CPU use in the corner
+cat > "$XDG_CONFIG_HOME/tileWin/taskbar.conf" <<EOF
+screensaver {
+	name blank
+	stats yes
+}
+EOF
+ipc screensaver start >/dev/null
+sleep 2.5
+grim "$work/shot.png" 2>/dev/null
+corner=$("$count" "$work/shot.png" 0 0 400 100)
+rest=$("$count" "$work/shot.png" 0 200 1280 520)
+echo "Blank with stats: $corner pixels drawn in the top left corner, $rest elsewhere"
+[ "$corner" -gt 200 ] || fail "stats yes shows no frames a second and CPU use"
+[ "$rest" -eq 0 ] || fail "stats yes draws outside the top left corner"
+nudge 900
+sleep 1
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

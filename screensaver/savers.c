@@ -1,9 +1,11 @@
+#include <pango/pangocairo.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <unistd.h>
 #include "saver_util.h"
 #include "stringop.h"
 #include "tw_paths.h"
@@ -114,7 +116,137 @@ struct saver_run {
 	int inner_w, inner_h;      // what the saver draws on
 	cairo_surface_t *inner;    // for a saver drawn smaller and scaled up
 	double speed;
+	struct saver_stats *stats; // with show_stats, or NULL
 };
+
+/* ---------- frames a second and the processor ---------- */
+
+struct saver_stats {
+	double since;              // when the figures were last worked out
+	int frames;                // drawn since
+	double busy;               // seconds spent drawing them
+	double process_cpu;        // this program's processor time then
+	unsigned long long all, idle; // of the whole processor then, from /proc/stat
+	char text[128];
+	PangoLayout *layout;
+};
+
+static double monotonic(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static double process_cpu(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+	return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+/* The time the whole processor has run and idled so far, in ticks; false without /proc. */
+static bool cpu_ticks(unsigned long long *all, unsigned long long *idle) {
+	FILE *f = fopen("/proc/stat", "r");
+	if (!f) {
+		return false;
+	}
+	unsigned long long v[8] = { 0 };
+	int n = fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2],
+		&v[3], &v[4], &v[5], &v[6], &v[7]);
+	fclose(f);
+	if (n < 4) {
+		return false;
+	}
+	*all = 0;
+	for (int i = 0; i < 8; i++) {
+		*all += v[i];
+	}
+	*idle = v[3] + v[4]; // idle and waiting for the disk
+	return true;
+}
+
+static struct saver_stats *stats_new(void) {
+	struct saver_stats *st = calloc(1, sizeof(*st));
+	st->since = monotonic();
+	st->process_cpu = process_cpu();
+	cpu_ticks(&st->all, &st->idle);
+	snprintf(st->text, sizeof(st->text), "… fps\nCPU …");
+	return st;
+}
+
+/* Counts a frame that took busy seconds; once a second the figures are worked out anew. */
+static void stats_frame(struct saver_stats *st, double busy) {
+	st->frames++;
+	st->busy += busy;
+	double now = monotonic(), span = now - st->since;
+	if (span < 1) {
+		return;
+	}
+	double cpu = process_cpu();
+	long cores = sysconf(_SC_NPROCESSORS_ONLN);
+	// this program's share of the whole machine, so it compares with the figure for all
+	double own = (cpu - st->process_cpu) / span / (cores > 0 ? cores : 1) * 100;
+	unsigned long long all = 0, idle = 0;
+	double total = -1;
+	if (cpu_ticks(&all, &idle) && all > st->all) {
+		total = 100.0 * (1 - (double)(idle - st->idle) / (double)(all - st->all));
+	}
+	if (total >= 0) {
+		snprintf(st->text, sizeof(st->text), "%.0f fps · %.1f ms a frame\nCPU %.0f%% · "
+			"the screen saver %.1f%%", st->frames / span, st->busy / st->frames * 1000,
+			total, own);
+	} else {
+		snprintf(st->text, sizeof(st->text), "%.0f fps · %.1f ms a frame\n"
+			"the screen saver %.1f%% CPU", st->frames / span, st->busy / st->frames * 1000, own);
+	}
+	if (st->layout) {
+		pango_layout_set_text(st->layout, st->text, -1);
+	}
+	st->since = now;
+	st->frames = 0;
+	st->busy = 0;
+	st->process_cpu = cpu;
+	st->all = all;
+	st->idle = idle;
+}
+
+/* The figures in the top left corner, on a dark plate, sized to the area. */
+static void stats_draw(struct saver_stats *st, cairo_t *cr, int width, int height) {
+	double size = fmax(7, fmin(width, height) / 55.0);
+	if (!st->layout) {
+		st->layout = pango_cairo_create_layout(cr);
+		PangoFontDescription *font = pango_font_description_from_string("monospace");
+		pango_font_description_set_absolute_size(font, size * PANGO_SCALE);
+		pango_layout_set_font_description(st->layout, font);
+		pango_font_description_free(font);
+		pango_layout_set_text(st->layout, st->text, -1);
+	} else {
+		pango_cairo_update_layout(cr, st->layout);
+	}
+	int tw, th;
+	pango_layout_get_pixel_size(st->layout, &tw, &th);
+	double pad = size * 0.6, x = size, y = size;
+	cairo_save(cr);
+	cairo_new_path(cr);
+	double r = size * 0.4, w = tw + 2 * pad, h = th + 2 * pad;
+	cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, 0);
+	cairo_arc(cr, x + w - r, y + h - r, r, 0, M_PI / 2);
+	cairo_arc(cr, x + r, y + h - r, r, M_PI / 2, M_PI);
+	cairo_arc(cr, x + r, y + r, r, M_PI, 3 * M_PI / 2);
+	cairo_close_path(cr);
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
+	cairo_fill(cr);
+	cairo_move_to(cr, x + pad, y + pad);
+	cairo_set_source_rgb(cr, 0.95, 0.97, 1);
+	pango_cairo_show_layout(cr, st->layout);
+	cairo_restore(cr);
+}
+
+static void stats_free(struct saver_stats *st) {
+	if (st && st->layout) {
+		g_object_unref(st->layout);
+	}
+	free(st);
+}
 
 struct saver_run *saver_run_new(const struct saver *saver, int width, int height,
 		const struct saver_options *options) {
@@ -129,6 +261,9 @@ struct saver_run *saver_run_new(const struct saver *saver, int width, int height
 	if (res < 1) {
 		run->inner = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, run->inner_w, run->inner_h);
 	}
+	if (options && options->show_stats) {
+		run->stats = stats_new();
+	}
 	struct saver_options defaults = { .speed = 1, .photo_seconds = 8 };
 	run->state = saver->create(run->inner_w, run->inner_h, options ? options : &defaults);
 	return run;
@@ -136,6 +271,7 @@ struct saver_run *saver_run_new(const struct saver *saver, int width, int height
 
 void saver_run_draw(struct saver_run *run, cairo_t *cr, double seconds) {
 	double dt = saver_clamp(seconds, 0, 0.25) * run->speed; // a stall is no leap
+	double started = run->stats ? monotonic() : 0;
 	cairo_t *target = cr;
 	if (run->inner) {
 		target = cairo_create(run->inner);
@@ -166,6 +302,10 @@ void saver_run_draw(struct saver_run *run, cairo_t *cr, double seconds) {
 		cairo_paint(cr);
 		cairo_restore(cr);
 	}
+	if (run->stats) {
+		stats_frame(run->stats, monotonic() - started);
+		stats_draw(run->stats, cr, run->width, run->height);
+	}
 }
 
 void saver_run_free(struct saver_run *run) {
@@ -173,6 +313,7 @@ void saver_run_free(struct saver_run *run) {
 		return;
 	}
 	run->saver->destroy(run->state);
+	stats_free(run->stats);
 	if (run->inner) {
 		cairo_surface_destroy(run->inner);
 	}
@@ -269,6 +410,9 @@ char *saver_options_load(struct saver_options *options) {
 		options->text = value ? strdup(value) : NULL;
 		value = twconf_value(block, "photos");
 		options->photos = value ? tw_expand_home(value) : NULL;
+		value = twconf_value(block, "stats");
+		options->show_stats = value && (strcasecmp(value, "yes") == 0 ||
+			strcasecmp(value, "on") == 0 || strcasecmp(value, "true") == 0);
 		value = twconf_value(block, "photo_seconds");
 		if (value && atoi(value) >= 2) {
 			options->photo_seconds = atoi(value);
