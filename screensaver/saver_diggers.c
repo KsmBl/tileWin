@@ -2427,11 +2427,11 @@ static const char *const miners_labels[] = { "Normal", "Few", "Many", NULL };
 static const char *const renew_values[] = { "two", "five", "never", NULL };
 static const char *const renew_labels[] = { "After 2 minutes", "After 5 minutes", "Never", NULL };
 static const struct saver_option diggers_options[] = {
-	{ "miners", "Miners", NULL, SAVER_CHOICE, miners_values, miners_labels, false },
+	{ "miners", "Miners", NULL, SAVER_CHOICE, miners_values, miners_labels, false, NULL },
 	{ "dynamite", "Dynamite", "One of them carries it and blasts craters", SAVER_TOGGLE, NULL,
-		NULL, true },
+		NULL, true, NULL },
 	{ "renew", "Renew the windows", "The drill clears them and helicopters bring them back; "
-		"sooner when a third is dug out", SAVER_CHOICE, renew_values, renew_labels, false },
+		"sooner when a third is dug out", SAVER_CHOICE, renew_values, renew_labels, false, NULL },
 	{ 0 },
 };
 

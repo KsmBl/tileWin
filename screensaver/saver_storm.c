@@ -638,9 +638,9 @@ static void *storm_create(int width, int height, const struct saver_options *opt
 		drop_reset(s, &s->near[i], (float)(u * 2300), (float)(u * 90), true);
 	}
 	static const double amounts[] = { 1, 0.55, 1.5 }, paces[] = { 1, 0.45, 2.5 };
-	s->rain_amount = amounts[saver_choice(options, &saver_storm, "rain")];
-	s->bolt_pace = paces[saver_choice(options, &saver_storm, "lightning")];
-	s->hits = saver_toggle(options, &saver_storm, "strikes");
+	s->rain_amount = amounts[saver_choice(options, &saver_doomsday, "thunderstorm_rain")];
+	s->bolt_pace = paces[saver_choice(options, &saver_doomsday, "thunderstorm_lightning")];
+	s->hits = saver_toggle(options, &saver_doomsday, "thunderstorm_strikes");
 	s->bolt_t = -1;
 	s->next_bolt = saver_between(1.5, 4);
 	s->thunder_at = -1;
@@ -974,24 +974,11 @@ static void storm_destroy(void *state) {
 	free(s);
 }
 
-static const char *const rain_values[] = { "heavy", "light", "downpour", NULL };
-static const char *const rain_labels[] = { "Heavy", "Light", "Downpour", NULL };
-static const char *const bolt_values[] = { "sometimes", "often", "rarely", NULL };
-static const char *const bolt_labels[] = { "Now and then", "Often", "Rarely", NULL };
-static const struct saver_option storm_options[] = {
-	{ "rain", "Rain", NULL, SAVER_CHOICE, rain_values, rain_labels, false },
-	{ "lightning", "Lightning", NULL, SAVER_CHOICE, bolt_values, bolt_labels, false },
-	{ "strikes", "Strikes into windows", "Lightning hits the windows and the taskbar too",
-		SAVER_TOGGLE, NULL, NULL, true },
-	{ 0 },
-};
-
 const struct saver saver_storm = {
 	.name = "thunderstorm",
 	.title = "Thunderstorm",
 	.description = "Rain on the windows and the taskbar, lightning striking into them, thunder",
 	.wants_desktop = true,
-	.options = storm_options,
 	.create = storm_create,
 	.draw = storm_draw,
 	.destroy = storm_destroy,

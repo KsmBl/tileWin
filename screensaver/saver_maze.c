@@ -503,9 +503,9 @@ static void maze_destroy(void *state) {
 }
 
 static const struct saver_option maze_options[] = {
-	{ "rats", "Rats", NULL, SAVER_TOGGLE, NULL, NULL, true },
+	{ "rats", "Rats", NULL, SAVER_TOGGLE, NULL, NULL, true, NULL },
 	{ "stones", "Grey stones", "Walking into one turns the world upside down", SAVER_TOGGLE, NULL,
-		NULL, true },
+		NULL, true, NULL },
 	{ 0 },
 };
 

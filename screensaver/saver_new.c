@@ -174,8 +174,8 @@ static const char *const mood_labels[] = { "Follows the processor", "Always calm
 	NULL };
 static const struct saver_option aurora_options[] = {
 	{ "mood", "Northern lights", "Following the processor, they grow wilder the harder it works",
-		SAVER_CHOICE, mood_values, mood_labels, false },
-	{ "stars", "Stars", NULL, SAVER_TOGGLE, NULL, NULL, true },
+		SAVER_CHOICE, mood_values, mood_labels, false, NULL },
+	{ "stars", "Stars", NULL, SAVER_TOGGLE, NULL, NULL, true, NULL },
 	{ 0 },
 };
 
@@ -395,7 +395,7 @@ static void wordclock_destroy(void *state) {
 static const char *const color_values[] = { "white", "green", "blue", "amber", "pink", NULL };
 static const char *const color_labels[] = { "White", "Green", "Blue", "Amber", "Pink", NULL };
 static const struct saver_option wordclock_options[] = {
-	{ "color", "Colour", NULL, SAVER_CHOICE, color_values, color_labels, false },
+	{ "color", "Colour", NULL, SAVER_CHOICE, color_values, color_labels, false, NULL },
 	{ 0 },
 };
 
@@ -788,7 +788,7 @@ static void tiling_destroy(void *state) {
 static const char *const tiles_values[] = { "nine", "four", "two", NULL };
 static const char *const tiles_labels[] = { "Up to nine", "Up to four", "Up to two", NULL };
 static const struct saver_option tiling_options[] = {
-	{ "windows", "Windows", NULL, SAVER_CHOICE, tiles_values, tiles_labels, false },
+	{ "windows", "Windows", NULL, SAVER_CHOICE, tiles_values, tiles_labels, false, NULL },
 	{ 0 },
 };
 

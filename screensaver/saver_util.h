@@ -67,6 +67,24 @@ extern const struct saver saver_blank, saver_bubbles, saver_mystify, saver_ribbo
 	saver_text3d, saver_photos;
 extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
-	saver_maze, saver_matrix, saver_hellfire, saver_ad, saver_storm, saver_gravity;
+	saver_maze, saver_matrix, saver_ad, saver_gravity;
+/* Doomsday, and the kinds it runs, which are not in the list themselves. */
+extern const struct saver saver_doomsday, saver_hellfire, saver_storm, saver_blizzard;
+extern const struct saver *const doomsday_kinds[];
+extern const int doomsday_kind_count;
+
+/* What a Blizzard has done so far, for the tests. */
+struct blizzard_stats {
+	int ledges, icicles;
+	int window_columns;              // columns of the tops of windows snow can lie on
+	double windows, taskbar, ground; // snow lying on them, pixels of area
+	double icicle_length;            // of all together
+	double frost;                    // the part of the screen frosted over, 0 to 1
+	long frost_outside;              // pixels of frost outside the windows and taskbars
+	double storm;                    // how hard it snows now
+	bool fits;                       // no heap deeper than its room or where nothing shows
+	double deepest, deepest_x, deepest_y; // the deepest snow on a window, and its top
+};
+void saver_blizzard_stats(void *state, struct blizzard_stats *out);
 
 #endif

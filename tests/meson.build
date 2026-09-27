@@ -57,8 +57,23 @@ test(
 		link_with: [lib_savers, lib_sway_common],
 		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, math],
 	),
+	args: [files('../config/taskbar.conf')],
 	env: ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent'],
 	suite: 'unit',
+)
+
+test(
+	'blizzard',
+	executable(
+		'test-blizzard',
+		'test_blizzard.c',
+		include_directories: [sway_inc, include_directories('../screensaver')],
+		link_with: [lib_savers, lib_sway_common],
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, math],
+	),
+	env: ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent'],
+	suite: 'unit',
+	timeout: 120,
 )
 
 test(
@@ -250,6 +265,16 @@ if gdk_pixbuf.found()
 		suite: 'gui',
 		is_parallel: false,
 		timeout: 120,
+	)
+
+	test(
+		'doomsday',
+		find_program('doomsday.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [pointer_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 180,
 	)
 
 	test(

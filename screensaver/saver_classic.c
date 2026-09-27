@@ -69,7 +69,7 @@ static void starfield_draw(void *state, cairo_t *cr, int width, int height, doub
 static const char *const stars_values[] = { "normal", "sparse", "dense", NULL };
 static const char *const stars_labels[] = { "Normal", "Sparse", "Dense", NULL };
 static const struct saver_option starfield_options[] = {
-	{ "stars", "Stars", NULL, SAVER_CHOICE, stars_values, stars_labels, false },
+	{ "stars", "Stars", NULL, SAVER_CHOICE, stars_values, stars_labels, false, NULL },
 	{ 0 },
 };
 
@@ -174,7 +174,7 @@ static void flying_draw(void *state, cairo_t *cr, int width, int height, double 
 static const char *const windows_values[] = { "normal", "few", "many", NULL };
 static const char *const windows_labels[] = { "Normal", "Few", "Many", NULL };
 static const struct saver_option flying_options[] = {
-	{ "windows", "Windows", NULL, SAVER_CHOICE, windows_values, windows_labels, false },
+	{ "windows", "Windows", NULL, SAVER_CHOICE, windows_values, windows_labels, false, NULL },
 	{ 0 },
 };
 

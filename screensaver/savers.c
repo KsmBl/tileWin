@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -29,9 +30,8 @@ const struct saver *const savers[] = {
 	&saver_tiling,
 	&saver_diggers,
 	&saver_matrix,
-	&saver_hellfire,
+	&saver_doomsday,
 	&saver_ad,
-	&saver_storm,
 	&saver_gravity,
 };
 
@@ -88,7 +88,21 @@ const struct saver *saver_find(const char *name) {
 			return savers[i];
 		}
 	}
+	for (int i = 0; i < doomsday_kind_count; i++) {
+		if (strcasecmp(doomsday_kinds[i]->name, name) == 0) {
+			return doomsday_kinds[i];
+		}
+	}
 	return NULL;
+}
+
+const struct saver *saver_listed(const char *name) {
+	for (int i = 0; name && i < doomsday_kind_count; i++) {
+		if (strcasecmp(doomsday_kinds[i]->name, name) == 0) {
+			return &saver_doomsday;
+		}
+	}
+	return name && strcasecmp(name, "random") != 0 ? saver_find(name) : NULL;
 }
 
 /* ---------- running one ---------- */
@@ -165,18 +179,26 @@ void saver_run_free(struct saver_run *run) {
 
 /* ---------- options ---------- */
 
-/* What is written for a setting of a saver, or NULL. */
+/*
+ * What is written for a setting of a saver, or NULL. A key that names a saver
+ * itself, like Doomsday's "hellfire_flash", is found without the prefix too:
+ * that is how it was written while it was a saver of its own.
+ */
 static const char *setting(const struct saver_options *options, const struct saver *saver,
 		const char *key) {
 	size_t name_len = strlen(saver->name);
+	const char *bare = NULL;
 	for (int i = 0; options && i + 1 < options->setting_count; i += 2) {
 		const char *name = options->settings[i];
 		if (strncmp(name, saver->name, name_len) == 0 && name[name_len] == '_' &&
 				strcmp(name + name_len + 1, key) == 0) {
 			return options->settings[i + 1];
 		}
+		if (strchr(key, '_') && strcmp(name, key) == 0) {
+			bare = options->settings[i + 1];
+		}
 	}
-	return NULL;
+	return bare;
 }
 
 static const struct saver_option *find_option(const struct saver *saver, const char *key) {
@@ -198,6 +220,18 @@ int saver_choice(const struct saver_options *options, const struct saver *saver,
 		}
 	}
 	return 0;
+}
+
+bool saver_option_shown(const struct saver_options *options, const struct saver *saver,
+		const struct saver_option *option) {
+	const char *eq = option->when ? strchr(option->when, '=') : NULL;
+	if (!eq) {
+		return true;
+	}
+	char key[64];
+	snprintf(key, sizeof(key), "%.*s", (int)(eq - option->when), option->when);
+	const struct saver_option *o = find_option(saver, key);
+	return o && o->values && strcasecmp(o->values[saver_choice(options, saver, key)], eq + 1) == 0;
 }
 
 bool saver_toggle(const struct saver_options *options, const struct saver *saver,

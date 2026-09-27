@@ -1014,9 +1014,9 @@ static void *hellfire_create(int width, int height, const struct saver_options *
 	}
 	make_hell(s);
 	static const float keeps[] = { 0.47f, 0.56f, 0.4f };
-	s->keep_at = keeps[saver_choice(options, &saver_hellfire, "scraps")];
-	s->flash = saver_toggle(options, &saver_hellfire, "flash");
-	s->falling = saver_toggle(options, &saver_hellfire, "debris");
+	s->keep_at = keeps[saver_choice(options, &saver_doomsday, "hellfire_scraps")];
+	s->flash = saver_toggle(options, &saver_doomsday, "hellfire_flash");
+	s->falling = saver_toggle(options, &saver_doomsday, "hellfire_debris");
 	plan(s, wins, count, bars, bar_count);
 	s->base_surface = cairo_image_surface_create_for_data((unsigned char *)s->base,
 		CAIRO_FORMAT_RGB24, width, height, width * 4);
@@ -1101,18 +1101,6 @@ static void hellfire_destroy(void *state) {
 	free(s);
 }
 
-static const char *const scraps_values[] = { "some", "few", "many", NULL };
-static const char *const scraps_labels[] = { "Some", "Few", "Many", NULL };
-static const struct saver_option hellfire_options[] = {
-	{ "flash", "White flash", "The blast at the start; off for anyone sensitive to flashes",
-		SAVER_TOGGLE, NULL, NULL, true },
-	{ "debris", "Falling pieces", "Pieces of the decoration break off and pile up at the bottom",
-		SAVER_TOGGLE, NULL, NULL, true },
-	{ "scraps", "What is left", "Scraps of the title bars, borders and taskbar that smoulder on",
-		SAVER_CHOICE, scraps_values, scraps_labels, false },
-	{ 0 },
-};
-
 const struct saver saver_hellfire = {
 	.name = "hellfire",
 	.title = "Hellfire",
@@ -1121,6 +1109,5 @@ const struct saver saver_hellfire = {
 	.wants_desktop = true,
 	.create = hellfire_create,
 	.draw = hellfire_draw,
-	.options = hellfire_options,
 	.destroy = hellfire_destroy,
 };

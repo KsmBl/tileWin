@@ -190,7 +190,7 @@ static const char *const matrix_values[] = { "green", "blue", "red", "amber", "w
 static const char *const matrix_labels[] = { "Green", "Blue", "Red", "Amber", "White", NULL };
 static const struct saver_option matrix_options[] = {
 	{ "color", "Colour", "Green, as in the film, or another", SAVER_CHOICE, matrix_values,
-		matrix_labels, false },
+		matrix_labels, false, NULL },
 	{ 0 },
 };
 

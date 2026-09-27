@@ -26,6 +26,8 @@ struct saver_option {
 	const char *const *values;       // a choice: what is written, NULL-terminated
 	const char *const *labels;       // and what the settings show
 	bool on;                         // a toggle: its default
+	const char *when;                // shown only while another choice of the saver is
+	                                 // this, "<key>=<value>"; NULL for always
 };
 
 struct saver_options {
@@ -59,8 +61,19 @@ int saver_choice(const struct saver_options *options, const struct saver *saver,
 /* A toggle of a saver's own settings, its default when not set. */
 bool saver_toggle(const struct saver_options *options, const struct saver *saver, const char *key);
 
-/* The saver of that name; "random" picks one. NULL for none or an unknown name. */
+/*
+ * The saver of that name; "random" picks one. NULL for none or an unknown name.
+ * The kinds of Doomsday are found by their own names too (hellfire,
+ * thunderstorm, blizzard), which is what they were called before.
+ */
 const struct saver *saver_find(const char *name);
+
+/* The saver of the list that shows the one of that name: itself, or Doomsday for its kinds. */
+const struct saver *saver_listed(const char *name);
+
+/* Whether an option of a saver is shown with these settings, going by its "when". */
+bool saver_option_shown(const struct saver_options *options, const struct saver *saver,
+	const struct saver_option *option);
 
 /* One saver running on one area, with the scaling and the clearing done for it. */
 struct saver_run;

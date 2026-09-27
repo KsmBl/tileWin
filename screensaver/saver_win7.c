@@ -183,8 +183,8 @@ static void bubbles_draw(void *state, cairo_t *cr, int width, int height, double
 }
 
 static const struct saver_option bubbles_options[] = {
-	{ "count", "Bubbles", NULL, SAVER_CHOICE, amount_values, amount_labels, false },
-	{ "size", "Size", NULL, SAVER_CHOICE, size_values, size_labels, false },
+	{ "count", "Bubbles", NULL, SAVER_CHOICE, amount_values, amount_labels, false, NULL },
+	{ "size", "Size", NULL, SAVER_CHOICE, size_values, size_labels, false, NULL },
 	{ 0 },
 };
 
@@ -298,9 +298,9 @@ static const char *const shapes_labels[] = { "Two", "One", NULL };
 static const char *const trail_values[] = { "normal", "short", "long", NULL };
 static const char *const trail_labels[] = { "Normal", "Short", "Long", NULL };
 static const struct saver_option mystify_options[] = {
-	{ "shapes", "Shapes", NULL, SAVER_CHOICE, shapes_values, shapes_labels, false },
+	{ "shapes", "Shapes", NULL, SAVER_CHOICE, shapes_values, shapes_labels, false, NULL },
 	{ "trail", "Trail", "How many echoes follow each shape", SAVER_CHOICE, trail_values,
-		trail_labels, false },
+		trail_labels, false, NULL },
 	{ 0 },
 };
 
@@ -410,7 +410,7 @@ static void ribbons_draw(void *state, cairo_t *cr, int width, int height, double
 static const char *const ribbons_values[] = { "five", "three", "one", NULL };
 static const char *const ribbons_labels[] = { "Five", "Three", "One", NULL };
 static const struct saver_option ribbons_options[] = {
-	{ "ribbons", "Ribbons", NULL, SAVER_CHOICE, ribbons_values, ribbons_labels, false },
+	{ "ribbons", "Ribbons", NULL, SAVER_CHOICE, ribbons_values, ribbons_labels, false, NULL },
 	{ 0 },
 };
 

@@ -1045,8 +1045,8 @@ static void ad_destroy(void *state) {
 
 static const struct saver_option ad_options[] = {
 	{ "updates", "Update notifications", "Updates are ready, twice a round: Restart now or "
-		"Restart now", SAVER_TOGGLE, NULL, NULL, true },
-	{ "skip", "Skip ad button", "Counts down and never lets you", SAVER_TOGGLE, NULL, NULL, true },
+		"Restart now", SAVER_TOGGLE, NULL, NULL, true, NULL },
+	{ "skip", "Skip ad button", "Counts down and never lets you", SAVER_TOGGLE, NULL, NULL, true, NULL },
 	{ 0 },
 };
 

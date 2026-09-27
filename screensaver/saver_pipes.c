@@ -497,10 +497,10 @@ static const char *const pipes_labels[] = { "Two", "One", "Three", NULL };
 static const char *const teapot_values[] = { "rarely", "often", NULL };
 static const char *const teapot_labels[] = { "Very rarely", "Often", NULL };
 static const struct saver_option pipes_options[] = {
-	{ "joints", "Joint type", NULL, SAVER_CHOICE, joints_values, joints_labels, false },
-	{ "pipes", "Pipes at once", NULL, SAVER_CHOICE, pipes_values, pipes_labels, false },
+	{ "joints", "Joint type", NULL, SAVER_CHOICE, joints_values, joints_labels, false, NULL },
+	{ "pipes", "Pipes at once", NULL, SAVER_CHOICE, pipes_values, pipes_labels, false, NULL },
 	{ "teapot", "Teapots", "In place of a joint, as in the Windows pipes", SAVER_CHOICE,
-		teapot_values, teapot_labels, false },
+		teapot_values, teapot_labels, false, NULL },
 	{ 0 },
 };
 

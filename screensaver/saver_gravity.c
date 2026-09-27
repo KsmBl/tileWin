@@ -452,9 +452,9 @@ static const char *const speed_values[] = { "normal", "slow", "fast", NULL };
 static const char *const speed_labels[] = { "Normal", "Slow", "Fast", NULL };
 static const struct saver_option gravity_options[] = {
 	{ "speed", "Falling", "How fast the windows come loose and fall", SAVER_CHOICE, speed_values,
-		speed_labels, false },
+		speed_labels, false, NULL },
 	{ "taskbar", "The taskbar falls too", "Last, so nothing of the windows shows on its buttons "
-		"either", SAVER_TOGGLE, NULL, NULL, false },
+		"either", SAVER_TOGGLE, NULL, NULL, false, NULL },
 	{ 0 },
 };
 

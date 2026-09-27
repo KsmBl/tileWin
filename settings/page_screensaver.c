@@ -248,15 +248,32 @@ static void update_rows(struct screensaver_page *p) {
 	gtk_widget_set_visible(p->seconds_row, any && (random || strcmp(name, "photos") == 0));
 	gtk_widget_set_sensitive(p->preview_button, any);
 	gtk_widget_set_visible(p->options, any && strcmp(name, "blank") != 0);
+	// a setting that goes with one choice of another, like a kind of Doomsday, only with it
+	GPtrArray *own = own_settings(p, NULL);
+	struct saver_options options = {
+		.settings = (const char *const *)own->pdata,
+		.setting_count = (int)own->len,
+	};
 	for (guint i = 0; i < p->own->len; i++) {
 		struct own_row *r = p->own->pdata[i];
-		gtk_widget_set_visible(r->row, any && strcmp(name, r->saver->name) == 0);
+		gtk_widget_set_visible(r->row, any && strcmp(name, r->saver->name) == 0 &&
+			saver_option_shown(&options, r->saver, r->option));
 	}
+	g_ptr_array_free(own, TRUE);
 }
 
 static void refresh(struct screensaver_page *p) {
-	p->updating = true;
 	const char *name = saver_value(p, "name");
+	const struct saver *listed = saver_listed(name);
+	if (name && listed && g_ascii_strcasecmp(listed->name, name) != 0) {
+		// a kind of Doomsday that was a saver of its own before: Doomsday, of that kind
+		char *kind = g_ascii_strdown(name, -1);
+		saver_write(p, "name", listed->name);
+		saver_write(p, "doomsday_kind", strcmp(kind, "hellfire") == 0 ? NULL : kind);
+		g_free(kind);
+		name = saver_value(p, "name");
+	}
+	p->updating = true;
 	struct cstmt *timeout = confdoc_child(p->s->common->root, "idle_timeout", "screensaver");
 	const char *value = cstmt_arg(timeout, 1);
 	int seconds = value ? atoi(value) : 0;
@@ -541,9 +558,8 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(pick), p->preview_button);
 	p->saver_row = ui_row(group, "Screen saver", "Bubbles, Mystify, Ribbons, 3D Text and "
 		"Photos from Windows 7, Starfield, 3D Pipes, 3D Maze and Flying Windows from before, "
-		"Aurora, Word Clock, Tiling, Diggers, Hellfire, Thunderstorm and Gravity of tileWin's "
-		"own, the Matrix, and "
-		"a word from Microslop", pick);
+		"Aurora, Word Clock, Tiling, Diggers, Doomsday (Hellfire, Thunderstorm or Blizzard) and "
+		"Gravity of tileWin's own, the Matrix, and a word from Microslop", pick);
 
 	p->wait_dd = gtk_drop_down_new_from_strings(wait_labels);
 	g_signal_connect(p->wait_dd, "notify::selected", G_CALLBACK(on_wait), p);
