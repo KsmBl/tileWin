@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "saver_util.h"
+#include "doomsday.h"
 
 static int failures;
 

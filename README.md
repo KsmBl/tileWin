@@ -623,6 +623,19 @@ If you have your own copy of an original wallpaper (or any picture you like for 
 
 Wallpapers are rendered once per screen size and cached in `~/.cache/tileWin/wallpapers`.
 
+## Your own screen savers
+
+Each screen saver is a directory: `saver.so`, a module that draws it, and
+`screenshot.png`, its picture in the list of the settings. tileWin's own are
+installed in `/usr/local/share/tileWin/screensavers`; put a directory of your
+own into `~/.local/share/tileWin/screensavers` and it is on the Screen saver
+page, with its settings and the preview, and `tilewin-screensaver` shows it.
+`tilewin-screensaver --list` shows every saver found and where it is, and
+`tilewin-screensaver --screenshot <directory> <file>` draws a saver's picture.
+
+How to write one, with a whole example (a lava lamp) to start from:
+[screensaver/README.md](screensaver/README.md).
+
 ## Limitations
 
 - Session restore starts apps again from their command line: terminals come back in their last directory but not with their running programs or scrollback, and documents or tabs only come back if the app restores them itself. Tile mode restores workspaces but not the split layout.

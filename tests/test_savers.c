@@ -164,6 +164,11 @@ static void check_documented(const char *path) {
 }
 
 int main(int argc, char **argv) {
+	saver_load_all();
+	if (saver_count == 0) {
+		fprintf(stderr, "FAIL: no screen savers found (TILEWIN_SAVERS: %s)\n", getenv("TILEWIN_SAVERS"));
+		return 1;
+	}
 	if (argc > 1) {
 		check_documented(argv[1]);
 	}
@@ -183,8 +188,9 @@ int main(int argc, char **argv) {
 		fail("doomsday", "is not there");
 		return 1;
 	}
-	for (int k = 0; k < doomsday_kind_count; k++) {
-		const char *kind = doomsday_kinds[k]->name;
+	static const char *const kinds[] = { "hellfire", "thunderstorm", "blizzard", "decay", "jungle" };
+	for (int k = 0; k < 5; k++) {
+		const char *kind = kinds[k];
 		const char *settings[] = { "doomsday_kind", kind };
 		struct saver_options o = options;
 		o.settings = settings;

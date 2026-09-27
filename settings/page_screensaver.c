@@ -545,7 +545,33 @@ static void on_preview(GtkButton *button, gpointer data) {
 	}
 }
 
+/* ---------- the list of savers, with their screenshots ---------- */
+
+static void on_item_setup(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer data) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	GtkWidget *picture = gtk_picture_new();
+	gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_COVER);
+	gtk_widget_set_size_request(picture, 80, 50);
+	gtk_box_append(GTK_BOX(box), picture);
+	gtk_box_append(GTK_BOX(box), gtk_label_new(NULL));
+	gtk_list_item_set_child(item, box);
+}
+
+static void on_item_bind(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer data) {
+	GtkWidget *box = gtk_list_item_get_child(item);
+	GtkWidget *picture = gtk_widget_get_first_child(box), *label = gtk_widget_get_last_child(box);
+	guint i = gtk_list_item_get_position(item);
+	GtkStringObject *text = gtk_list_item_get_item(item);
+	gtk_label_set_text(GTK_LABEL(label), gtk_string_object_get_string(text));
+	// None and Random have no picture; a saver of one's own perhaps none either
+	const char *shot = i >= 2 && i - 2 < (guint)saver_count ? saver_screenshot(savers[i - 2]) : NULL;
+	gtk_picture_set_filename(GTK_PICTURE(picture), shot);
+	gtk_widget_set_opacity(picture, shot ? 1 : 0);
+}
+
 GtkWidget *screensaver_page_new(struct settings *s) {
+	// the savers are directories, found now: one dropped in is there when the page opens
+	saver_load_all();
 	struct screensaver_page *p = g_new0(struct screensaver_page, 1);
 	p->s = s;
 	GtkWidget *content;
@@ -574,6 +600,11 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 		gtk_string_list_append(names, savers[i]->title);
 	}
 	p->saver_dd = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
+	GtkListItemFactory *list = gtk_signal_list_item_factory_new();
+	g_signal_connect(list, "setup", G_CALLBACK(on_item_setup), NULL);
+	g_signal_connect(list, "bind", G_CALLBACK(on_item_bind), NULL);
+	gtk_drop_down_set_list_factory(GTK_DROP_DOWN(p->saver_dd), list);
+	g_object_unref(list);
 	g_signal_connect(p->saver_dd, "notify::selected", G_CALLBACK(on_saver), p);
 	p->preview_button = gtk_button_new_with_label("Preview");
 	g_signal_connect(p->preview_button, "clicked", G_CALLBACK(on_preview), p);
@@ -583,7 +614,8 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	p->saver_row = ui_row(group, "Screen saver", "Bubbles, Mystify, Ribbons, 3D Text and "
 		"Photos from Windows 7, Starfield, 3D Pipes, 3D Maze and Flying Windows from before, "
 		"Aurora, Word Clock, Tiling, Diggers, Doomsday (Hellfire, Thunderstorm, Blizzard, Decay "
-		"or Jungle) and Gravity of tileWin's own, the Matrix, and a word from Microslop", pick);
+		"or Jungle) and Gravity of tileWin's own, the Matrix, a word from Microslop, and any of "
+		"your own in ~/.local/share/tileWin/screensavers", pick);
 
 	p->wait_dd = gtk_drop_down_new_from_strings(wait_labels);
 	g_signal_connect(p->wait_dd, "notify::selected", G_CALLBACK(on_wait), p);

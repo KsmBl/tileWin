@@ -26,9 +26,13 @@ executable(
 		'widgets.c',
 		tilewin_version_h,
 	],
-	include_directories: [sway_inc, include_directories('../screensaver')],
-	dependencies: [gtk4, dependency('gio-unix-2.0'), jsonc, cairo, gdk_pixbuf, math, rsvg, pango],
-	link_with: [lib_savers, lib_sway_common],
+	include_directories: [sway_inc, saver_inc],
+	dependencies: [gtk4, dependency('gio-unix-2.0'), jsonc, cairo, gdk_pixbuf, math, rsvg, pango,
+		pangocairo],
+	# the kit whole, its functions lent to the savers the preview loads
+	link_whole: [lib_saver_kit],
+	link_with: [lib_sway_common],
+	export_dynamic: true,
 	install: true,
 )
 

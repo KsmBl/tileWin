@@ -1,0 +1,74 @@
+#ifndef _TW_SAVER_UTIL_H
+#define _TW_SAVER_UTIL_H
+#include <cairo.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include "savers.h"
+
+/* Helpers the savers share; not part of what the rest of tileWin sees. */
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* A number in [0, 1). */
+double saver_random(void);
+/* A number in [low, high). */
+static inline double saver_between(double low, double high) {
+	return low + (high - low) * saver_random();
+}
+
+/* Hue, saturation and value in [0, 1] to red, green and blue. */
+void saver_hsv(double h, double s, double v, double *r, double *g, double *b);
+void saver_set_hsva(cairo_t *cr, double h, double s, double v, double a);
+
+/* The unit of length: a thousandth of the shorter side. */
+static inline double saver_unit(int width, int height) {
+	return (width < height ? width : height) / 1000.0;
+}
+
+static inline double saver_clamp(double v, double low, double high) {
+	return v < low ? low : v > high ? high : v;
+}
+
+/* A window on the screen, from tileWin: the title bar is its top title_h pixels. */
+struct saver_window {
+	double x, y, w, h;
+	char title[64];
+	double title_h, border;
+};
+
+/*
+ * The windows tileWin shows on that screen, bottom first, in its coordinates,
+ * and its taskbars (bars may be NULL); false without tileWin to ask.
+ */
+bool saver_tilewin_windows(const char *output, struct saver_window *wins, int max,
+	int *count, struct saver_window *bars, int *bar_count);
+
+/*
+ * The desktop a saver is drawn over: its windows and taskbars, from tileWin or
+ * made up without it (the preview), and a picture of it: the screen as it was
+ * before the saver, or drawn stand-ins. An RGB24 surface of width by height.
+ */
+cairo_surface_t *saver_desktop(const struct saver_options *options, int width, int height,
+	struct saver_window *wins, int max, int *count, struct saver_window *bars, int *bar_count);
+
+/*
+ * The wallpaper of that screen as tileWin draws it, width by height, RGB24;
+ * NULL without tileWin to ask (the preview).
+ */
+cairo_surface_t *saver_wallpaper(const char *output, int width, int height);
+/*
+ * The desktop with the windows taken off (and the taskbars too with no_bars):
+ * where they stood, with margin around each for its shadow, the wallpaper
+ * tileWin reports when it is the one on the screen, or else the colour of the
+ * desktop around each; in the preview (not real) the stand-in wallpaper.
+ */
+cairo_surface_t *saver_bare_desktop(const struct saver_options *options, cairo_surface_t *desktop,
+	int width, int height, const struct saver_window *wins, int count,
+	const struct saver_window *bars, int bar_count, double margin, bool real, bool no_bars);
+/* The wallpaper of the windows of its own that savers bring without tileWin. */
+void saver_fake_wallpaper(cairo_t *cr, int width, int height);
+
+#endif

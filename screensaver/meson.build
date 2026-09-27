@@ -1,36 +1,40 @@
-# the screen savers, also drawn by the preview of the settings app
-lib_savers = static_library(
-	'tilewin-savers', [
-		'savers.c',
-		'saver_tilewin.c',
-		'saver_ad.c',
-		'saver_blizzard.c',
-		'saver_classic.c',
-		'saver_decay.c',
-		'saver_diggers.c',
-		'saver_doomsday.c',
-		'saver_hellfire.c',
-		'saver_jungle.c',
-		'saver_matrix.c',
-		'saver_maze.c',
-		'saver_new.c',
-		'saver_pipes.c',
-		'saver_storm.c',
-		'saver_gravity.c',
-		'saver_win7.c',
+# What runs the screen savers (the kit): finding them, running them, and the
+# helpers they share. It goes into every program that shows savers, which
+# lend its functions to the savers they load, and into the savers that come
+# with tileWin, so these need nothing of the program.
+saver_inc = include_directories('include')
+saver_deps = [cairo, gdk_pixbuf, jsonc, math, pango, pangocairo]
+lib_saver_kit = static_library(
+	'tilewin-saver-kit', [
+		'kit/savers.c',
+		'kit/saver_tilewin.c',
 	],
-	include_directories: [sway_inc],
-	dependencies: [cairo, gdk_pixbuf, jsonc, math, pango, pangocairo],
+	include_directories: [sway_inc, saver_inc],
+	dependencies: saver_deps,
 	link_with: [lib_sway_common],
+	pic: true,
 )
 
-executable(
+screensaver_exe = executable(
 	'tilewin-screensaver', [
 		'main.c',
 		wl_protos_src,
 	],
-	include_directories: [sway_inc],
-	dependencies: [cairo, gdk_pixbuf, math, pango, pangocairo, wayland_client],
-	link_with: [lib_savers, lib_sway_common, lib_sway_client],
+	include_directories: [sway_inc, saver_inc],
+	dependencies: saver_deps + [wayland_client],
+	link_whole: [lib_saver_kit],
+	link_with: [lib_sway_common, lib_sway_client],
+	export_dynamic: true,
 	install: true,
 )
+
+# the screen savers: a directory each, with its module and its screenshot
+tilewin_savers_dir = join_paths(tilewin_datadir, 'screensavers')
+saver_shot_env = ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent', 'TILEWIN_SAVERS=']
+saver_modules = []
+subdir('savers')
+subdir('example')
+
+# for screen savers of your own (see README.md here)
+install_headers('include/tilewin-saver.h', 'include/savers.h', 'include/saver_util.h',
+	'include/saver_noise.h', subdir: 'tileWin')

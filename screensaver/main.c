@@ -24,7 +24,7 @@
 #include <wayland-client.h>
 #include <sys/mman.h>
 #include "pool-buffer.h"
-#include "savers.h"
+#include "saver_util.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
 
@@ -610,25 +610,82 @@ static void handle_signal(int sig) {
 }
 
 static void list_savers(void) {
+	saver_load_all();
 	for (int i = 0; i < saver_count; i++) {
-		printf("%-14s %s: %s\n", savers[i]->name, savers[i]->title, savers[i]->description);
+		printf("%-14s %s: %s\n%-14s in %s\n", savers[i]->name, savers[i]->title,
+			savers[i]->description, "", saver_dir(savers[i]));
 	}
 	printf("%-14s one of them, picked each time\n", "random");
+}
+
+/*
+ * The screenshot of the saver in a directory: run for a few seconds on the
+ * windows it brings itself (as in the preview), drawn into a PNG.
+ */
+static int screenshot(const char *dir, const char *file, double seconds) {
+	char *why;
+	const struct saver_module *m = saver_load_dir(dir, &why);
+	if (!m) {
+		fprintf(stderr, "tilewin-screensaver: %s\n", why);
+		free(why);
+		return 1;
+	}
+	if (seconds <= 0) {
+		seconds = m->shot_seconds > 0 ? m->shot_seconds : 5;
+	}
+	const int w = 480, h = 300;
+	struct saver_options options = { .speed = 1, .text = "tileWin", .photo_seconds = 8 };
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_t *cr = cairo_create(surface);
+	struct saver_run *run = saver_run_new(m->saver, w, h, &options);
+	for (int i = 0; i < (int)(seconds * 30); i++) {
+		saver_run_draw(run, cr, 1 / 30.0);
+	}
+	saver_run_free(run);
+	cairo_destroy(cr);
+	if (m->saver->transparent) {
+		// drawn over the desktop: over a wallpaper, as the preview shows it
+		cairo_surface_t *desktop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+		cairo_t *d = cairo_create(desktop);
+		saver_fake_wallpaper(d, w, h);
+		cairo_set_source_surface(d, surface, 0, 0);
+		cairo_paint(d);
+		cairo_destroy(d);
+		cairo_surface_destroy(surface);
+		surface = desktop;
+	}
+	cairo_status_t status = cairo_surface_write_to_png(surface, file);
+	cairo_surface_destroy(surface);
+	if (status != CAIRO_STATUS_SUCCESS) {
+		fprintf(stderr, "tilewin-screensaver: cannot write %s: %s\n", file,
+			cairo_status_to_string(status));
+		return 1;
+	}
+	return 0;
 }
 
 int main(int argc, char **argv) {
 	static const struct option long_options[] = {
 		{ "saver", required_argument, NULL, 's' },
 		{ "list", no_argument, NULL, 'l' },
+		{ "screenshot", required_argument, NULL, 'p' },
+		{ "seconds", required_argument, NULL, 't' },
 		{ "help", no_argument, NULL, 'h' },
 		{ 0 },
 	};
-	const char *wanted = NULL;
+	const char *wanted = NULL, *shot_dir = NULL;
+	double seconds = 0;
 	int c;
-	while ((c = getopt_long(argc, argv, "s:lh", long_options, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "s:lp:t:h", long_options, NULL)) != -1) {
 		switch (c) {
 		case 's':
 			wanted = optarg;
+			break;
+		case 'p':
+			shot_dir = optarg;
+			break;
+		case 't':
+			seconds = atof(optarg);
 			break;
 		case 'l':
 			list_savers();
@@ -636,11 +693,20 @@ int main(int argc, char **argv) {
 		case 'h':
 		default:
 			printf("Usage: tilewin-screensaver [--saver <name>] [--list]\n"
+				"       tilewin-screensaver --screenshot <directory> <file.png> [--seconds <s>]\n"
 				"Shows a screen saver on every screen until the mouse moves or a key is\n"
 				"pressed. Without --saver, the one of the \"screensaver\" block of\n"
-				"taskbar.conf, or Bubbles.\n");
+				"taskbar.conf, or Bubbles. --screenshot draws the saver in a directory\n"
+				"into a picture, as the settings show it.\n");
 			return c == 'h' ? 0 : 1;
 		}
+	}
+	if (shot_dir) {
+		if (optind >= argc) {
+			fprintf(stderr, "tilewin-screensaver: --screenshot wants the file to write\n");
+			return 1;
+		}
+		return screenshot(shot_dir, argv[optind], seconds);
 	}
 	setlocale(LC_ALL, "");
 	char *configured = saver_options_load(&ss.options);
