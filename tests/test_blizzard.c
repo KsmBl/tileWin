@@ -9,6 +9,9 @@
  *  - frost comes only inside the windows and the taskbar, and not at all with
  *    it turned off; icicles grow; the storm builds up;
  *  - light snow leaves less than heavy snow;
+ *  - after some minutes all is buried: the windows and the taskbar plastered
+ *    over, the drift far up the screen, the heaps grown into mounds; the light
+ *    has failed and the glass of the screen has cracked;
  *  - it starts and ends at once (while the frost is still worked out), at
  *    tiny sizes too, and draws a frame in reasonable time.
  */
@@ -118,6 +121,24 @@ int main(void) {
 	printf("the deepest heap, %.1f deep, is %.0f light\n", st.deepest, white);
 	check(st.deepest > 2 && white > 190, "the snow on the windows is not seen");
 	double heavy_depth = st.windows / (st.window_columns ? st.window_columns : 1);
+	check(st.plastered < 0.5, "the windows are snowed over far too early");
+
+	// on to seven minutes: buried
+	for (int k = 0; k < 32; k++) {
+		run(&heavy, 10, &st);
+		fits = fits && st.fits;
+	}
+	double drift = st.ground / heavy.w;
+	double mounds = st.windows / (st.window_columns ? st.window_columns : 1);
+	printf("heavy, 421 s: %.0f%% of the windows snowed over, the drift %.0f of %d high, "
+		"%.1f deep on the windows; light %.2f gone, %d cracks\n", st.plastered * 100, drift,
+		heavy.h, mounds, st.dark, st.cracks);
+	check(fits, "snow deeper than its room, or where the surface does not show, later on");
+	check(st.plastered > 0.9, "the windows are not snowed over after seven minutes");
+	check(drift > heavy.h * 0.25, "the drift does not rise up the screen");
+	check(mounds > heavy_depth * 2.5, "the heaps on the windows do not grow into mounds");
+	check(st.dark > 0.4, "the light does not fail");
+	check(st.cracks >= 3, "the glass of the screen does not crack");
 	finish(&heavy);
 
 	struct run light;
@@ -130,6 +151,7 @@ int main(void) {
 	check(light_depth < heavy_depth, "light snow leaves as much as heavy snow");
 	check(st.frost == 0, "frost with the frost turned off");
 	check(st.ground == 0, "a drift with the drift turned off");
+	check(st.plastered == 0, "windows snowed over with that turned off");
 	finish(&light);
 
 	// started and ended at once, while the frost is still being worked out

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Doomsday in a nested tileWin, over a real window:
 #  - tilewin-screensaver --list shows Doomsday, not its kinds;
-#  - as a Blizzard, the teal wallpaper turns to cold light at once, snow piles
+#  - as a Blizzard, the teal wallpaper turns to dark, cold light at once, snow piles
 #    up on the title bar of the window, and frost grows over its glass;
 #  - as Hellfire it covers the desktop too, and "name thunderstorm", what the
 #    Thunderstorm was called on its own, still starts it;
@@ -163,9 +163,10 @@ sleep 4
 running || fail "the Blizzard did not start"
 wall=$(mean 20 20 200 150)
 echo "Blizzard, 4 s: wallpaper $wall"
-# teal has no red; in the cold light of snow it is grey-blue
-echo "$wall" | awk '{ exit !($1 > 40 && $3 >= $2 - 10) }' ||
-	fail "the wallpaper did not turn to the cold light of the snow"
+# teal has no red, and as much blue as green; in the dark, cold light of the
+# storm it is grey-blue, bluer than green, and darker
+echo "$wall" | awk '{ exit !($1 > 25 && $3 > $2 + 10 && $1 + $2 + $3 < 256) }' ||
+	fail "the wallpaper did not turn to the cold light of the storm"
 
 sleep 41
 snow=$(light $((wx + 40)) $((wtop - 3)) $((ww - 80)) 3)

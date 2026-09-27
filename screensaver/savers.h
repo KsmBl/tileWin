@@ -46,6 +46,7 @@ struct saver {
 	bool transparent;      // drawn over the desktop, which shows through
 	double resolution;     // drawn at this part of the size and scaled up, for soft ones
 	bool wants_desktop;    // gets a picture of the screen from before it started
+	bool covers;           // paints every pixel of every frame itself: no clearing first
 	const struct saver_option *options; // its own settings, NULL for none
 	void *(*create)(int width, int height, const struct saver_options *options);
 	/* Draws the next picture over black (or the desktop); dt is seconds, sped up. */

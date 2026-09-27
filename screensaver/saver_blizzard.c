@@ -23,8 +23,19 @@
  * later it grows in from the edges of the screen itself, on which a flake
  * sometimes lands and melts.
  *
+ * And it does not stop. The snow keeps coming harder, the heaps grow into
+ * mounds, the drift rises up the screen over the lower parts of the windows,
+ * and snow plasters the windows from their lower and windward sides until
+ * everything is buried. The light fails as it goes on; squalls drive walls of
+ * snow across and rattle the screen, thundersnow flashes in the murk, and the
+ * frozen glass of the screen cracks where something hits it.
+ *
  * The windows and the taskbar are the real ones: the picture of the screen
  * from before the saver, and where they are from tileWin.
+ *
+ * What changes slowly (the desktop frosting over, the heaps, the drift, the
+ * icicles, the failing light) is drawn together a few times a second into a
+ * picture of its own; each frame then only adds what moves.
  */
 
 #define WINDOWS_MAX 48
@@ -41,7 +52,10 @@
 #define SHARDS_MAX 24
 #define GLINTS_MAX 90
 #define BOKEH_SIZES 5
-#define GLASS_TILE 64
+#define GLASS_TILE 32
+#define SCENE_EVERY 6      // frames to build the slow parts anew in (in 4 of them a part each)
+#define CRUST_RAMP 12.0f   // seconds snow plastered on a spot takes to cover it
+#define CRACKS_MAX 7
 #define ROW_STEP 4         // the frost is brought up to date on every fourth row a frame
 #define FROST_RAMP 4.0f    // seconds a spot of frost takes to set
 #define INTRO 4.0          // seconds the light takes to turn wintry
@@ -143,8 +157,19 @@ struct blizzard {
 	uint8_t *tiles;           // which tiles of GLASS_TILE have frost on the glass
 	int tiles_w, tiles_h;
 	double fog_x[2];          // how far the blowing snow has moved on
-	cairo_surface_t *ice;     // the icicles, drawn anew only as they grow
-	double ice_drawn;         // when last
+	cairo_surface_t *scene;   // the slow parts: the desktop, heaps, drift, icicles, the light
+	cairo_surface_t *next;    // the next of it, built a part a frame
+	bool scene_dirty;         // to be drawn whole at once
+	double veil;              // how white the air is in the gusts and squalls
+	int ground;               // the ledge of the drift, -1 for none
+	struct frost_map crust;   // snow plastered over the windows and the taskbar
+	cairo_surface_t *cracks;  // cracks in the glass of the screen
+	double crack_box[CRACKS_MAX][4];
+	int crack_count;
+	double next_crack, impact; // the next one; the jolt of the last, fading
+	double squall, squall_t, next_squall; // a wall of snow driven across, 0 to 1
+	double flash_t, next_flash; // thundersnow: since the last flash, and until the next
+	double dark;              // how far the light has failed, 0 to 1
 	float glass_start;        // when the frost on the screen begins
 	int intro_rows;           // frames of updating every row still to come after the intro
 	// the weather
@@ -242,8 +267,9 @@ static cairo_surface_t *winter_light(cairo_surface_t *desktop, int width, int he
 	uint32_t *dst = (uint32_t *)cairo_image_surface_get_data(out);
 	int ss = cairo_image_surface_get_stride(desktop) / 4, ds = cairo_image_surface_get_stride(out) / 4;
 	for (int y = 0; y < height; y++) {
-		// the air thicker with snow towards the top
-		float haze = 22 * (1 - (float)y / height);
+		// the air thick with snow, and under the storm the sky darker towards the top
+		float haze = 12 * (1 - (float)y / height);
+		float sky = 0.7f + 0.3f * smooth(0, 0.65f, (float)y / height);
 		float dy = (y - height * 0.5f) / (height * 0.5f);
 		for (int x = 0; x < width; x++) {
 			uint32_t p = src[y * ss + x];
@@ -251,10 +277,10 @@ static cairo_surface_t *winter_light(cairo_surface_t *desktop, int width, int he
 			float lum = r * 0.3f + g * 0.59f + b * 0.11f;
 			// darker and bluer towards the edges of the screen, as through a cold window
 			float dx = (x - width * 0.5f) / (width * 0.5f);
-			float edge = 1 - 0.28f * smooth(0.55f, 1.5f, sqrtf(dx * dx + dy * dy));
-			r = ((r * 0.4f + lum * 0.6f) * 0.62f + 38 + haze) * edge;
-			g = ((g * 0.4f + lum * 0.6f) * 0.66f + 44 + haze) * edge;
-			b = ((b * 0.4f + lum * 0.6f) * 0.7f + 58 + haze * 1.1f) * (0.3f + 0.7f * edge);
+			float edge = (1 - 0.35f * smooth(0.5f, 1.45f, sqrtf(dx * dx + dy * dy))) * sky;
+			r = ((r * 0.3f + lum * 0.7f) * 0.56f + 22 + haze) * edge;
+			g = ((g * 0.3f + lum * 0.7f) * 0.6f + 28 + haze) * edge;
+			b = ((b * 0.3f + lum * 0.7f) * 0.66f + 42 + haze * 1.2f) * (0.3f + 0.7f * edge);
 			dst[y * ds + x] = 0xff000000u | (uint32_t)fminf(255, r) << 16 |
 				(uint32_t)fminf(255, g) << 8 | (uint32_t)fminf(255, b);
 		}
@@ -329,8 +355,8 @@ static cairo_surface_t *make_fog(int width, int height, double u, uint32_t seed,
 			float d = smooth(0.32f, 0.82f, n) * low * thick;
 			d = d > 1 ? 1 : d;
 			uint32_t a = (uint32_t)(d * 255);
-			uint32_t r = (uint32_t)(d * 0.9f * 255), g = (uint32_t)(d * 0.93f * 255),
-				b = (uint32_t)(d * 0.98f * 255);
+			uint32_t r = (uint32_t)(d * 0.8f * 255), g = (uint32_t)(d * 0.84f * 255),
+				b = (uint32_t)(d * 0.92f * 255);
 			px[y * stride + x] = a << 24 | r << 16 | g << 8 | b;
 		}
 	}
@@ -495,7 +521,8 @@ static struct ledge *add_ledge(struct blizzard *s, int x0, int x1, float y, int 
 		// no heap is quite even: some parts take more of what falls, and hold more
 		float n = fbm(x / (float)(u * 60), 0.5f, 0, seed, 3);
 		l->lump[c] = 0.45f + 1.1f * n;
-		l->cap[c] = (float)(u * 44 * (0.7 + 0.6 * n));
+		// as high as there is room: the heaps grow into mounds
+		l->cap[c] = (float)fminf(y, (float)(u * 420 * (0.75 + 0.5 * n)));
 	}
 	return l;
 }
@@ -540,30 +567,33 @@ static void make_ledges(struct blizzard *s) {
 			}
 		}
 	}
-	bool bottom_bar = false;
+	s->ground = -1;
 	for (int i = 0; i < s->bar_count; i++) {
 		struct saver_window *b = &s->bars[i];
 		if (b->y < H * 0.5) {
 			continue; // at the top: nothing lands on it
 		}
-		bottom_bar = true;
 		add_ledge(s, (int)fmax(0, b->x), (int)fmin(W, b->x + b->w), (float)b->y, TASKBAR);
 	}
 	if (s->bury) {
-		// the drift at the bottom, which buries the taskbar
-		double deep = u * 70;
+		// the drift at the bottom, which buries the taskbar and rises up the screen
+		double deep = H * 0.5;
 		for (int i = 0; i < s->bar_count; i++) {
 			if (s->bars[i].y >= H * 0.5) {
-				deep = s->bars[i].h;
+				deep += s->bars[i].h;
 			}
 		}
+		s->ground = s->ledge_count;
 		struct ledge *l = add_ledge(s, 0, s->width, (float)H, GROUND);
 		uint32_t seed = (uint32_t)(saver_random() * 100000);
 		for (int c = 0; l && c < l->n; c++) {
-			// dunes: crests rising over the taskbar, hollows between
+			// dunes: crests, and hollows between
 			float n = fbm(c / (float)(u * 220), 0.3f, 0, seed, 3);
-			l->cap[c] = (float)(deep * (bottom_bar ? 0.5 + 0.75 * n : 0.3 + 0.7 * n));
+			l->cap[c] = (float)fmin(H * 0.7, deep * (0.6 + 0.6 * n));
 			l->lump[c] = 0.3f + 1.4f * n;
+		}
+		if (!l) {
+			s->ground = -1;
 		}
 	}
 	// per column, the ledges in it, top first
@@ -620,7 +650,7 @@ static void deposit(struct blizzard *s, struct ledge *l, float x, float amount, 
 		if (i < 0 || i >= l->n) {
 			continue;
 		}
-		l->h[i] += amount * (r + 1 - abs(k)) / total * l->lump[i];
+		l->h[i] = fminf(l->cap[i], l->h[i] + amount * (r + 1 - abs(k)) / total * l->lump[i]);
 	}
 }
 
@@ -663,8 +693,8 @@ static void break_off(struct blizzard *s, struct ledge *l, int side) {
 static void settle(struct blizzard *s, double dt) {
 	double u = s->u;
 	float slope = 1.0f;
-	// (some from the start, so there is snow to see soon)
-	float grow = (float)(u * 0.2 * fmax(s->storm, 0.7 * s->amount) * dt);
+	// (some from the start, so there is snow to see soon, and more and more)
+	float grow = (float)(u * (0.2 + 0.005 * fmin(s->t, 600)) * fmax(s->storm, 0.7 * s->amount) * dt);
 	for (int k = 0; k < s->ledge_count; k++) {
 		struct ledge *l = &s->ledges[k];
 		float *h = l->h;
@@ -672,31 +702,37 @@ static void settle(struct blizzard *s, double dt) {
 		for (int c = 0; c < l->n; c++) {
 			h[c] += g * l->lump[c];
 		}
-		// no steeper than it holds: what is too steep slides down beside it
+		// no steeper than it holds: what is too steep slides down beside it (a drift
+		// the wind shapes lies flatter, in long smooth dunes)
+		bool drift = l->owner == GROUND;
+		float steep = drift ? 0.35f : slope;
 		for (int pass = 0; pass < 2; pass++) {
 			for (int c = 0; c + 1 < l->n; c++) {
 				float d = h[c] - h[c + 1];
-				if (fabsf(d) > slope) {
-					float m = (fabsf(d) - slope) * 0.5f * (d > 0 ? 1 : -1);
+				if (fabsf(d) > steep) {
+					float m = (fabsf(d) - steep) * 0.5f * (d > 0 ? 1 : -1);
 					h[c] -= m;
 					h[c + 1] += m;
 				}
 			}
 		}
 		// soft: settled a little into itself
-		float prev = h[0];
-		for (int c = 1; c + 1 < l->n; c++) {
-			float here = h[c];
-			h[c] += 0.2f * (prev + h[c + 1] - 2 * here);
-			prev = here;
+		for (int pass = 0; pass < (drift ? 3 : 1); pass++) {
+			float prev = h[0];
+			for (int c = 1; c + 1 < l->n; c++) {
+				float here = h[c];
+				h[c] += (drift ? 0.45f : 0.2f) * (prev + h[c + 1] - 2 * here);
+				prev = here;
+			}
 		}
 		// rounded at the ends, where what is too much goes over and gathers
 		float edge = (float)(u * 1.5), round_w = fminf((float)(u * 16), l->n * 0.3f);
 		for (int c = 0; c < l->n; c++) {
 			int from_end = c < l->n - 1 - c ? c : l->n - 1 - c;
 			float k = 1 - fminf(1, (from_end + 0.5f) / round_w);
-			float most = fminf(l->cap[c], edge + (float)(u * 40) * sqrtf(1 - k * k) * 0.7f +
-				(from_end + 0.5f) * 0.25f);
+			// a dome: steep at the very end, flattening towards the middle
+			float most = fminf(l->cap[c], edge + (float)(u * 20) * sqrtf(1 - k * k) +
+				(float)(u * 300) * (1 - expf(-(from_end + 0.5f) / (float)(u * 110))));
 			if (l->owner == GROUND) {
 				most = l->cap[c]; // the screen goes on beyond the edges
 			}
@@ -1030,6 +1066,42 @@ static void make_frost(struct blizzard *s) {
 	free(n2.v);
 }
 
+/*
+ * Snow plastered on the windows and the taskbar by the wind: from their lower
+ * edge up and from the side the wind comes from across, along a ragged front,
+ * starting after a minute or so and covering them after a few more.
+ */
+static void make_crust(struct blizzard *s) {
+	double u = s->u;
+	struct grid n1, n2;
+	grid_make(&n1, s->width, s->height, 4, (float)fmax(4, u * 55), 303);
+	grid_make(&n2, s->width, s->height, 4, (float)fmax(4, u * 7), 404);
+	frost_alloc(&s->crust, s->width, s->height);
+	for (int i = 0; i < s->count + s->bar_count; i++) {
+		struct saver_window *w = i < s->count ? &s->wins[i] : &s->bars[i - s->count];
+		struct box b = box_of(s, w->x, w->y, w->w, w->h);
+		frost_clear(s, &s->crust, b);
+		float start = i < s->count ? 70 + (float)frost_between(s, 0, 25) + i * 6 : 45;
+		float span = i < s->count ? 260 : 150;
+		float bw = (float)fmax(1, b.x1 - b.x0), bh = (float)fmax(1, b.y1 - b.y0);
+		for (int y = b.y0; y < b.y1; y++) {
+			float up = (b.y1 - y) / bh;
+			for (int x = b.x0; x < b.x1; x++) {
+				float across = (s->dir > 0 ? x - b.x0 : b.x1 - 1 - x) / bw;
+				float f = fminf(up, across * 1.5f + 0.12f) + (grid_at(&n1, x, y) - 0.5f) * 0.4f;
+				int k = y * s->width + x;
+				s->crust.freeze[k] = start + fmaxf(0, f) * span;
+				// lumpy: thicker and lighter in places, with a grain
+				s->crust.dens[k] = (uint8_t)fminf(255, 150 * grid_at(&n2, x, y) +
+					110 * grid_at(&n1, x + 977, y) + (hash2(x, y, 9) & 31));
+			}
+		}
+	}
+	frost_rows(s, &s->crust);
+	free(n1.v);
+	free(n2.v);
+}
+
 /* The frost on the screen's glass at a pixel, premultiplied. */
 static uint32_t glass_px(float a) {
 	return (uint32_t)(a * 255) << 24 | (uint32_t)(a * 0.93f * 255) << 16 |
@@ -1038,10 +1110,7 @@ static uint32_t glass_px(float a) {
 
 /* The tiles of the screen with frost on its glass, the only ones it is drawn in. */
 static void glass_tiles(struct blizzard *s) {
-	int tw = (s->width + GLASS_TILE - 1) / GLASS_TILE, th = (s->height + GLASS_TILE - 1) / GLASS_TILE;
-	s->tiles = calloc((size_t)tw * th, 1);
-	s->tiles_w = tw;
-	s->tiles_h = th;
+	int tw = s->tiles_w;
 	for (int y = 0; y < s->height; y++) {
 		for (int x = 0; x < s->width; x++) {
 			if (s->glass_frost.dens[y * s->width + x]) {
@@ -1056,8 +1125,9 @@ static void update_rows(struct blizzard *s) {
 	int W = s->width;
 	float t = (float)s->t;
 	bool intro = s->intro_rows > 0;
-	bool frost = s->frost_on && atomic_load(&s->ready);
-	if (!intro && !frost) {
+	bool ready = atomic_load(&s->ready);
+	bool frost = s->frost_on && ready, crust = s->bury && ready;
+	if (!intro && !frost && !crust) {
 		return;
 	}
 	int k_intro = (int)(256 * fmin(1, s->t / INTRO));
@@ -1071,16 +1141,22 @@ static void update_rows(struct blizzard *s) {
 	cairo_surface_flush(s->view);
 	cairo_surface_flush(s->glass);
 	for (int y = s->frame % ROW_STEP; y < s->height; y += ROW_STEP) {
-		struct frost_map *m = &s->frost;
-		bool busy = frost && t >= m->row_first[y] && t <= m->row_last[y] + FROST_RAMP + 1.5f;
-		if (intro || busy) {
+		struct frost_map *m = &s->frost, *c = &s->crust;
+		bool frosting = frost && t >= m->row_first[y] && t <= m->row_last[y] + FROST_RAMP + 1.5f;
+		bool plastering = crust && t >= c->row_first[y] && t <= c->row_last[y] + CRUST_RAMP + 1.5f;
+		if (intro || frosting || plastering) {
 			uint32_t *o = orig + y * os, *w = winter + y * ws, *v = view + y * vs;
 			const uint32_t *bl = frost ? s->blurred + y * W : NULL;
 			const float *fz = frost ? m->freeze + y * W : NULL;
 			const uint8_t *dn = frost ? m->dens + y * W : NULL;
+			const float *cz = crust ? c->freeze + y * W : NULL;
+			const uint8_t *cd = crust ? c->dens + y * W : NULL;
 			for (int x = 0; x < W; x++) {
-				if (!intro && (!dn[x] || fz[x] >= t || t - fz[x] > FROST_RAMP + 1.5f)) {
-					continue; // as it was: no frost there yet, or set for a while
+				// as it was: no frost or snow there yet, or set for a while
+				bool f_moving = frosting && dn[x] && fz[x] < t && t - fz[x] <= FROST_RAMP + 1.5f;
+				bool c_moving = plastering && cd[x] && cz[x] < t && t - cz[x] <= CRUST_RAMP + 1.5f;
+				if (!intro && !f_moving && !c_moving) {
+					continue;
 				}
 				uint32_t p = k_intro < 256 ? mix_px(o[x], w[x], k_intro) : w[x];
 				if (frost && dn[x] && fz[x] < t) {
@@ -1094,6 +1170,13 @@ static void update_rows(struct blizzard *s) {
 						col = mix_px(frost_col, 0xff7288ad, (int)(k * 256));
 					}
 					p = mix_px(p, col, (int)(a * 0.92f * 256));
+				}
+				if (crust && cd[x] && cz[x] < t) {
+					// packed snow, grainy, a little blue in its hollows
+					float a = fminf(1, (t - cz[x]) / CRUST_RAMP) * 0.97f;
+					uint32_t g = 170 + cd[x] * 80 / 255;
+					uint32_t col = 0xff000000u | (g - 10) << 16 | (g - 4) << 8 | (g + 7 > 255 ? 255 : g + 7);
+					p = mix_px(p, col, (int)(a * 256));
 				}
 				v[x] = p;
 			}
@@ -1175,9 +1258,14 @@ static bool flake_gone(struct blizzard *s, struct flake *f) {
 /* What takes long: the frost, and the blurred desktop it shows. */
 static void *prepare(void *data) {
 	struct blizzard *s = data;
-	s->blurred = blurred_copy(s->winter, s->width, s->height, (int)fmax(1, s->u * 3.5));
-	make_frost(s);
-	glass_tiles(s);
+	if (s->frost_on) {
+		s->blurred = blurred_copy(s->winter, s->width, s->height, (int)fmax(1, s->u * 3.5));
+		make_frost(s);
+		glass_tiles(s);
+	}
+	if (s->bury) {
+		make_crust(s);
+	}
 	atomic_store(&s->ready, true);
 	return NULL;
 }
@@ -1210,7 +1298,12 @@ static void *blizzard_create(int width, int height, const struct saver_options *
 	cairo_paint(cr);
 	cairo_destroy(cr);
 	s->glass = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-	s->ice = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+	s->scene = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+	s->next = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+	s->scene_dirty = true;
+	s->tiles_w = (width + GLASS_TILE - 1) / GLASS_TILE;
+	s->tiles_h = (height + GLASS_TILE - 1) / GLASS_TILE;
+	s->tiles = calloc((size_t)s->tiles_w * s->tiles_h, 1);
 	s->fog[0] = make_fog(width, height, u, 5, 0.75f, false);
 	s->fog_h = (int)(height * 0.45);
 	s->fog[1] = make_fog(width, s->fog_h, u * 0.6, 17, 1.0f, true);
@@ -1224,14 +1317,20 @@ static void *blizzard_create(int width, int height, const struct saver_options *
 	}
 	make_ledges(s);
 	make_icicles(s);
+	s->dir = saver_random() < 0.5 ? -1 : 1;
 	s->frost_rng = (uint64_t)(saver_random() * 9007199254740992.0) | 1;
-	if (s->frost_on) {
+	if (s->frost_on || s->bury) {
 		s->working = pthread_create(&s->worker, NULL, prepare, s) == 0;
 		if (!s->working) {
 			prepare(s);
 		}
+	} else {
+		atomic_store(&s->ready, true);
 	}
-	s->dir = saver_random() < 0.5 ? -1 : 1;
+	s->next_squall = saver_between(25, 40);
+	s->next_flash = saver_between(35, 70);
+	s->next_crack = saver_between(50, 80);
+	s->squall_t = s->flash_t = -1;
 	for (int i = 0; i < FAR_FLAKES; i++) {
 		flake_reset(s, &s->far[i], 1, 0, true);
 		s->far[i].size = (float)fmax(0.8, u * saver_between(0.9, 2));
@@ -1327,13 +1426,10 @@ static void grow_icicles(struct blizzard *s, double dt) {
 	}
 }
 
-/* The icicles as they are now, into their own layer. */
-static void draw_icicles(struct blizzard *s) {
+/* The icicles as they are now. */
+static void draw_icicles(struct blizzard *s, cairo_t *cr) {
 	double u = s->u;
-	cairo_t *cr = cairo_create(s->ice);
-	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
-	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	cairo_new_path(cr);
 	for (int i = 0; i < s->icicle_count; i++) {
 		struct icicle *c = &s->icicles[i];
 		if (c->len < 1) {
@@ -1370,7 +1466,6 @@ static void draw_icicles(struct blizzard *s) {
 	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 	cairo_set_source_rgba(cr, 1, 1, 1, 0.85);
 	cairo_stroke(cr);
-	cairo_destroy(cr);
 }
 
 /* A glint at the tips, now and then. */
@@ -1444,7 +1539,7 @@ static void draw_falling(struct blizzard *s, cairo_t *cr, double dt) {
 						c->len, c->w, 0, (float)saver_between(-2, 2), true };
 					c->len = 0;
 					c->grow_at = (float)(s->t + saver_between(4, 20));
-					s->ice_drawn = -1; // to be drawn without it at once
+
 					break;
 				}
 			}
@@ -1483,9 +1578,8 @@ static void draw_falling(struct blizzard *s, cairo_t *cr, double dt) {
 		cairo_set_source_rgba(cr, 0.82, 0.92, 1, 0.75);
 		cairo_fill(cr);
 	}
-	// powder and glittering ice: the dust as small soft flakes, the ice as bright points
-	cairo_surface_t *dust = s->bokeh[0];
-	int half = cairo_image_surface_get_width(dust) / 2;
+	// powder and glittering ice: the dust as small soft dots in a few strengths, the
+	// ice as bright points, each in one go
 	for (int i = 0; i < POWDER_MAX; i++) {
 		struct powder *p = &s->powder[i];
 		if (p->age >= p->life) {
@@ -1498,12 +1592,19 @@ static void draw_falling(struct blizzard *s, cairo_t *cr, double dt) {
 		p->vy -= (float)(p->vy * fmin(1, drag * 0.5 * dt));
 		p->x += p->vx * (float)dt;
 		p->y += p->vy * (float)dt;
-		double k = 1 - p->age / p->life;
-		if (p->ice) {
-			continue; // drawn below, all together
+	}
+	for (int level = 0; level < 3; level++) {
+		cairo_new_path(cr);
+		for (int i = 0; i < POWDER_MAX; i++) {
+			struct powder *p = &s->powder[i];
+			double k = 1 - p->age / p->life;
+			if (p->ice || p->age >= p->life || (int)(k * 3) != level) {
+				continue;
+			}
+			cairo_rectangle(cr, p->x - p->size / 2, p->y - p->size / 2, p->size, p->size);
 		}
-		cairo_set_source_surface(cr, dust, round(p->x) - half, round(p->y) - half);
-		cairo_paint_with_alpha(cr, 0.9 * k);
+		cairo_set_source_rgba(cr, 0.93, 0.95, 1, 0.3 + 0.3 * level);
+		cairo_fill(cr);
 	}
 	cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
 	cairo_new_path(cr);
@@ -1571,6 +1672,162 @@ static void draw_crystal(struct blizzard *s, cairo_t *cr, int crystal, double x,
 	cairo_restore(cr);
 }
 
+/*
+ * The slow parts, drawn together: the desktop, the icicles, the heaps, the
+ * drift, and over them the failing light and the white of the air. They are
+ * built into the next picture a part a frame, so no frame gets all the work,
+ * and shown when done; part -1 builds all at once.
+ */
+static void build_scene(struct blizzard *s, int part) {
+	cairo_t *cr = cairo_create(s->next);
+	if (part <= 0) {
+		cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+		cairo_set_source_surface(cr, s->view, 0, 0);
+		cairo_paint(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+		draw_icicles(s, cr);
+	}
+	if (part < 0 || part == 1) {
+		draw_ledges(s, cr, false);
+	}
+	if (part < 0 || part == 2) {
+		draw_ledges(s, cr, true);
+	}
+	if (part < 0 || part == 3) {
+		// the light failing and the air whitening, as one layer: the dark under the white
+		double d = s->dark, v = s->veil, a = 1 - (1 - d) * (1 - v);
+		if (a > 0.01) {
+			double r = (0.7 * v + (1 - v) * d * 0.01) / a, g = (0.75 * v + (1 - v) * d * 0.02) / a,
+				b = (0.84 * v + (1 - v) * d * 0.05) / a;
+			cairo_set_source_rgba(cr, r, g, b, a);
+			cairo_paint(cr);
+		}
+		cairo_surface_t *shown = s->scene;
+		s->scene = s->next;
+		s->next = shown;
+	}
+	cairo_destroy(cr);
+}
+
+/* The tiles of the glass a line crosses, to be drawn from now on. */
+static void mark_line(struct blizzard *s, double x0, double y0, double x1, double y1) {
+	int steps = (int)(hypot(x1 - x0, y1 - y0) / (GLASS_TILE / 4)) + 1;
+	for (int k = 0; k <= steps; k++) {
+		double x = x0 + (x1 - x0) * k / steps, y = y0 + (y1 - y0) * k / steps;
+		int tx = (int)fmin(s->tiles_w - 1, fmax(0, x / GLASS_TILE));
+		int ty = (int)fmin(s->tiles_h - 1, fmax(0, y / GLASS_TILE));
+		s->tiles[ty * s->tiles_w + tx] = 1;
+	}
+}
+
+/* The glass of the screen cracks where something hit it: jagged lines out, rings between. */
+static void crack_glass(struct blizzard *s) {
+	double u = s->u, W = s->width, H = s->height;
+	double cx = saver_between(0.08, 0.92) * W, cy = saver_between(0.08, 0.85) * H;
+	double reach = u * saver_between(80, 200);
+	int arms = 6 + (int)(saver_random() * 5);
+	double ring[12][3][2];
+	cairo_t *cr = cairo_create(s->glass);
+	cairo_new_path(cr);
+	double base = saver_between(0, 2 * M_PI);
+	for (int k = 0; k < arms; k++) {
+		double a = base + k * 2 * M_PI / arms + saver_between(-0.25, 0.25);
+		double len = reach * saver_between(0.45, 1.1), walked = 0, x = cx, y = cy;
+		for (int r = 0; r < 3; r++) {
+			ring[k][r][0] = cx;
+			ring[k][r][1] = cy;
+		}
+		cairo_move_to(cr, x, y);
+		while (walked < len) {
+			// glass breaks straight, with a kink now and then
+			double step = u * saver_between(10, 28);
+			a += saver_random() < 0.2 ? saver_between(-0.45, 0.45) : saver_between(-0.06, 0.06);
+			mark_line(s, x, y, x + cos(a) * step, y + sin(a) * step);
+			x += cos(a) * step;
+			y += sin(a) * step;
+			walked += step;
+			cairo_line_to(cr, x, y);
+			for (int r = 0; r < 3; r++) {
+				if (walked < reach * (0.14 + 0.18 * r)) {
+					ring[k][r][0] = x;
+					ring[k][r][1] = y;
+				}
+			}
+			if (saver_random() < 0.25) { // a splinter off to the side
+				double b = a + saver_between(0.4, 0.9) * (saver_random() < 0.5 ? -1 : 1);
+				double bl = u * saver_between(10, 40) * (1 - walked / len);
+				cairo_line_to(cr, x + cos(b) * bl, y + sin(b) * bl);
+				mark_line(s, x, y, x + cos(b) * bl, y + sin(b) * bl);
+				cairo_move_to(cr, x, y);
+			}
+		}
+	}
+	// the rings of the shattering, from one line to the next
+	for (int r = 0; r < 3; r++) {
+		for (int k = 0; k < arms; k++) {
+			if (saver_random() < 0.25 + 0.15 * r) {
+				continue;
+			}
+			int n = (k + 1) % arms;
+			double mx = (ring[k][r][0] + ring[n][r][0]) / 2 + saver_between(-3, 3) * u;
+			double my = (ring[k][r][1] + ring[n][r][1]) / 2 + saver_between(-3, 3) * u;
+			cairo_move_to(cr, ring[k][r][0], ring[k][r][1]);
+			cairo_line_to(cr, mx, my);
+			cairo_line_to(cr, ring[n][r][0], ring[n][r][1]);
+			mark_line(s, ring[k][r][0], ring[k][r][1], mx, my);
+			mark_line(s, mx, my, ring[n][r][0], ring[n][r][1]);
+		}
+	}
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	// light caught in the break, its dark edge, then the bright break itself
+	cairo_set_line_width(cr, fmax(2, u * 3.5));
+	cairo_set_source_rgba(cr, 0.85, 0.92, 1, 0.12);
+	cairo_stroke_preserve(cr);
+	cairo_save(cr);
+	cairo_translate(cr, u * 0.8, u * 0.8);
+	cairo_set_line_width(cr, fmax(1, u * 1.8));
+	cairo_set_source_rgba(cr, 0.02, 0.04, 0.1, 0.55);
+	cairo_stroke_preserve(cr);
+	cairo_restore(cr);
+	cairo_set_line_width(cr, fmax(0.8, u * 1));
+	cairo_set_source_rgba(cr, 0.95, 0.98, 1, 0.95);
+	cairo_stroke(cr);
+	// the milky star where it hit
+	cairo_pattern_t *p = cairo_pattern_create_radial(cx, cy, 0, cx, cy, u * 14);
+	cairo_pattern_add_color_stop_rgba(p, 0, 0.95, 0.97, 1, 0.85);
+	cairo_pattern_add_color_stop_rgba(p, 1, 0.9, 0.95, 1, 0);
+	cairo_set_source(cr, p);
+	cairo_arc(cr, cx, cy, u * 14, 0, 2 * M_PI);
+	cairo_fill(cr);
+	cairo_pattern_destroy(p);
+	cairo_destroy(cr);
+	for (int dy = -1; dy <= 1; dy++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			int tx = (int)(cx / GLASS_TILE) + dx, ty = (int)(cy / GLASS_TILE) + dy;
+			if (tx >= 0 && ty >= 0 && tx < s->tiles_w && ty < s->tiles_h) {
+				s->tiles[ty * s->tiles_w + tx] = 1;
+			}
+		}
+	}
+	s->crack_count++;
+	s->impact = 1;
+	for (int k = 0; k < 24; k++) {
+		double a = saver_between(0, 2 * M_PI), v = saver_between(60, 320) * u;
+		*new_powder(s) = (struct powder){ (float)cx, (float)cy, (float)(cos(a) * v),
+			(float)(sin(a) * v), (float)(u * saver_between(1, 2.5)), (float)saver_between(0.3, 0.9),
+			0, true };
+	}
+}
+
+/* How bright thundersnow is at t seconds after it began: two pulses, gone in a second. */
+static double thundersnow(double t) {
+	if (t < 0 || t > 1.5) {
+		return 0;
+	}
+	return fmax(exp(-t * 9), 0.7 * (t > 0.16) * exp(-(t - 0.16) * 6));
+}
+
 static void blizzard_draw(void *state, cairo_t *cr, int width, int height, double dt) {
 	struct blizzard *s = state;
 	double u = s->u, W = width, H = height;
@@ -1581,15 +1838,69 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 	double swell = 0.78 + 0.22 * sin(s->t * 2 * M_PI / 85 - M_PI / 2);
 	s->gust += (saver_random() < dt * 0.13 * (0.4 + build) ? 1 : 0) - s->gust * dt * 0.3;
 	s->gust = fmin(s->gust, 1.6);
-	s->storm = s->amount * (0.3 + 0.7 * build) * swell * (1 + 0.35 * s->gust);
+	// squalls: a wall of snow driven across every minute or so
+	s->next_squall -= dt;
+	if (s->next_squall <= 0) {
+		s->squall_t = 0;
+		s->next_squall = saver_between(35, 75) / fmax(0.6, s->amount);
+	}
+	s->squall = 0;
+	if (s->squall_t >= 0) {
+		s->squall_t += dt;
+		double k = s->squall_t / 9;
+		s->squall = k < 1 ? pow(sin(M_PI * k), 2) : 0;
+		if (k >= 1) {
+			s->squall_t = -1;
+		}
+	}
+	s->storm = s->amount * (0.3 + 0.7 * build) * swell * (1 + 0.35 * s->gust + 0.5 * s->squall);
 	s->wind = s->dir * u * (30 + 260 * s->storm * (0.7 + 0.3 * sin(s->t * 0.07)) +
-		420 * s->gust * s->amount * build);
+		420 * s->gust * s->amount * build) * (1 + 1.4 * s->squall);
+	s->dark = 0.5 * smooth(20, 360, (float)s->t);
+	// thundersnow, and something hitting the glass
+	s->next_flash -= dt;
+	if (s->next_flash <= 0) {
+		s->flash_t = 0;
+		s->next_flash = saver_between(40, 90);
+	}
+	if (s->flash_t >= 0) {
+		s->flash_t += dt;
+	}
+	double flash = thundersnow(s->flash_t);
+	double rumble = s->flash_t > 0.7 && s->flash_t < 2.5 ? 1 - (s->flash_t - 0.7) / 1.8 : 0;
+	s->next_crack -= dt * (1 + 2 * s->squall);
+	if (s->next_crack <= 0 && atomic_load(&s->ready) && s->crack_count < CRACKS_MAX) {
+		crack_glass(s);
+		s->next_crack = saver_between(25, 55);
+	}
+	s->impact = fmax(0, s->impact - dt * 2.5);
 	update_rows(s);
+	settle(s, dt);
+	grow_icicles(s, dt);
+	s->veil = fmin(0.6, (0.05 * s->storm + 0.16 * s->gust * build + 0.35 * s->squall) *
+		s->whiteout);
+	if (s->scene_dirty) {
+		build_scene(s, -1);
+		s->scene_dirty = false;
+	} else if (s->frame % SCENE_EVERY < 4) {
+		build_scene(s, s->frame % SCENE_EVERY);
+	}
 
-	// the desktop, cold and frosting over
-	cairo_set_source_surface(cr, s->view, 0, 0);
+	// the screen rattles in the squalls, the thunder and when the glass is hit
+	double shake = u * (3 * s->squall + 6 * s->impact * s->impact + 3 * rumble);
+	cairo_save(cr);
+	if (shake > 0.05) {
+		cairo_translate(cr, sin(s->t * 61) * shake + sin(s->t * 23) * shake * 0.5,
+			cos(s->t * 47) * shake * 0.7);
+	}
+	// the desktop, cold, frosting over, snowed in
+	cairo_set_source_surface(cr, s->scene, 0, 0);
+	if (shake > 0.05) {
+		cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_PAD); // no black edges
+	}
 	cairo_paint(cr);
-	// the far snow, a fine haze of it, behind the windows
+	// the far snow, a fine haze of it, behind the windows and the drift
+	struct ledge *drift = s->ground >= 0 ? &s->ledges[s->ground] : NULL;
 	int far = (int)(FAR_FLAKES * fmin(1, 0.25 + 0.6 * s->storm));
 	cairo_new_path(cr);
 	for (int i = 0; i < far; i++) {
@@ -1598,7 +1909,9 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 		if (flake_gone(s, f)) {
 			flake_reset(s, f, (float)(u * 40), (float)(s->wind * 0.55), false);
 		}
-		if (window_at(s, f->x, f->y) >= 0) {
+		int c = (int)f->x;
+		if ((drift && c >= 0 && c < drift->n && f->y > drift->y - drift->h[c]) ||
+				window_at(s, f->x, f->y) >= 0) {
 			continue;
 		}
 		cairo_rectangle(cr, f->x, f->y, f->size, f->size);
@@ -1617,25 +1930,7 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 	cairo_paint_with_alpha(cr, fog0);
 	cairo_set_source_surface(cr, s->fog[0], fog_off[0] - W, 0);
 	cairo_paint_with_alpha(cr, fog0);
-	// the ice and the snow on the windows and the taskbar
-	settle(s, dt);
-	grow_icicles(s, dt);
-	if (s->t - s->ice_drawn > 0.5) {
-		draw_icicles(s);
-		s->ice_drawn = s->t;
-	}
-	cairo_new_path(cr);
-	for (int i = 0; i < s->icicle_count; i++) {
-		struct icicle *c = &s->icicles[i];
-		if (c->len >= 1) {
-			cairo_rectangle(cr, floor(c->x - c->w) - 1, floor(c->y) - 1, ceil(c->w * 2) + 3,
-				ceil(c->len) + 3);
-		}
-	}
-	cairo_set_source_surface(cr, s->ice, 0, 0);
-	cairo_fill(cr);
 	icicle_glints(s, cr);
-	draw_ledges(s, cr, false);
 	draw_glints(s, cr, dt);
 	// the snow driving past and settling
 	int mid = (int)(MID_FLAKES * fmin(1, 0.2 + 0.55 * s->storm));
@@ -1659,30 +1954,33 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 			}
 			// a round flake, drawn out a little along its way when the wind drives it
 			float dx = f->x - f->px, dy = f->y - f->py, len = hypotf(dx, dy);
-			float tail = fminf(len * 0.35f, (float)(u * (2.5 + 5 * s->gust))) / fmaxf(len, 0.01f);
+			float tail = fminf(len * 0.35f, (float)(u * (2.5 + 5 * (s->gust + s->squall)))) / fmaxf(len, 0.01f);
 			cairo_move_to(cr, f->x - dx * tail, f->y - dy * tail);
 			cairo_line_to(cr, f->x + 0.01, f->y);
 		}
 		cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 		cairo_set_line_width(cr, fmax(1, u * (2 + pass * 1.3)));
 		cairo_set_source_rgba(cr, 0.97, 0.98, 1, 0.95 - pass * 0.12);
+		// small and moving: the cheaper edge is as good to the eye
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
 		cairo_stroke(cr);
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 	}
 	draw_falling(s, cr, dt);
-	// the drift at the bottom, in front of the taskbar
-	draw_ledges(s, cr, true);
-	// blowing snow close by, and the air turning white in the gusts
-	double fog1 = fmin(0.95, (0.08 + 0.55 * s->gust * build) * s->whiteout);
+	// blowing snow close by, and the air turning white in the gusts and squalls
+	double fog1 = fmin(0.95, (0.08 + 0.55 * s->gust * build + 0.6 * s->squall) * s->whiteout);
 	if (fog1 > 0.02) {
 		cairo_set_source_surface(cr, s->fog[1], fog_off[1], H - s->fog_h);
 		cairo_paint_with_alpha(cr, fog1);
 		cairo_set_source_surface(cr, s->fog[1], fog_off[1] - W, H - s->fog_h);
 		cairo_paint_with_alpha(cr, fog1);
 	}
-	double veil = fmin(0.5, (0.05 * s->storm + 0.16 * s->gust * build) * s->whiteout);
-	if (veil > 0.01) {
-		cairo_set_source_rgba(cr, 0.86, 0.9, 0.96, veil);
+	// thundersnow: a cold flash through the murk
+	if (flash > 0.02) {
+		cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+		cairo_set_source_rgba(cr, 0.5, 0.56, 0.75, 0.5 * flash);
 		cairo_paint(cr);
+		cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	}
 	// big soft flakes right in front, and now and then a crystal drifting by
 	int near = (int)(NEAR_FLAKES * fmin(1, 0.3 + 0.5 * s->storm));
@@ -1713,6 +2011,7 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 		cairo_set_source_surface(cr, s->bokeh[k], round(f->x) - half, round(f->y) - half);
 		cairo_paint_with_alpha(cr, 0.6);
 	}
+	cairo_restore(cr);
 	// flakes caught on the screen itself, melting into drops
 	if (saver_random() < dt * 0.3 * s->storm) {
 		for (int i = 0; i < LENS_MAX; i++) {
@@ -1755,8 +2054,8 @@ static void blizzard_draw(void *state, cairo_t *cr, int width, int height, doubl
 			cairo_pattern_destroy(p);
 		}
 	}
-	// the frost on the screen itself
-	if (atomic_load(&s->ready) && s->tiles && s->t > s->glass_start) {
+	// the frost and the cracks on the screen itself
+	if (atomic_load(&s->ready) && s->t > s->glass_start) {
 		cairo_new_path(cr);
 		for (int ty = 0; ty < s->tiles_h; ty++) {
 			for (int tx = 0; tx < s->tiles_w; tx++) {
@@ -1777,7 +2076,8 @@ static void blizzard_destroy(void *state) {
 	cairo_surface_destroy(s->winter);
 	cairo_surface_destroy(s->view);
 	cairo_surface_destroy(s->glass);
-	cairo_surface_destroy(s->ice);
+	cairo_surface_destroy(s->scene);
+	cairo_surface_destroy(s->next);
 	cairo_surface_destroy(s->fog[0]);
 	cairo_surface_destroy(s->fog[1]);
 	for (int k = 0; k < BOKEH_SIZES; k++) {
@@ -1794,10 +2094,9 @@ static void blizzard_destroy(void *state) {
 	free(s->cols);
 	free(s->tiles);
 	free(s->blurred);
-	if (atomic_load(&s->ready)) {
-		frost_free(&s->frost);
-		frost_free(&s->glass_frost);
-	}
+	frost_free(&s->frost);
+	frost_free(&s->glass_frost);
+	frost_free(&s->crust);
 	free(s);
 }
 
@@ -1834,6 +2133,16 @@ void saver_blizzard_stats(void *state, struct blizzard_stats *out) {
 	for (int i = 0; i < s->icicle_count; i++) {
 		out->icicle_length += s->icicles[i].len;
 	}
+	out->cracks = s->crack_count;
+	out->dark = s->dark;
+	if (s->bury) {
+		long plastered = 0, area = 0;
+		for (int i = 0; i < s->width * s->height; i++) {
+			area += s->crust.dens[i] > 0;
+			plastered += s->crust.dens[i] && s->crust.freeze[i] <= s->t;
+		}
+		out->plastered = area ? (double)plastered / area : 0;
+	}
 	if (s->frost_on) {
 		long frosted = 0, inside = 0, outside = 0;
 		for (int y = 0; y < s->height; y++) {
@@ -1861,6 +2170,7 @@ const struct saver saver_blizzard = {
 	.title = "Blizzard",
 	.description = "Snow piling up on the windows and the taskbar, icicles, frost over the glass",
 	.wants_desktop = true,
+	.covers = true,
 	.create = blizzard_create,
 	.draw = blizzard_draw,
 	.destroy = blizzard_destroy,

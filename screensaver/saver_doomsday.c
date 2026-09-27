@@ -63,8 +63,8 @@ static const struct saver_option doomsday_options[] = {
 		snow_labels, false, "kind=blizzard" },
 	{ "blizzard_frost", "Frost on the windows", "Ice flowers grow over the glass of the "
 		"windows and the screen", SAVER_TOGGLE, NULL, NULL, true, "kind=blizzard" },
-	{ "blizzard_bury", "Snowed-in taskbar", "A drift rises at the bottom of the screen and "
-		"buries the taskbar", SAVER_TOGGLE, NULL, NULL, true, "kind=blizzard" },
+	{ "blizzard_bury", "Snowed in", "A drift rises up the screen and snow plasters the "
+		"windows until all is buried", SAVER_TOGGLE, NULL, NULL, true, "kind=blizzard" },
 	{ 0 },
 };
 
@@ -74,6 +74,7 @@ const struct saver saver_doomsday = {
 	.description = "The end of the desktop: burnt down in Hellfire, drowned in a "
 		"Thunderstorm, or buried in a Blizzard",
 	.wants_desktop = true,
+	.covers = true,
 	.options = doomsday_options,
 	.create = doomsday_create,
 	.draw = doomsday_draw,

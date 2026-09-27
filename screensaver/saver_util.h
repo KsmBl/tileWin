@@ -84,6 +84,9 @@ struct blizzard_stats {
 	double storm;                    // how hard it snows now
 	bool fits;                       // no heap deeper than its room or where nothing shows
 	double deepest, deepest_x, deepest_y; // the deepest snow on a window, and its top
+	double plastered;                // the part of the windows and taskbars snowed over
+	int cracks;                      // in the glass of the screen
+	double dark;                     // how far the light has failed, 0 to 1
 };
 void saver_blizzard_stats(void *state, struct blizzard_stats *out);
 

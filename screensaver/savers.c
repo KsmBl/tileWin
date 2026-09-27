@@ -140,15 +140,17 @@ void saver_run_draw(struct saver_run *run, cairo_t *cr, double seconds) {
 	if (run->inner) {
 		target = cairo_create(run->inner);
 	}
-	cairo_save(target);
-	cairo_set_operator(target, CAIRO_OPERATOR_SOURCE);
-	if (run->saver->transparent) {
-		cairo_set_source_rgba(target, 0, 0, 0, 0);
-	} else {
-		cairo_set_source_rgb(target, 0, 0, 0);
+	if (!run->saver->covers) { // (a whole screen of nothing costs as much as a picture)
+		cairo_save(target);
+		cairo_set_operator(target, CAIRO_OPERATOR_SOURCE);
+		if (run->saver->transparent) {
+			cairo_set_source_rgba(target, 0, 0, 0, 0);
+		} else {
+			cairo_set_source_rgb(target, 0, 0, 0);
+		}
+		cairo_paint(target);
+		cairo_restore(target);
 	}
-	cairo_paint(target);
-	cairo_restore(target);
 	cairo_save(target);
 	run->saver->draw(run->state, target, run->inner_w, run->inner_h, dt);
 	cairo_restore(target);
