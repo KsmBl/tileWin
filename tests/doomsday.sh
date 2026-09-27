@@ -3,6 +3,7 @@
 #  - tilewin-screensaver --list shows Doomsday, not its kinds;
 #  - as a Blizzard, the teal wallpaper turns to dark, cold light at once, snow piles
 #    up on the title bar of the window, and frost grows over its glass;
+#  - as Decay the wallpaper yellows with age, as Jungle the light turns green;
 #  - as Hellfire it covers the desktop too, and "name thunderstorm", what the
 #    Thunderstorm was called on its own, still starts it;
 #  - moving the mouse ends each of them.
@@ -187,6 +188,29 @@ wall=$(mean 20 20 200 150)
 echo "Hellfire, 5 s: wallpaper $wall"
 [ "$wall" != "$wall_before" ] || fail "Hellfire left the wallpaper as it was"
 end_saver "Hellfire"
+
+saver_conf "name doomsday
+doomsday_kind decay
+doomsday_decay_pace fast"
+ipc screensaver start >/dev/null
+sleep 20
+running || fail "Decay did not start"
+wall=$(mean 20 20 200 150)
+echo "Decay, 20 s: wallpaper $wall"
+# teal has no red: yellowing like old paper brings some
+echo "$wall" | awk '{ exit !($1 > 15) }' || fail "Decay did not age the wallpaper"
+end_saver "Decay"
+
+saver_conf "name doomsday
+doomsday_kind jungle"
+ipc screensaver start >/dev/null
+sleep 8
+running || fail "Jungle did not start"
+wall=$(mean 20 20 200 150)
+echo "Jungle, 8 s: wallpaper $wall"
+# teal is as blue as green: under the canopy green wins
+echo "$wall" | awk '{ exit !($2 > $3 + 25) }' || fail "Jungle did not turn the light green"
+end_saver "Jungle"
 
 saver_conf "name thunderstorm"
 ipc screensaver start >/dev/null

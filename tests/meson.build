@@ -77,6 +77,20 @@ test(
 )
 
 test(
+	'doomsday-decay-jungle',
+	executable(
+		'test-doomsday',
+		'test_doomsday.c',
+		include_directories: [sway_inc, include_directories('../screensaver')],
+		link_with: [lib_savers, lib_sway_common],
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, math],
+	),
+	env: ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent'],
+	suite: 'unit',
+	timeout: 240,
+)
+
+test(
 	'reorder',
 	executable(
 		'test-reorder',
@@ -274,7 +288,7 @@ if gdk_pixbuf.found()
 		depends: [pointer_tool, count_content],
 		suite: 'gui',
 		is_parallel: false,
-		timeout: 180,
+		timeout: 240,
 	)
 
 	test(

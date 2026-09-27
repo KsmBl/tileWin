@@ -4,7 +4,8 @@
 /*
  * Doomsday: the end of the desktop, in the kind picked. Hellfire burns the
  * windows down, Thunderstorm drowns them in rain and lightning, Blizzard
- * buries them in snow and ice. Each kind is a saver of its own, run inside
+ * buries them in snow and ice, Decay lets time eat them to dust, and Jungle
+ * overgrows them. Each kind is a saver of its own, run inside
  * this one with the scaling and clearing it wants; their settings are
  * Doomsday's, "doomsday_<kind>_<setting>", shown for the kind picked.
  */
@@ -13,6 +14,8 @@ const struct saver *const doomsday_kinds[] = {
 	&saver_hellfire,
 	&saver_storm,
 	&saver_blizzard,
+	&saver_decay,
+	&saver_jungle,
 };
 
 const int doomsday_kind_count = sizeof(doomsday_kinds) / sizeof(doomsday_kinds[0]);
@@ -34,8 +37,13 @@ static void doomsday_destroy(void *state) {
 	saver_run_free(state);
 }
 
-static const char *const kind_values[] = { "hellfire", "thunderstorm", "blizzard", NULL };
-static const char *const kind_labels[] = { "Hellfire", "Thunderstorm", "Blizzard", NULL };
+static const char *const kind_values[] = { "hellfire", "thunderstorm", "blizzard", "decay",
+	"jungle", NULL };
+static const char *const kind_labels[] = { "Hellfire", "Thunderstorm", "Blizzard", "Decay",
+	"Jungle", NULL };
+static const char *const pace_values[] = { "normal", "slow", "fast", NULL };
+static const char *const pace_labels[] = { "Six minutes", "Twelve minutes", "Two and a half minutes",
+	NULL };
 static const char *const scraps_values[] = { "some", "few", "many", NULL };
 static const char *const scraps_labels[] = { "Some", "Few", "Many", NULL };
 static const char *const rain_values[] = { "heavy", "light", "downpour", NULL };
@@ -66,6 +74,16 @@ static const struct saver_option doomsday_options[] = {
 		"windows and the screen", SAVER_TOGGLE, NULL, NULL, true, "kind=blizzard" },
 	{ "blizzard_bury", "Snowed in", "A drift rises up the screen and snow plasters the "
 		"windows until all is buried", SAVER_TOGGLE, NULL, NULL, true, "kind=blizzard" },
+	{ "decay_pace", "Until all is dust", "How long time takes to eat everything", SAVER_CHOICE,
+		pace_values, pace_labels, false, "kind=decay" },
+	{ "decay_years", "Count the years", "The years going by, in a corner", SAVER_TOGGLE, NULL,
+		NULL, true, "kind=decay" },
+	{ "jungle_pace", "Until all is overgrown", "How long the jungle takes to cover everything",
+		SAVER_CHOICE, pace_values, pace_labels, false, "kind=jungle" },
+	{ "jungle_creatures", "Butterflies and fireflies", NULL, SAVER_TOGGLE, NULL, NULL, true,
+		"kind=jungle" },
+	{ "jungle_nights", "Days and nights", "Nights come, with fireflies and night flowers",
+		SAVER_TOGGLE, NULL, NULL, true, "kind=jungle" },
 	{ 0 },
 };
 
@@ -73,7 +91,7 @@ const struct saver saver_doomsday = {
 	.name = "doomsday",
 	.title = "Doomsday",
 	.description = "The end of the desktop: burnt down in Hellfire, drowned in a "
-		"Thunderstorm, or buried in a Blizzard",
+		"Thunderstorm, buried in a Blizzard, eaten by time in Decay, or overgrown by Jungle",
 	.wants_desktop = true,
 	.covers = true,
 	.options = doomsday_options,

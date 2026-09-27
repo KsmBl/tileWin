@@ -7,7 +7,8 @@
  * catches a saver that writes where it should not. Each kind of Doomsday is run
  * the same way. Then the settings of the savers: that their tables make sense,
  * that they are read as written (and by the names they had before), and that
- * the kinds of Doomsday are found by their old names but not listed. Last the
+ * the kinds of Doomsday (Hellfire, Thunderstorm, Blizzard, Decay, Jungle) are
+ * found by their own names but not listed. Last the
  * frames a second and CPU use any saver can show: read from taskbar.conf, and
  * drawn in the top left corner and nowhere else.
  */
@@ -18,7 +19,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include "savers.h"
+#include "saver_util.h"
 
 static int failures;
 
@@ -176,33 +177,33 @@ int main(int argc, char **argv) {
 		try_saver(saver, saver->name, options);
 	}
 
-	// Doomsday: each of its kinds, found by their old names, but not in the list
-	static const char *const kinds[] = { "hellfire", "thunderstorm", "blizzard" };
+	// Doomsday: each of its kinds, found by their own names, but not in the list
 	const struct saver *doomsday = saver_find("doomsday");
 	if (!doomsday) {
 		fail("doomsday", "is not there");
 		return 1;
 	}
-	for (int k = 0; k < 3; k++) {
-		const char *settings[] = { "doomsday_kind", kinds[k] };
+	for (int k = 0; k < doomsday_kind_count; k++) {
+		const char *kind = doomsday_kinds[k]->name;
+		const char *settings[] = { "doomsday_kind", kind };
 		struct saver_options o = options;
 		o.settings = settings;
 		o.setting_count = 2;
 		char name[64];
-		snprintf(name, sizeof(name), "doomsday (%s)", kinds[k]);
+		snprintf(name, sizeof(name), "doomsday (%s)", kind);
 		try_saver(doomsday, name, o);
-		const struct saver *old = saver_find(kinds[k]);
-		if (!old || strcmp(old->name, kinds[k]) != 0 || saver_listed(kinds[k]) != doomsday) {
-			fail(kinds[k], "is not found by its old name, or not shown as Doomsday");
+		const struct saver *old = saver_find(kind);
+		if (!old || strcmp(old->name, kind) != 0 || saver_listed(kind) != doomsday) {
+			fail(kind, "is not found by its old name, or not shown as Doomsday");
 		}
 		for (int i = 0; i < saver_count; i++) {
-			if (strcmp(savers[i]->name, kinds[k]) == 0) {
-				fail(kinds[k], "is in the list next to Doomsday");
+			if (strcmp(savers[i]->name, kind) == 0) {
+				fail(kind, "is in the list next to Doomsday");
 			}
 		}
 		// the settings of each kind are shown with it, and only with it
 		for (const struct saver_option *opt = doomsday->options; opt->key; opt++) {
-			bool mine = strncmp(opt->key, kinds[k], strlen(kinds[k])) == 0;
+			bool mine = strncmp(opt->key, kind, strlen(kind)) == 0;
 			if (strcmp(opt->key, "kind") != 0 && saver_option_shown(&o, doomsday, opt) != mine) {
 				fail(opt->key, "is shown with another kind of Doomsday, or not with its own");
 			}

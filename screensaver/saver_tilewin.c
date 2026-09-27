@@ -275,6 +275,136 @@ cairo_surface_t *saver_desktop(const struct saver_options *options, int width, i
 	return picture;
 }
 
+/* ---------- the desktop without the windows ---------- */
+
+struct bare {
+	cairo_surface_t *desktop;
+	int width, height;
+	const struct saver_window *wins, *bars;
+	int count, bar_count;
+	double margin;
+};
+
+/* Whether a point is on no window and no taskbar: desktop to be seen. */
+static bool bare_at(const struct bare *s, int x, int y) {
+	for (int i = 0; i < s->count; i++) {
+		const struct saver_window *b = &s->wins[i];
+		double m = s->margin;
+		if (x >= b->x - m && x < b->x + b->w + m && y >= b->y - m && y < b->y + b->h + m) {
+			return false;
+		}
+	}
+	for (int i = 0; i < s->bar_count; i++) {
+		const struct saver_window *b = &s->bars[i];
+		if (x >= b->x && x < b->x + b->w && y >= b->y && y < b->y + b->h) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+ * Whether a wallpaper is the one on the screen: compared with the picture where
+ * the desktop shows. Another program may draw its own over tileWin's (swaybg).
+ */
+static bool wallpaper_matches(const struct bare *s, cairo_surface_t *wall) {
+	cairo_surface_flush(s->desktop);
+	cairo_surface_flush(wall);
+	const uint32_t *a = (const uint32_t *)cairo_image_surface_get_data(s->desktop);
+	const uint32_t *b = (const uint32_t *)cairo_image_surface_get_data(wall);
+	int sa = cairo_image_surface_get_stride(s->desktop) / 4, sb = cairo_image_surface_get_stride(wall) / 4;
+	double diff = 0;
+	int n = 0;
+	for (int k = 0; k < 4000 && n < 400; k++) {
+		int x = (int)(saver_random() * s->width), y = (int)(saver_random() * s->height);
+		if (!bare_at(s, x, y)) {
+			continue;
+		}
+		uint32_t p = a[y * sa + x], q = b[y * sb + x];
+		diff += abs((int)((p >> 16) & 255) - (int)((q >> 16) & 255)) +
+			abs((int)((p >> 8) & 255) - (int)((q >> 8) & 255)) + abs((int)(p & 255) - (int)(q & 255));
+		n++;
+	}
+	return n < 20 || diff / n / 3 < 18; // desktop icons and the like differ a little
+}
+
+/* The colour of the desktop around a window (or taskbar), outside its shadow. */
+static void surrounding_colour(const struct bare *s, const struct saver_window *b, double rgb[3]) {
+	const uint32_t *px = (const uint32_t *)cairo_image_surface_get_data(s->desktop);
+	int stride = cairo_image_surface_get_stride(s->desktop) / 4;
+	double sum[3] = { 0 };
+	int n = 0;
+	for (int k = 0; k < 400; k++) {
+		// a point on a ring outside the window and its shadow
+		double f = k / 400.0, ring = s->margin + 4;
+		int x, y;
+		if (f < 0.25) {
+			x = (int)(b->x + b->w * f * 4); y = (int)(b->y - ring);
+		} else if (f < 0.5) {
+			x = (int)(b->x + b->w + ring); y = (int)(b->y + b->h * (f - 0.25) * 4);
+		} else if (f < 0.75) {
+			x = (int)(b->x + b->w * (f - 0.5) * 4); y = (int)(b->y + b->h + ring);
+		} else {
+			x = (int)(b->x - ring); y = (int)(b->y + b->h * (f - 0.75) * 4);
+		}
+		if (x < 0 || y < 0 || x >= s->width || y >= s->height || !bare_at(s, x, y)) {
+			continue;
+		}
+		uint32_t p = px[y * stride + x];
+		sum[0] += (p >> 16) & 255;
+		sum[1] += (p >> 8) & 255;
+		sum[2] += p & 255;
+		n++;
+	}
+	for (int k = 0; k < 3; k++) {
+		rgb[k] = n ? sum[k] / n / 255.0 : 0.12;
+	}
+}
+
+cairo_surface_t *saver_bare_desktop(const struct saver_options *options, cairo_surface_t *desktop,
+		int width, int height, const struct saver_window *wins, int count,
+		const struct saver_window *bars, int bar_count, double margin, bool real, bool no_bars) {
+	struct bare s = { desktop, width, height, wins, bars, count, bar_count, margin };
+	cairo_surface_t *empty = cairo_image_surface_create(CAIRO_FORMAT_RGB24, width, height);
+	cairo_t *cr = cairo_create(empty);
+	cairo_set_source_surface(cr, desktop, 0, 0);
+	cairo_paint(cr);
+	// where the windows stood, with the shadows around them, and the taskbars
+	for (int i = 0; i < count; i++) {
+		cairo_rectangle(cr, wins[i].x - margin, wins[i].y - margin, wins[i].w + 2 * margin,
+			wins[i].h + 2 * margin);
+	}
+	for (int i = 0; no_bars && i < bar_count; i++) {
+		cairo_rectangle(cr, bars[i].x, bars[i].y, bars[i].w, bars[i].h);
+	}
+	cairo_clip(cr);
+	cairo_surface_t *wall = real ? saver_wallpaper(options->output, width, height) : NULL;
+	if (wall && !wallpaper_matches(&s, wall)) {
+		cairo_surface_destroy(wall); // not the one on the screen
+		wall = NULL;
+	}
+	if (wall) {
+		cairo_set_source_surface(cr, wall, 0, 0);
+		cairo_paint(cr);
+		cairo_surface_destroy(wall);
+	} else if (!real) {
+		saver_fake_wallpaper(cr, width, height);
+	} else {
+		// no wallpaper known: each place in the colour of the desktop around it
+		cairo_reset_clip(cr);
+		for (int i = 0; i < count + (no_bars ? bar_count : 0); i++) {
+			const struct saver_window *b = i < count ? &wins[i] : &bars[i - count];
+			double m = i < count ? margin : 0, rgb[3];
+			surrounding_colour(&s, b, rgb);
+			cairo_rectangle(cr, b->x - m, b->y - m, b->w + 2 * m, b->h + 2 * m);
+			cairo_set_source_rgb(cr, rgb[0], rgb[1], rgb[2]);
+			cairo_fill(cr);
+		}
+	}
+	cairo_destroy(cr);
+	return empty;
+}
+
 /* ---------- the wallpaper ---------- */
 
 static void set_hex(cairo_pattern_t *p, double offset, const char *hex) {

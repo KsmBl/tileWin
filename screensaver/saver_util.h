@@ -59,6 +59,15 @@ cairo_surface_t *saver_desktop(const struct saver_options *options, int width, i
  * NULL without tileWin to ask (the preview).
  */
 cairo_surface_t *saver_wallpaper(const char *output, int width, int height);
+/*
+ * The desktop with the windows taken off (and the taskbars too with no_bars):
+ * where they stood, with margin around each for its shadow, the wallpaper
+ * tileWin reports when it is the one on the screen, or else the colour of the
+ * desktop around each; in the preview (not real) the stand-in wallpaper.
+ */
+cairo_surface_t *saver_bare_desktop(const struct saver_options *options, cairo_surface_t *desktop,
+	int width, int height, const struct saver_window *wins, int count,
+	const struct saver_window *bars, int bar_count, double margin, bool real, bool no_bars);
 /* The wallpaper of the windows of its own that savers bring without tileWin. */
 void saver_fake_wallpaper(cairo_t *cr, int width, int height);
 
@@ -69,7 +78,8 @@ extern const struct saver saver_starfield, saver_pipes, saver_flying;
 extern const struct saver saver_aurora, saver_wordclock, saver_tiling, saver_diggers,
 	saver_maze, saver_matrix, saver_ad, saver_gravity;
 /* Doomsday, and the kinds it runs, which are not in the list themselves. */
-extern const struct saver saver_doomsday, saver_hellfire, saver_storm, saver_blizzard;
+extern const struct saver saver_doomsday, saver_hellfire, saver_storm, saver_blizzard,
+	saver_decay, saver_jungle;
 extern const struct saver *const doomsday_kinds[];
 extern const int doomsday_kind_count;
 
@@ -89,5 +99,30 @@ struct blizzard_stats {
 	double dark;                     // how far the light has failed, 0 to 1
 };
 void saver_blizzard_stats(void *state, struct blizzard_stats *out);
+
+/* What Decay has done so far, for the tests. */
+struct decay_stats {
+	int pieces, cracks;              // the windows and taskbars were broken into
+	int fallen, resting, flying, shattered; // pieces off, at rest in the rubble, in the air
+	int standing;                    // windows and taskbars not all fallen yet
+	double rubble, dust;             // mean height at the bottom, pixels
+	double untouched;                // the part of the screen not aged at all yet
+	double progress;                 // to dust, 1 all dust
+	bool inside;                     // no piece off the sides or lost
+};
+void saver_decay_stats(void *state, struct decay_stats *out);
+
+/* What Jungle has grown so far, for the tests. */
+struct jungle_stats {
+	int vines, growing;              // vines planned or grown, and growing now
+	double length;                   // of all the vines together
+	long leaves, blooms;             // leaves grown and growing; flowers opened so far
+	int flowers, open, fronds;       // flowers, open now, giant fronds out
+	double moss;                     // the part of the screen mossed over
+	double covered;                  // the part covered by vines and leaves
+	double progress, night;          // to all overgrown; how dark it is
+	bool inside;                     // no butterfly lost
+};
+void saver_jungle_stats(void *state, struct jungle_stats *out);
 
 #endif
