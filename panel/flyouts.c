@@ -367,11 +367,60 @@ struct saved_net {
 	char *ssid;
 };
 
+/*
+ * How fast a wired link runs, as the card and the other end agreed on it:
+ * "1 Gbit/s, full duplex" from /sys/class/net/<device>/speed and duplex.
+ */
+static void wired_link_speed(const char *device, char *out, size_t size) {
+	out[0] = '\0';
+	if (!device || strchr(device, '/')) {
+		return;
+	}
+	char path[512], value[32];
+	// (a test points this at a directory of its own)
+	const char *root = getenv("TILEWIN_SYS_NET") ? getenv("TILEWIN_SYS_NET") : "/sys/class/net";
+	snprintf(path, sizeof(path), "%s/%s/speed", root, device);
+	FILE *f = fopen(path, "r");
+	int mbit = -1;
+	if (f) {
+		if (fgets(value, sizeof(value), f)) {
+			mbit = atoi(value);
+		}
+		fclose(f);
+	}
+	if (mbit <= 0) {
+		return; // down, or a card that does not tell (virtual ones, some USB)
+	}
+	char speed[24];
+	if (mbit >= 1000) {
+		snprintf(speed, sizeof(speed), "%g Gbit/s", mbit / 1000.0);
+	} else {
+		snprintf(speed, sizeof(speed), "%d Mbit/s", mbit);
+	}
+	snprintf(path, sizeof(path), "%s/%s/duplex", root, device);
+	f = fopen(path, "r");
+	value[0] = '\0';
+	if (f) {
+		if (!fgets(value, sizeof(value), f)) {
+			value[0] = '\0';
+		}
+		fclose(f);
+	}
+	value[strcspn(value, "\n")] = '\0';
+	if (strcmp(value, "full") == 0 || strcmp(value, "half") == 0) {
+		snprintf(out, size, "%s, %s duplex", speed, value);
+	} else {
+		snprintf(out, size, "%s", speed);
+	}
+}
+
 struct net_flyout {
 	struct flyout base; // first member
 	list_t *nets; // struct wifi_net *
 	char *wifi_device;
 	char *wired_connection;
+	char *wired_device;
+	char wired_speed[48]; // "1 Gbit/s, full duplex", empty when the card does not say
 	bool wired;
 	bool have_nmcli, wifi_enabled, loaded, rescanned;
 	char *expanded; // SSID of the expanded row
@@ -432,6 +481,9 @@ static void net_clear(struct net_flyout *f) {
 	f->nets->length = 0;
 	free(f->wifi_device);
 	free(f->wired_connection);
+	free(f->wired_device);
+	f->wired_device = NULL;
+	f->wired_speed[0] = '\0';
 	f->wifi_device = NULL;
 	f->wired_connection = NULL;
 	f->wired = false;
@@ -641,6 +693,8 @@ static void net_query_done(void *data, const char *output) {
 					strncmp(v[2], "connected", 9) == 0) {
 				f->wired = true;
 				f->wired_connection = strdup(v[3]);
+				f->wired_device = strdup(v[0]);
+				wired_link_speed(v[0], f->wired_speed, sizeof(f->wired_speed));
 			}
 		} else if (section == S_WIFI && fields->length >= 4 && v[3][0]) {
 			if (!asked_caps && f->wifi_device) {
@@ -1029,12 +1083,18 @@ static void net_render(struct popup *p, cairo_t *cr) {
 
 	struct wifi_net *active = net_active(f);
 	const char *title, *subtitle;
+	char wired_subtitle[80];
 	if (active) {
 		title = active->ssid;
 		subtitle = active->security[0] ? "Connected, secured" : "Connected";
 	} else if (f->wired) {
 		title = f->wired_connection && *f->wired_connection ? f->wired_connection : "Ethernet";
-		subtitle = "Connected";
+		if (f->wired_speed[0]) {
+			snprintf(wired_subtitle, sizeof(wired_subtitle), "Connected · %s", f->wired_speed);
+			subtitle = wired_subtitle;
+		} else {
+			subtitle = "Connected";
+		}
 	} else {
 		title = "Not connected";
 		subtitle = !f->loaded ? "Checking..." : f->have_nmcli ? "No network connection" :
