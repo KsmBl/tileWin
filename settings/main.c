@@ -516,7 +516,7 @@ static void build_window(struct settings *s) {
 			"doomsday end of the world apocalypse hellfire fire burn thunderstorm storm rain "
 			"lightning blizzard snow ice frost icicles winter decay time dust age cracks ruin "
 			"jungle plants vines leaves flowers moss butterflies gravity privacy falling matrix "
-			"microslop copilot ad commercial idle lock fps frames per second cpu usage "
+			"microslop copilot ad commercial idle lock fps frames per second cpu usage source code "
 			"password resume", screensaver_page_new },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "

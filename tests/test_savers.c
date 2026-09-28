@@ -182,6 +182,18 @@ int main(int argc, char **argv) {
 		try_saver(saver, saver->name, options);
 	}
 
+	// Matrix raining its own source code
+	const struct saver *matrix = saver_find("matrix");
+	if (matrix) {
+		const char *settings[] = { "matrix_characters", "code" };
+		struct saver_options o = options;
+		o.settings = settings;
+		o.setting_count = 2;
+		try_saver(matrix, "matrix (its own code)", o);
+	} else {
+		fail("matrix", "is not there");
+	}
+
 	// Doomsday: each of its kinds, found by their own names, but not in the list
 	const struct saver *doomsday = saver_find("doomsday");
 	if (!doomsday) {

@@ -32,6 +32,9 @@ screensaver_exe = executable(
 tilewin_savers_dir = join_paths(tilewin_datadir, 'screensavers')
 saver_shot_env = ['HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent', 'TILEWIN_SAVERS=']
 saver_modules = []
+# a file as a C string, for savers that show a text of the source tree
+embed_exe = executable('tilewin-embed', '../tools/embed.c', native: true)
+
 subdir('savers')
 subdir('example')
 

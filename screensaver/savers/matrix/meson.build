@@ -1,6 +1,13 @@
 # matrix: its module, and a picture of it for the settings
+# its own code, which it can rain down instead of the film's characters
+matrix_source = custom_target(
+	'matrix-source',
+	input: 'matrix.c',
+	output: 'matrix_source.h',
+	command: [embed_exe, '@INPUT@', '@OUTPUT@', 'matrix_source'],
+)
 saver_module = shared_module(
-	'saver', files('matrix.c'),
+	'saver', files('matrix.c'), matrix_source,
 	name_prefix: '',
 	include_directories: [sway_inc, saver_inc],
 	dependencies: saver_deps,
