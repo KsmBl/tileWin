@@ -13,6 +13,7 @@
 #include "sway/tw_priority.h"
 #include "sway/tree/container.h"
 #include "sway/tree/workspace.h"
+#include "sway/tree/root.h"
 #include "log.h"
 #include "stringop.h"
 #include "util.h"
@@ -920,5 +921,201 @@ struct cmd_results *cmd_lock_command(int argc, char **argv) {
 	}
 	free(config->tw_lock_command);
 	config->tw_lock_command = join_args(argv, argc);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* "end_task": kills the app of the window at once, as Windows' "End task". */
+struct cmd_results *cmd_end_task(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "end_task", EXPECTED_EQUAL_TO, 0))) {
+		return error;
+	}
+	struct sway_container *con = target_window();
+	if (!con) {
+		return cmd_results_new(CMD_FAILURE, "No window whose app to end");
+	}
+	char *err = NULL;
+	if (!tw_end_task(con->view, &err)) {
+		return result_from_error(err);
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_not_responding(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "not_responding", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_not_responding = parse_boolean(argv[0], config->tw_not_responding);
+	if (!config->reading) {
+		tw_hung_config_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* "30", "30s", "5m", "1h", or off / never / 0. */
+static int parse_seconds(const char *text) {
+	if (strcasecmp(text, "off") == 0 || strcasecmp(text, "never") == 0 ||
+			strcasecmp(text, "disable") == 0 || strcasecmp(text, "no") == 0) {
+		return 0;
+	}
+	char *end;
+	long v = strtol(text, &end, 10);
+	if (end == text || v < 0) {
+		return -1;
+	}
+	if (strcasecmp(end, "m") == 0 || strcasecmp(end, "min") == 0) {
+		v *= 60;
+	} else if (strcasecmp(end, "h") == 0) {
+		v *= 3600;
+	} else if (*end && strcasecmp(end, "s") != 0) {
+		return -1;
+	}
+	return v > 86400 ? 86400 : (int)v;
+}
+
+struct cmd_results *cmd_pause_minimized(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pause_minimized", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	int seconds = parse_seconds(argv[0]);
+	if (seconds < 0) {
+		return cmd_results_new(CMD_INVALID, "Expected off or a time, e.g. 30, 30s, 5m");
+	}
+	config->tw_pause_minimized = seconds;
+	if (!config->reading) {
+		tw_pause_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_pause_minimized_sound(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pause_minimized_sound", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "keep") == 0 || strcasecmp(argv[0], "running") == 0) {
+		config->tw_pause_keep_sound = true;
+	} else if (strcasecmp(argv[0], "pause") == 0) {
+		config->tw_pause_keep_sound = false;
+	} else {
+		return cmd_results_new(CMD_INVALID, "Expected 'pause_minimized_sound keep|pause'");
+	}
+	if (!config->reading) {
+		tw_pause_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* Adds apps to a list; "none" empties it (a config line per app is fine too). */
+static void add_apps(list_t *list, int argc, char **argv) {
+	for (int i = 0; i < argc; i++) {
+		if (strcasecmp(argv[i], "none") == 0) {
+			while (list->length) {
+				free(list->items[list->length - 1]);
+				list_del(list, list->length - 1);
+			}
+			continue;
+		}
+		list_add(list, strdup(argv[i]));
+	}
+}
+
+struct cmd_results *cmd_pause_minimized_except(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "pause_minimized_except", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	add_apps(config->tw_pause_except, argc, argv);
+	if (!config->reading) {
+		tw_pause_changed();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_remember_windows(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "remember_windows", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_remember_places = parse_boolean(argv[0], config->tw_remember_places);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_remember_windows_except(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "remember_windows_except", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	add_apps(config->tw_remember_except, argc, argv);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* "magnifier Alt": scrolling with that key held zooms the screen; off turns it off. */
+struct cmd_results *cmd_magnifier(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "magnifier", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	uint32_t mask = 0;
+	if (strcasecmp(argv[0], "off") != 0 && strcasecmp(argv[0], "none") != 0 &&
+			strcasecmp(argv[0], "disable") != 0) {
+		list_t *names = split_string(argv[0], "+");
+		for (int j = 0; j < names->length; j++) {
+			uint32_t mod = get_modifier_mask_by_name(names->items[j]);
+			if (!mod) {
+				list_free_items_and_destroy(names);
+				return cmd_results_new(CMD_INVALID, "Unknown modifier '%s', expected off or "
+					"Alt, Super, Ctrl, Shift (joined with +)", argv[0]);
+			}
+			mask |= mod;
+		}
+		list_free_items_and_destroy(names);
+	}
+	config->tw_magnifier_modifier = mask;
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* "magnify in|out|off|<factor>": zooms the screen around the pointer. */
+struct cmd_results *cmd_magnify(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "magnify", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	char *err = NULL;
+	if (!tw_magnify_command(argv[0], &err)) {
+		return result_from_error(err);
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+static bool has_id(struct sway_container *con, void *data) {
+	return con->node.id == *(size_t *)data;
+}
+
+/*
+ * "peek <con_id>|desktop|off": for a moment only that window (or only the
+ * desktop) is shown, the others as outlines of glass. The taskbar uses it
+ * while the pointer rests on a window's preview or on "Show desktop".
+ */
+struct cmd_results *cmd_peek(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "peek", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "off") == 0) {
+		tw_peek(NULL, false);
+	} else if (strcasecmp(argv[0], "desktop") == 0) {
+		tw_peek(NULL, true);
+	} else {
+		char *end;
+		size_t id = strtoull(argv[0], &end, 10);
+		struct sway_container *con = *end ? NULL : root_find_container(has_id, &id);
+		if (!con || !con->view) {
+			return cmd_results_new(CMD_INVALID, "Expected 'peek <window id>|desktop|off'");
+		}
+		tw_peek(con, false);
+	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }

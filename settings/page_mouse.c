@@ -73,7 +73,7 @@ struct mouse_page {
 	GPtrArray *cursor_themes; // char *
 	GtkWidget *theme_dd, *size_dd, *trail;
 	guint trail_timer;
-	GtkWidget *speed, *test_icon, *locate;
+	GtkWidget *speed, *test_icon, *locate, *magnifier;
 	GPtrArray *root_settings; // struct root_setting *
 	guint speed_timer;
 	gint64 last_test_click; // milliseconds, 0 when the next click is the first
@@ -420,6 +420,28 @@ static void on_locate(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	settings_command(p->s, "pointer_locate %s", value);
 }
 
+/* ---------- magnifier ---------- */
+
+static const char *const magnifier_values[] = { "Alt", "Super", "Ctrl", "Shift", "off", NULL };
+static const char *const magnifier_labels[] = { "Alt", "Super", "Ctrl", "Shift", "Off", NULL };
+
+static void on_magnifier(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct mouse_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->magnifier));
+	if (sel >= G_N_ELEMENTS(magnifier_values) - 1) {
+		return;
+	}
+	const char *value = magnifier_values[sel];
+	struct confdoc *d = common(p);
+	// Alt is what tileWin does without the line
+	confdoc_set(d, d->root, "magnifier", NULL, sel == 0 ? NULL : value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "magnifier %s", value);
+}
+
 /* ---------- pointer trail ---------- */
 
 static gboolean apply_trail(gpointer data) {
@@ -503,6 +525,18 @@ void mouse_page_refresh(struct settings *s) {
 			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->size_dd), i);
 		}
 	}
+	const char *magnifier = cstmt_arg(confdoc_child(common(p)->root, "magnifier", NULL), 0);
+	guint magnifier_sel = 0;
+	for (guint i = 0; magnifier && magnifier_values[i]; i++) {
+		if (g_ascii_strcasecmp(magnifier, magnifier_values[i]) == 0 ||
+				(i == 0 && g_ascii_strcasecmp(magnifier, "Mod1") == 0) ||
+				(i == 1 && g_ascii_strcasecmp(magnifier, "Mod4") == 0) ||
+				(i == 4 && (g_ascii_strcasecmp(magnifier, "none") == 0 ||
+				g_ascii_strcasecmp(magnifier, "disable") == 0))) {
+			magnifier_sel = i;
+		}
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->magnifier), magnifier_sel);
 	const char *trail = cstmt_arg(confdoc_child(common(p)->root, "pointer_trail", NULL), 0);
 	gtk_range_set_value(GTK_RANGE(p->trail), trail ? atoi(trail) : 0);
 	root_settings_refresh(p);
@@ -597,6 +631,13 @@ GtkWidget *mouse_page_new(struct settings *s) {
 	ui_row(cursor, "Show the pointer when Ctrl is tapped",
 		"Rings shrink onto the pointer, like on Windows. Ctrl held as part of a "
 		"shortcut or a Ctrl+click does nothing", p->locate);
+
+	GtkWidget *zoom = ui_group(content, "Magnifier", NULL);
+	p->magnifier = gtk_drop_down_new_from_strings(magnifier_labels);
+	g_signal_connect(p->magnifier, "notify::selected", G_CALLBACK(on_magnifier), p);
+	ui_row(zoom, "Zoom the screen with the scroll wheel while holding",
+		"The pointer stays in the middle of what is shown, so moving the mouse moves the "
+		"enlarged picture; scroll back all the way to leave it", p->magnifier);
 
 	GtkWidget *find = ui_group(content, "Finding the pointer", NULL);
 	root_setting_new(p, find, "pointer_shake", "Grow the pointer when the mouse is shaken",

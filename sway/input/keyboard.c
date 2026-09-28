@@ -10,6 +10,7 @@
 #include <wlr/types/wlr_keyboard_group.h>
 #include <xkbcommon/xkbcommon-names.h>
 #include "sway/tilewin.h"
+#include "sway/tree/view.h"
 #include "sway/commands.h"
 #include "sway/input/input-manager.h"
 #include "sway/input/keyboard.h"
@@ -635,6 +636,10 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 		wlr_seat_set_keyboard(wlr_seat, keyboard->wlr);
 		wlr_seat_keyboard_notify_key(wlr_seat, event->time_msec,
 				event->keycode, event->state);
+		struct wlr_surface *typed_into = wlr_seat->keyboard_state.focused_surface;
+		if (typed_into) {
+			tw_hung_poke(view_from_wlr_surface(typed_into)); // does it still answer?
+		}
 	}
 
 	free(device_identifier);

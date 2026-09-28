@@ -1214,6 +1214,10 @@ static void seat_set_workspace_focus(struct sway_seat *seat, struct sway_node *n
 	// the focused window's process first (focus_priority); on a desktop with none, none
 	tw_priority_focus(container && container->view ? container->view->pid : 0,
 		config->tw_focus_nice);
+	if (container && container->view) {
+		tw_pause_wake(container->view);
+		tw_hung_poke(container->view);
+	}
 
 	if (last_workspace && last_workspace != new_workspace) {
 		wlr_ext_workspace_handle_v1_set_active(last_workspace->ext_workspace,
@@ -1544,6 +1548,13 @@ void seat_pointer_notify_button(struct sway_seat *seat, uint32_t time_msec,
 		uint32_t button, enum wl_pointer_button_state state) {
 	seat->last_button_serial = wlr_seat_pointer_notify_button(seat->wlr_seat,
 			time_msec, button, state);
+	struct wlr_surface *clicked = seat->wlr_seat->pointer_state.focused_surface;
+	if (state == WL_POINTER_BUTTON_STATE_PRESSED && tw_peek_active()) {
+		tw_peek(NULL, false); // a click ends peeking, whatever it was on
+	}
+	if (state == WL_POINTER_BUTTON_STATE_PRESSED && clicked) {
+		tw_hung_poke(view_from_wlr_surface(clicked)); // does it still answer?
+	}
 }
 
 void seat_consider_warp_to_focus(struct sway_seat *seat) {

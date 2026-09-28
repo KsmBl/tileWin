@@ -770,6 +770,12 @@ static void handle_pointer_axis(struct sway_seat *seat,
 	char *dev_id = device ? input_device_get_identifier(device) : strdup("*");
 	uint32_t button = wl_axis_to_button(event);
 
+	// the magnifier (Alt + wheel) comes before bindings and the window
+	if (tw_magnify_axis(modifiers, event->orientation, event->delta, event->delta_discrete)) {
+		free(dev_id);
+		return;
+	}
+
 	// Handle mouse bindings - x11 mouse buttons 4-7 - press event
 	struct sway_binding *binding = NULL;
 	state_add_button(e, button);

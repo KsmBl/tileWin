@@ -400,7 +400,7 @@ static void arrange_container(struct sway_container *con,
 	// this container might have previously been in the scratchpad,
 	// make sure it's enabled for viewing
 	// a copy of the window is animated instead while it is hidden
-	wlr_scene_node_set_enabled(&con->scene_tree->node, !tw_animate_hides(con));
+	wlr_scene_node_set_enabled(&con->scene_tree->node, !tw_animate_hides(con) && !tw_peek_hides(con));
 
 	if (con->view && con->current.tw_deco) {
 		struct tw_insets in = tw_deco_insets(con->current.tw_maximized);
@@ -570,7 +570,8 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 		wlr_scene_node_set_position(&floater->scene_tree->node,
 			floater->current.x + tw_animate_workspace_dx(ws),
 			floater->current.y + tw_animate_workspace_dy(ws) + tw_animate_container_dy(floater));
-		wlr_scene_node_set_enabled(&floater->scene_tree->node, !tw_animate_hides(floater));
+		wlr_scene_node_set_enabled(&floater->scene_tree->node, !tw_animate_hides(floater) &&
+			!tw_peek_hides(floater));
 		wlr_scene_node_set_enabled(&floater->border.tree->node, true);
 
 		arrange_container(floater, floater->current.width, floater->current.height,
@@ -618,7 +619,8 @@ static void arrange_output(struct sway_output *output, int width, int height) {
 			struct sway_container *floater = child->current.floating->items[i];
 			wlr_scene_node_reparent(&floater->scene_tree->node, root->layers.floating);
 			wlr_scene_node_set_enabled(&floater->scene_tree->node,
-				activated && !floater->current.tw_minimized && !tw_animate_hides(floater));
+				activated && !floater->current.tw_minimized && !tw_animate_hides(floater) &&
+				!tw_peek_hides(floater));
 		}
 
 		if (activated) {

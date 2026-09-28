@@ -382,6 +382,8 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 json_object *tw_describe_state(void) {
 	json_object *obj = json_object_new_object();
 	json_object_object_add(obj, "mode", json_object_new_string(tw_mode_name(tw_mode)));
+	json_object_object_add(obj, "magnify", json_object_new_double(tw_magnify_level()));
+	json_object_object_add(obj, "peek", json_object_new_boolean(tw_peek_active()));
 	json_object_object_add(obj, "theme",
 		json_object_new_string(tw_theme ? tw_theme->name : ""));
 	for (int i = 0; i < 2; i++) {
@@ -429,6 +431,8 @@ void tw_after_reload(void) {
 	tw_power_config_changed();
 	tw_main_output_changed();
 	tw_priority_refresh(); // (a setting taken out of the config is off now)
+	tw_hung_config_changed();
+	tw_pause_changed();
 }
 
 static void mark_container_dirty(struct sway_container *con, void *data);

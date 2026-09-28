@@ -408,6 +408,7 @@ int main(int argc, char **argv) {
 			"If the cursor is invisible or flickers, set WLR_NO_HARDWARE_CURSORS=1.");
 	}
 
+	tw_pause_recover(); // apps a crashed tileWin left stopped
 	server_run(&server);
 
 shutdown:
@@ -415,6 +416,8 @@ shutdown:
 	tw_animate_shutdown();
 
 	tw_priority_forget(); // the focused window's process gets its nice value back
+	tw_pause_forget(); // and the stopped apps go on
+	tw_power_fini(); // its timers belong to the event loop server_fini ends
 	server_fini(&server);
 	root_destroy(root);
 	root = NULL;

@@ -214,6 +214,10 @@ void tw_minimize(struct sway_container *con, bool enable) {
 		arrange_workspace(ws);
 	}
 	ipc_event_window(con, enable ? "minimize" : "unminimize");
+	if (!enable) {
+		tw_pause_wake(con->view); // it draws again at once
+	}
+	tw_pause_changed();
 }
 
 struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap) {

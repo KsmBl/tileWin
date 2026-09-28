@@ -446,6 +446,10 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 		if (args) {
 			bar_handle_panel_command(panel, args);
 		}
+	} else if (strcmp(change, "not_responding") == 0) {
+		hungdialog_open(panel, jint(event, "con_id"), jstr(event, "title"), jstr(event, "app_id"));
+	} else if (strcmp(change, "responding") == 0) {
+		hungdialog_close(panel, jint(event, "con_id"));
 	} else if (strcmp(change, "window_menu") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

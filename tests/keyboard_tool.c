@@ -10,6 +10,8 @@
  *                          mods is ctrl, shift, ctrl+shift or none, and name
  *                          is a letter, a digit, "return", "tab", "escape" or
  *                          an arrow: "up", "down", "left", "right"
+ *   hold alt <ms>          holds Alt down that long (for a pointer tool that
+ *                          scrolls meanwhile), then lets go
  *
  * The modifiers have to be announced as well as pressed: a virtual keyboard
  * that only sends the key events leaves the compositor thinking nothing is
@@ -28,6 +30,7 @@
 
 #define MOD_SHIFT (1 << 0)
 #define MOD_CTRL (1 << 2)
+#define MOD_ALT (1 << 3)
 
 static struct zwp_virtual_keyboard_manager_v1 *manager;
 static struct wl_seat *seat;
@@ -168,6 +171,18 @@ int main(int argc, char **argv) {
 				return 2;
 			}
 			i += 2;
+		} else if (strcmp(argv[i], "hold") == 0 && i + 2 < argc &&
+				strcmp(argv[i + 1], "alt") == 0) {
+			zwp_virtual_keyboard_v1_key(keyboard, now_ms(), KEY_LEFTALT,
+				WL_KEYBOARD_KEY_STATE_PRESSED);
+			zwp_virtual_keyboard_v1_modifiers(keyboard, MOD_ALT, 0, 0, 0);
+			wl_display_flush(display);
+			rest(atoi(argv[i + 2]));
+			zwp_virtual_keyboard_v1_key(keyboard, now_ms(), KEY_LEFTALT,
+				WL_KEYBOARD_KEY_STATE_RELEASED);
+			zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, 0);
+			wl_display_flush(display);
+			i += 3;
 		} else if (strcmp(argv[i], "key") == 0 && i + 2 < argc) {
 			uint32_t mods = 0;
 			if (strstr(argv[i + 1], "ctrl")) {

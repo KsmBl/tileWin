@@ -24,6 +24,7 @@ struct window_page;
 struct datetime_page;
 struct desktop_page;
 struct screensaver_page;
+struct appwin_page;
 
 struct settings {
 	GtkApplication *app;
@@ -54,6 +55,7 @@ struct settings {
 	struct datetime_page *datetime_page;
 	struct desktop_page *desktop_page;
 	struct screensaver_page *screensaver_page;
+	struct appwin_page *appwin_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -74,6 +76,14 @@ struct tw_screen {
 };
 /* The screens in use, in the order tileWin lists them. */
 GPtrArray *tw_ipc_screens(void);
+/* A window that is open now, for picking its app. */
+struct tw_open_app {
+	char *id;    // Wayland app id, or X11 class
+	char *title;
+	bool x11;
+};
+/* One per app that has a window open, by title. */
+GPtrArray *tw_ipc_open_apps(void);
 
 /* main.c */
 void settings_status(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
@@ -225,5 +235,7 @@ GtkWidget *window_page_new(struct settings *s);
 GtkWidget *datetime_page_new(struct settings *s);
 void datetime_page_refresh(struct settings *s);
 void window_page_refresh(struct settings *s);
+GtkWidget *appwin_page_new(struct settings *s);
+void appwin_page_refresh(struct settings *s);
 
 #endif

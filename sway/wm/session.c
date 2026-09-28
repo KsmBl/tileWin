@@ -1008,9 +1008,9 @@ static void placement_free(struct placement *p) {
 	free(p);
 }
 
-void tw_session_apply_placement(struct sway_container *con) {
+bool tw_session_apply_placement(struct sway_container *con) {
 	if (!placements || !con->view) {
-		return;
+		return false;
 	}
 	const char *app_id = view_get_app_id(con->view);
 	if (!app_id) {
@@ -1036,6 +1036,7 @@ void tw_session_apply_placement(struct sway_container *con) {
 		// apps that hand over to another process (wrappers, single-instance apps)
 		found = by_app;
 	}
+	bool applied = found != NULL;
 	if (found) {
 		list_del(placements, list_find(placements, found));
 		if (found->workspace[0] && !strchr(found->workspace, '"') &&
@@ -1069,4 +1070,5 @@ void tw_session_apply_placement(struct sway_container *con) {
 		list_free(placements);
 		placements = NULL;
 	}
+	return applied;
 }

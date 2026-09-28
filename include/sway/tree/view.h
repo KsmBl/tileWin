@@ -128,6 +128,17 @@ struct sway_view {
 
 	enum sway_view_tearing_mode tearing_mode;
 	enum wp_tearing_control_v1_presentation_hint tearing_hint;
+
+	// tileWin (wm/hung.c): whether the app still answers
+	struct {
+		bool hung;      // it did not answer a ping in time: "(Not Responding)"
+		bool pinged;    // a ping of ours is waiting for its answer
+		int64_t pinged_ms;
+		int64_t close_ms; // when it was asked to close, 0 if not
+		bool listening;
+		struct wl_listener ping_timeout;
+		struct wlr_scene_rect *ghost; // the white veil over it while it hangs
+	} tw_hung;
 };
 
 struct sway_xdg_shell_view {

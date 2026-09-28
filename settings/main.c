@@ -204,6 +204,7 @@ void settings_refresh(struct settings *s) {
 	mouse_page_refresh(s);
 	animations_page_refresh(s);
 	window_page_refresh(s);
+	appwin_page_refresh(s);
 	screen_page_refresh(s);
 	sound_page_refresh(s);
 	datetime_page_refresh(s);
@@ -504,6 +505,10 @@ static void build_window(struct settings *s) {
 			"open close desktop switch", animations_page_new },
 		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
 			"double click focus follows mouse attention activation priority nice cpu fast", window_page_new },
+		{ "appwindows", "App windows", "not responding hang hung frozen freeze end task kill "
+			"minimized pause stop suspend battery efficiency sound remember position place size "
+			"open where rules for_window always on top maximized desktop workspace",
+			appwin_page_new },
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
 		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
@@ -523,7 +528,8 @@ static void build_window(struct settings *s) {
 		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
-		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap", mouse_page_new },
+		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap magnifier zoom "
+			"magnify enlarge", mouse_page_new },
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
 		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new },

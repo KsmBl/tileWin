@@ -1026,8 +1026,13 @@ static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, doubl
 	pd_text(cr, bar_font(panel), label, x, y, w, h, light ? 0xffffffff : 0x000000ff, PD_CENTER);
 }
 
-static void rundialog_render(struct popup *p, cairo_t *cr) {
-	struct rundialog *rd = p->data;
+/*
+ * The frame and title bar of a dialog in the theme's look, with a close button
+ * whose hotspot has close_kind. Leaves cr at the dialog's top left corner and
+ * gives its size and the top of the room below the title bar.
+ */
+static void draw_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, int close_kind,
+		int *width, int *height, double *content_y) {
 	struct panel *panel = p->panel;
 	enum pstyle style = panel_style(panel);
 	int M = popup_shadow_margin(panel);
@@ -1081,7 +1086,7 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 	default:
 		break;
 	}
-	pd_text(cr, bar_bold_font(panel), "Run", tx + 8, ty, tw - 40, title_h, title_fg, PD_LEFT);
+	pd_text(cr, bar_bold_font(panel), title, tx + 8, ty, tw - 40, title_h, title_fg, PD_LEFT);
 	// close button
 	double cbw = style == PS_CLASSIC ? 16 : 46;
 	double cbx = style == PS_CLASSIC ? w - 3 - 2 - 16 : w - cbw;
@@ -1102,9 +1107,22 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 	cairo_line_to(cr, cx - s, cy + s);
 	cairo_stroke(cr);
 	cairo_restore(cr);
-	psurface_add_hotspot(p->surface, M + cbx, M + cby, cbw, cbh, NULL, RUN_HS_CLOSE, 0, NULL);
+	psurface_add_hotspot(p->surface, M + cbx, M + cby, cbw, cbh, NULL, close_kind, 0, NULL);
+	*width = w;
+	*height = h;
+	*content_y = ty + title_h;
+}
 
-	double bx = 16, by = ty + title_h + 14;
+static void rundialog_render(struct popup *p, cairo_t *cr) {
+	struct rundialog *rd = p->data;
+	struct panel *panel = p->panel;
+	enum pstyle style = panel_style(panel);
+	int M = popup_shadow_margin(panel);
+	int w, h;
+	double top;
+	draw_dialog_chrome(p, cr, "Run", RUN_HS_CLOSE, &w, &h, &top);
+
+	double bx = 16, by = top + 14;
 	cairo_surface_t *icon = apps_icon(panel, "system-run", 32 * p->surface->scale);
 	if (!icon) {
 		icon = apps_icon(panel, "utilities-terminal", 32 * p->surface->scale);
@@ -1312,4 +1330,163 @@ void rundialog_open_with(struct panel *panel, struct panel_output *output,
 
 void rundialog_open(struct panel *panel, struct panel_output *output) {
 	rundialog_open_with(panel, output, NULL);
+}
+
+/* ---------- "not responding" ---------- */
+
+enum {
+	HUNG_HS_END = 1,
+	HUNG_HS_WAIT,
+	HUNG_HS_CLOSE,
+};
+
+struct hungdialog {
+	int64_t con_id;
+	char *title;
+	char *app_id;
+};
+
+static void hungdialog_render(struct popup *p, cairo_t *cr) {
+	struct hungdialog *hd = p->data;
+	struct panel *panel = p->panel;
+	enum pstyle style = panel_style(panel);
+	int M = popup_shadow_margin(panel);
+	int w, h;
+	double top;
+	draw_dialog_chrome(p, cr, hd->title[0] ? hd->title : "tileWin", HUNG_HS_CLOSE, &w, &h, &top);
+
+	double bx = 18, by = top + 18;
+	struct pwindow *win = panel_find_window(panel, hd->con_id);
+	cairo_surface_t *icon = win ? apps_icon_for_window(panel, win, 32 * p->surface->scale) :
+		NULL;
+	if (!icon && hd->app_id[0]) {
+		icon = apps_icon(panel, hd->app_id, 32 * p->surface->scale);
+	}
+	if (!icon) {
+		icon = apps_icon(panel, "dialog-warning", 32 * p->surface->scale);
+	}
+	pd_icon(cr, icon, bx, by, 32);
+
+	char *headline = format_str("%s is not responding", hd->title[0] ? hd->title : "The app");
+	cairo_save(cr);
+	PangoLayout *layout = pango_cairo_create_layout(cr);
+	PangoFontDescription *desc = pango_font_description_from_string(bar_font(panel));
+	pango_font_description_set_weight(desc, PANGO_WEIGHT_BOLD);
+	pango_font_description_set_size(desc, pango_font_description_get_size(desc) * 6 / 5);
+	pango_layout_set_font_description(layout, desc);
+	pango_font_description_free(desc);
+	pango_layout_set_width(layout, (w - bx - 64) * PANGO_SCALE);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+	pango_layout_set_height(layout, -2); // at most two lines
+	pango_layout_set_text(layout, headline, -1);
+	pd_color(cr, style == PS_LUNA || style == PS_AERO ? 0x1e3287ff : 0x000000ff);
+	cairo_move_to(cr, bx + 48, by);
+	pango_cairo_show_layout(cr, layout);
+	int lw, lh;
+	pango_layout_get_pixel_size(layout, &lw, &lh);
+	g_object_unref(layout);
+
+	layout = pango_cairo_create_layout(cr);
+	desc = pango_font_description_from_string(bar_font(panel));
+	pango_layout_set_font_description(layout, desc);
+	pango_font_description_free(desc);
+	pango_layout_set_width(layout, (w - bx - 64) * PANGO_SCALE);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
+	pango_layout_set_text(layout, "If you close the program, you might lose information. "
+		"You can also wait for it to respond.", -1);
+	pd_color(cr, 0x000000ff);
+	cairo_move_to(cr, bx + 48, by + lh + 8);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+	cairo_restore(cr);
+	free(headline);
+
+	double btn_h = style == PS_CLASSIC ? 23 : 28, btn_y = h - btn_h - 14;
+	double end_w = 150, wait_w = 96;
+	double wait_x = w - 16 - wait_w, end_x = wait_x - 8 - end_w;
+	draw_dialog_button(panel, cr, end_x, btn_y, end_w, btn_h, "Close the program", true);
+	draw_dialog_button(panel, cr, wait_x, btn_y, wait_w, btn_h, "Wait", false);
+	psurface_add_hotspot(p->surface, M + end_x, M + btn_y, end_w, btn_h, NULL, HUNG_HS_END, 0,
+		NULL);
+	psurface_add_hotspot(p->surface, M + wait_x, M + btn_y, wait_w, btn_h, NULL, HUNG_HS_WAIT, 0,
+		NULL);
+}
+
+static void hung_end_task(struct popup *p) {
+	struct hungdialog *hd = p->data;
+	struct deferred_command *dc = calloc(1, sizeof(*dc));
+	dc->panel = p->panel;
+	dc->command = format_str("[con_id=%lld] end_task", (long long)hd->con_id);
+	popup_close_later(p->panel);
+	loop_add_timer(p->panel->loop, 1, run_command_later, dc);
+}
+
+static void hungdialog_button(struct popup *p, double x, double y, uint32_t button,
+		bool pressed) {
+	if (pressed) {
+		return;
+	}
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (!hs) {
+		return;
+	}
+	if (hs->kind == HUNG_HS_END) {
+		hung_end_task(p);
+	} else if (hs->kind == HUNG_HS_WAIT || hs->kind == HUNG_HS_CLOSE) {
+		popup_close_later(p->panel);
+	}
+}
+
+static void hungdialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	if (sym == XKB_KEY_Escape) {
+		popup_close_later(p->panel);
+	} else if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
+		hung_end_task(p);
+	}
+}
+
+static void hungdialog_destroy(struct popup *p) {
+	struct hungdialog *hd = p->data;
+	free(hd->title);
+	free(hd->app_id);
+	free(hd);
+}
+
+static const struct popup_vtable hungdialog_vtable = {
+	.render = hungdialog_render,
+	.button = hungdialog_button,
+	.key = hungdialog_key,
+	.destroy = hungdialog_destroy,
+};
+
+void hungdialog_open(struct panel *panel, int64_t con_id, const char *title, const char *app_id) {
+	if (panel->popup && panel->popup->kind == POPUP_HUNG) {
+		struct hungdialog *open = panel->popup->data;
+		if (open->con_id == con_id) {
+			return;
+		}
+	}
+	struct panel_output *output = panel_focused_output(panel);
+	if (!output) {
+		return;
+	}
+	popup_close_all(panel);
+	struct hungdialog *hd = calloc(1, sizeof(*hd));
+	hd->con_id = con_id;
+	hd->title = strdup(title ? title : "");
+	hd->app_id = strdup(app_id ? app_id : "");
+	int M = popup_shadow_margin(panel);
+	int width = 470 + 2 * M, height = 180 + 2 * M;
+	popup_create(panel, POPUP_HUNG, NULL, output, (output->width - width) / 2,
+		(output->height - height) / 3, width, height, &hungdialog_vtable, hd);
+}
+
+void hungdialog_close(struct panel *panel, int64_t con_id) {
+	if (panel->popup && panel->popup->kind == POPUP_HUNG) {
+		struct hungdialog *hd = panel->popup->data;
+		if (hd->con_id == con_id) {
+			popup_close_later(panel);
+		}
+	}
 }

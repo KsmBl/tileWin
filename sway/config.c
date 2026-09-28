@@ -191,6 +191,12 @@ void free_config(struct sway_config *config) {
 	free(config->tw_lock_command);
 	free(config->tw_screensaver_command);
 	free(config->tw_main_output);
+	if (config->tw_pause_except) {
+		list_free_items_and_destroy(config->tw_pause_except);
+	}
+	if (config->tw_remember_except) {
+		list_free_items_and_destroy(config->tw_remember_except);
+	}
 	free((char *)config->current_config_path);
 	free((char *)config->current_config);
 	keysym_translation_state_destroy(config->keysym_translation_state);
@@ -316,6 +322,13 @@ static void config_defaults(struct sway_config *config) {
 	memset(config->tw_lid_action, 0, sizeof(config->tw_lid_action));
 	config->tw_power_key_action = TW_POWER_DEFAULT;
 	config->tw_lock_on_sleep = true;
+	config->tw_not_responding = true;
+	config->tw_pause_minimized = 0;
+	config->tw_pause_keep_sound = true;
+	config->tw_pause_except = create_list();
+	config->tw_remember_places = true;
+	config->tw_remember_except = create_list();
+	config->tw_magnifier_modifier = WLR_MODIFIER_ALT;
 	if (!(config->tw_lock_command = strdup("tilewin-lock -f"))) goto cleanup;
 	config->tw_xdg_autostart = true;
 	config->tw_animations = true;

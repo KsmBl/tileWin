@@ -644,10 +644,18 @@ static size_t append_prop(char *buffer, const char *value) {
  * Calculate and return the length of the formatted title.
  * If buffer is not NULL, also populate the buffer with the formatted title.
  */
+/* The app's title, or while it hangs the one saying so (view_update_title). */
+static const char *shown_title(struct sway_container *container) {
+	if (container->view->tw_hung.hung && container->title) {
+		return container->title;
+	}
+	return view_get_title(container->view);
+}
+
 size_t parse_title_format(struct sway_container *container, char *buffer) {
 	if (!container->title_format || strcmp(container->title_format, "%title") == 0) {
 		if (container->view) {
-			return append_prop(buffer, view_get_title(container->view));
+			return append_prop(buffer, shown_title(container));
 		} else {
 			return container_build_representation(container->pending.layout, container->pending.children, buffer);
 		}
@@ -664,7 +672,7 @@ size_t parse_title_format(struct sway_container *container, char *buffer) {
 
 		if (has_prefix(next, "%title")) {
 			if (container->view) {
-				len += append_prop(buffer, view_get_title(container->view));
+				len += append_prop(buffer, shown_title(container));
 			} else {
 				len += container_build_representation(container->pending.layout, container->pending.children, buffer);
 			}

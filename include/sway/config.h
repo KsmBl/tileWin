@@ -554,6 +554,13 @@ struct sway_config {
 	char *tw_screensaver_command; // NULL: tilewin-screensaver
 	bool tw_screensaver_lock; // lock when someone comes back to the screen saver
 	int tw_focus_nice;        // focus_priority: the nice value of the focused window, 0 off
+	bool tw_not_responding;   // apps that stop answering are shown as "(Not Responding)"
+	int tw_pause_minimized;   // seconds after which minimized apps stop, 0: never
+	bool tw_pause_keep_sound; // apps playing sound keep running
+	list_t *tw_pause_except;  // desktop ids / app ids that never stop
+	bool tw_remember_places;  // apps open where their window was last closed
+	list_t *tw_remember_except; // apps that do not
+	uint32_t tw_magnifier_modifier; // held while scrolling zooms the screen, 0: off
 	int tw_lid_action[2]; // enum tw_power_action with the lid closed, and docked
 	int tw_power_key_action; // enum tw_power_action
 	bool tw_lock_on_sleep; // lock the session before the computer sleeps or hibernates

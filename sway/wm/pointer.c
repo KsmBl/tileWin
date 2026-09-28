@@ -559,6 +559,7 @@ static int trail_tick(void *data) {
 
 /* Called for every movement of the pointer. */
 void tw_pointer_moved(struct sway_cursor *cursor) {
+	tw_magnify_pointer_moved();
 	if (cursor && cursor->cursor) {
 		shake_motion(cursor, cursor->cursor->x, cursor->cursor->y);
 	}

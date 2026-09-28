@@ -295,13 +295,15 @@ static int output_repaint_timer_handler(void *data) {
 	};
 
 	struct wlr_scene_output *scene_output = output->scene_output;
-	if (!wlr_scene_output_needs_frame(scene_output)) {
+	bool zoomed = tw_magnify_active(output); // (it moves with the pointer, not the scene)
+	if (!zoomed && !wlr_scene_output_needs_frame(scene_output)) {
 		return 0;
 	}
 
 	struct wlr_output_state pending;
 	wlr_output_state_init(&pending);
-	if (!wlr_scene_output_build_state(output->scene_output, &pending, &opts)) {
+	if (zoomed ? !tw_magnify_render(output, &pending, &opts) :
+			!wlr_scene_output_build_state(output->scene_output, &pending, &opts)) {
 		wlr_output_state_finish(&pending);
 		return 0;
 	}
@@ -442,6 +444,7 @@ void force_modeset(void) {
 }
 
 static void begin_destroy(struct sway_output *output) {
+	tw_magnify_output_destroyed(output);
 
 	wl_list_remove(&output->layout_destroy.link);
 	wl_list_remove(&output->destroy.link);

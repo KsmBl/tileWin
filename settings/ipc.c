@@ -232,3 +232,69 @@ GPtrArray *tw_ipc_screens(void) {
 	json_object_put(obj);
 	return screens;
 }
+
+static void open_app_free(gpointer data) {
+	struct tw_open_app *app = data;
+	g_free(app->id);
+	g_free(app->title);
+	g_free(app);
+}
+
+static void collect_apps(json_object *node, GPtrArray *apps) {
+	json_object *value;
+	const char *id = NULL;
+	bool x11 = false;
+	if (json_object_object_get_ex(node, "app_id", &value) && value) {
+		id = json_object_get_string(value);
+	}
+	if ((!id || !*id) && json_object_object_get_ex(node, "window_properties", &value)) {
+		json_object *cls;
+		if (json_object_object_get_ex(value, "class", &cls) && cls) {
+			id = json_object_get_string(cls);
+			x11 = true;
+		}
+	}
+	if (id && *id) {
+		bool known = false;
+		for (guint i = 0; i < apps->len && !known; i++) {
+			known = strcmp(((struct tw_open_app *)apps->pdata[i])->id, id) == 0;
+		}
+		if (!known) {
+			struct tw_open_app *app = g_new0(struct tw_open_app, 1);
+			app->id = g_strdup(id);
+			const char *title = json_object_object_get_ex(node, "name", &value) && value ?
+				json_object_get_string(value) : NULL;
+			app->title = g_strdup(title && *title ? title : id);
+			app->x11 = x11;
+			g_ptr_array_add(apps, app);
+		}
+	}
+	const char *lists[] = { "nodes", "floating_nodes" };
+	for (size_t l = 0; l < G_N_ELEMENTS(lists); l++) {
+		json_object *children;
+		if (json_object_object_get_ex(node, lists[l], &children) &&
+				json_object_is_type(children, json_type_array)) {
+			for (size_t i = 0; i < json_object_array_length(children); i++) {
+				collect_apps(json_object_array_get_idx(children, i), apps);
+			}
+		}
+	}
+}
+
+static gint open_app_cmp(gconstpointer a, gconstpointer b) {
+	const struct tw_open_app *x = *(struct tw_open_app **)a, *y = *(struct tw_open_app **)b;
+	return g_utf8_collate(x->title, y->title);
+}
+
+GPtrArray *tw_ipc_open_apps(void) {
+	GPtrArray *apps = g_ptr_array_new_with_free_func(open_app_free);
+	char *reply = tw_ipc_request(IPC_GET_TREE, "");
+	json_object *tree = reply ? json_tokener_parse(reply) : NULL;
+	g_free(reply);
+	if (tree) {
+		collect_apps(tree, apps);
+		json_object_put(tree);
+	}
+	g_ptr_array_sort(apps, open_app_cmp);
+	return apps;
+}

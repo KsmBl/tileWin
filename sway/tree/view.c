@@ -555,6 +555,8 @@ void view_set_tiled(struct sway_view *view, bool tiled) {
 }
 
 void view_close(struct sway_view *view) {
+	tw_pause_wake(view); // a stopped app could not close
+	tw_hung_close_requested(view);
 	if (view->impl->close) {
 		view->impl->close(view);
 	}
@@ -699,7 +701,8 @@ static struct sway_workspace *select_workspace(struct sway_view *view) {
 static void update_ext_foreign_toplevel(struct sway_view *view) {
 	struct wlr_ext_foreign_toplevel_handle_v1_state toplevel_state = {
 		.app_id = view_get_app_id(view),
-		.title = view_get_title(view),
+		.title = view->container && view->container->title ?
+			view->container->title : view_get_title(view),
 	};
 	wlr_ext_foreign_toplevel_handle_v1_update_state(view->ext_foreign_toplevel, &toplevel_state);
 }
@@ -967,8 +970,9 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 			container_floating_move_to_center(view->container);
 		}
 	}
-	if (!fullscreen) {
-		tw_session_apply_placement(view->container);
+	if (!fullscreen && !tw_session_apply_placement(view->container) &&
+			tw_mode == TW_MODE_WINDOW) {
+		tw_remember_apply(view->container);
 	}
 
 	if (config->popup_during_fullscreen == POPUP_LEAVE &&
@@ -1010,6 +1014,8 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	if (set_focus) {
 		input_manager_set_focus(&view->container->node);
 	}
+	tw_hung_view_mapped(view);
+	tw_pause_changed();
 
 	if (view->ext_foreign_toplevel) {
 		update_ext_foreign_toplevel(view);
@@ -1027,6 +1033,10 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 
 void view_unmap(struct sway_view *view) {
 	wl_signal_emit_mutable(&view->events.unmap, view);
+	tw_remember_view_closing(view);
+	tw_hung_view_unmapped(view);
+	tw_pause_wake(view);
+	tw_pause_changed();
 	tw_animate_close(view->container);
 
 	view->executed_criteria->length = 0;
@@ -1092,6 +1102,7 @@ void view_update_size(struct sway_view *view) {
 
 void view_center_and_clip_surface(struct sway_view *view) {
 	struct sway_container *con = view->container;
+	tw_hung_arrange(view);
 	if (tw_container_fills_slot(con)) {
 		tw_update_content_fill(con);
 		return;
@@ -1170,11 +1181,13 @@ void view_update_app_id(struct sway_view *view) {
 }
 
 void view_update_title(struct sway_view *view, bool force) {
-	const char *title = view_get_title(view);
+	char *shown = tw_hung_title(view, view_get_title(view));
+	const char *title = shown;
 
 	if (!force) {
 		if (title && view->container->title &&
 				strcmp(title, view->container->title) == 0) {
+			free(shown);
 			return;
 		}
 		if (!title && !view->container->title) {
@@ -1184,12 +1197,14 @@ void view_update_title(struct sway_view *view, bool force) {
 
 	free(view->container->title);
 	free(view->container->formatted_title);
+	view->container->title = title ? strdup(title) : NULL;
 
 	size_t len = parse_title_format(view->container, NULL);
 
 	if (len) {
 		char *buffer = calloc(len + 1, sizeof(char));
 		if (!sway_assert(buffer, "Unable to allocate title string")) {
+			free(shown);
 			return;
 		}
 
@@ -1198,8 +1213,6 @@ void view_update_title(struct sway_view *view, bool force) {
 	} else {
 		view->container->formatted_title = NULL;
 	}
-
-	view->container->title = title ? strdup(title) : NULL;
 
 	// Update title after the global font height is updated
 	if (view->container->title_bar.title_text && len) {
@@ -1219,6 +1232,7 @@ void view_update_title(struct sway_view *view, bool force) {
 	if (view->ext_foreign_toplevel) {
 		update_ext_foreign_toplevel(view);
 	}
+	free(shown);
 }
 
 bool view_is_visible(struct sway_view *view) {

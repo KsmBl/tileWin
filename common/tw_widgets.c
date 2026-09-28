@@ -190,6 +190,14 @@ static const struct tw_widget_option opts_taskbar[] = {
 	{ "button_width", "Button width", "Pixels", NULL },
 	{ "thumbnails", "Preview on hover", "A live picture of the window above the button",
 		choice_yes_no },
+	{ "peek", "Peek at windows", "Resting on a preview shows only that window, the others as "
+		"outlines of glass", choice_yes_no },
+	{ 0 },
+};
+static const struct tw_widget_option opts_showdesktop[] = {
+	{ "width", "Width", "Pixels", NULL },
+	{ "peek", "Peek at the desktop", "Resting on the button shows the desktop through the "
+		"windows", choice_yes_no },
 	{ 0 },
 };
 static const struct tw_widget_option opts_search[] = {
@@ -299,7 +307,8 @@ const struct tw_widget_info tw_widgets[] = {
 		BOTH, opts_notifications, styles_plain },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode",
 		BOTH, opts_none, styles_plain },
-	{ "showdesktop", "Show desktop", "Minimizes all windows", BOTH, opts_width, styles_plain },
+	{ "showdesktop", "Show desktop", "Minimizes all windows", BOTH, opts_showdesktop,
+		styles_plain },
 	// the layout helpers only make sense between other widgets on the taskbar
 	{ "separator", "Separator", "A thin line", TW_WIDGET_TASKBAR, opts_width, NULL },
 	{ "spacer", "Spacer", "Empty space", TW_WIDGET_TASKBAR, opts_width, NULL },

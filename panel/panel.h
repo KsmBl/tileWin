@@ -467,6 +467,7 @@ enum popup_kind {
 	POPUP_SNIP,
 	POPUP_CLIPBOARD,
 	POPUP_INFO,
+	POPUP_HUNG,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -482,6 +483,10 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 /* shutdown.c: the shut down dialog of the theme */
 void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool logoff);
 void rundialog_open(struct panel *panel, struct panel_output *output);
+/* "<title> is not responding": end the app or wait for it (Windows' dialog). */
+void hungdialog_open(struct panel *panel, int64_t con_id, const char *title, const char *app_id);
+/* The app answers again (or is gone): its dialog closes. */
+void hungdialog_close(struct panel *panel, int64_t con_id);
 /* The same with the box already filled, e.g. with a file that was browsed to. */
 void rundialog_open_with(struct panel *panel, struct panel_output *output,
 		const char *prefill);
@@ -619,6 +624,13 @@ void thumbnails_list_bound(struct panel *panel);
 /* Shows previews instead of a tooltip; false if the hotspot has none. */
 bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *hs);
 void thumbnails_hide_later(struct panel *panel);
+/*
+ * Peek (thumbnails.c): only one window, "<con_id>", or the "desktop" shown,
+ * the other windows as outlines, after delay_ms; NULL ends it at once.
+ */
+void panel_peek(struct panel *panel, const char *what, int delay_ms);
+/* What is peeked at now ("" for nothing). */
+const char *panel_peeking(void);
 bool thumbnails_visible(void);
 void thumbnails_fini(struct panel *panel);
 

@@ -316,6 +316,7 @@ void pointer_motion(struct sway_cursor *cursor, uint32_t time_msec,
 		dy = sy_confined - sy;
 	}
 
+	tw_magnify_scale_motion(&dx, &dy); // finer while the screen is zoomed
 	wlr_cursor_move(cursor->cursor, device, dx, dy);
 	tw_pointer_moved(cursor);
 

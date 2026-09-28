@@ -28,6 +28,8 @@
 #define MAX_THUMBS 6
 #define REFRESH_MS 1000
 #define HIDE_MS 250
+#define PEEK_MS 500      // resting on a preview this long shows only its window
+#define PEEK_NEXT_MS 120 // and moving on to the next one while peeking
 
 struct handle {
 	struct ext_foreign_toplevel_handle_v1 *handle;
@@ -70,7 +72,52 @@ static struct {
 	struct loop_timer *hide_timer, *op_timer;
 	enum op op;
 	int64_t op_id;
+	bool peek; // resting on a preview peeks at its window
 } tn;
+
+/* ---------- peek ---------- */
+
+static struct {
+	struct loop_timer *timer;
+	struct panel *panel;
+	char wanted[32], shown[32]; // "<con_id>", "desktop" or "" for none
+} pk;
+
+static void peek_fire(void *data) {
+	pk.timer = NULL;
+	if (strcmp(pk.wanted, pk.shown) != 0 && pk.panel) {
+		ipc_panel_commandf(pk.panel, "peek %s", pk.wanted[0] ? pk.wanted : "off");
+		snprintf(pk.shown, sizeof(pk.shown), "%s", pk.wanted);
+	}
+}
+
+void panel_peek(struct panel *panel, const char *what, int delay_ms) {
+	if (pk.timer) {
+		loop_remove_timer(panel->loop, pk.timer);
+		pk.timer = NULL;
+	}
+	pk.panel = panel;
+	snprintf(pk.wanted, sizeof(pk.wanted), "%s", what ? what : "");
+	if (strcmp(pk.wanted, pk.shown) == 0) {
+		return;
+	}
+	if (!what || delay_ms <= 0) {
+		peek_fire(NULL);
+	} else {
+		pk.timer = loop_add_timer(panel->loop, delay_ms, peek_fire, NULL);
+	}
+}
+
+const char *panel_peeking(void) {
+	return pk.shown;
+}
+
+/* Ends peeking at a window of the previews (not at the desktop). */
+static void peek_end(struct panel *panel) {
+	if (strcmp(pk.wanted, "desktop") != 0 || strcmp(pk.shown, "desktop") != 0) {
+		panel_peek(panel, NULL, 0);
+	}
+}
 
 /* ---------- foreign toplevel handles ---------- */
 
@@ -364,6 +411,9 @@ static void thumb_free(struct thumb *t) {
 /* ---------- the previews ---------- */
 
 static void hide_now(void) {
+	if (tn.panel) {
+		peek_end(tn.panel);
+	}
 	if (tn.hide_timer) {
 		loop_remove_timer(tn.panel->loop, tn.hide_timer);
 		tn.hide_timer = NULL;
@@ -455,6 +505,7 @@ static void run_op(void *data) {
 	tn.op_timer = NULL;
 	struct panel *panel = tn.panel;
 	struct pwindow *win = panel_find_window(panel, tn.op_id);
+	peek_end(panel); // the window picked shows as it is
 	if (win && tn.op == OP_CLOSE) {
 		ipc_panel_commandf(panel, "[con_id=%lld] kill", (long long)win->id);
 	} else if (win && tn.op == OP_ACTIVATE) {
@@ -474,9 +525,26 @@ static void pointer_motion(struct psurface *s, double x, double y) {
 		tn.hide_timer = NULL;
 	}
 	psurface_set_dirty(s);
+	if (!tn.peek || tn.op_timer) {
+		return;
+	}
+	int64_t over = 0;
+	for (int i = 0; i < tn.count; i++) {
+		if (pbox_contains(&tn.thumbs[i].box, x, y)) {
+			over = tn.thumbs[i].con_id;
+		}
+	}
+	if (over) {
+		char id[32];
+		snprintf(id, sizeof(id), "%lld", (long long)over);
+		panel_peek(s->panel, id, panel_peeking()[0] ? PEEK_NEXT_MS : PEEK_MS);
+	} else {
+		peek_end(s->panel);
+	}
 }
 
 static void pointer_leave(struct psurface *s) {
+	peek_end(s->panel);
 	tn.hover = false;
 	psurface_set_dirty(s);
 	thumbnails_hide_later(s->panel);
@@ -533,6 +601,8 @@ bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *
 	}
 	bool enabled = widget_conf_bool(hs->widget, "thumbnails",
 		tw_theme_bool(panel->theme, "taskbar.thumbnails", true));
+	tn.peek = widget_conf_bool(hs->widget, "peek", tw_theme_bool(panel->theme, "taskbar.peek",
+		true));
 	struct pwindow *win = panel_find_window(panel, hs->id);
 	if (!enabled || !win || !bar->output || !panel->toplevel_capture || !panel->copy_capture) {
 		return false;
@@ -589,6 +659,10 @@ bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *
 }
 
 void thumbnails_fini(struct panel *panel) {
+	if (pk.timer) {
+		loop_remove_timer(panel->loop, pk.timer);
+		pk.timer = NULL;
+	}
 	if (tn.op_timer) {
 		loop_remove_timer(panel->loop, tn.op_timer);
 		tn.op_timer = NULL;

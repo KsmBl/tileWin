@@ -65,6 +65,10 @@ static void show_tooltip(void *data) {
 	if (!source || !hs->widget || !hs->widget->impl->tooltip || panel->popup) {
 		return;
 	}
+	if (hs->widget->impl == &widget_showdesktop && widget_conf_bool(hs->widget, "peek",
+			tw_theme_bool(panel->theme, "taskbar.peek", true))) {
+		panel_peek(panel, "desktop", 0); // resting on "Show desktop" shows it for a moment
+	}
 	if (thumbnails_show(panel, source, hs)) {
 		destroy_tooltip_surface(panel);
 		return;
@@ -151,6 +155,9 @@ void tooltip_schedule(struct panel *panel, struct psurface *s, struct hotspot *h
 }
 
 void tooltip_cancel(struct panel *panel) {
+	if (strcmp(panel_peeking(), "desktop") == 0) {
+		panel_peek(panel, NULL, 0); // left "Show desktop"
+	}
 	if (panel->tooltip_timer) {
 		loop_remove_timer(panel->loop, panel->tooltip_timer);
 		panel->tooltip_timer = NULL;

@@ -12,6 +12,7 @@
 #include "sway/tree/arrange.h"
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
+#include "sway/tilewin.h"
 #include "sway/tree/workspace.h"
 #include "list.h"
 #include "log.h"
@@ -155,6 +156,7 @@ void root_scratchpad_remove_container(struct sway_container *con) {
 }
 
 void root_scratchpad_show(struct sway_container *con) {
+	tw_pause_changed();
 	struct sway_seat *seat = input_manager_current_seat();
 	struct sway_workspace *new_ws = seat_get_focused_workspace(seat);
 	if (!new_ws) {
@@ -210,6 +212,7 @@ static void disable_fullscreen(struct sway_container *con, void *data) {
 }
 
 void root_scratchpad_hide(struct sway_container *con) {
+	tw_pause_changed();
 	struct sway_seat *seat = input_manager_current_seat();
 	struct sway_node *focus = seat_get_focus_inactive(seat, &root->node);
 	struct sway_workspace *ws = con->pending.workspace;

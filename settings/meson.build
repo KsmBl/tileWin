@@ -7,6 +7,7 @@ executable(
 		'page_account.c',
 		'page_animations.c',
 		'page_apps.c',
+		'page_appwindows.c',
 		'page_bluetooth.c',
 		'page_datetime.c',
 		'page_desktop.c',

@@ -96,6 +96,13 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Theme icons in other apps:** Thunar, Dolphin, Nautilus, file dialogs and other GTK, KDE and Qt apps show the icons of the theme too, e.g. Windows XP folders and files (see [Icons](#icons)).
 - **Themes:** switch with `tilewin-theme set <name>`. Create your own themes, inheriting from the built-in ones.
 - **Dark mode:** `tilewin-theme scheme dark` (or the switch in tileWin Settings) gives every theme dark title bars, menus, flyouts and start menu, and switches GTK, GNOME (and Qt apps through the desktop portal) and KDE apps to dark as well.
+- **Apps behind the windows** (the App windows page of the settings):
+  - **Not responding, like on Windows:** an app that gives no answer within five seconds after you click, type into, focus or close its window gets "(Not Responding)" in its title and on the taskbar, and its window turns pale. Closing it then brings up "… is not responding" with **Close the program** (ends it at once, `end_task`) and **Wait**. It all goes away as soon as the app answers. Apps are only asked when you do something with their window, so an idle desktop wakes nothing.
+  - **Minimized apps stop** (`pause_minimized 5m`, off by default): an app all of whose windows are minimized is stopped (SIGSTOP, together with the programs it started) after that long, so it takes no processor time or battery, and goes on the moment one of its windows is shown, focused or closed. Terminals and apps running a shell, apps with a window of another process of theirs shown, apps keeping the screen on, apps playing sound (`pause_minimized_sound keep`) and apps in `pause_minimized_except` keep running. If tileWin itself ends without letting them go on, the next tileWin does.
+  - **Apps open where they were closed** (`remember_windows`, on by default): the first window of an app opens on the screen, at the place and in the size its window had when it was closed last, maximized or snapped if it was. Dialogs, windows of a fixed size and apps in `remember_windows_except` open as new windows do.
+  - **Window rules:** for one app, keep it on top, open it maximized, minimized, full screen or on a given desktop, let it float in tile mode or make it see-through; the settings write them as `for_window` lines.
+- **Peek** like Aero Peek: resting the pointer on a window's preview above the taskbar shows only that window, the others as outlines of glass (a minimized one shows where it would open); resting on "Show desktop" shows the desktop. `peek no` on the `taskbar` or `showdesktop` widget turns it off.
+- **Magnifier:** hold Alt and turn the scroll wheel to zoom the screen in and out around the pointer, up to 32 times. The pointer stays in the middle of what is shown, so moving the mouse moves the enlarged picture, and it moves more finely the more it is zoomed; past the screen's edge it is dark. `magnifier Super` takes another key, `magnifier off` turns it off, `magnify in|out|off|<factor>` does it from a binding.
 - **Session restore:** the apps open at shutdown or logout start again at the next login, on the same workspace and position. Terminals (xfce4-terminal, GNOME Terminal, Konsole, kitty, Alacritty, foot, …) reopen in the directory their shell was in, and file managers (Thunar, Dolphin, Nautilus, Nemo, Caja, PCManFM) reopen the folder that was shown; tileWin switches Thunar, Dolphin and Nemo to show the full path in the window title for this. Apps that save their own state (browsers, editors) bring back their content. Turn it off with `session_restore no`.
 - **Reload without logging out:**
   - `reload`: config.
@@ -392,6 +399,16 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `pointer_shake_rate <percent>` | How fast it grows and shrinks again, in percent per second, 10 to 5000 (default 400) |
 | `pointer_shake_shakes <count>` | Changes of direction per second before it starts growing (default 6) |
 | `pointer_locate theme\|enable\|disable` | Tapping Ctrl on its own draws rings that shrink onto the pointer; `theme` (default) leaves it to `pointer { locate }` of the theme |
+| `not_responding enable\|disable` | Show apps that do not answer as "(Not Responding)" and offer to end them when they are closed (default enable) |
+| `end_task` | Ends the app of the window at once (SIGKILL), as "Close the program" of the not-responding dialog does; `[con_id=…] end_task` for another window |
+| `pause_minimized off\|<seconds>\|<n>m` | Stop apps all of whose windows have been minimized that long, until one is shown again (default off) |
+| `pause_minimized_sound keep\|pause` | Whether minimized apps playing sound keep running (default keep; asks `pactl`) |
+| `pause_minimized_except <app>...` | Apps that never stop, by desktop id (`firefox.desktop`) or app id; `none` empties the list |
+| `remember_windows enable\|disable` | Apps open where their window was last closed (default enable) |
+| `remember_windows_except <app>...` | Apps that open as new windows do; `none` empties the list |
+| `peek <con_id>\|desktop\|off` | Shows only that window, or only the desktop, the other windows as outlines, until `peek off` or a click (the taskbar uses it) |
+| `magnifier Alt\|Super\|Ctrl\|Shift\|off` | The key that zooms the screen with the scroll wheel (default Alt) |
+| `magnify in\|out\|off\|<factor>` | Zooms the screen around the pointer, 1 to 32 |
 | `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off) |
 | `double_click_time <ms>` | How long after the first click the second one still makes a double-click, in title bars, on window frames and on the desktop (default 400) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
@@ -470,7 +487,7 @@ menu taskbar {
 | Widget | Options |
 |---|---|
 | `start` | `label`, `width` |
-| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`) |
+| `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`), `peek yes\|no` (resting on a preview shows only its window; theme key `taskbar.peek`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]` |
 | `workspaces` | (none) |
 | `title` | `max_width`; click for the window: its desktop, screen and process, and Minimize, Maximize and Close |
@@ -492,7 +509,7 @@ The usage widgets (`cpu`, `memory`, `gpu`, `net`, `storage`, `power`) all take `
 | `brightness` | (none; scroll changes it via brightnessctl) |
 | `keyboard` | (none); click for the layouts to pick from, middle click switches to the next one straight away |
 | `modeswitch` | (none) |
-| `showdesktop` | `width` |
+| `showdesktop` | `width`, `peek yes\|no` (resting on it shows the desktop through the windows) |
 | `search` | `label`, `width` |
 | `separator` | `width` |
 | `spacer` | `width <px>\|expand` |

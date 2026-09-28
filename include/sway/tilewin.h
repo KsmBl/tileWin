@@ -341,6 +341,65 @@ void tw_pointer_moved(struct sway_cursor *cursor);
 void tw_pointer_trail_changed(void);
 void tw_pointer_fini(void);
 
+/* hung.c: apps that stop answering ("(Not Responding)", like on Windows) */
+/* The user did something with the window: ask the app whether it still answers. */
+void tw_hung_poke(struct sway_view *view);
+void tw_hung_view_mapped(struct sway_view *view);
+void tw_hung_view_unmapped(struct sway_view *view);
+/* The window is asked to close; while it hangs the taskbar offers to end it. */
+void tw_hung_close_requested(struct sway_view *view);
+/* The size of the veil over a hanging window follows the window. */
+void tw_hung_arrange(struct sway_view *view);
+/* The title shown for a view: its own, with "(Not Responding)" while it hangs. */
+char *tw_hung_title(struct sway_view *view, const char *title);
+/* Kills the app of a window at once ("end_task"); false with a reason if it may not. */
+bool tw_end_task(struct sway_view *view, char **error);
+void tw_hung_config_changed(void);
+
+/* pause.c: apps whose windows are all minimized stop after a while (SIGSTOP) */
+/* Windows were minimized, shown, opened or closed: look again, soon. */
+void tw_pause_changed(void);
+/* The app of this window must run now (it is shown, closed or ended). */
+void tw_pause_wake(struct sway_view *view);
+bool tw_pause_is_paused(struct sway_view *view);
+/* The app is in a list of apps: desktop ids ("firefox.desktop") or app ids. */
+bool tw_app_in_list(list_t *list, const char *app_id);
+/* At start: the apps a tileWin before (that crashed) left stopped go on. */
+void tw_pause_recover(void);
+/* Every paused app goes on, e.g. when tileWin ends. */
+void tw_pause_forget(void);
+
+/* remember.c: each app opens where its window was last closed */
+void tw_remember_view_closing(struct sway_view *view);
+/* A new window: true if it was put where its app's window was last. */
+bool tw_remember_apply(struct sway_container *con);
+
+/* peek.c: looking at one window or the desktop through the others (Aero Peek) */
+/* con NULL with desktop true shows the desktop; both off ends peeking. */
+void tw_peek(struct sway_container *con, bool desktop);
+bool tw_peek_active(void);
+/* The window is hidden while peeking at another one or the desktop. */
+bool tw_peek_hides(struct sway_container *con);
+void tw_peek_container_destroyed(struct sway_container *con);
+
+/* magnify.c: the screen zoomed around the pointer (Alt + scroll wheel) */
+/* A scroll with the modifier held: true when it zoomed and goes no further. */
+bool tw_magnify_axis(uint32_t modifiers, int orientation, double delta,
+		int32_t delta_discrete);
+/* "magnify in|out|off|<factor>" */
+bool tw_magnify_command(const char *arg, char **error);
+/* Relative pointer motion is made smaller while zoomed in, for precise pointing. */
+void tw_magnify_scale_motion(double *dx, double *dy);
+void tw_magnify_pointer_moved(void);
+/* Renders the zoomed picture of an output; false if it is not zoomed. */
+struct wlr_output_state;
+struct wlr_scene_output_state_options;
+bool tw_magnify_render(struct sway_output *output, struct wlr_output_state *state,
+		const struct wlr_scene_output_state_options *options);
+bool tw_magnify_active(struct sway_output *output);
+void tw_magnify_output_destroyed(struct sway_output *output);
+double tw_magnify_level(void);
+
 /* session.c */
 void tw_panel_start(void);
 /* Starts tilewin-nightlight, which keeps the night light colors. */
@@ -410,7 +469,8 @@ bool tw_restart(bool relaunch_apps, bool force_exec, char **error);
 /* Remembers the file tileWin was started from, to notice a new one later. */
 void tw_record_binary(void);
 void tw_session_restore(void);
-void tw_session_apply_placement(struct sway_container *con);
+/* Puts a window where the session had it; false if it had none of it. */
+bool tw_session_apply_placement(struct sway_container *con);
 /* Windows changed; the session is saved shortly afterwards. */
 void tw_session_changed(void);
 /* Saves the session now, e.g. when logging out with apps still running. */
