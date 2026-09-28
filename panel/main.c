@@ -86,6 +86,24 @@ struct panel_output *panel_focused_output(struct panel *p) {
 	return first;
 }
 
+struct panel_output *panel_main_output(struct panel *p) {
+	struct panel_output *output, *with_bar = NULL;
+	wl_list_for_each(output, &p->outputs, link) {
+		if (!output->ready || !output->bar) {
+			continue;
+		}
+		if (p->state.main_output && output->name &&
+				strcmp(output->name, p->state.main_output) == 0) {
+			return output;
+		}
+		if (!with_bar) {
+			with_bar = output;
+		}
+	}
+	// the main display has no taskbar: the first screen with one, then any
+	return with_bar ? with_bar : panel_focused_output(p);
+}
+
 struct panel_seat *panel_first_seat(struct panel *p) {
 	if (wl_list_empty(&p->seats)) {
 		return NULL;

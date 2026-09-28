@@ -1013,15 +1013,6 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->delay_spin = gtk_spin_button_new_with_range(0, 5000, 100);
 	g_signal_connect(p->delay_spin, "value-changed", G_CALLBACK(on_delay_changed), p);
 	ui_row(general, "Tooltip delay", "Milliseconds", p->delay_spin);
-	p->screens_dd = gtk_drop_down_new_from_strings((const char *const[]){ "Every screen",
-		"Only the main display", "The screens picked below", NULL });
-	g_signal_connect(p->screens_dd, "notify::selected", G_CALLBACK(on_screens), p);
-	ui_row(general, "Show the taskbar on", "The main display is set on the Screen page",
-		p->screens_dd);
-	p->screen_checks = g_ptr_array_new();
-	p->screens_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-	p->screens_row = ui_row(general, "Screens with a taskbar", NULL, p->screens_box);
-	screens_refresh(p);
 
 	GtkWidget *layout = ui_group(content, "Layout",
 		"tileWin keeps a separate taskbar layout for window mode and for tile mode.");
@@ -1041,6 +1032,7 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	ui_row(layout, "Height", "Pixels; 0 uses the theme's height", p->height_spin);
 	ui_taskbar_key(s, p->root_settings, layout, "theme_layout", "Let the theme bring its own layout",
 		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
+
 
 	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);
 	ui_taskbar_key(s, p->root_settings, clipboard, "clipboard_history", "Remember what was copied",
@@ -1101,6 +1093,17 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->quick->row_icon = quick_row_icon;
 
 	menus_section_attach(s, content);
+	GtkWidget *screens = ui_group(content, "Screens",
+		"Which screens have a taskbar.");
+	p->screens_dd = gtk_drop_down_new_from_strings((const char *const[]){ "Every screen",
+		"Only the main display", "The screens picked below", NULL });
+	g_signal_connect(p->screens_dd, "notify::selected", G_CALLBACK(on_screens), p);
+	ui_row(screens, "Show the taskbar on", "The main display is set on the Screen page",
+		p->screens_dd);
+	p->screen_checks = g_ptr_array_new();
+	p->screens_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	p->screens_row = ui_row(screens, "Screens with a taskbar", NULL, p->screens_box);
+	screens_refresh(p);
 
 	s->taskbar_page = p;
 	rebuild_all(p);

@@ -4,7 +4,9 @@
 #    icons is drawn on that screen, not on the main one;
 #  - "outputs main" in taskbar.conf gives only the main display a taskbar,
 #    and the default gives every screen one;
-#  - "panel identify" shows the number of each screen on it.
+#  - "panel identify" shows the number of each screen on it;
+#  - the Super key ("panel startmenu toggle") opens the Start menu on the main
+#    display, also while another screen has the focus.
 #
 # usage: multi_screen_panel.sh <build dir> <source dir>
 set -u
@@ -109,6 +111,15 @@ sleep 0.8
 [ "$(pixel 1920 300)" != "$wall" ] || fail "identify shows nothing on the second screen"
 sleep 3
 [ "$(pixel 1920 300)" = "$wall" ] || fail "the numbers of identify do not go away"
+
+# the Start menu from the keyboard, on the main display
+ipc focus output HEADLESS-2 >/dev/null
+ipc panel startmenu toggle >/dev/null
+sleep 1
+[ "$(pixel 60 400)" != "$wall" ] || fail "the Start menu does not open on the main display"
+[ "$(pixel 1340 400)" = "$wall" ] || fail "the Start menu opens on the focused screen"
+ipc panel startmenu close >/dev/null
+sleep 0.5
 
 # only the main display gets a taskbar
 sed -i 's/^# outputs \*.*/outputs main/' "$XDG_CONFIG_HOME/tileWin/taskbar.conf"

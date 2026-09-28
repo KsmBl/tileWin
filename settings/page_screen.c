@@ -60,6 +60,8 @@ struct screen_page {
 	int drag_display;
 	double drag_start_x, drag_start_y;
 	int drag_orig_x, drag_orig_y;
+	double drag_scale, drag_off_x, drag_off_y; // the preview keeps its scale while dragging
+	bool dragging;
 
 	GtkWidget *brightness_scale;
 	char *backlight; // /sys/class/backlight/<name>
@@ -74,6 +76,9 @@ struct screen_page {
 	GtkWidget *lock_entry;
 	GtkWidget *lock_on_sleep_switch;
 	guint lock_timer;
+
+	// "Align with a grid": a grid over every screen, moved until it runs on straight
+	struct grid_tool *grid;
 
 	// the "keep these settings?" question
 	GPtrArray *previous; // struct display * before the change
@@ -707,6 +712,11 @@ struct layout_box {
 };
 
 static void layout_box(struct screen_page *p, int width, int height, struct layout_box *box) {
+	if (p->dragging) {
+		// the box does not grow and shrink under the pointer while a screen moves
+		*box = (struct layout_box){ p->drag_scale, p->drag_off_x, p->drag_off_y };
+		return;
+	}
 	int min_x = INT_MAX, min_y = INT_MAX, max_x = INT_MIN, max_y = INT_MIN;
 	for (guint i = 0; i < p->displays->len; i++) {
 		struct display *d = p->displays->pdata[i];
@@ -779,6 +789,47 @@ static int display_at(struct screen_page *p, double px, double py) {
 	return -1;
 }
 
+/* The nearest of the candidates within reach, or the value itself. */
+static int nearest(int value, const int *candidates, int n, double reach) {
+	int best = value;
+	double best_d = reach;
+	for (int i = 0; i < n; i++) {
+		double dist = fabs((double)candidates[i] - value);
+		if (dist < best_d) {
+			best_d = dist;
+			best = candidates[i];
+		}
+	}
+	return best;
+}
+
+/*
+ * While a screen is dragged, its edges are pulled onto the edges of the
+ * others close by: side by side or one above the other, and lined up at the
+ * tops, bottoms, left or right edges or the middles.
+ */
+static void magnet(struct screen_page *p, struct display *d, double reach) {
+	int xs[64], ys[64], nx = 0, ny = 0;
+	for (guint i = 0; i < p->displays->len && nx < 60; i++) {
+		struct display *o = p->displays->pdata[i];
+		if (o == d || !o->active) {
+			continue;
+		}
+		xs[nx++] = o->x + o->width;                   // right of it
+		xs[nx++] = o->x - d->width;                   // left of it
+		xs[nx++] = o->x;                              // left edges lined up
+		xs[nx++] = o->x + o->width - d->width;        // right edges lined up
+		xs[nx++] = o->x + (o->width - d->width) / 2;  // middles
+		ys[ny++] = o->y + o->height;                  // below it
+		ys[ny++] = o->y - d->height;                  // above it
+		ys[ny++] = o->y;                              // tops lined up
+		ys[ny++] = o->y + o->height - d->height;      // bottoms lined up
+		ys[ny++] = o->y + (o->height - d->height) / 2;
+	}
+	d->x = nearest(d->x, xs, nx, reach);
+	d->y = nearest(d->y, ys, ny, reach);
+}
+
 static void on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer data) {
 	struct screen_page *p = data;
 	p->drag_display = display_at(p, x, y);
@@ -789,6 +840,13 @@ static void on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer 
 	struct display *d = selected_display(p);
 	p->drag_orig_x = d->x;
 	p->drag_orig_y = d->y;
+	struct layout_box box;
+	layout_box(p, gtk_widget_get_width(p->arrangement), gtk_widget_get_height(p->arrangement),
+		&box);
+	p->drag_scale = box.scale;
+	p->drag_off_x = box.off_x;
+	p->drag_off_y = box.off_y;
+	p->dragging = true;
 	rebuild_display_rows(p);
 }
 
@@ -803,6 +861,7 @@ static void on_drag_update(GtkGestureDrag *gesture, double dx, double dy, gpoint
 	struct display *d = p->displays->pdata[p->drag_display];
 	d->x = p->drag_orig_x + dx / box.scale;
 	d->y = p->drag_orig_y + dy / box.scale;
+	magnet(p, d, 14 / box.scale); // 14 pixels of the preview
 	gtk_widget_queue_draw(p->arrangement);
 }
 
@@ -865,6 +924,7 @@ static void on_drag_end(GtkGestureDrag *gesture, double dx, double dy, gpointer 
 	}
 	struct display *d = p->displays->pdata[p->drag_display];
 	p->drag_display = -1;
+	p->dragging = false;
 	if (fabs(dx) < 3 && fabs(dy) < 3) {
 		d->x = p->drag_orig_x;
 		d->y = p->drag_orig_y;
@@ -947,6 +1007,311 @@ static void on_align(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	p->updating = true;
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), 0);
 	p->updating = false;
+}
+
+/* ---------- aligning with a grid ---------- */
+
+/*
+ * A window over each screen shows one grid drawn in the coordinates of the
+ * whole layout: lines every 50 pixels, stronger every 250, colored bands
+ * between them, and diagonals. Where two screens meet, the lines only run
+ * on straight across the bezels when the screens sit in the layout as they
+ * stand on the desk. Dragging the grid of a screen (or the arrow keys, with
+ * Shift ten at a time) moves that screen in the layout until they do. Enter
+ * or Done keeps it, Escape or Cancel puts everything back.
+ */
+
+#define GRID_STEP 50
+#define GRID_MAJOR 5
+
+struct grid_window {
+	struct grid_tool *tool;
+	GtkWidget *window, *area;
+	int display; // index in p->displays
+};
+
+struct grid_tool {
+	struct screen_page *p;
+	GPtrArray *windows; // struct grid_window *
+	GPtrArray *before;  // struct display *, to put back
+	int drag_x, drag_y; // the screen's place when the drag began
+	bool closing;
+};
+
+static void grid_redraw(struct grid_tool *t) {
+	for (guint i = 0; i < t->windows->len; i++) {
+		struct grid_window *gw = t->windows->pdata[i];
+		gtk_widget_queue_draw(gw->area);
+	}
+}
+
+static void band_color(cairo_t *cr, int major, double alpha) {
+	static const double colors[][3] = {
+		{ 0.90, 0.30, 0.30 }, { 0.95, 0.65, 0.20 }, { 0.90, 0.85, 0.25 }, { 0.35, 0.80, 0.35 },
+		{ 0.25, 0.70, 0.90 }, { 0.45, 0.45, 0.95 }, { 0.80, 0.40, 0.85 },
+	};
+	int n = (int)(sizeof(colors) / sizeof(colors[0]));
+	int k = ((major % n) + n) % n;
+	cairo_set_source_rgba(cr, colors[k][0], colors[k][1], colors[k][2], alpha);
+}
+
+static int floor_div(int a, int b) {
+	return a >= 0 ? a / b : -((-a + b - 1) / b);
+}
+
+static void draw_grid(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
+	struct grid_window *gw = data;
+	struct screen_page *p = gw->tool->p;
+	struct display *d = p->displays->pdata[gw->display];
+	cairo_set_source_rgb(cr, 0.06, 0.07, 0.09);
+	cairo_paint(cr);
+	int major = GRID_STEP * GRID_MAJOR;
+	// colored bands between the strong lines, across the whole layout
+	for (int k = floor_div(d->y, major); k * major < d->y + height; k++) {
+		band_color(cr, k, 0.16);
+		cairo_rectangle(cr, 0, k * major - d->y, width, major);
+		cairo_fill(cr);
+	}
+	// diagonals: they show an offset along both axes at once
+	cairo_set_line_width(cr, 1);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.13);
+	for (int k = floor_div(d->x + d->y, 2 * GRID_STEP) - 1;
+			k * 2 * GRID_STEP < d->x + d->y + width + height + 2 * GRID_STEP; k++) {
+		double c = k * 2 * GRID_STEP - d->x - d->y; // x + y = c on this screen
+		cairo_move_to(cr, c, 0);
+		cairo_line_to(cr, c - height, height);
+	}
+	cairo_stroke(cr);
+	// the lines
+	for (int axis = 0; axis < 2; axis++) {
+		int origin = axis ? d->y : d->x, size = axis ? height : width;
+		for (int k = floor_div(origin, GRID_STEP); k * GRID_STEP <= origin + size; k++) {
+			double at = k * GRID_STEP - origin + 0.5;
+			bool strong = k % GRID_MAJOR == 0;
+			if (strong) {
+				band_color(cr, floor_div(k * GRID_STEP, major), 0.95);
+			} else {
+				cairo_set_source_rgba(cr, 1, 1, 1, 0.35);
+			}
+			cairo_set_line_width(cr, strong ? 3 : 1);
+			if (axis) {
+				cairo_move_to(cr, 0, at);
+				cairo_line_to(cr, width, at);
+			} else {
+				cairo_move_to(cr, at, 0);
+				cairo_line_to(cr, at, height);
+			}
+			cairo_stroke(cr);
+			if (strong && axis) {
+				// the height in the layout, at both sides, to tell the lines apart
+				char label[24];
+				snprintf(label, sizeof(label), "%d", k * GRID_STEP);
+				cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+					CAIRO_FONT_WEIGHT_BOLD);
+				cairo_set_font_size(cr, 15);
+				cairo_text_extents_t ext;
+				cairo_text_extents(cr, label, &ext);
+				cairo_move_to(cr, 8, at - 6);
+				cairo_show_text(cr, label);
+				cairo_move_to(cr, width - ext.x_advance - 8, at - 6);
+				cairo_show_text(cr, label);
+			}
+		}
+	}
+	// which screen this is
+	char number[16];
+	snprintf(number, sizeof(number), "%d", gw->display + 1);
+	cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+	cairo_set_font_size(cr, MIN(width, height) * 0.22);
+	cairo_text_extents_t ext;
+	cairo_text_extents(cr, number, &ext);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.22);
+	cairo_move_to(cr, (width - ext.width) / 2 - ext.x_bearing,
+		(height - ext.height) / 2 - ext.y_bearing);
+	cairo_show_text(cr, number);
+}
+
+static void grid_close(struct grid_tool *t, bool keep) {
+	if (t->closing) {
+		return;
+	}
+	t->closing = true;
+	struct screen_page *p = t->p;
+	if (keep) {
+		// still touching each other, and starting at 0,0
+		for (guint i = 0; i < p->displays->len; i++) {
+			struct display *d = p->displays->pdata[i];
+			if (d->active) {
+				snap_display(p, d);
+			}
+		}
+		for (guint i = 0; i < p->displays->len; i++) {
+			struct display *d = p->displays->pdata[i];
+			if (d->active) {
+				apply_display(p, d);
+			}
+		}
+		save_displays(p);
+		settings_status(p->s, "Kept the new arrangement of the screens");
+	} else {
+		g_ptr_array_unref(p->displays);
+		p->displays = g_ptr_array_ref(t->before);
+	}
+	for (guint i = 0; i < t->windows->len; i++) {
+		struct grid_window *gw = t->windows->pdata[i];
+		gtk_window_destroy(GTK_WINDOW(gw->window));
+		g_free(gw);
+	}
+	g_ptr_array_free(t->windows, TRUE);
+	g_ptr_array_unref(t->before);
+	p->grid = NULL;
+	g_free(t);
+	rebuild_display_rows(p);
+}
+
+static void on_grid_done(GtkButton *button, gpointer data) {
+	grid_close(data, true);
+}
+
+static void on_grid_cancel(GtkButton *button, gpointer data) {
+	grid_close(data, false);
+}
+
+static void grid_move(struct grid_window *gw, int dx, int dy) {
+	struct display *d = gw->tool->p->displays->pdata[gw->display];
+	d->x += dx;
+	d->y += dy;
+	grid_redraw(gw->tool);
+}
+
+static gboolean on_grid_key(GtkEventControllerKey *key, guint keyval, guint keycode,
+		GdkModifierType state, gpointer data) {
+	struct grid_window *gw = data;
+	int step = state & GDK_SHIFT_MASK ? 10 : 1;
+	// the arrow moves the lines on this screen that way, so the screen goes the other
+	switch (keyval) {
+	case GDK_KEY_Up:
+		grid_move(gw, 0, step);
+		return TRUE;
+	case GDK_KEY_Down:
+		grid_move(gw, 0, -step);
+		return TRUE;
+	case GDK_KEY_Left:
+		grid_move(gw, step, 0);
+		return TRUE;
+	case GDK_KEY_Right:
+		grid_move(gw, -step, 0);
+		return TRUE;
+	case GDK_KEY_Return:
+	case GDK_KEY_KP_Enter:
+		grid_close(gw->tool, true);
+		return TRUE;
+	case GDK_KEY_Escape:
+		grid_close(gw->tool, false);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static void on_grid_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer data) {
+	struct grid_window *gw = data;
+	struct display *d = gw->tool->p->displays->pdata[gw->display];
+	gw->tool->drag_x = d->x;
+	gw->tool->drag_y = d->y;
+}
+
+static void on_grid_drag_update(GtkGestureDrag *gesture, double dx, double dy, gpointer data) {
+	struct grid_window *gw = data;
+	struct display *d = gw->tool->p->displays->pdata[gw->display];
+	// the lines follow the pointer: the screen moves the other way in the layout
+	d->x = gw->tool->drag_x - (int)round(dx);
+	d->y = gw->tool->drag_y - (int)round(dy);
+	grid_redraw(gw->tool);
+}
+
+static void on_grid_align(GtkButton *button, gpointer data) {
+	struct screen_page *p = data;
+	if (p->grid) {
+		return;
+	}
+	GListModel *monitors = gdk_display_get_monitors(gdk_display_get_default());
+	struct grid_tool *t = g_new0(struct grid_tool, 1);
+	t->p = p;
+	t->windows = g_ptr_array_new();
+	t->before = snapshot(p);
+	p->grid = t;
+	for (guint m = 0; m < g_list_model_get_n_items(monitors); m++) {
+		GdkMonitor *monitor = g_list_model_get_item(monitors, m);
+		const char *connector = gdk_monitor_get_connector(monitor);
+		int index = -1;
+		for (guint i = 0; connector && i < p->displays->len; i++) {
+			struct display *d = p->displays->pdata[i];
+			if (d->active && d->name && strcmp(d->name, connector) == 0) {
+				index = (int)i;
+			}
+		}
+		if (index < 0) {
+			g_object_unref(monitor);
+			continue;
+		}
+		struct grid_window *gw = g_new0(struct grid_window, 1);
+		gw->tool = t;
+		gw->display = index;
+		gw->window = gtk_window_new();
+		gtk_window_set_title(GTK_WINDOW(gw->window), "Align the screens");
+		gtk_window_set_decorated(GTK_WINDOW(gw->window), FALSE);
+		gw->area = gtk_drawing_area_new();
+		gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(gw->area), draw_grid, gw, NULL);
+		GtkGesture *drag = gtk_gesture_drag_new();
+		g_signal_connect(drag, "drag-begin", G_CALLBACK(on_grid_drag_begin), gw);
+		g_signal_connect(drag, "drag-update", G_CALLBACK(on_grid_drag_update), gw);
+		gtk_widget_add_controller(gw->area, GTK_EVENT_CONTROLLER(drag));
+		GtkEventController *keys = gtk_event_controller_key_new();
+		g_signal_connect(keys, "key-pressed", G_CALLBACK(on_grid_key), gw);
+		gtk_widget_add_controller(gw->window, keys);
+
+		GtkWidget *overlay = gtk_overlay_new();
+		gtk_overlay_set_child(GTK_OVERLAY(overlay), gw->area);
+		GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+		gtk_widget_add_css_class(panel, "osd");
+		gtk_widget_set_halign(panel, GTK_ALIGN_CENTER);
+		gtk_widget_set_valign(panel, GTK_ALIGN_END);
+		gtk_widget_set_margin_bottom(panel, 80);
+		char *text = g_strdup_printf("Screen %d (%s)\n"
+			"Drag the grid, or use the arrow keys (Shift: 10 pixels), until its lines run on "
+			"straight into the next screen.", index + 1,
+			((struct display *)p->displays->pdata[index])->name);
+		GtkWidget *label = gtk_label_new(text);
+		g_free(text);
+		gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+		gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+		gtk_label_set_max_width_chars(GTK_LABEL(label), 60);
+		gtk_widget_set_margin_start(label, 16);
+		gtk_widget_set_margin_end(label, 16);
+		gtk_widget_set_margin_top(label, 12);
+		gtk_box_append(GTK_BOX(panel), label);
+		GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		gtk_widget_set_halign(buttons, GTK_ALIGN_CENTER);
+		gtk_widget_set_margin_bottom(buttons, 12);
+		GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+		g_signal_connect(cancel, "clicked", G_CALLBACK(on_grid_cancel), t);
+		GtkWidget *done = gtk_button_new_with_label("Done");
+		gtk_widget_add_css_class(done, "suggested-action");
+		g_signal_connect(done, "clicked", G_CALLBACK(on_grid_done), t);
+		gtk_box_append(GTK_BOX(buttons), cancel);
+		gtk_box_append(GTK_BOX(buttons), done);
+		gtk_box_append(GTK_BOX(panel), buttons);
+		gtk_overlay_add_overlay(GTK_OVERLAY(overlay), panel);
+		gtk_window_set_child(GTK_WINDOW(gw->window), overlay);
+		gtk_window_fullscreen_on_monitor(GTK_WINDOW(gw->window), monitor);
+		gtk_window_present(GTK_WINDOW(gw->window));
+		g_ptr_array_add(t->windows, gw);
+		g_object_unref(monitor);
+	}
+	if (t->windows->len == 0) {
+		settings_status(p->s, "No screens to align were found");
+		grid_close(t, false);
+	}
 }
 
 /* Shows the number of each display on the screen itself for a few seconds. */
@@ -1625,7 +1990,12 @@ GtkWidget *screen_page_new(struct settings *s) {
 	GtkWidget *identify = gtk_button_new_with_label("Identify");
 	gtk_widget_set_tooltip_text(identify, "Shows the number of each screen on it");
 	g_signal_connect(identify, "clicked", G_CALLBACK(on_identify), p);
+	GtkWidget *grid = gtk_button_new_with_label("Align with a grid…");
+	gtk_widget_set_tooltip_text(grid, "A grid over all screens: move them until its lines run "
+		"on straight from one screen into the next");
+	g_signal_connect(grid, "clicked", G_CALLBACK(on_grid_align), p);
 	gtk_box_append(GTK_BOX(tools), align);
+	gtk_box_append(GTK_BOX(tools), grid);
 	gtk_box_append(GTK_BOX(tools), identify);
 	ui_row(p->displays_group, "Align the screens",
 		"Puts them in one row or column without gaps, lined up at an edge or their middles",

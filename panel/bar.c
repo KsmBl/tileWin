@@ -610,6 +610,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 	if (strcmp(cmd, "identify") == 0) {
 		identify_screens(panel, argc - 1, argv + 1);
 	} else if (strcmp(cmd, "startmenu") == 0) {
+		// the Super key opens it on the main display, whichever screen has the focus
+		output = panel_main_output(panel);
 		const char *action = argc > 1 ? argv[1] : "toggle";
 		bool open = popup_is_open(panel, POPUP_STARTMENU);
 		if (strcmp(action, "close") == 0 || (strcmp(action, "toggle") == 0 && open)) {

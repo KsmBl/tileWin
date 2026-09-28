@@ -406,6 +406,8 @@ void panel_set_dirty(struct panel *panel);
 void widget_set_dirty(struct widget *w);
 void panel_request_reload(struct panel *panel);
 struct panel_output *panel_focused_output(struct panel *panel);
+/* The main display, where the Start menu opens from the keyboard (as on Windows). */
+struct panel_output *panel_main_output(struct panel *panel);
 struct panel_seat *panel_first_seat(struct panel *panel);
 
 /* wayland.c */
