@@ -302,10 +302,56 @@ static gboolean on_keep_close_request(GtkWindow *window, gpointer data) {
 	return TRUE;
 }
 
+/* The size a display takes in the layout: its mode, scaled, and turned. */
+static void update_logical_size(struct display *d) {
+	if (d->current.width <= 0 || d->current.height <= 0 || d->scale <= 0) {
+		return;
+	}
+	int w = (int)round(d->current.width / d->scale), h = (int)round(d->current.height / d->scale);
+	bool turned = strcmp(d->transform, "90") == 0 || strcmp(d->transform, "270") == 0 ||
+		strcmp(d->transform, "flipped-90") == 0 || strcmp(d->transform, "flipped-270") == 0;
+	d->width = turned ? h : w;
+	d->height = turned ? w : h;
+}
+
+/*
+ * A display got another size (turned, scaled, another resolution): the ones
+ * right of it and below it move along, so none overlaps it or leaves a gap.
+ */
+static void reflow(struct screen_page *p, struct display *d, int old_w, int old_h) {
+	int dw = d->width - old_w, dh = d->height - old_h;
+	for (guint i = 0; i < p->displays->len; i++) {
+		struct display *o = p->displays->pdata[i];
+		if (o == d || !o->active) {
+			continue;
+		}
+		bool moved = false;
+		if (dw && o->x >= d->x + old_w) {
+			o->x += dw;
+			moved = true;
+		}
+		if (dh && o->y >= d->y + old_h) {
+			o->y += dh;
+			moved = true;
+		}
+		if (moved) {
+			apply_display(p, o);
+		}
+	}
+}
+
 /* Applies the changed display and asks whether to keep it, like Windows. */
 static void change_display(struct screen_page *p, struct display *changed, GPtrArray *before,
 		bool ask) {
+	int old_w = changed->width, old_h = changed->height;
+	update_logical_size(changed);
 	apply_display(p, changed);
+	if (changed->active && (old_w != changed->width || old_h != changed->height)) {
+		reflow(p, changed, old_w, old_h);
+	}
+	if (p->arrangement) {
+		gtk_widget_queue_draw(p->arrangement); // the preview shows it turned at once
+	}
 	if (!ask) {
 		if (before) {
 			g_ptr_array_unref(before);
@@ -810,6 +856,87 @@ static void on_drag_end(GtkGestureDrag *gesture, double dx, double dy, gpointer 
 	}
 	save_displays(p);
 	gtk_widget_queue_draw(p->arrangement);
+}
+
+/* ---------- lining the displays up ---------- */
+
+static const char *const align_labels[] = { "Line up…", "Side by side, tops aligned",
+	"Side by side, centered", "Side by side, bottoms aligned", "Stacked, left edges aligned",
+	"Stacked, centered", "Stacked, right edges aligned", NULL };
+
+static gint by_x(gconstpointer a, gconstpointer b) {
+	const struct display *x = *(struct display **)a, *y = *(struct display **)b;
+	return x->x != y->x ? x->x - y->x : x->y - y->y;
+}
+
+static gint by_y(gconstpointer a, gconstpointer b) {
+	const struct display *x = *(struct display **)a, *y = *(struct display **)b;
+	return x->y != y->y ? x->y - y->y : x->x - y->x;
+}
+
+/*
+ * Puts every display in one row (or one column) without gaps, in the order
+ * they have now, lined up at one edge or at their middles, so the pointer
+ * crosses from one to the next where they meet.
+ */
+static void line_up(struct screen_page *p, int how) {
+	GPtrArray *active = g_ptr_array_new();
+	int biggest = 0;
+	bool row = how <= 3;
+	for (guint i = 0; i < p->displays->len; i++) {
+		struct display *d = p->displays->pdata[i];
+		if (d->active) {
+			g_ptr_array_add(active, d);
+			biggest = MAX(biggest, row ? d->height : d->width);
+		}
+	}
+	g_ptr_array_sort(active, row ? by_x : by_y);
+	int along = 0;
+	for (guint i = 0; i < active->len; i++) {
+		struct display *d = active->pdata[i];
+		int size = row ? d->height : d->width;
+		int across = how == 1 || how == 4 ? 0 : how == 2 || how == 5 ? (biggest - size) / 2 :
+			biggest - size;
+		if (row) {
+			d->x = along;
+			d->y = across;
+			along += d->width;
+		} else {
+			d->x = across;
+			d->y = along;
+			along += d->height;
+		}
+		apply_display(p, d);
+	}
+	g_ptr_array_free(active, TRUE);
+	save_displays(p);
+	gtk_widget_queue_draw(p->arrangement);
+}
+
+static void on_align(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct screen_page *p = data;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	if (p->updating || sel == 0 || sel == GTK_INVALID_LIST_POSITION) {
+		return;
+	}
+	line_up(p, (int)sel);
+	p->updating = true;
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), 0);
+	p->updating = false;
+}
+
+/* Shows the number of each display on the screen itself for a few seconds. */
+static void on_identify(GtkButton *button, gpointer data) {
+	struct screen_page *p = data;
+	GString *args = g_string_new("panel identify");
+	for (guint i = 0; i < p->displays->len; i++) {
+		struct display *d = p->displays->pdata[i];
+		if (d->active && d->name && !strpbrk(d->name, " \"=")) {
+			g_string_append_printf(args, " %s=%u", d->name, i + 1);
+		}
+	}
+	settings_command(p->s, "%s", args->str);
+	g_string_free(args, TRUE);
 }
 
 /* ---------- brightness ---------- */
@@ -1468,6 +1595,17 @@ GtkWidget *screen_page_new(struct settings *s) {
 	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(arrangement_row), p->arrangement);
 	gtk_list_box_append(GTK_LIST_BOX(p->displays_group), arrangement_row);
 	gtk_widget_set_tooltip_text(p->arrangement, "Drag the screens to arrange them");
+	GtkWidget *tools = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *align = gtk_drop_down_new_from_strings(align_labels);
+	g_signal_connect(align, "notify::selected", G_CALLBACK(on_align), p);
+	GtkWidget *identify = gtk_button_new_with_label("Identify");
+	gtk_widget_set_tooltip_text(identify, "Shows the number of each screen on it");
+	g_signal_connect(identify, "clicked", G_CALLBACK(on_identify), p);
+	gtk_box_append(GTK_BOX(tools), align);
+	gtk_box_append(GTK_BOX(tools), identify);
+	ui_row(p->displays_group, "Align the screens",
+		"Puts them in one row or column without gaps, lined up at an edge or their middles",
+		tools);
 
 	p->display_dd = gtk_drop_down_new(NULL, NULL);
 	g_signal_connect(p->display_dd, "notify::selected", G_CALLBACK(on_display_selected), p);

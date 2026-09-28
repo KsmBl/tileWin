@@ -51,6 +51,7 @@ struct output {
 	void *copy_data;
 	size_t copy_size;
 	uint32_t copy_format, copy_width, copy_height, copy_stride, copy_flags;
+	int32_t transform; // how the screen is turned (wl_output)
 	struct wl_list link;
 };
 
@@ -231,19 +232,62 @@ static void copy_flags(void *data, struct zwlr_screencopy_frame_v1 *frame, uint3
 	o->copy_flags = flags;
 }
 
+/*
+ * The copy is the screen's buffer as the hardware scans it out; on a turned
+ * screen that is not what one sees. This gives the pixel of the buffer that
+ * shows at x, y of the picture as it is seen (w by h).
+ */
+static void seen_to_buffer(int32_t transform, uint32_t x, uint32_t y, uint32_t bw, uint32_t bh,
+		uint32_t *bx, uint32_t *by) {
+	if (transform >= WL_OUTPUT_TRANSFORM_FLIPPED) {
+		uint32_t w = transform == WL_OUTPUT_TRANSFORM_FLIPPED_90 ||
+			transform == WL_OUTPUT_TRANSFORM_FLIPPED_270 ? bh : bw;
+		x = w - 1 - x; // mirrored first
+		transform -= WL_OUTPUT_TRANSFORM_FLIPPED;
+	}
+	switch (transform) {
+	case WL_OUTPUT_TRANSFORM_90:
+		*bx = y;
+		*by = bh - 1 - x;
+		break;
+	case WL_OUTPUT_TRANSFORM_180:
+		*bx = bw - 1 - x;
+		*by = bh - 1 - y;
+		break;
+	case WL_OUTPUT_TRANSFORM_270:
+		*bx = bw - 1 - y;
+		*by = x;
+		break;
+	default:
+		*bx = x;
+		*by = y;
+		break;
+	}
+}
+
 static void copy_ready(void *data, struct zwlr_screencopy_frame_v1 *frame, uint32_t sec_hi,
 		uint32_t sec_lo, uint32_t nsec) {
 	struct output *o = data;
-	o->desktop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, o->copy_width, o->copy_height);
+	int32_t t = o->transform;
+	bool turned = t == WL_OUTPUT_TRANSFORM_90 || t == WL_OUTPUT_TRANSFORM_270 ||
+		t == WL_OUTPUT_TRANSFORM_FLIPPED_90 || t == WL_OUTPUT_TRANSFORM_FLIPPED_270;
+	uint32_t w = turned ? o->copy_height : o->copy_width;
+	uint32_t h = turned ? o->copy_width : o->copy_height;
+	o->desktop = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
 	uint32_t *dst = (uint32_t *)cairo_image_surface_get_data(o->desktop);
 	int dst_stride = cairo_image_surface_get_stride(o->desktop) / 4;
 	bool invert = o->copy_flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT;
-	for (uint32_t y = 0; y < o->copy_height; y++) {
-		const uint32_t *src = (const uint32_t *)((const char *)o->copy_data +
-			(size_t)(invert ? o->copy_height - 1 - y : y) * o->copy_stride);
+	for (uint32_t y = 0; y < h; y++) {
 		uint32_t *row = dst + (size_t)y * dst_stride;
-		for (uint32_t x = 0; x < o->copy_width; x++) {
-			row[x] = copy_pixel(o->copy_format, src[x]);
+		for (uint32_t x = 0; x < w; x++) {
+			uint32_t bx, by;
+			seen_to_buffer(t, x, y, o->copy_width, o->copy_height, &bx, &by);
+			if (invert) {
+				by = o->copy_height - 1 - by;
+			}
+			const uint32_t *src = (const uint32_t *)((const char *)o->copy_data +
+				(size_t)by * o->copy_stride);
+			row[x] = copy_pixel(o->copy_format, src[bx]);
 		}
 	}
 	cairo_surface_mark_dirty(o->desktop);
@@ -410,6 +454,8 @@ static void destroy_output(struct output *o) {
 static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y,
 		int32_t pw, int32_t ph, int32_t subpixel, const char *make, const char *model,
 		int32_t transform) {
+	struct output *o = data;
+	o->transform = transform;
 }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,

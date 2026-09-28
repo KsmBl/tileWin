@@ -607,7 +607,9 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		return;
 	}
 	struct panel_output *output = panel_focused_output(panel);
-	if (strcmp(cmd, "startmenu") == 0) {
+	if (strcmp(cmd, "identify") == 0) {
+		identify_screens(panel, argc - 1, argv + 1);
+	} else if (strcmp(cmd, "startmenu") == 0) {
 		const char *action = argc > 1 ? argv[1] : "toggle";
 		bool open = popup_is_open(panel, POPUP_STARTMENU);
 		if (strcmp(action, "close") == 0 || (strcmp(action, "toggle") == 0 && open)) {

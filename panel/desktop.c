@@ -76,6 +76,7 @@ static struct {
 	struct {
 		bool armed, active;
 		double x0, y0, x1, y1;
+		struct psurface *surface; // the screen it is drawn on, where it began
 	} band;
 	/* The grid, from taskbar.conf; refreshed whenever the config is read. */
 	int icon_size, cell_w, cell_h, margin;
@@ -499,8 +500,11 @@ static void update_icons_size(struct panel *panel, struct psurface *s) {
 	}
 	// the rubber band is drawn here too, so an empty desktop needs the room as
 	// well: without it a drag on the wallpaper would show nothing
-	if ((desktop.drag.active || desktop.band.active) && primary && s->output) {
-		width = s->output->width; // room to drag an icon or a band anywhere
+	if (desktop.drag.active && primary && s->output) {
+		width = s->output->width; // room to drag an icon anywhere
+	}
+	if (desktop.band.active && desktop.band.surface == s && s->output) {
+		width = s->output->width; // the band, on whichever screen it is drawn
 	}
 	if (s->req_width != width) {
 		psurface_set_size(s, width, 0);
@@ -613,10 +617,26 @@ static void draw_item(struct psurface *s, cairo_t *cr, struct desktop_item *item
 	}
 }
 
+static void draw_band(struct psurface *s, cairo_t *cr) {
+	if (!desktop.band.active || desktop.band.surface != s) {
+		return;
+	}
+	double x = fmin(desktop.band.x0, desktop.band.x1);
+	double y = fmin(desktop.band.y0, desktop.band.y1);
+	double w = fabs(desktop.band.x1 - desktop.band.x0);
+	double h = fabs(desktop.band.y1 - desktop.band.y0);
+	pd_rect(cr, x, y, w, h, 0x3399ff44);
+	cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+	pd_color(cr, 0x99ccffc0);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+}
+
 static void icons_render(struct psurface *s, cairo_t *cr) {
 	struct panel *panel = s->panel;
 	psurface_add_hotspot(s, 0, 0, s->width, s->height, NULL, DESK_HS_BACKGROUND, -1, NULL);
 	if (s != primary_icons(panel) || !desktop.items) {
+		draw_band(s, cr); // a screen without icons shows the band all the same
 		return;
 	}
 	layout_items(s);
@@ -629,17 +649,7 @@ static void icons_render(struct psurface *s, cairo_t *cr) {
 		}
 		psurface_add_hotspot(s, x, y, desktop.cell_w, desktop.cell_h, NULL, DESK_HS_ITEM, i, NULL);
 	}
-	if (desktop.band.active) {
-		double x = fmin(desktop.band.x0, desktop.band.x1);
-		double y = fmin(desktop.band.y0, desktop.band.y1);
-		double w = fabs(desktop.band.x1 - desktop.band.x0);
-		double h = fabs(desktop.band.y1 - desktop.band.y0);
-		pd_rect(cr, x, y, w, h, 0x3399ff44);
-		cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
-		pd_color(cr, 0x99ccffc0);
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-	}
+	draw_band(s, cr);
 	struct desktop_item *dragged = dragging ? item_at(desktop.drag.index) : NULL;
 	if (dragged) {
 		// every icon of the group follows the pointer by the same amount, so
@@ -729,8 +739,12 @@ static list_t *item_menu(struct desktop_item *item) {
 
 /* ---------- input ---------- */
 
-/* Selects every icon the rubber band covers. */
-static void band_select(void) {
+/* Selects every icon the rubber band covers (on the screen with the icons). */
+static void band_select(struct panel *panel) {
+	if (desktop.band.surface != primary_icons(panel)) {
+		select_none();
+		return;
+	}
 	double x0 = fmin(desktop.band.x0, desktop.band.x1);
 	double x1 = fmax(desktop.band.x0, desktop.band.x1);
 	double y0 = fmin(desktop.band.y0, desktop.band.y1);
@@ -916,12 +930,13 @@ static void desktop_motion(struct psurface *s, double x, double y) {
 			desktop.band.active = true;
 		}
 		if (desktop.band.active) {
-			band_select();
+			band_select(s->panel);
 			struct psurface *icons = primary_icons(s->panel);
 			if (icons) {
-				update_icons_size(s->panel, icons); // room to drag anywhere
-				psurface_set_dirty(icons);
+				psurface_set_dirty(icons); // the selection shows there
 			}
+			update_icons_size(s->panel, desktop.band.surface); // room to drag anywhere
+			psurface_set_dirty(desktop.band.surface);
 			return;
 		}
 	}
@@ -986,6 +1001,9 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 			// dragging on the empty desktop draws a selection rectangle
 			desktop.band.armed = true;
 			desktop.band.active = false;
+			// drawn on the icons of the screen it began on (the events may come
+			// from the background behind them)
+			desktop.band.surface = s->output && s->output->desktop ? s->output->desktop : s;
 			desktop.band.x0 = desktop.band.x1 = x;
 			desktop.band.y0 = desktop.band.y1 = y;
 		}

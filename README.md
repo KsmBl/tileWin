@@ -68,6 +68,9 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Show desktop (`Super+D`) clears every screen at once.
   - A **main display** (`main_output`, or "Make this my main display" on the Screen page; by default the screen at the top left) gets the desktop icons, and the taskbar there can show the windows of every screen (`outputs main`).
   - Every screen can have a wallpaper of its own (`output_wallpaper`, or the Screen chooser on the Wallpaper page); the lock screen shows it too.
+  - The taskbar can be on every screen, only on the main display, or on the screens you pick ("Show the taskbar on" on the Taskbar page; `outputs * | main | <names>` at the top of `taskbar.conf`). With `main` it moves along when another screen becomes the main display.
+  - The Screen page arranges the screens by dragging them, and **Align the screens** puts them in one row or column without gaps, lined up at their tops, middles or bottoms (left edges, middles or right edges when stacked). **Identify** shows each screen's number on it. Turning a screen, or changing its scale or resolution, shows at once in the arrangement, and the screens right of it and below it move along so none overlaps it.
+  - Selecting icons with a rectangle works on every screen, and the rectangle is drawn on the screen it is dragged on. Screen savers that use the picture of the desktop show it the right way round on turned screens.
 - **Tile mode:** everything sway does.
 - **Taskbar:**
   - Separate layouts for window mode and tile mode.

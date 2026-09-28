@@ -284,6 +284,12 @@ static void set_main_output(struct panel *panel, const char *name) {
 	free(panel->state.main_output);
 	panel->state.main_output = name ? strdup(name) : NULL;
 	if (panel->config) { // not while starting, before the screens are known
+		for (int i = 0; panel->config->outputs && i < panel->config->outputs->length; i++) {
+			if (strcmp(panel->config->outputs->items[i], "main") == 0) {
+				panel_outputs_update_bars(panel); // "outputs main": the taskbar moves along
+				break;
+			}
+		}
 		desktop_main_output_changed(panel);
 		deskwidgets_update(panel);
 		notify_widgets(panel);

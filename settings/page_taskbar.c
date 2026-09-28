@@ -23,6 +23,8 @@ struct taskbar_page {
 	GtkWidget *scripts;
 	GtkWidget *custom_entry, *custom_popover;
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
+	GtkWidget *screens_dd, *screens_box, *screens_row; // which screens get a taskbar
+	GPtrArray *screen_checks; // GtkCheckButton *, the screen's name as "name"
 	struct app_list *quick;
 	GPtrArray *root_settings;
 	GHashTable *quick_icons;
@@ -778,9 +780,85 @@ static void rebuild_all(struct taskbar_page *p) {
 	}
 }
 
+/* ---------- the screens with a taskbar ---------- */
+
+static void screens_write(struct taskbar_page *p) {
+	guint how = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->screens_dd));
+	gtk_widget_set_visible(p->screens_row, how == 2);
+	GString *names = g_string_new(NULL);
+	if (how == 1) {
+		g_string_append(names, "main");
+	} else if (how == 2) {
+		for (guint i = 0; i < p->screen_checks->len; i++) {
+			GtkWidget *check = p->screen_checks->pdata[i];
+			if (gtk_check_button_get_active(GTK_CHECK_BUTTON(check))) {
+				char *q = conf_quote(g_object_get_data(G_OBJECT(check), "name"));
+				g_string_append_printf(names, "%s%s", names->len ? " " : "", q);
+				free(q);
+			}
+		}
+		if (!names->len) {
+			g_string_append(names, "main"); // not none at all: the main display keeps one
+		}
+	}
+	confdoc_set(doc(p), doc(p)->root, "outputs", NULL, names->len ? names->str : NULL);
+	settings_taskbar_changed(p->s);
+	g_string_free(names, TRUE);
+}
+
+static void on_screens(GObject *object, GParamSpec *pspec, gpointer data) {
+	struct taskbar_page *p = data;
+	if (!p->updating) {
+		screens_write(p);
+	}
+}
+
+static void on_screen_check(GtkCheckButton *check, gpointer data) {
+	struct taskbar_page *p = data;
+	if (!p->updating) {
+		screens_write(p);
+	}
+}
+
+static void screens_refresh(struct taskbar_page *p) {
+	struct cstmt *st = confdoc_child(doc(p)->root, "outputs", NULL);
+	int argc = st ? cstmt_argc(st) : 0;
+	bool all = argc == 0;
+	bool main_only = argc == 1 && strcmp(cstmt_arg(st, 0), "main") == 0;
+	for (int i = 0; i < argc; i++) {
+		all |= strcmp(cstmt_arg(st, i), "*") == 0;
+	}
+	bool was = p->updating;
+	p->updating = true;
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->screens_dd), all ? 0 : main_only ? 1 : 2);
+	gtk_widget_set_visible(p->screens_row, !all && !main_only);
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(p->screens_box))) {
+		gtk_box_remove(GTK_BOX(p->screens_box), child);
+	}
+	g_ptr_array_set_size(p->screen_checks, 0);
+	GPtrArray *screens = tw_ipc_screens();
+	for (guint i = 0; i < screens->len; i++) {
+		struct tw_screen *screen = screens->pdata[i];
+		GtkWidget *check = gtk_check_button_new_with_label(screen->label);
+		g_object_set_data_full(G_OBJECT(check), "name", g_strdup(screen->name), g_free);
+		bool on = all;
+		for (int a = 0; a < argc; a++) {
+			on |= strcmp(cstmt_arg(st, a), screen->name) == 0;
+		}
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(check), on);
+		g_signal_connect(check, "toggled", G_CALLBACK(on_screen_check), p);
+		gtk_box_append(GTK_BOX(p->screens_box), check);
+		g_ptr_array_add(p->screen_checks, check);
+	}
+	g_ptr_array_free(screens, TRUE);
+	p->updating = was;
+}
+
 void taskbar_page_refresh(struct settings *s) {
 	if (s->taskbar_page) {
 		rebuild_all(s->taskbar_page);
+		screens_refresh(s->taskbar_page);
 	}
 }
 
@@ -935,6 +1013,15 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	p->delay_spin = gtk_spin_button_new_with_range(0, 5000, 100);
 	g_signal_connect(p->delay_spin, "value-changed", G_CALLBACK(on_delay_changed), p);
 	ui_row(general, "Tooltip delay", "Milliseconds", p->delay_spin);
+	p->screens_dd = gtk_drop_down_new_from_strings((const char *const[]){ "Every screen",
+		"Only the main display", "The screens picked below", NULL });
+	g_signal_connect(p->screens_dd, "notify::selected", G_CALLBACK(on_screens), p);
+	ui_row(general, "Show the taskbar on", "The main display is set on the Screen page",
+		p->screens_dd);
+	p->screen_checks = g_ptr_array_new();
+	p->screens_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	p->screens_row = ui_row(general, "Screens with a taskbar", NULL, p->screens_box);
+	screens_refresh(p);
 
 	GtkWidget *layout = ui_group(content, "Layout",
 		"tileWin keeps a separate taskbar layout for window mode and for tile mode.");

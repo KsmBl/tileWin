@@ -13,6 +13,9 @@
  *                                 and let go while still moving
  *   drag <x1> <y1> <x2> <y2>      press at the first point, carry it slowly to
  *                                 the second, hold still there and let go
+ *   down <x> <y>                  put it there and press the left button
+ *   up                            let go of the left button
+ *   wait <ms>                     do nothing that long (e.g. while held down)
  *
  * The width and height are those of the screen the coordinates are in.
  */
@@ -190,6 +193,25 @@ int main(int argc, char **argv) {
 			throw_window(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]),
 				atoi(argv[i + 4]));
 			i += 5;
+		} else if (strcmp(argv[i], "down") == 0 && i + 2 < argc) {
+			move(atoi(argv[i + 1]), atoi(argv[i + 2]));
+			move(atoi(argv[i + 1]), atoi(argv[i + 2]));
+			zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+				WL_POINTER_BUTTON_STATE_PRESSED);
+			zwlr_virtual_pointer_v1_frame(pointer);
+			wl_display_flush(display);
+			rest(150);
+			i += 3;
+		} else if (strcmp(argv[i], "up") == 0) {
+			zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+				WL_POINTER_BUTTON_STATE_RELEASED);
+			zwlr_virtual_pointer_v1_frame(pointer);
+			wl_display_flush(display);
+			rest(150);
+			i += 1;
+		} else if (strcmp(argv[i], "wait") == 0 && i + 1 < argc) {
+			rest(atoi(argv[i + 1]));
+			i += 2;
 		} else if (strcmp(argv[i], "drag") == 0 && i + 4 < argc) {
 			drag(atoi(argv[i + 1]), atoi(argv[i + 2]), atoi(argv[i + 3]), atoi(argv[i + 4]));
 			i += 5;

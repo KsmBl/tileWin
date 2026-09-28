@@ -624,6 +624,8 @@ void thumbnails_list_bound(struct panel *panel);
 /* Shows previews instead of a tooltip; false if the hotspot has none. */
 bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *hs);
 void thumbnails_hide_later(struct panel *panel);
+/* identify.c: "panel identify <output>=<number>...", big numbers on the screens */
+void identify_screens(struct panel *panel, int argc, char **argv);
 /*
  * Peek (thumbnails.c): only one window, "<con_id>", or the "desktop" shown,
  * the other windows as outlines, after delay_ms; NULL ends it at once.

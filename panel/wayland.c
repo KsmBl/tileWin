@@ -620,7 +620,11 @@ void panel_outputs_update_bars(struct panel *panel) {
 		if (panel->config->outputs) {
 			for (int i = 0; i < panel->config->outputs->length; i++) {
 				const char *name = panel->config->outputs->items[i];
-				if (strcmp(name, "*") == 0 || strcmp(name, output->name) == 0) {
+				// "main": the main display, or the first screen while none is known
+				bool main = strcmp(name, "main") == 0 && (panel->state.main_output ?
+					strcmp(panel->state.main_output, output->name) == 0 :
+					output->link.prev == &panel->outputs);
+				if (main || strcmp(name, "*") == 0 || strcmp(name, output->name) == 0) {
 					wanted = true;
 					break;
 				}
