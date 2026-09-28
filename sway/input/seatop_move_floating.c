@@ -4,6 +4,7 @@
 #include "sway/input/cursor.h"
 #include "sway/input/seat.h"
 #include "sway/tilewin.h"
+#include "sway/tree/workspace.h"
 
 #define RESTORE_DRAG_THRESHOLD 6
 
@@ -46,7 +47,8 @@ static void finalize_move(struct sway_seat *seat, uint32_t time_msec) {
 	// so it discovers its output again.
 	container_floating_move_to(e->con, e->con->pending.x, e->con->pending.y);
 
-	enum tw_snap snap = tw_snap_preview_finish();
+	struct sway_output *snap_output = NULL;
+	enum tw_snap snap = tw_snap_preview_finish(&snap_output);
 	// only a window let go of while it is still moving carries on: stopping
 	// first and then letting go puts it down where it is
 	bool still_moving = e->last_msec && time_msec >= e->last_msec &&
@@ -55,6 +57,11 @@ static void finalize_move(struct sway_seat *seat, uint32_t time_msec) {
 		tw_animate_glide(e->con, e->vx, e->vy);
 	}
 	if (snap != TW_SNAP_NONE && !e->restore_on_drag) {
+		// on the screen the pointer is on, not the one under most of the window
+		struct sway_workspace *ws = e->con->pending.workspace;
+		if (snap_output && (!ws || ws->output != snap_output)) {
+			tw_move_to_screen(e->con, snap_output);
+		}
 		tw_snap_to(e->con, snap);
 		// restoring brings the window back to where the drag started, not
 		// to the edge it was dropped at
@@ -159,7 +166,7 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 		}
 	}
 	if (together) {
-		tw_snap_preview_finish(); // a group is not snapped to the screen edge
+		tw_snap_preview_finish(NULL); // a group is not snapped to the screen edge
 	} else {
 		tw_snap_preview_update(e->con, cursor->x, cursor->y);
 	}
@@ -177,7 +184,7 @@ static void handle_unref(struct sway_seat *seat, struct sway_container *con) {
 		}
 	}
 	if (e->con == con) {
-		tw_snap_preview_finish();
+		tw_snap_preview_finish(NULL);
 		tw_session_changed();
 		seatop_begin_default(seat);
 	}

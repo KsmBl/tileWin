@@ -748,6 +748,10 @@ static void quicklaunch_render(struct widget *w, struct render_ctx *ctx, struct 
 		}
 		cairo_surface_t *surface = apps_icon(ctx->panel, icon_name ? icon_name : item->id,
 			icon * ctx->surface->scale);
+		if (!surface && !entry) {
+			// a command without an icon of its own
+			surface = apps_icon(ctx->panel, "application-x-executable", icon * ctx->surface->scale);
+		}
 		pd_icon(ctx->cairo, surface, b.x + (b.width - icon) / 2.0,
 			b.y + (b.height - icon) / 2.0, icon);
 		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, i, NULL);

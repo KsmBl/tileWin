@@ -275,7 +275,8 @@ struct sway_container *tw_next_focus_candidate(struct sway_seat *seat,
 void tw_view_notify_maximized(struct sway_view *view, bool maximized);
 enum tw_snap tw_snap_zone(double lx, double ly);
 void tw_snap_preview_update(struct sway_container *con, double lx, double ly);
-enum tw_snap tw_snap_preview_finish(void);
+/* Ends the preview: the snap to do, and the screen to do it on (output may be NULL). */
+enum tw_snap tw_snap_preview_finish(struct sway_output **output);
 
 /* alttab.c */
 bool tw_alttab_active(void);

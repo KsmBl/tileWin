@@ -151,17 +151,57 @@ echo "snapped right twice: $*"
 [ "$1" = HEADLESS-2 ] && [ "$2" = 1280 ] && [ "$4" = 960 ] ||
 	fail "Win+Right did not carry the snapped window on to the left half of the next screen"
 
-# carrying it over the edge between the screens and holding it there
+# carried over the edge between the screens and let go at once: no snapping
 ipc "[title=wide] snap restore" >/dev/null
 ipc "[title=wide] move position 1500 300" >/dev/null
 sleep 0.5
 x=$(field wide 2); y=$(field wide 3); w=$(field wide 4)
-"$pointer" 3200 1080 drag $((x + w / 2)) $((y - 10)) 1279 500 >/dev/null 2>&1
-sleep 0.5
+"$pointer" 3200 1080 down $((x + w / 2)) $((y - 10)) move 1100 500 move 1279 500 up \
+	>/dev/null 2>&1
+sleep 0.8
 set -- $(window wide)
 echo "let go on the edge between the screens: $*"
 [ "$6" = 0 ] && [ "$4" != 640 ] && [ "$4" != 960 ] ||
-	fail "the edge between the screens snapped the window"
+	fail "the edge between the screens snapped a window carried across"
+
+# held there for a moment, it snaps: the right half of the left screen
+x=$(field wide 2); y=$(field wide 3); w=$(field wide 4)
+"$pointer" 3200 1080 down $((x + w / 2)) $((y - 10)) move 1100 500 move 1276 500 wait 800 up \
+	>/dev/null 2>&1
+sleep 0.8
+set -- $(window wide)
+echo "held at the edge between the screens: $*"
+[ "$1" = HEADLESS-1 ] && [ "$2" = 640 ] && [ "$4" = 640 ] ||
+	fail "holding at the edge between the screens did not snap to that half"
+
+# held at the left edge of the right screen and slid to its bottom: that quarter
+ipc "[title=wide] snap restore" >/dev/null
+sleep 0.5
+x=$(field wide 2); y=$(field wide 3); w=$(field wide 4)
+"$pointer" 3200 1080 down $((x + w / 2)) $((y - 10)) move 1100 500 move 1284 600 wait 700 \
+	move 1284 1060 wait 300 up >/dev/null 2>&1
+sleep 0.8
+set -- $(window wide)
+echo "held at the right screen's left edge, at its bottom: $*"
+[ "$1" = HEADLESS-2 ] && [ "$2" = 1280 ] && [ "$4" = 960 ] && [ "$3" -gt 500 ] ||
+	fail "the bottom left quarter of the right screen cannot be reached"
+
+# the outer top corner of the right screen snaps at once, on that screen
+ipc "[title=wide] snap restore" >/dev/null
+ipc "[title=wide] move position 300 300" >/dev/null
+sleep 0.5
+x=$(field wide 2); y=$(field wide 3); w=$(field wide 4)
+"$pointer" 3200 1080 down $((x + w / 2)) $((y - 10)) move 2000 300 move 3199 1 wait 200 up \
+	>/dev/null 2>&1
+sleep 0.8
+set -- $(window wide)
+echo "let go in the top right corner of the right screen: $*"
+[ "$1" = HEADLESS-2 ] && [ "$2" = 2240 ] && [ "$4" = 960 ] ||
+	fail "the top right corner of the right screen did not snap to that quarter"
+ipc "[title=wide] snap restore" >/dev/null
+ipc "[title=wide] move position 1500 300" >/dev/null
+sleep 0.5
+
 x=$(field wide 2); y=$(field wide 3); w=$(field wide 4)
 "$pointer" 3200 1080 drag $((x + w / 2)) $((y - 10)) 0 400 >/dev/null 2>&1
 sleep 0.5

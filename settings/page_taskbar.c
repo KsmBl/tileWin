@@ -986,6 +986,32 @@ static void on_quick_icon(struct app_list *l, guint index, gpointer data) {
 		e ? e->icon : NULL, "Use the app's icon", on_icon_chosen, r);
 }
 
+/* ---------- a command of one's own in the quick launch ---------- */
+
+static void on_command_chosen(const char *command, gpointer data) {
+	struct taskbar_page *p = data;
+	char *text = command ? g_strstrip(g_strdup(command)) : NULL;
+	if (!text || !*text) {
+		g_free(text);
+		return;
+	}
+	ui_app_list_add(p->quick, text); // there already, and its icon is asked for next
+	struct icon_request *r = g_new0(struct icon_request, 1);
+	r->p = p;
+	r->id = text;
+	ui_icon_dialog(p->s->window, "Icon of the command",
+		"The icon its button shows: an icon name of your icon theme, e.g. utilities-terminal, "
+		"or an image file.", NULL, "utilities-terminal", "No icon of its own",
+		on_icon_chosen, r);
+}
+
+static void on_quick_command(struct app_list *l, gpointer data) {
+	struct taskbar_page *p = data;
+	ui_command_dialog(p->s->window, "Quick launch command",
+		"A command the button runs, e.g. firefox --private-window or a script of yours.",
+		NULL, on_command_chosen, p);
+}
+
 static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char *placeholder) {
 	GtkWidget *entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
@@ -1085,8 +1111,11 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	g_signal_connect(p->scripts, "row-activated", G_CALLBACK(on_row_activated), p);
 
 	p->quick = ui_app_list_new(content, "Quick launch",
-		"Apps shown by the quick launch widget. The button beside an app changes its icon.",
-		on_quick_changed, p);
+		"Apps and commands shown by the quick launch widget. The button beside one changes its "
+		"icon.", on_quick_changed, p);
+	p->quick->commands = true;
+	p->quick->add_other_label = "Add command…";
+	p->quick->add_other = on_quick_command;
 	p->quick->extra = on_quick_icon;
 	p->quick->extra_icon = "image-x-generic-symbolic";
 	p->quick->extra_tooltip = "Change the icon";

@@ -160,12 +160,19 @@ struct app_list {
 	void (*extra)(struct app_list *list, guint index, gpointer data);
 	/* Optional icon shown for a row instead of the app's own one. */
 	const char *(*row_icon)(struct app_list *list, guint index, gpointer data);
+	/* Optional second button beside "Add app…", e.g. to add a command. */
+	const char *add_other_label;
+	void (*add_other)(struct app_list *list, gpointer data);
+	/* Entries that are no desktop id are commands to run, not missing apps. */
+	bool commands;
 };
 struct app_list *ui_app_list_new(GtkWidget *content, const char *title,
 		const char *description, void (*changed)(struct app_list *, gpointer), gpointer data);
 void ui_app_list_set(struct app_list *list, GPtrArray *ids);
 /* Redraws the rows, e.g. after an entry's icon changed. */
 void ui_app_list_refresh(struct app_list *list);
+/* Adds an entry (unless it is there already), as picking it would. */
+void ui_app_list_add(struct app_list *list, const char *id);
 
 /* ~/.config/tileWin/wallpapers/<basename>.<ext>, NULL if there is none. */
 char *ui_wallpaper_dropin(const char *basename);

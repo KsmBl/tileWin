@@ -974,76 +974,167 @@ void tw_convert_to_tile_mode(void) {
 
 /* ---------- drag snapping ---------- */
 
+/*
+ * Where a dragged window snaps. The outer edges of the screens snap at once:
+ * the sides for halves, the top to maximize, and the corners (along any of
+ * the edges that meet there) for quarters. An edge shared with another screen
+ * lets the pointer through, so a window carried across does not snap on the
+ * way; holding the pointer at such an edge for a moment snaps there all the
+ * same, so the halves and quarters of every screen can be reached. The window
+ * snaps on the screen the pointer is on.
+ */
+#define SNAP_EDGE 2       // pixels from an outer edge that snap
+#define SNAP_SHARED 10    // pixels from an edge between screens where holding counts
+#define SNAP_CORNER 64    // how far along an edge from a corner still means the corner
+#define SNAP_DWELL_MS 400 // how long to hold at an edge between screens
+
 static struct {
 	struct wlr_scene_rect *rect;
 	enum tw_snap snap;
 	struct sway_container *con;
+	struct sway_output *output; // where it snaps
+	double lx, ly;              // the pointer, for looking again after holding
+	bool dwelling;              // held at an edge between screens
+	struct timespec dwell_since;
+	struct wl_event_source *dwell_timer;
 } preview;
 
 static bool screen_beyond(double lx, double ly) {
 	return wlr_output_layout_output_at(root->output_layout, lx, ly) != NULL;
 }
 
-enum tw_snap tw_snap_zone(double lx, double ly) {
+static int64_t dwell_ms(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec - preview.dwell_since.tv_sec) * 1000 +
+		(now.tv_nsec - preview.dwell_since.tv_nsec) / 1000000;
+}
+
+static int handle_dwell(void *data) {
+	if (preview.con) {
+		tw_snap_preview_update(preview.con, preview.lx, preview.ly); // held long enough now
+	}
+	return 0;
+}
+
+/*
+ * The zone of the pointer. *at_shared tells whether it sits at an edge between
+ * screens, *near whether it is close to any edge; once held, the edges stay as
+ * wide as those between screens, so sliding along one keeps it.
+ */
+static enum tw_snap snap_zone(double lx, double ly, bool held_long, bool *at_shared,
+		bool *near) {
+	*at_shared = *near = false;
 	struct wlr_output *wlr_output = wlr_output_layout_output_at(root->output_layout, lx, ly);
 	if (!wlr_output) {
 		return TW_SNAP_NONE;
 	}
 	struct wlr_box box;
 	wlr_output_layout_get_box(root->output_layout, wlr_output, &box);
-	const int edge = 2, corner = 32;
-	// an edge shared with another screen lets the pointer through to it, so
-	// a window carried across does not snap on the way
-	bool left = lx <= box.x + edge && !screen_beyond(box.x - 1, ly);
-	bool right = lx >= box.x + box.width - 1 - edge && !screen_beyond(box.x + box.width, ly);
-	bool top = ly <= box.y + edge && !screen_beyond(lx, box.y - 1);
-	bool bottom = ly >= box.y + box.height - 1 - edge;
+	double x0 = box.x, y0 = box.y, x1 = box.x + box.width - 1, y1 = box.y + box.height - 1;
+	bool outer_left = !screen_beyond(box.x - 1, ly);
+	bool outer_right = !screen_beyond(box.x + box.width, ly);
+	bool outer_top = !screen_beyond(lx, box.y - 1);
+	bool outer_bottom = !screen_beyond(lx, box.y + box.height);
+	*near = lx <= x0 + SNAP_SHARED || lx >= x1 - SNAP_SHARED || ly <= y0 + SNAP_SHARED ||
+		ly >= y1 - SNAP_SHARED;
+	int outer = held_long ? SNAP_SHARED : SNAP_EDGE;
+	bool near_left = lx <= x0 + (outer_left ? outer : SNAP_SHARED);
+	bool near_right = lx >= x1 - (outer_right ? outer : SNAP_SHARED);
+	bool near_top = ly <= y0 + (outer_top ? outer : SNAP_SHARED);
+	bool near_bottom = ly >= y1 - (outer_bottom ? outer : SNAP_SHARED);
+	*at_shared = (near_left && !outer_left) || (near_right && !outer_right) ||
+		(near_top && !outer_top) || (near_bottom && !outer_bottom);
+	bool left = near_left && (outer_left || held_long);
+	bool right = near_right && (outer_right || held_long);
+	bool top = near_top && (outer_top || held_long);
+	bool bottom = near_bottom && (outer_bottom || held_long);
+	int corner = SNAP_CORNER;
+	if (corner > box.width / 4) {
+		corner = box.width / 4;
+	}
+	if (corner > box.height / 4) {
+		corner = box.height / 4;
+	}
+	bool left_part = lx <= x0 + corner, right_part = lx >= x1 - corner;
+	bool top_part = ly <= y0 + corner, bottom_part = ly >= y1 - corner;
+	if ((left || top) && left_part && top_part) {
+		return TW_SNAP_TOPLEFT;
+	}
+	if ((right || top) && right_part && top_part) {
+		return TW_SNAP_TOPRIGHT;
+	}
+	if ((left || bottom) && left_part && bottom_part) {
+		return TW_SNAP_BOTTOMLEFT;
+	}
+	if ((right || bottom) && right_part && bottom_part) {
+		return TW_SNAP_BOTTOMRIGHT;
+	}
 	if (left) {
-		if (ly <= box.y + corner) {
-			return TW_SNAP_TOPLEFT;
-		}
-		if (ly >= box.y + box.height - corner) {
-			return TW_SNAP_BOTTOMLEFT;
-		}
 		return TW_SNAP_LEFT;
 	}
 	if (right) {
-		if (ly <= box.y + corner) {
-			return TW_SNAP_TOPRIGHT;
-		}
-		if (ly >= box.y + box.height - corner) {
-			return TW_SNAP_BOTTOMRIGHT;
-		}
 		return TW_SNAP_RIGHT;
 	}
 	if (top) {
 		return TW_SNAP_TOP;
 	}
-	(void)bottom;
 	return TW_SNAP_NONE;
 }
 
+enum tw_snap tw_snap_zone(double lx, double ly) {
+	bool shared, near;
+	return snap_zone(lx, ly, false, &shared, &near);
+}
+
 void tw_snap_preview_update(struct sway_container *con, double lx, double ly) {
-	enum tw_snap snap = tw_mode == TW_MODE_WINDOW && config->tw_snap ?
-		tw_snap_zone(lx, ly) : TW_SNAP_NONE;
+	enum tw_snap snap = TW_SNAP_NONE;
 	preview.con = con;
-	if (snap == preview.snap) {
+	preview.lx = lx;
+	preview.ly = ly;
+	if (tw_mode == TW_MODE_WINDOW && config->tw_snap) {
+		bool shared, near;
+		snap = snap_zone(lx, ly, preview.dwelling && dwell_ms() >= SNAP_DWELL_MS, &shared,
+			&near);
+		if (shared && !preview.dwelling) {
+			// held at an edge between screens: it snaps there after a moment
+			preview.dwelling = true;
+			clock_gettime(CLOCK_MONOTONIC, &preview.dwell_since);
+			if (!preview.dwell_timer) {
+				preview.dwell_timer = wl_event_loop_add_timer(server.wl_event_loop,
+					handle_dwell, NULL);
+			}
+			if (preview.dwell_timer) {
+				wl_event_source_timer_update(preview.dwell_timer, SNAP_DWELL_MS + 10);
+			}
+		} else if (!near && preview.dwelling) {
+			// (holding lasts while it slides along the edges)
+			preview.dwelling = false;
+			if (preview.dwell_timer) {
+				wl_event_source_timer_update(preview.dwell_timer, 0);
+			}
+		}
+	}
+	struct sway_workspace *ws = NULL;
+	struct wlr_output *wlr_output = wlr_output_layout_output_at(root->output_layout, lx, ly);
+	struct sway_output *output = wlr_output ? output_from_wlr_output(wlr_output) : NULL;
+	if (snap == preview.snap && (snap == TW_SNAP_NONE || output == preview.output)) {
 		return;
 	}
 	preview.snap = snap;
+	preview.output = snap == TW_SNAP_NONE ? NULL : output;
 	if (snap == TW_SNAP_NONE) {
 		if (preview.rect) {
 			wlr_scene_node_set_enabled(&preview.rect->node, false);
 		}
 		return;
 	}
-	struct sway_workspace *ws = NULL;
-	struct wlr_output *wlr_output = wlr_output_layout_output_at(root->output_layout, lx, ly);
-	struct sway_output *output = wlr_output ? output_from_wlr_output(wlr_output) : NULL;
 	if (output) {
 		ws = output_get_active_workspace(output);
 	}
 	if (!ws) {
+		preview.snap = TW_SNAP_NONE;
+		preview.output = NULL;
 		return;
 	}
 	struct wlr_box area = tw_workarea(ws);
@@ -1069,10 +1160,18 @@ void tw_snap_preview_update(struct sway_container *con, double lx, double ly) {
 	}
 }
 
-enum tw_snap tw_snap_preview_finish(void) {
+enum tw_snap tw_snap_preview_finish(struct sway_output **output) {
 	enum tw_snap snap = preview.snap;
+	if (output) {
+		*output = preview.output;
+	}
 	preview.snap = TW_SNAP_NONE;
 	preview.con = NULL;
+	preview.output = NULL;
+	preview.dwelling = false;
+	if (preview.dwell_timer) {
+		wl_event_source_timer_update(preview.dwell_timer, 0);
+	}
 	if (preview.rect) {
 		wlr_scene_node_set_enabled(&preview.rect->node, false);
 	}

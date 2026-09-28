@@ -873,6 +873,10 @@ static void app_action(GtkButton *button, gpointer data) {
 	app_list_schedule(l);
 }
 
+static void app_add_other(struct app_list *l) {
+	l->add_other(l, l->data);
+}
+
 static void app_added(const char *id, gpointer data) {
 	struct app_list *l = data;
 	for (guint i = 0; i < l->ids->len; i++) {
@@ -900,11 +904,13 @@ static void app_list_rebuild(struct app_list *l) {
 	for (guint i = 0; i < l->ids->len; i++) {
 		const char *id = l->ids->pdata[i];
 		const struct tw_desktop_entry *e = ui_find_app(id);
+		bool command = !e && l->commands && !g_str_has_suffix(id, ".desktop");
 		GtkWidget *row = ui_row(l->list, e ? e->name : id,
-			e ? id : "Not installed, skipped", NULL);
+			e ? id : command ? "Runs this command" : "Not installed, skipped", NULL);
 		GtkWidget *box = ui_row_box(row);
 		const char *icon = l->row_icon ? l->row_icon(l, i, l->data) : NULL;
-		gtk_box_prepend(GTK_BOX(box), ui_app_icon(icon ? icon : e ? e->icon : NULL, 32));
+		gtk_box_prepend(GTK_BOX(box), ui_app_icon(icon ? icon : e ? e->icon :
+			command ? "utilities-terminal" : NULL, 32));
 		if (l->extra) {
 			add_app_button(l, box, l->extra_icon ? l->extra_icon : "document-edit-symbolic",
 				l->extra_tooltip, true, i, APP_EXTRA);
@@ -914,7 +920,16 @@ static void app_list_rebuild(struct app_list *l) {
 			APP_DOWN);
 		add_app_button(l, box, "list-remove-symbolic", "Remove", true, i, APP_REMOVE);
 	}
-	ui_row(l->list, NULL, l->ids->len ? NULL : "No apps", ui_app_picker("Add app…", app_added, l));
+	GtkWidget *adders = ui_app_picker("Add app…", app_added, l);
+	if (l->add_other) {
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		GtkWidget *other = gtk_button_new_with_label(l->add_other_label);
+		g_signal_connect_swapped(other, "clicked", G_CALLBACK(app_add_other), l);
+		gtk_box_append(GTK_BOX(box), other);
+		gtk_box_append(GTK_BOX(box), adders);
+		adders = box;
+	}
+	ui_row(l->list, NULL, l->ids->len ? NULL : "No apps", adders);
 }
 
 struct app_list *ui_app_list_new(GtkWidget *content, const char *title,
@@ -925,6 +940,10 @@ struct app_list *ui_app_list_new(GtkWidget *content, const char *title,
 	l->changed = changed;
 	l->data = data;
 	return l;
+}
+
+void ui_app_list_add(struct app_list *l, const char *id) {
+	app_added(id, l);
 }
 
 void ui_app_list_refresh(struct app_list *l) {

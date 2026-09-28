@@ -63,7 +63,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Several screens** (window mode), handled the way Windows handles them:
   - A window taken to another screen (`Super+Shift+←/→` or dragging it over) stays maximized or snapped there, keeps the focus, and the size it goes back to comes along to the same place on the new screen. A window too big for the new screen is made to fit.
   - `Super+←` on a window snapped to the left half carries it on to the right half of the screen to the left, and `Super+→` the other way round.
-  - The edge between two screens does not snap a window carried over it; only the outer edges of the screens do.
+  - The edge between two screens does not snap a window carried quickly over it; hold the pointer at it for a moment and it snaps there too (the half of that screen, or a quarter when you slide on to a corner). The outer corners snap along either edge that meets there, and the window snaps on the screen the pointer is on, even when most of it is still on the other one.
   - Unplugging a screen puts its windows on the desktop on view on another screen, still maximized or snapped. Plugging it back in returns them to it, where they were and as they were, unless you moved them in the meantime. Screens are recognized by make, model and serial, so another port does not matter.
   - Show desktop (`Super+D`) clears every screen at once.
   - The Super key opens the Start menu on the main display, as on Windows; the Start button of another screen's taskbar opens it there.
@@ -492,7 +492,7 @@ menu taskbar {
 |---|---|
 | `start` | `label`, `width` |
 | `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`), `peek yes\|no` (resting on a preview shows only its window; theme key `taskbar.peek`) |
-| `quicklaunch` | `item <desktop-id or command> [icon]` |
+| `quicklaunch` | `item <desktop-id or command> [icon]`; on the Taskbar page, Quick launch has **Add app…** and **Add command…** (a command of your own, then its icon), and the button beside an entry changes its icon |
 | `workspaces` | (none) |
 | `title` | `max_width`; click for the window: its desktop, screen and process, and Minimize, Maximize and Close |
 | `tray` | (none) |
