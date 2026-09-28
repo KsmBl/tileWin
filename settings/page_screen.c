@@ -36,6 +36,7 @@ struct display {
 	int x, y, width, height; // logical layout rectangle
 	double scale;
 	char *transform;
+	bool same_id; // another screen says it is the same make, model and serial
 	struct mode current;
 	GArray *modes; // struct mode
 };
@@ -121,10 +122,22 @@ static int json_int(json_object *obj, const char *key) {
 }
 
 /* The identifier tileWin matches outputs by: "make model serial". */
-static char *display_id(const struct display *d) {
+static char *hardware_id(const struct display *d) {
 	return g_strdup_printf("%s %s %s", d->make && *d->make ? d->make : "Unknown",
 		d->model && *d->model ? d->model : "Unknown",
 		d->serial && *d->serial ? d->serial : "Unknown");
+}
+
+/*
+ * What the config calls a display: its make, model and serial, so it keeps
+ * its settings on another connector; but two screens of one model without a
+ * serial of their own would both be meant, so those go by their connector.
+ */
+static char *display_id(const struct display *d) {
+	if (d->same_id && d->name) {
+		return g_strdup(d->name);
+	}
+	return hardware_id(d);
 }
 
 static char *display_title(const struct display *d, int number) {
@@ -183,6 +196,17 @@ static GPtrArray *load_displays(void) {
 		g_ptr_array_add(list, d);
 	}
 	json_object_put(obj);
+	for (guint i = 0; i < list->len; i++) {
+		struct display *a = list->pdata[i];
+		char *ia = hardware_id(a);
+		for (guint j = 0; j < list->len; j++) {
+			struct display *b = list->pdata[j];
+			char *ib = hardware_id(b);
+			a->same_id |= i != j && strcmp(ia, ib) == 0;
+			g_free(ib);
+		}
+		g_free(ia);
+	}
 	return list;
 }
 
