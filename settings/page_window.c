@@ -45,6 +45,9 @@ static const char *const follows_labels[] = { "Clicking it", "Pointing at it",
 static const char *const alttab_values[] = { "theme", "icons", "flip3d", NULL };
 static const char *const alttab_labels[] = { "As the theme has it", "Grid of icons",
 	"3D stack of the windows (Flip 3D)", NULL };
+static const char *const priority_values[] = { "off", "raised", "high", "highest", NULL };
+static const char *const priority_labels[] = { "Like all others", "Raised (nice -5)",
+	"High (nice -10)", "Highest (nice -15)", NULL };
 static const char *const activation_values[] = { "focus", "smart", "urgent", "none", NULL };
 static const char *const activation_labels[] = { "Switch to it",
 	"Switch to it if it is on this desktop", "Highlight its taskbar button", "Nothing", NULL };
@@ -113,6 +116,10 @@ static const struct control focus_controls[] = {
 		.title = "When an app asks for attention",
 		.hint = "For example a chat app with a new message, or a link opened in the browser",
 		.kind = CONTROL_CHOICE, .values = activation_values, .labels = activation_labels },
+	{ .doc = DOC_COMMON, .key = "focus_priority", .title = "Priority of the focused window",
+		.hint = "The app of the focused window gets the processor first, so it draws fast; "
+		"the one focused before gets back its own priority",
+		.kind = CONTROL_CHOICE, .values = priority_values, .labels = priority_labels },
 	{ 0 },
 };
 
@@ -232,7 +239,16 @@ static void add_controls(struct window_page *p, GtkWidget *group, const struct c
 			g_signal_connect(b->widget, "notify::selected", G_CALLBACK(on_choice), b);
 			break;
 		}
-		ui_row(group, c->title, c->hint, b->widget);
+		const char *hint = c->hint;
+		char *more = NULL;
+		if (strcmp(c->key, "focus_priority") == 0 && tw_ipc_can_nice() == 0) {
+			// it would do nothing: say what it takes
+			hint = more = g_strdup_printf("%s. tileWin may not do this yet: install it with "
+				"install.sh, or run sudo setcap cap_sys_nice=ep $(which tilewin), and log in "
+				"again", c->hint);
+		}
+		ui_row(group, c->title, hint, b->widget);
+		g_free(more);
 		g_ptr_array_add(p->bindings, b);
 	}
 }

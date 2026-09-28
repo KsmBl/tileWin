@@ -29,6 +29,7 @@ sway_sources = files(
 	'wm/pointer.c',
 	'wm/screens.c',
 	'wm/power.c',
+	'wm/priority.c',
 	'wm/session.c',
 	'wm/stick.c',
 	'wm/styles.c',

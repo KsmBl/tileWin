@@ -18,6 +18,7 @@
 #include "sway/commands.h"
 #include "sway/config.h"
 #include "sway/server.h"
+#include "sway/tw_priority.h"
 #include "sway/swaynag.h"
 #include "sway/desktop/transaction.h"
 #include "sway/tree/root.h"
@@ -413,6 +414,7 @@ shutdown:
 	sway_log(SWAY_INFO, "Shutting down sway");
 	tw_animate_shutdown();
 
+	tw_priority_forget(); // the focused window's process gets its nice value back
 	server_fini(&server);
 	root_destroy(root);
 	root = NULL;

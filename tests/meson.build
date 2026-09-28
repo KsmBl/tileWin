@@ -118,6 +118,16 @@ test(
 )
 
 test(
+	'focus-priority',
+	executable(
+		'test-priority',
+		['test_priority.c', '../sway/wm/priority.c'],
+		include_directories: sway_inc,
+	),
+	suite: 'unit',
+)
+
+test(
 	'reorder',
 	executable(
 		'test-reorder',
@@ -210,6 +220,16 @@ test(
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 300,
+)
+
+test(
+	'focus-priority-session',
+	find_program('focus_priority.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
 )
 
 test(

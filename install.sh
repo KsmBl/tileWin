@@ -186,6 +186,19 @@ if [ -z "$DESTDIR" ] && [ -d /etc/pam.d ] && [ ! -e /etc/pam.d/tilewin-lock ]; t
 	sudo install -Dm644 data/tilewin-lock.pam /etc/pam.d/tilewin-lock
 fi
 
+# Lowering the nice value of the focused window's process (focus_priority), and
+# giving tileWin itself the round-robin scheduling sway uses when it may, takes
+# CAP_SYS_NICE. Installing the binary again drops it, so it is given each time.
+if [ -z "$DESTDIR" ]; then
+	if command -v setcap >/dev/null 2>&1; then
+		msg "Letting tileWin raise the focused window's priority (CAP_SYS_NICE)"
+		$SUDO setcap cap_sys_nice=ep "$PREFIX/bin/tilewin" ||
+			warn "could not give tileWin CAP_SYS_NICE: focus_priority will do nothing"
+	else
+		warn "setcap not found (package libcap): focus_priority will do nothing"
+	fi
+fi
+
 # ---------------------------------------------------------------- user config
 if [ "$USER_CONFIG" -eq 1 ]; then
 	config_home="${XDG_CONFIG_HOME:-$HOME/.config}/tileWin"

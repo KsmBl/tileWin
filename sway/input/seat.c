@@ -23,6 +23,7 @@
 #include "sway/input/keyboard.h"
 #include "sway/input/libinput.h"
 #include "sway/input/seat.h"
+#include "sway/tw_priority.h"
 #include "sway/input/switch.h"
 #include "sway/input/tablet.h"
 #include "sway/ipc-server.h"
@@ -1210,6 +1211,9 @@ static void seat_set_workspace_focus(struct sway_seat *seat, struct sway_node *n
 	if (container && container->view) {
 		ipc_event_window(container, "focus");
 	}
+	// the focused window's process first (focus_priority); on a desktop with none, none
+	tw_priority_focus(container && container->view ? container->view->pid : 0,
+		config->tw_focus_nice);
 
 	if (last_workspace && last_workspace != new_workspace) {
 		wlr_ext_workspace_handle_v1_set_active(last_workspace->ext_workspace,

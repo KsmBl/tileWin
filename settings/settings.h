@@ -60,6 +60,8 @@ struct settings {
 /* ipc.c: talks to the running tileWin, if any */
 char *tw_ipc_request(uint32_t type, const char *payload);
 bool tw_ipc_available(void);
+/* Whether the running tileWin may lower nice values (CAP_SYS_NICE): 1, 0, -1 not known. */
+int tw_ipc_can_nice(void);
 bool tw_ipc_command(const char *command, char **error);
 /* A field of the get_tilewin reply. Newly allocated, NULL if not running. */
 char *tw_ipc_state(const char *key);

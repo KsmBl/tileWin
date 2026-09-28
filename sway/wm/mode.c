@@ -428,6 +428,7 @@ void tw_after_reload(void) {
 	apply_app_icons();
 	tw_power_config_changed();
 	tw_main_output_changed();
+	tw_priority_refresh(); // (a setting taken out of the config is off now)
 }
 
 static void mark_container_dirty(struct sway_container *con, void *data);

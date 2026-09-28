@@ -168,6 +168,8 @@ void tw_add_default_bindings(struct sway_config *config);
 /* Points $taskmanager at a task manager that is actually installed. */
 void tw_fix_task_manager(struct sway_config *config);
 void tw_after_reload(void);
+/* The focused window first again, after focus_priority or the config changed. */
+void tw_priority_refresh(void);
 /* Tells the taskbar the new "double_click_time" so it uses it too. */
 void tw_double_click_time_changed(void);
 json_object *tw_describe_state(void);

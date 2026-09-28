@@ -71,6 +71,7 @@ static const struct cmd_handler handlers[] = {
 	{ "focus", cmd_focus },
 	{ "focus_follows_mouse", cmd_focus_follows_mouse },
 	{ "focus_on_window_activation", cmd_focus_on_window_activation },
+	{ "focus_priority", cmd_focus_priority },
 	{ "focus_wrapping", cmd_focus_wrapping },
 	{ "font", cmd_font },
 	{ "for_window", cmd_for_window },

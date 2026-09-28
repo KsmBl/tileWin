@@ -9,6 +9,8 @@
 #include "sway/input/seat.h"
 #include "sway/ipc-server.h"
 #include "sway/tilewin.h"
+#include "sway/tree/view.h"
+#include "sway/tw_priority.h"
 #include "sway/tree/container.h"
 #include "sway/tree/workspace.h"
 #include "log.h"
@@ -853,6 +855,52 @@ struct cmd_results *cmd_screensaver_command(int argc, char **argv) {
 	}
 	free(config->tw_screensaver_command);
 	config->tw_screensaver_command = join_args(argv, argc);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+/* The process of the focused window, 0 for none. */
+static pid_t focused_pid(void) {
+	struct sway_seat *seat = input_manager_current_seat();
+	struct sway_container *con = seat ? seat_get_focused_container(seat) : NULL;
+	return con && con->view ? con->view->pid : 0;
+}
+
+void tw_priority_refresh(void) {
+	tw_priority_focus(focused_pid(), config ? config->tw_focus_nice : 0);
+}
+
+/*
+ * focus_priority off|raised|high|highest|<nice>: the process of the focused
+ * window runs at that nice value (raised -5, high -10, highest -15), the one
+ * focused before gets its own back.
+ */
+struct cmd_results *cmd_focus_priority(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "focus_priority", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	static const struct { const char *name; int nice; } levels[] = {
+		{ "off", 0 }, { "normal", 0 }, { "raised", -5 }, { "high", -10 }, { "highest", -15 },
+	};
+	int nice = 1;
+	for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+		if (strcasecmp(argv[0], levels[i].name) == 0) {
+			nice = levels[i].nice;
+		}
+	}
+	if (nice == 1) {
+		char *end;
+		long v = strtol(argv[0], &end, 10);
+		if (*end || v > 0 || v < -20) {
+			return cmd_results_new(CMD_INVALID, "Expected off, raised, high, highest or a "
+				"nice value from -20 to 0");
+		}
+		nice = (int)v;
+	}
+	config->tw_focus_nice = nice;
+	if (!config->reading) {
+		tw_priority_refresh();
+	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

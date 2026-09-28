@@ -131,6 +131,7 @@ sway_cmd cmd_lock_command;
 sway_cmd cmd_screensaver;
 sway_cmd cmd_screensaver_command;
 sway_cmd cmd_screensaver_lock;
+sway_cmd cmd_focus_priority;
 sway_cmd cmd_main_output;
 sway_cmd cmd_output_wallpaper;
 sway_cmd cmd_xdg_autostart;

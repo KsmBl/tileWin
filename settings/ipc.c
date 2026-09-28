@@ -1,3 +1,4 @@
+#define _GNU_SOURCE // struct ucred
 #include <errno.h>
 #include <json.h>
 #include <string.h>
@@ -56,6 +57,40 @@ static bool read_all(int fd, void *data, size_t len) {
 		len -= n;
 	}
 	return true;
+}
+
+int tw_ipc_can_nice(void) {
+	char *path = socket_path();
+	if (!path) {
+		return -1;
+	}
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	g_strlcpy(addr.sun_path, path, sizeof(addr.sun_path));
+	g_free(path);
+	struct ucred cred = { 0 };
+	socklen_t len = sizeof(cred);
+	if (fd < 0 || connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+			getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0) {
+		if (fd >= 0) {
+			close(fd);
+		}
+		return -1;
+	}
+	close(fd);
+	// the capabilities it has in effect: CAP_SYS_NICE is bit 23
+	char *status_path = g_strdup_printf("/proc/%d/status", (int)cred.pid), *status = NULL;
+	int result = -1;
+	if (g_file_get_contents(status_path, &status, NULL, NULL)) {
+		const char *line = strstr(status, "\nCapEff:");
+		if (line) {
+			unsigned long long caps = g_ascii_strtoull(line + 9, NULL, 16);
+			result = (caps >> 23) & 1;
+		}
+	}
+	g_free(status);
+	g_free(status_path);
+	return result;
 }
 
 char *tw_ipc_request(uint32_t type, const char *payload) {

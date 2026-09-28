@@ -503,7 +503,7 @@ static void build_window(struct settings *s) {
 		{ "animations", "Animations", "effects motion speed fade zoom slide minimize maximize "
 			"open close desktop switch", animations_page_new },
 		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
-			"double click focus follows mouse attention activation", window_page_new },
+			"double click focus follows mouse attention activation priority nice cpu fast", window_page_new },
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
 			"night light sleep lock lid power", screen_page_new },
 		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
