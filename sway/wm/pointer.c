@@ -49,6 +49,8 @@ struct trail_copy {
 	struct timespec born;
 	struct wlr_scene_buffer *node;
 	bool alive;
+	bool big;            // shows the picture of the grown pointer
+	double w, h, hx, hy; // its size and hotspot, as the pointer was when it was left
 };
 
 static struct {
@@ -86,7 +88,8 @@ static struct {
 	struct wlr_xcursor_manager *shake_source;
 	struct wlr_buffer *shake_image;
 	char shake_image_name[64];
-	int shake_image_width, shake_image_hotspot_x, shake_image_hotspot_y;
+	int shake_image_width, shake_image_height, shake_image_hotspot_x, shake_image_hotspot_y;
+	double shake_logical; // the size the grown pointer is shown at, in logical pixels
 } state;
 
 static double elapsed_ms(struct timespec *since) {
@@ -328,6 +331,7 @@ static bool shake_load_image(struct sway_cursor *cursor) {
 	state.shake_image = buffer;
 	snprintf(state.shake_image_name, sizeof(state.shake_image_name), "%s", name);
 	state.shake_image_width = xcursor->images[0]->width;
+	state.shake_image_height = xcursor->images[0]->height;
 	state.shake_image_hotspot_x = xcursor->images[0]->hotspot_x;
 	state.shake_image_hotspot_y = xcursor->images[0]->hotspot_y;
 	return true;
@@ -356,6 +360,7 @@ static void shake_apply(struct sway_cursor *cursor) {
 	}
 	// the buffer covers width/scale logical pixels, so ask for the size we want
 	double want = cursor->xcursor_manager->size * state.shake_factor;
+	state.shake_logical = want;
 	float scale = (float)(state.shake_image_width / want);
 	wlr_cursor_set_buffer(cursor->cursor, state.shake_image,
 		(int)round(state.shake_image_hotspot_x / scale),
@@ -523,9 +528,6 @@ static bool trail_load_image(struct sway_cursor *cursor, double scale, bool *cha
  */
 static int trail_age(void) {
 	int lifetime = trail_lifetime();
-	double scale = state.trail_scale > 0 ? state.trail_scale : 1;
-	double w = state.image_width / scale, h = state.image_height / scale;
-	double hx = state.image_hotspot_x / scale, hy = state.image_hotspot_y / scale;
 	int alive = 0;
 	for (int i = 0; i < TRAIL_MAX; i++) {
 		struct trail_copy *copy = &state.trail[i];
@@ -541,9 +543,9 @@ static int trail_age(void) {
 		alive++;
 		wlr_scene_node_set_enabled(&copy->node->node, true);
 		wlr_scene_buffer_set_opacity(copy->node, (float)(0.85 * left));
-		wlr_scene_buffer_set_dest_size(copy->node, (int)round(w), (int)round(h));
-		wlr_scene_node_set_position(&copy->node->node, (int)round(copy->x - hx),
-			(int)round(copy->y - hy));
+		wlr_scene_buffer_set_dest_size(copy->node, (int)round(copy->w), (int)round(copy->h));
+		wlr_scene_node_set_position(&copy->node->node, (int)round(copy->x - copy->hx),
+			(int)round(copy->y - copy->hy));
 	}
 	state.trail_alive = alive;
 	return alive;
@@ -586,7 +588,7 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 	}
 	if (image_changed) {
 		for (int i = 0; i < TRAIL_MAX; i++) {
-			if (state.trail[i].node) {
+			if (state.trail[i].node && !state.trail[i].big) {
 				// setting the same buffer again would redraw every copy for nothing
 				wlr_scene_buffer_set_buffer(state.trail[i].node, state.trail_image);
 			}
@@ -614,6 +616,26 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 		copy->x = x;
 		copy->y = y;
 		copy->alive = true;
+		// as big as the pointer is now: grown by shaking, the copies are too
+		bool big = state.shake_applied && state.shake_image && state.shake_image_width > 0 &&
+			state.shake_logical > 0;
+		if (big) {
+			double k = state.shake_logical / state.shake_image_width;
+			copy->w = state.shake_image_width * k;
+			copy->h = state.shake_image_height * k;
+			copy->hx = state.shake_image_hotspot_x * k;
+			copy->hy = state.shake_image_hotspot_y * k;
+		} else {
+			double sc = state.trail_scale > 0 ? state.trail_scale : 1;
+			copy->w = state.image_width / sc;
+			copy->h = state.image_height / sc;
+			copy->hx = state.image_hotspot_x / sc;
+			copy->hy = state.image_hotspot_y / sc;
+		}
+		if (big != copy->big) {
+			wlr_scene_buffer_set_buffer(copy->node, big ? state.shake_image : state.trail_image);
+			copy->big = big;
+		}
 		clock_gettime(CLOCK_MONOTONIC, &copy->born);
 		wlr_scene_node_raise_to_top(&copy->node->node); // the newest one in front
 		state.trail_head = (state.trail_head + 1) % TRAIL_MAX;

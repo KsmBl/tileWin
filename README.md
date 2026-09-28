@@ -414,7 +414,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `peek <con_id>\|desktop\|off` | Shows only that window, or only the desktop, the other windows as outlines, until `peek off` or a click (the taskbar uses it) |
 | `magnifier Alt\|Super\|Ctrl\|Shift\|off` | The key that zooms the screen with the scroll wheel (default Alt) |
 | `magnify in\|out\|off\|<factor>` | Zooms the screen around the pointer, 1 to 32 |
-| `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off) |
+| `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off). While `pointer_shake` has the pointer grown, the copies it leaves are grown as well |
 | `double_click_time <ms>` | How long after the first click the second one still makes a double-click, in title bars, on window frames and on the desktop (default 400) |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock`, `lid_action ... lock`, `power_key_action lock` and `lock_on_sleep` (default `tilewin-lock -f`) |

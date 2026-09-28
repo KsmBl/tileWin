@@ -395,3 +395,16 @@ test(
 	is_parallel: false,
 	timeout: 120,
 )
+
+if gdk_pixbuf.found()
+	test(
+		'pointer-trail',
+		find_program('pointer_trail.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		env: saver_gui_env,
+		depends: [pointer_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 60,
+	)
+endif
