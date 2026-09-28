@@ -239,6 +239,12 @@ void tw_xdg_autostart(void) {
 	if (!config || !config->tw_xdg_autostart) {
 		return;
 	}
+	if (getenv("TILEWIN_NO_APP_TWEAKS")) {
+		// a test session: its empty config would have xdg-user-dirs-update make
+		// Music, Videos, Templates and Public in the real home, and the
+		// other entries start the user's own programs a second time
+		return;
+	}
 	list_t *seen = create_list();
 	const char *config_home = getenv("XDG_CONFIG_HOME");
 	const char *home = getenv("HOME");

@@ -39,6 +39,7 @@ XDG_STATE_HOME=$work/state
 XDG_CACHE_HOME=$work/cache
 XDG_DATA_HOME=$work/data
 export XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME XDG_DATA_HOME
+export TILEWIN_NO_APP_TWEAKS=1 # leaves the real desktop and home alone
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 cat > "$work/tilewin.conf" <<EOF
