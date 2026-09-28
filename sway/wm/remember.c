@@ -22,8 +22,9 @@
 
 /*
  * Each app opens where its window was last closed ("remember_windows"), as
- * apps on Windows do by themselves: the screen, the place and the size, and
- * whether it was maximized or snapped. That is kept per app id in
+ * apps on Windows do by themselves: the place and the size, and whether it
+ * was maximized or snapped. It opens on the screen it is started on (where
+ * the pointer is), at the same place of that screen. That is kept per app id in
  * ~/.local/state/tileWin/window-places, the most recent last.
  *
  * Only the first window of an app goes there; a second one opening while the
@@ -247,18 +248,9 @@ bool tw_remember_apply(struct sway_container *con) {
 	if (other.found) {
 		return false; // it would cover the one that is open
 	}
-	struct sway_output *output = NULL;
-	for (int i = 0; i < root->outputs->length; i++) {
-		struct sway_output *o = root->outputs->items[i];
-		if (o->wlr_output && o->wlr_output->name && strcmp(o->wlr_output->name, p->output) == 0) {
-			output = o;
-		}
-	}
+	// it opens on the screen it is started on (where the pointer is); the
+	// place and size it had there are taken over to this one
 	struct sway_workspace *ws = con->pending.workspace;
-	if (output && ws && ws->output != output) {
-		tw_move_to_screen(con, output);
-		ws = con->pending.workspace;
-	}
 	if (!ws || !ws->output) {
 		return false;
 	}

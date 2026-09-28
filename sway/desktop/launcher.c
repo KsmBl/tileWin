@@ -1,6 +1,10 @@
 #include <stdlib.h>
 #include <string.h>
+#include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
+#include "sway/config.h"
+#include "sway/input/cursor.h"
 #include "sway/input/seat.h"
 #include "sway/output.h"
 #include "sway/desktop/launcher.h"
@@ -239,9 +243,29 @@ static void launch_ctx_handle_seat_destroy(struct wl_listener *listener, void *d
 }
 
 // Creates a context with a new token for the internal launcher
+/* The desktop shown on the screen the pointer is on, NULL if none. */
+static struct sway_workspace *pointer_workspace(struct sway_seat *seat) {
+	if (!seat->cursor || !seat->cursor->cursor) {
+		return NULL;
+	}
+	struct wlr_output *wlr_output = wlr_output_layout_output_at(root->output_layout,
+		seat->cursor->cursor->x, seat->cursor->cursor->y);
+	struct sway_output *output = wlr_output ? output_from_wlr_output(wlr_output) : NULL;
+	return output ? output_get_active_workspace(output) : NULL;
+}
+
 struct launcher_ctx *launcher_ctx_create_internal(void) {
 	struct sway_seat *seat = input_manager_current_seat();
 	struct sway_workspace *ws = seat_get_focused_workspace(seat);
+	// tileWin: the screen the pointer is on is the one being worked on, so a
+	// program started now (a shortcut, the Start menu) opens there and gets the
+	// focus, also when it hands over to a running process tileWin cannot
+	// follow, as a program started on Windows opens on the active screen
+	struct sway_workspace *under = config && !config->reading ? pointer_workspace(seat) : NULL;
+	if (under && under != ws) {
+		seat_set_focus(seat, seat_get_focus_inactive(seat, &under->node));
+		ws = under;
+	}
 	if (!ws) {
 		sway_log(SWAY_DEBUG, "Failed to create launch context. No workspace.");
 		return NULL;

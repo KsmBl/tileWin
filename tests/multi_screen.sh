@@ -210,6 +210,29 @@ echo "let go on the outer left edge: $*"
 [ "$1" = HEADLESS-1 ] && [ "$2" = 0 ] && [ "$4" = 640 ] ||
 	fail "the outer edge did not snap the window any more"
 
+# a program started while the pointer is on the other screen opens there, focused
+ipc focus_follows_mouse no >/dev/null # (so only the start moves the focus)
+ipc "[title=wide] move output left" >/dev/null
+ipc "[title=wide] focus" >/dev/null
+"$pointer" 3200 1080 move 2200 500 >/dev/null 2>&1
+open_on_pointer() {
+	ipc exec "xfce4-terminal --disable-server -T $1" >/dev/null 2>&1
+	attempt=0
+	while [ -z "$(window "$1")" ] && [ $attempt -lt 40 ]; do
+		sleep 0.5
+		attempt=$((attempt + 1))
+	done
+	sleep 1
+}
+open_on_pointer started
+set -- $(window started)
+echo "started with the pointer on the right screen: $*"
+[ "$1" = HEADLESS-2 ] || fail "a program started opens on the screen with the focus, not the pointer"
+[ "$8" = 1 ] || fail "a program started on the pointer's screen does not get the focus"
+ipc "[title=started] kill" >/dev/null
+ipc focus_follows_mouse yes >/dev/null
+sleep 0.5
+
 # windows on both screens, then the right one goes away and comes back
 ipc "[title=wide] move output right" >/dev/null
 ipc "[title=wide] maximize enable" >/dev/null
