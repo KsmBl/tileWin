@@ -1549,6 +1549,9 @@ void seat_pointer_notify_button(struct sway_seat *seat, uint32_t time_msec,
 	seat->last_button_serial = wlr_seat_pointer_notify_button(seat->wlr_seat,
 			time_msec, button, state);
 	struct wlr_surface *clicked = seat->wlr_seat->pointer_state.focused_surface;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	seat->tw_button_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 	if (state == WL_POINTER_BUTTON_STATE_PRESSED && tw_peek_active()) {
 		tw_peek(NULL, false); // a click ends peeking, whatever it was on
 	}

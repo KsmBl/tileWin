@@ -386,6 +386,17 @@ test(
 )
 
 test(
+	'x11-titlebar',
+	find_program('x11_titlebar.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 60,
+)
+
+test(
 	'multi-screen-panel',
 	find_program('multi_screen_panel.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

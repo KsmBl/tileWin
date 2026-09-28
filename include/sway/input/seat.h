@@ -111,6 +111,7 @@ struct sway_seat {
 	void *seatop_data;
 
 	uint32_t last_button_serial;
+	int64_t tw_button_ms; // when a pointer button was last pressed or let go (CLOCK_MONOTONIC)
 
 	uint32_t idle_inhibit_sources, idle_wake_sources;
 

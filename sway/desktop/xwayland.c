@@ -1,7 +1,9 @@
 #include <float.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <time.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
@@ -469,6 +471,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	wl_list_remove(&xwayland_view->destroy.link);
 	wl_list_remove(&xwayland_view->request_configure.link);
 	wl_list_remove(&xwayland_view->request_fullscreen.link);
+	wl_list_remove(&xwayland_view->request_maximize.link);
 	wl_list_remove(&xwayland_view->request_minimize.link);
 	wl_list_remove(&xwayland_view->request_move.link);
 	wl_list_remove(&xwayland_view->request_resize.link);
@@ -595,11 +598,28 @@ static void handle_request_configure(struct wl_listener *listener, void *data) {
 					con->current.content_width, con->current.content_height);
 			return;
 		}
+		bool moved = false;
+		if (tw_mode == TW_MODE_WINDOW &&
+				(ev->mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y))) {
+			// apps that draw their own title bar (Bambu Studio, ...) are
+			// dragged by moving themselves
+			double x = ev->mask & XCB_CONFIG_WINDOW_X ? ev->x : con->pending.content_x;
+			double y = ev->mask & XCB_CONFIG_WINDOW_Y ? ev->y : con->pending.content_y;
+			if (x != con->pending.content_x || y != con->pending.content_y) {
+				container_floating_move_to(con, con->pending.x + x - con->pending.content_x,
+					con->pending.y + y - con->pending.content_y);
+				moved = true;
+			}
+		}
+		bool resized = ev->width != con->pending.content_width ||
+			ev->height != con->pending.content_height;
 		// Respect minimum and maximum sizes
 		view->natural_width = ev->width;
 		view->natural_height = ev->height;
 		if (tw_mode == TW_MODE_WINDOW) {
-			tw_floating_resize_in_place(con);
+			if (resized) {
+				tw_floating_resize_in_place(con);
+			}
 		} else {
 			container_floating_resize_and_center(con);
 		}
@@ -607,6 +627,12 @@ static void handle_request_configure(struct wl_listener *listener, void *data) {
 		configure(view, con->pending.content_x, con->pending.content_y,
 				con->pending.content_width, con->pending.content_height);
 		node_set_dirty(&con->node);
+		if (moved) {
+			// shown there right away, without waiting for the app to draw:
+			// the X server has the window there already, and the app reads
+			// the pointer against that place for its next step
+			transaction_commit_dirty_client();
+		}
 	} else {
 		configure(view, view->container->current.content_x,
 				view->container->current.content_y,
@@ -627,6 +653,26 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data) 
 
 	arrange_root();
 	transaction_commit_dirty();
+}
+
+static void handle_request_maximize(struct wl_listener *listener, void *data) {
+	struct sway_xwayland_view *xwayland_view =
+		wl_container_of(listener, xwayland_view, request_maximize);
+	struct sway_view *view = &xwayland_view->view;
+	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
+	struct sway_container *con = view->container;
+	if (xsurface->surface == NULL || !xsurface->surface->mapped || !con) {
+		return;
+	}
+	bool maximized = !container_is_floating(con); // tiled windows count as maximized
+	if (tw_mode == TW_MODE_WINDOW && container_is_floating(con) &&
+			con->pending.fullscreen_mode == FULLSCREEN_NONE) {
+		tw_maximize(con, xsurface->maximized_horz && xsurface->maximized_vert);
+		transaction_commit_dirty();
+		maximized = con->pending.tw_maximized;
+	}
+	// the window's _NET_WM_STATE says what it is now, not what it asked for
+	wlr_xwayland_surface_set_maximized(xsurface, maximized, maximized);
 }
 
 static void handle_request_minimize(struct wl_listener *listener, void *data) {
@@ -682,12 +728,50 @@ static void handle_request_resize(struct wl_listener *listener, void *data) {
 	seatop_begin_resize_floating(seat, view->container, e->edges);
 }
 
+/*
+ * wxWidgets on GTK "restores" a window by asking to activate it
+ * (gtk_window_present), which no window manager takes as leaving the
+ * maximized state. Apps with a title bar of their own (Bambu Studio and other
+ * slicers) have their restore button do just that, so it would do nothing. An
+ * undecorated window that is maximized and has the focus already, asking to be
+ * activated right after a click in its title strip, is taken as that button.
+ */
+#define RESTORE_CLICK_MS 500
+#define RESTORE_STRIP 48
+
+static bool is_restore_click(struct sway_view *view) {
+	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
+	struct sway_container *con = view->container;
+	struct sway_seat *seat = input_manager_current_seat();
+	if (tw_mode != TW_MODE_WINDOW || !con || !container_is_floating(con) ||
+			!con->pending.tw_maximized ||
+			!(xsurface->decorations & WLR_XWAYLAND_SURFACE_DECORATIONS_NO_TITLE) ||
+			seat_get_focused_container(seat) != con) {
+		return false;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	int64_t ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+	if (!seat->tw_button_ms || ms - seat->tw_button_ms > RESTORE_CLICK_MS) {
+		return false;
+	}
+	double x = seat->cursor->cursor->x, y = seat->cursor->cursor->y;
+	return x >= con->current.content_x &&
+		x < con->current.content_x + con->current.content_width &&
+		y >= con->current.content_y && y < con->current.content_y + RESTORE_STRIP;
+}
+
 static void handle_request_activate(struct wl_listener *listener, void *data) {
 	struct sway_xwayland_view *xwayland_view =
 		wl_container_of(listener, xwayland_view, request_activate);
 	struct sway_view *view = &xwayland_view->view;
 	struct wlr_xwayland_surface *xsurface = view->wlr_xwayland_surface;
 	if (xsurface->surface == NULL || !xsurface->surface->mapped) {
+		return;
+	}
+	if (is_restore_click(view)) {
+		tw_maximize(view->container, false);
+		transaction_commit_dirty();
 		return;
 	}
 	view_request_activate(view, NULL);
@@ -838,6 +922,10 @@ struct sway_xwayland_view *create_xwayland_view(struct wlr_xwayland_surface *xsu
 	wl_signal_add(&xsurface->events.request_fullscreen,
 		&xwayland_view->request_fullscreen);
 	xwayland_view->request_fullscreen.notify = handle_request_fullscreen;
+
+	wl_signal_add(&xsurface->events.request_maximize,
+		&xwayland_view->request_maximize);
+	xwayland_view->request_maximize.notify = handle_request_maximize;
 
 	wl_signal_add(&xsurface->events.request_minimize,
 		&xwayland_view->request_minimize);

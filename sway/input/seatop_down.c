@@ -22,8 +22,31 @@ struct seatop_down_event {
 	struct wlr_surface *surface;
 	double ref_lx, ref_ly;         // cursor's x/y at start of op
 	double ref_con_lx, ref_con_ly; // container's x/y at start of op
+	double ref_view_lx, ref_view_ly; // where the window was at start of op
 	struct wl_list point_events;   // seatop_touch_point_event::link
 };
+
+/*
+ * Where the window of the surface is shown now. An app that moves its window
+ * itself while the button is held (one that draws its own title bar and is
+ * dragged by it, as Bambu Studio on X11) must see the pointer relative to
+ * where the window is now, or every step of the drag adds up.
+ */
+static void view_position(struct wlr_surface *surface, double *lx, double *ly) {
+	struct sway_view *view = surface ? view_from_wlr_surface(surface) : NULL;
+	struct sway_container *con = view ? view->container : NULL;
+	if (con) { // otherwise left as it is
+		*lx = con->current.content_x;
+		*ly = con->current.content_y;
+	}
+}
+
+static void surface_coords(struct seatop_down_event *e, double *sx, double *sy) {
+	double lx = e->ref_view_lx, ly = e->ref_view_ly;
+	view_position(e->surface, &lx, &ly);
+	*sx = e->ref_con_lx + e->seat->cursor->cursor->x - e->ref_lx - (lx - e->ref_view_lx);
+	*sy = e->ref_con_ly + e->seat->cursor->cursor->y - e->ref_ly - (ly - e->ref_view_ly);
+}
 
 static void handle_touch_motion(struct sway_seat *seat,
 		struct wlr_touch_motion_event *event, double lx, double ly) {
@@ -158,10 +181,8 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
 static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	struct seatop_down_event *e = seat->seatop_data;
 	if (seat_is_input_allowed(seat, e->surface)) {
-		double moved_x = seat->cursor->cursor->x - e->ref_lx;
-		double moved_y = seat->cursor->cursor->y - e->ref_ly;
-		double sx = e->ref_con_lx + moved_x;
-		double sy = e->ref_con_ly + moved_y;
+		double sx, sy;
+		surface_coords(e, &sx, &sy);
 		wlr_seat_pointer_notify_motion(seat->wlr_seat, time_msec, sx, sy);
 	}
 }
@@ -179,10 +200,8 @@ static void handle_tablet_tool_motion(struct sway_seat *seat,
 		struct sway_tablet_tool *tool, uint32_t time_msec) {
 	struct seatop_down_event *e = seat->seatop_data;
 	if (seat_is_input_allowed(seat, e->surface)) {
-		double moved_x = seat->cursor->cursor->x - e->ref_lx;
-		double moved_y = seat->cursor->cursor->y - e->ref_ly;
-		double sx = e->ref_con_lx + moved_x;
-		double sy = e->ref_con_ly + moved_y;
+		double sx, sy;
+		surface_coords(e, &sx, &sy);
 		wlr_tablet_v2_tablet_tool_notify_motion(tool->tablet_v2_tool, sx, sy);
 	}
 }
@@ -207,9 +226,17 @@ static void handle_end(struct sway_seat *seat) {
 	wl_list_remove(&e->surface_destroy.link);
 }
 
+/* The window moved under the pointer (the app moving itself while dragged by
+ * its own title bar): tell it where the pointer is on it now, or its last step
+ * is never seen, as the pointer itself did not move. */
+static void handle_rebase(struct sway_seat *seat, uint32_t time_msec) {
+	handle_pointer_motion(seat, time_msec);
+}
+
 static const struct sway_seatop_impl seatop_impl = {
 	.button = handle_button,
 	.pointer_motion = handle_pointer_motion,
+	.rebase = handle_rebase,
 	.pointer_axis = handle_pointer_axis,
 	.tablet_tool_tip = handle_tablet_tool_tip,
 	.tablet_tool_motion = handle_tablet_tool_motion,
@@ -257,6 +284,8 @@ void seatop_begin_down_on_surface(struct sway_seat *seat,
 	e->ref_ly = seat->cursor->cursor->y;
 	e->ref_con_lx = sx;
 	e->ref_con_ly = sy;
+	e->ref_view_lx = e->ref_view_ly = 0;
+	view_position(surface, &e->ref_view_lx, &e->ref_view_ly);
 	wl_list_init(&e->point_events);
 
 	seat->seatop_impl = &seatop_impl;
