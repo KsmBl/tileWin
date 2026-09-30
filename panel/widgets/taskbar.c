@@ -149,16 +149,20 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
+		// the face and the checkers in the theme's colors, which the dark
+		// scheme makes dark: its light text stays readable
 		struct pbox bb = { b.x + 1, b.y + 4, b.width - 2, b.height - 6 };
-		pd_rect(cr, bb.x, bb.y, bb.width, bb.height, 0xc0c0c0ff);
+		pd_rect(cr, bb.x, bb.y, bb.width, bb.height,
+			tw_theme_color(t, "taskbar.bg", tw_theme_color(t, "panel.bg", 0xc0c0c0ff)));
 		if (active || pressed) {
 			// checkered light background of a pressed task button
+			uint32_t check = tw_theme_color(t, "decoration.highlight", 0xffffffff);
 			cairo_save(cr);
 			cairo_rectangle(cr, bb.x + 2, bb.y + 2, bb.width - 4, bb.height - 4);
 			cairo_clip(cr);
 			for (int yy = bb.y; yy < bb.y + bb.height; yy++) {
 				for (int xx = bb.x + ((yy - bb.y) % 2); xx < bb.x + bb.width; xx += 2) {
-					pd_rect(cr, xx, yy, 1, 1, 0xffffffff);
+					pd_rect(cr, xx, yy, 1, 1, check);
 				}
 			}
 			cairo_restore(cr);
@@ -514,8 +518,10 @@ static int start_measure(struct widget *w, struct render_ctx *ctx) {
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
 		const char *label = widget_conf(w, "label", tw_theme_str(t, "start.label", "Start"));
-		fallback = render_text_width(ctx, bar_bold_font(ctx->panel), label) + 40;
-		break;
+		// the theme's width is the least: the label must fit in the font there is
+		int needed = render_text_width(ctx, bar_bold_font(ctx->panel), label) + 32;
+		int width = tw_theme_int(t, "start.width", needed);
+		return widget_conf_int(w, "width", width > needed ? width : needed);
 	}
 	case PSV_LUNA:
 		fallback = 100;
@@ -556,7 +562,8 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
 		struct pbox bb = { b.x + 2, b.y + 4, b.width - 3, b.height - 6 };
-		pd_rect(cr, bb.x, bb.y, bb.width, bb.height, 0xc0c0c0ff);
+		pd_rect(cr, bb.x, bb.y, bb.width, bb.height,
+			tw_theme_color(t, "start.bg", tw_theme_color(t, "panel.bg", 0xc0c0c0ff)));
 		pd_bevel(cr, bb.x, bb.y, bb.width, bb.height, pressed);
 		int off = pressed ? 1 : 0;
 		pd_glyph_windows(cr, bb.x + 5 + off, bb.y + (bb.height - 14) / 2.0 + off, 14,

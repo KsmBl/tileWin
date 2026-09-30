@@ -93,8 +93,19 @@ void pd_fill(cairo_t *cr, const struct tw_theme *t, const char *base,
 	}
 }
 
+// the edges of Windows 95 boxes; the theme's dark scheme darkens them
+static uint32_t bevel_hi = 0xffffffff, bevel_light = 0xdfdfdfff, bevel_shadow = 0x808080ff,
+	bevel_dark = 0x000000ff;
+
+void pd_set_bevel_colors(uint32_t hi, uint32_t light, uint32_t shadow, uint32_t dark) {
+	bevel_hi = hi;
+	bevel_light = light;
+	bevel_shadow = shadow;
+	bevel_dark = dark;
+}
+
 void pd_bevel(cairo_t *cr, double x, double y, double w, double h, bool sunken) {
-	uint32_t hi = 0xffffffff, light = 0xdfdfdfff, shadow = 0x808080ff, dark = 0x000000ff;
+	uint32_t hi = bevel_hi, light = bevel_light, shadow = bevel_shadow, dark = bevel_dark;
 	uint32_t o_tl = sunken ? dark : hi, o_br = sunken ? hi : dark;
 	uint32_t i_tl = sunken ? shadow : light, i_br = sunken ? light : shadow;
 	cairo_save(cr);

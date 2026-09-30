@@ -247,7 +247,7 @@ void fly_draw_bar(cairo_t *cr, const struct fly_style *st, double x, double y, d
 	share = share < 0 ? 0 : share > 1 ? 1 : share;
 	if (st->style == PS_CLASSIC) {
 		// a sunken field with the filled part in blocks, as Windows 95 drew progress
-		pd_rect(cr, x, y, w, h, 0xffffffff);
+		pd_rect(cr, x, y, w, h, st->field_bg);
 		pd_bevel(cr, x - 1, y - 1, w + 2, h + 2, true);
 		double fill = (w - 2) * share;
 		double block = h + 1;

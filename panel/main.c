@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "ipc-client.h"
 #include "log.h"
+#include "draw.h"
 #include "panel.h"
 #include "tw_desktop.h"
 #include "stringop.h"
@@ -133,6 +134,14 @@ static void load_theme(struct panel *p) {
 	}
 	tw_theme_free(p->theme);
 	p->theme = theme;
+	// the edges of the classic look in the colors of its frames (decoration.shadow
+	// is the drop shadow of windows in the other styles)
+	bool classic = panel_style(p) == PS_CLASSIC;
+	pd_set_bevel_colors(
+		classic ? tw_theme_color(theme, "decoration.highlight", 0xffffffff) : 0xffffffff,
+		classic ? tw_theme_color(theme, "decoration.light", 0xdfdfdfff) : 0xdfdfdfff,
+		classic ? tw_theme_color(theme, "decoration.shadow", 0x808080ff) : 0x808080ff,
+		classic ? tw_theme_color(theme, "decoration.dark", 0x000000ff) : 0x000000ff);
 	char *icons = tw_theme_icon_dir(theme);
 	tw_icon_set_theme_dir(icons);
 	free(icons);

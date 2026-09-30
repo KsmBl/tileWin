@@ -30,6 +30,8 @@ cairo_pattern_t *pd_gradient(const char *stops, double x0, double y0, double x1,
 void pd_fill(cairo_t *cr, const struct tw_theme *t, const char *base,
 	double y, double h, uint32_t fallback);
 void pd_bevel(cairo_t *cr, double x, double y, double w, double h, bool sunken);
+/* The colors pd_bevel draws with (those of the theme's decoration). */
+void pd_set_bevel_colors(uint32_t hi, uint32_t light, uint32_t shadow, uint32_t dark);
 void pd_border_sunken_thin(cairo_t *cr, double x, double y, double w, double h);
 
 void pd_text_size(cairo_t *cr, const char *font, const char *text, int *w, int *h);
