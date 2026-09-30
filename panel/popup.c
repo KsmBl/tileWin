@@ -1010,20 +1010,22 @@ static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, doubl
 	double r = style == PS_LUNA ? 3 : style == PS_FLUENT ? 4 : 2;
 	pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
 	if (style == PS_LUNA || style == PS_AERO) {
-		cairo_pattern_t *g = pd_gradient("0:#ffffff 0.5:#f0f0f0 0.51:#e5e5e5 1:#dcdcdc",
-			0, y, 0, y + h);
+		cairo_pattern_t *g = pd_gradient(tw_theme_str(panel->theme, "dialog.button_gradient",
+			"0:#ffffff 0.5:#f0f0f0 0.51:#e5e5e5 1:#dcdcdc"), 0, y, 0, y + h);
 		cairo_set_source(cr, g);
 		cairo_pattern_destroy(g);
 	} else {
 		pd_color(cr, is_default ? 0x0078d4ff : 0xfbfbfbff);
 	}
 	cairo_fill_preserve(cr);
-	pd_color(cr, is_default && style == PS_LUNA ? 0x003c74ff :
-		style == PS_FLAT || style == PS_FLUENT ? (is_default ? 0x0067c0ff : 0x00000028) : 0x707070ff);
+	pd_color(cr, tw_theme_color(panel->theme, is_default ? "dialog.default_border" :
+		"dialog.button_border", is_default && style == PS_LUNA ? 0x003c74ff :
+		style == PS_FLAT || style == PS_FLUENT ? (is_default ? 0x0067c0ff : 0x00000028) : 0x707070ff));
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
 	bool light = is_default && (style == PS_FLAT || style == PS_FLUENT);
-	pd_text(cr, bar_font(panel), label, x, y, w, h, light ? 0xffffffff : 0x000000ff, PD_CENTER);
+	pd_text(cr, bar_font(panel), label, x, y, w, h,
+		light ? 0xffffffff : tw_theme_color(panel->theme, "dialog.button_fg", 0x000000ff), PD_CENTER);
 }
 
 /*
@@ -1041,8 +1043,9 @@ static void draw_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, 
 
 	// dialog frame and title bar in the theme's look
 	int title_h = style == PS_CLASSIC ? 18 : style == PS_LUNA ? 28 : 32;
-	uint32_t body = style == PS_CLASSIC ? 0xc0c0c0ff : style == PS_LUNA ? 0xece9d8ff :
-		style == PS_AERO ? 0xf0f0f0ff : style == PS_FLUENT ? 0xf3f3f3ff : 0xffffffff;
+	uint32_t body = tw_theme_color(panel->theme, "dialog.bg",
+		style == PS_CLASSIC ? 0xc0c0c0ff : style == PS_LUNA ? 0xece9d8ff :
+		style == PS_AERO ? 0xf0f0f0ff : style == PS_FLUENT ? 0xf3f3f3ff : 0xffffffff);
 	cairo_translate(cr, -M, -M);
 	popup_draw_frame(panel, cr, w + 2 * M, h + 2 * M, M, "run");
 	cairo_translate(cr, M, M);
@@ -1067,13 +1070,17 @@ static void draw_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, 
 	}
 	case PS_LUNA: {
 		pd_rounded4(cr, 0, 0, w, title_h + 4, 7, 7, 0, 0);
-		cairo_pattern_t *g = pd_gradient("0:#3d8df5 0.1:#0a66f7 0.5:#0058ee 1:#0842c1", 0, 0, 0, title_h);
+		// the title bar and frame of the theme's windows
+		cairo_pattern_t *g = pd_gradient(tw_theme_str(panel->theme,
+			"decoration.active.title_gradient", "0:#3d8df5 0.1:#0a66f7 0.5:#0058ee 1:#0842c1"),
+			0, 0, 0, title_h);
 		cairo_set_source(cr, g);
 		cairo_fill(cr);
 		cairo_pattern_destroy(g);
-		pd_rect(cr, 0, title_h, 3, h - title_h, 0x0831d9ff);
-		pd_rect(cr, w - 3, title_h, 3, h - title_h, 0x0831d9ff);
-		pd_rect(cr, 0, h - 3, w, 3, 0x0831d9ff);
+		uint32_t frame = tw_theme_color(panel->theme, "decoration.active.frame", 0x0831d9ff);
+		pd_rect(cr, 0, title_h, 3, h - title_h, frame);
+		pd_rect(cr, w - 3, title_h, 3, h - title_h, frame);
+		pd_rect(cr, 0, h - 3, w, 3, frame);
 		title_fg = 0xffffffff;
 		break;
 	}
@@ -1137,16 +1144,17 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 	pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
 	pango_layout_set_text(layout, "Type the name of a program, folder, document, or "
 		"Internet resource, and tileWin will open it for you.", -1);
-	pd_color(cr, 0x000000ff);
+	pd_color(cr, tw_theme_color(panel->theme, "dialog.fg", 0x000000ff));
 	cairo_move_to(cr, bx + 48, by);
 	pango_cairo_show_layout(cr, layout);
 	g_object_unref(layout);
 	cairo_restore(cr);
 
 	double fy = by + 52;
-	pd_text(cr, bar_font(panel), "Open:", bx, fy, 50, 24, 0x000000ff, PD_LEFT);
+	pd_text(cr, bar_font(panel), "Open:", bx, fy, 50, 24,
+		tw_theme_color(panel->theme, "dialog.fg", 0x000000ff), PD_LEFT);
 	double fx = bx + 48, fw = w - fx - 16, fh = 24;
-	pd_rect(cr, fx, fy, fw, fh, 0xffffffff);
+	pd_rect(cr, fx, fy, fw, fh, tw_theme_color(panel->theme, "dialog.field_bg", 0xffffffff));
 	if (style == PS_CLASSIC) {
 		pd_bevel(cr, fx, fy, fw, fh, true);
 	} else if (style == PS_FLAT || style == PS_FLUENT) {
@@ -1157,12 +1165,13 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 		pd_rect(cr, fx, fy + fh - 2, fw, 2, 0x0067c0ff);
 	} else {
 		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
-		pd_color(cr, 0x7f9db9ff);
+		pd_color(cr, tw_theme_color(panel->theme, "dialog.field_border", 0x7f9db9ff));
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 	}
-	struct text_style ts = { .font = bar_font(panel), .fg = 0x000000ff, .caret = true };
+	struct text_style ts = { .font = bar_font(panel), .caret = true };
 	text_style_colors(panel, &ts);
+	ts.fg = tw_theme_color(panel->theme, "dialog.field_fg", 0x000000ff);
 	text_draw(cr, &ts, rd->text, &rd->tc, fx + 5, fy, fw - 10, fh);
 
 	double btn_w = 75, btn_h = style == PS_CLASSIC ? 23 : 26;
@@ -1380,7 +1389,8 @@ static void hungdialog_render(struct popup *p, cairo_t *cr) {
 	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
 	pango_layout_set_height(layout, -2); // at most two lines
 	pango_layout_set_text(layout, headline, -1);
-	pd_color(cr, style == PS_LUNA || style == PS_AERO ? 0x1e3287ff : 0x000000ff);
+	pd_color(cr, tw_theme_color(panel->theme, "dialog.heading_fg",
+		style == PS_LUNA || style == PS_AERO ? 0x1e3287ff : 0x000000ff));
 	cairo_move_to(cr, bx + 48, by);
 	pango_cairo_show_layout(cr, layout);
 	int lw, lh;
@@ -1395,7 +1405,7 @@ static void hungdialog_render(struct popup *p, cairo_t *cr) {
 	pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
 	pango_layout_set_text(layout, "If you close the program, you might lose information. "
 		"You can also wait for it to respond.", -1);
-	pd_color(cr, 0x000000ff);
+	pd_color(cr, tw_theme_color(panel->theme, "dialog.fg", 0x000000ff));
 	cairo_move_to(cr, bx + 48, by + lh + 8);
 	pango_cairo_show_layout(cr, layout);
 	g_object_unref(layout);

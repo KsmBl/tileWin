@@ -693,8 +693,8 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		ry = ly;
 		rw = W - 1 - rx;
 		pd_rect(cr, rx, ry, rw, lh, tw_theme_color(t, "startmenu.right_bg", 0xd3e5faff));
-		pd_rect(cr, rx, ry, 1, lh, 0x95bdeeff);
-		pd_rect(cr, lx, ly, W - 2, 2, 0xf5a14dff);
+		pd_rect(cr, rx, ry, 1, lh, tw_theme_color(t, "startmenu.divider", 0x95bdeeff));
+		pd_rect(cr, lx, ly, W - 2, 2, tw_theme_color(t, "startmenu.header_line", 0xf5a14dff));
 	} else {
 		cairo_translate(cr, -M, -M);
 		popup_draw_frame(panel, cr, W + 2 * M, H + 2 * M, M, "startmenu");
@@ -738,6 +738,9 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 	}
 
 	// left column content (hotspots are in surface coordinates)
+	uint32_t right_hl = tw_theme_color(t, "startmenu.right_hl_bg", xp ? 0x316ac5ff : 0xffffff30);
+	uint32_t separator = tw_theme_color(t, "startmenu.separator", 0xd0d0d0ff);
+	uint32_t dim = tw_theme_color(t, "startmenu.dim", 0x6d6d6dff);
 	cairo_save(cr);
 	cairo_translate(cr, -M, -M);
 	c.sm->hits->length = 0;
@@ -756,14 +759,14 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 				"Type to search programs");
 			top += 32;
 		}
-		pd_text(cr, bold, "Programs", col_x + 6, top, col_w, 22, xp ? 0x6d6d6dff : 0x1e395bff, PD_LEFT);
+		pd_text(cr, bold, "Programs", col_x + 6, top, col_w, 22, xp ? dim : 0x1e395bff, PD_LEFT);
 		draw_app_list(&c, results, false, col_x, top + 24, col_w, col_h - (top - col_y) - 24, 30, 24,
 			left_fg, 0, hl_bg, hl_fg, xp ? 0 : 3);
 		list_free(results);
 	} else if (sm->all_apps) {
 		draw_app_list(&c, sm->apps, false, col_x, col_y, col_w, col_h - 34, 24, 16,
 			left_fg, 0, hl_bg, hl_fg, xp ? 0 : 3);
-		pd_rect(cr, col_x + 10, col_y + col_h - 32, col_w - 20, 1, 0xd0d0d0ff);
+		pd_rect(cr, col_x + 10, col_y + col_h - 32, col_w - 20, 1, separator);
 		draw_simple_row(&c, HS_BACK, 0, NULL, "Back", col_x, col_y + col_h - 30, col_w, 30,
 			0, bold, left_fg, hl_bg, hl_fg, xp ? 0 : 3, false);
 	} else {
@@ -773,10 +776,10 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 			struct tw_desktop_entry *e = sm->pinned->items[i];
 			draw_app_row(&c, e, col_x, cy, col_w, 42, 32, i < 2 && xp ? bold : bar_font(panel),
 				left_fg, hl_bg, hl_fg, xp ? 0 : 3, i < 2 && xp ? e->generic_name : NULL,
-				0x6d6d6dff);
+				dim);
 			cy += 42;
 		}
-		pd_rect(cr, col_x + 10, col_y + col_h - 32, col_w - 20, 1, 0xd0d0d0ff);
+		pd_rect(cr, col_x + 10, col_y + col_h - 32, col_w - 20, 1, separator);
 		draw_simple_row(&c, HS_ALLAPPS, 0, NULL, "All Programs", col_x, col_y + col_h - 30,
 			col_w, 30, 0, bold, left_fg, hl_bg, hl_fg, xp ? 0 : 3, true);
 	}
@@ -786,18 +789,19 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 	for (int i = 0; i < sm->places->length; i++) {
 		struct place *pl = sm->places->items[i];
 		draw_simple_row(&c, HS_PLACE, i, pl->icon, pl->label, rcx, rcy, rcw, 32, xp ? 24 : 0,
-			xp ? bold : bar_font(panel), right_fg, xp ? 0x316ac5ff : 0xffffff30,
+			xp ? bold : bar_font(panel), right_fg, right_hl,
 			xp ? 0xffffffff : right_fg, xp ? 0 : 3, false);
 		rcy += 32;
 	}
-	pd_rect(cr, rcx + 6, rcy + 3, rcw - 12, 1, xp ? 0x95bdeeff : 0xffffff40);
+	pd_rect(cr, rcx + 6, rcy + 3, rcw - 12, 1,
+		tw_theme_color(t, "startmenu.divider", xp ? 0x95bdeeff : 0xffffff40));
 	rcy += 8;
 	draw_simple_row(&c, HS_THEMES, 0, "preferences-desktop-theme", "Change theme", rcx, rcy,
-		rcw, 32, xp ? 24 : 0, bar_font(panel), right_fg, xp ? 0x316ac5ff : 0xffffff30,
+		rcw, 32, xp ? 24 : 0, bar_font(panel), right_fg, right_hl,
 		xp ? 0xffffffff : right_fg, xp ? 0 : 3, true);
 	rcy += 32;
 	draw_simple_row(&c, HS_RUN, 0, "system-run", "Run...", rcx, rcy, rcw, 32, xp ? 24 : 0,
-		bar_font(panel), right_fg, xp ? 0x316ac5ff : 0xffffff30, xp ? 0xffffffff : right_fg,
+		bar_font(panel), right_fg, right_hl, xp ? 0xffffffff : right_fg,
 		xp ? 0 : 3, false);
 	cairo_restore(cr);
 }

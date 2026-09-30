@@ -117,7 +117,21 @@ struct tw_theme *tw_theme_load(const char *name, char **error) {
 		return NULL;
 	}
 
-	theme->dark = tw_color_scheme_is_dark();
+	// "scheme dark" (or light): a theme of one scheme only, whatever is chosen
+	const char *scheme = NULL;
+	for (int i = 0; i < theme->kv->length; i++) {
+		struct tw_theme_kv *kv = theme->kv->items[i];
+		if (strcmp(kv->key, "scheme") == 0) {
+			scheme = kv->value;
+		}
+	}
+	if (scheme && strcasecmp(scheme, "dark") == 0) {
+		theme->dark = true;
+	} else if (scheme && strcasecmp(scheme, "light") == 0) {
+		theme->dark = false;
+	} else {
+		theme->dark = tw_color_scheme_is_dark();
+	}
 	if (theme->dark) {
 		// "dark.menu.bg" overrides "menu.bg"; appended last, so it wins below
 		int count = theme->kv->length;

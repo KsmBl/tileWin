@@ -822,13 +822,15 @@ static void render_luna(struct shutdown *sd, cairo_t *cr, double W, double H) {
 		sd->logoff ? "Log Off Windows" : "Turn off computer", 12, 0, dw - 74, 44, 0xffffffff,
 		PD_LEFT);
 	pd_glyph_windows(cr, dw - 42, 8, 28, 0xf35325ff, 0x81bc06ff, 0x05a6f0ff, 0xffba08ff, true);
-	cairo_pattern_t *line = pd_gradient("0:#6f95e8 0.35:#c9d8f8 1:#4b73d6", 0, 0, dw, 0);
+	cairo_pattern_t *line = pd_gradient(tw_theme_str(t, "shutdown.line_gradient",
+		"0:#6f95e8 0.35:#c9d8f8 1:#4b73d6"), 0, 0, dw, 0);
 	cairo_rectangle(cr, 0, 44, dw, 2);
 	cairo_set_source(cr, line);
 	cairo_fill(cr);
 	cairo_pattern_destroy(line);
 
-	cairo_pattern_t *middle = pd_gradient("0:#8eaef1 0.45:#6b8fe4 1:#4d72d8", 0, 46, dw, 156);
+	cairo_pattern_t *middle = pd_gradient(tw_theme_str(t, "shutdown.middle_gradient",
+		"0:#8eaef1 0.45:#6b8fe4 1:#4d72d8"), 0, 46, dw, 156);
 	cairo_rectangle(cr, 0, 46, dw, 110);
 	cairo_set_source(cr, middle);
 	cairo_fill(cr);

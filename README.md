@@ -32,6 +32,8 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows XP](docs/screenshots/theme-winxp.png) |
 | **Windows 7** | **Windows 11** |
 | ![Windows 7](docs/screenshots/theme-win7.png) | ![Windows 11](docs/screenshots/theme-win11.png) |
+| **Windows XP (dark)** | |
+| ![Windows XP (dark)](docs/screenshots/theme-winxp-dark.png) | |
 
 Windows 8 replaces the start menu with a full-screen start screen of colored tiles:
 
@@ -592,6 +594,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 |---|---|
 | `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
 | `winxp` | Luna blue title bars, green start button, two-column start menu |
+| `winxp-dark` | Windows XP in black: the same glossy Luna title bars, taskbar, Start menu and dialogs in black and greys, under a night sky; apps go dark while it is on |
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |
 | `win8` | Colored window frames with centered titles, translucent blue taskbar, a start screen of colored tiles over the whole screen |
 | `win10` | Flat white title bars, dark taskbar with search box, list start menu |
@@ -636,6 +639,11 @@ Keys for the flyouts of the taskbar widgets (CPU, memory, network, volume, batte
 - `flyout { frame_width 4; frame <color>; frame_gradient "..."; frame_gloss "..."; inner_border <color> }` draws a frame around the content: the Luna blue of Windows XP, the glass of Windows 7.
 - `flyout { accent; link; bar }` color switches and buttons, the links at the bottom and the filled part of usage bars; `chart_bg; chart_grid; chart_line; chart_radius` the charts of the last minute (green on black, as the Task Manager drew them, in the 95 and XP themes). On Windows 95 the charts are sunken and the bars filled with blocks.
 - Every built-in theme sets them to match its taskbar and Start menu: the dark panes of Windows 8 and 10, glass on 7, the Luna frame on XP, the raised grey box on 95. Put them in the `dark { }` block for the dark scheme.
+
+Keys for a whole theme:
+- `scheme dark` (or `light`) makes a theme one of a single scheme: its `dark { }` colors are always used, and apps (GTK, GNOME, KDE) follow it while it is on, whatever scheme is chosen in the settings; switching to another theme brings the chosen one back. Windows XP (dark) uses it.
+- `dialog { bg; fg; heading_fg; field_bg; field_fg; field_border; button_gradient; button_fg; button_border; default_border }` color the Run and "not responding" dialogs; the Windows XP ones take the title bar and frame of the theme's windows.
+- `startmenu { divider; header_line; right_hl_bg; separator; dim }` color the lines, the highlight of the right column and the second lines of the two-column (XP and 7) Start menu; `shutdown { line_gradient; middle_gradient }` the XP shut down dialog.
 
 Keys for Alt+Tab:
 - `alttab { style flip3d }` shows the windows themselves as a 3D stack that flies past, like Flip 3D on Windows 7, instead of the grid of icons. `alttab { wash <color> }` is what the desktop behind it is covered with. The Windows 7 theme uses it; the others show icons (`style icons`).

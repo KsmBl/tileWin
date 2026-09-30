@@ -126,9 +126,10 @@ void tw_init(const char *mode_override) {
 	char *icons = tw_theme_icon_dir(tw_theme);
 	tw_icon_set_theme_dir(icons);
 	free(icons);
-	if (tw_color_scheme_is_set()) {
-		// apps may have been changed by another desktop since the last session
-		apply_app_color_scheme(tw_color_scheme_is_dark());
+	if (tw_color_scheme_is_set() || tw_theme_str(tw_theme, "scheme", NULL)) {
+		// apps may have been changed by another desktop since the last session;
+		// a theme of one scheme only (Windows XP dark) makes them follow it
+		apply_app_color_scheme(tw_theme->dark);
 	}
 	apply_app_icons();
 	sway_log(SWAY_INFO, "tileWin starting in %s mode with theme %s",
@@ -441,6 +442,10 @@ static void mark_container_dirty(struct sway_container *con, void *data);
 static void apply_theme(struct tw_theme *theme) {
 	struct tw_theme *old = tw_theme;
 	tw_theme = theme;
+	if (old && old != theme && old->dark != theme->dark) {
+		// to or from a theme of one scheme only: apps follow it
+		apply_app_color_scheme(theme->dark);
+	}
 	if (old != theme) {
 		tw_theme_free(old);
 	}
@@ -595,7 +600,9 @@ bool tw_set_color_scheme(bool dark, char **error) {
 		*error = strdup("Cannot save the color scheme");
 		return false;
 	}
-	apply_app_color_scheme(dark);
+	if (!tw_theme || !tw_theme_str(tw_theme, "scheme", NULL)) {
+		apply_app_color_scheme(dark); // a theme of one scheme only keeps it
+	}
 	return tw_request_theme(tw_theme ? tw_theme->name : TW_DEFAULT_THEME, error);
 }
 
