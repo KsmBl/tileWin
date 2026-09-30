@@ -72,7 +72,7 @@ void tw_floating_screen_changed(struct sway_container *con, const struct wlr_box
 	if (con->pending.tw_maximized) {
 		box = area;
 	} else if (con->tw.snap != TW_SNAP_NONE) {
-		box = tw_snap_box(area, con->tw.snap);
+		box = tw_container_snap_box(con, area);
 	} else {
 		box = tw_fit_box((struct wlr_box){ (int)con->pending.x, (int)con->pending.y,
 			(int)con->pending.width, (int)con->pending.height }, area);

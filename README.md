@@ -51,6 +51,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Double-click the title bar to maximize; double-click the icon to close. `double_click_time` sets how fast the two clicks have to follow each other.
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
+  - Snapped windows side by side resize together, as on Windows: drag the line between a left and a right half (or between two quarters of a column) and the windows on both sides follow, staying snapped. The line is easy to grab (6 pixels on each side), a window snapped next to them later takes the space that is left, and an outer side still unsnaps the window when dragged.
   - `Super+Arrow` snapping.
   - A new window about as big as the screen (90% of it both ways) opens maximized instead of a few pixels short of it; restoring it gives a window of the usual size. Dialogs and windows of a fixed size open as they are.
   - X11 apps that draw their own title bar (Bambu Studio and other slicers built on wxWidgets) can be dragged by it and their minimize, maximize and restore buttons work. They move themselves, ask for maximize over X11, and "restore" by asking to be activated, which a maximized window of that kind gets after a click in its top strip.
@@ -191,6 +192,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   not snap while the outer edge does, that unplugging a screen brings its
   windows onto the desktop on view and plugging it back sends them home as they
   were, and that show desktop clears both screens;
+- snaps terminals side by side and in quarters and checks that dragging the
+  line between them resizes the windows on both sides and keeps them snapped,
+  that a window snapped next to them takes the rest of the width, and that an
+  outer side still unsnaps only its window;
 - opens X11 and Wayland windows nearly as big as the screen and checks they
   open maximized and restore to the usual size, while a smaller one opens as it
   is;

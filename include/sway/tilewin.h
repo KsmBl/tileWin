@@ -83,6 +83,9 @@ struct tw_container {
 	enum tw_snap window_geometry_snap;
 	struct wlr_box window_geometry;
 	enum tw_snap snap;
+	// where the lines between snapped windows are, in parts of the work area
+	// (0: in the middle); moved by resizing a snapped window at such a line
+	double split_x, split_y;
 	bool above; // kept over the other floating windows
 	struct wlr_box restore_box; // geometry before maximize/snap
 	// double-clicking a frame side: the size before, and after stretching
@@ -242,6 +245,10 @@ struct wlr_box tw_workarea(struct sway_workspace *ws);
 struct wlr_box tw_fit_box(struct wlr_box box, struct wlr_box area);
 /* The part of area a window snapped that way takes. */
 struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap);
+/* The slot of a snapped window, where the lines between the slots are now. */
+struct wlr_box tw_container_snap_box(struct sway_container *con, struct wlr_box area);
+/* The sides of a snapped window that other snapped windows can share. */
+enum wlr_edges tw_snap_inner_edges(enum tw_snap snap);
 void tw_set_box(struct sway_container *con, const struct wlr_box *box);
 void tw_maximize(struct sway_container *con, bool enable);
 void tw_minimize(struct sway_container *con, bool enable);

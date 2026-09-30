@@ -397,6 +397,17 @@ test(
 )
 
 test(
+	'snap-resize',
+	find_program('snap_resize.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 90,
+)
+
+test(
 	'new-window-size',
 	find_program('new_window_size.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

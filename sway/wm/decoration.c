@@ -204,6 +204,8 @@ static bool box_contains(const struct wlr_box *box, double x, double y) {
 		x < box->x + box->width && y < box->y + box->height;
 }
 
+#define SHARED_EDGE_ZONE 6 // on each side of the line between snapped windows
+
 enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 		enum wlr_edges *edges) {
 	*edges = WLR_EDGE_NONE;
@@ -241,10 +243,21 @@ enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 			top_zone = in.top;
 		}
 		int bottom_zone = in.bottom > 0 ? in.bottom : 1;
+		// the sides snapped windows share are easy to grab, as on Windows:
+		// dragging them resizes the windows on both sides
+		enum wlr_edges inner = tw_snap_inner_edges(con->tw.snap);
+		int left_zone = inner & WLR_EDGE_LEFT ? SHARED_EDGE_ZONE : side;
+		int right_zone = inner & WLR_EDGE_RIGHT ? SHARED_EDGE_ZONE : side;
+		if (inner & WLR_EDGE_TOP) {
+			top_zone = SHARED_EDGE_ZONE;
+		}
+		if (inner & WLR_EDGE_BOTTOM) {
+			bottom_zone = SHARED_EDGE_ZONE;
+		}
 		enum wlr_edges e = WLR_EDGE_NONE;
-		if (x < side) {
+		if (x < left_zone) {
 			e |= WLR_EDGE_LEFT;
-		} else if (x >= W - side) {
+		} else if (x >= W - right_zone) {
 			e |= WLR_EDGE_RIGHT;
 		}
 		if (y < top_zone) {
@@ -398,7 +411,8 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 			last_click.edges = edges;
 			last_click.time = time_msec;
 		}
-		cont->tw.snap = TW_SNAP_NONE;
+		// a snapped window keeps its slot when resized at a side it shares
+		// with other snapped windows, and is unsnapped otherwise
 		seatop_begin_resize_floating(seat, cont, edges);
 		return true;
 	case TW_HIT_TITLE:

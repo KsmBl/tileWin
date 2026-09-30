@@ -220,8 +220,10 @@ void tw_minimize(struct sway_container *con, bool enable) {
 	tw_pause_changed();
 }
 
-struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap) {
-	int hw = area.width / 2, hh = area.height / 2;
+/* The slot of a snapped window, with the lines between the slots at fx of the
+ * width and fy of the height of the work area. */
+static struct wlr_box split_box(struct wlr_box area, enum tw_snap snap, double fx, double fy) {
+	int hw = (int)(area.width * fx), hh = (int)(area.height * fy);
 	switch (snap) {
 	case TW_SNAP_LEFT:
 		return (struct wlr_box){ area.x, area.y, hw, area.height };
@@ -240,6 +242,77 @@ struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap) {
 		break;
 	}
 	return area;
+}
+
+struct wlr_box tw_snap_box(struct wlr_box area, enum tw_snap snap) {
+	return split_box(area, snap, 0.5, 0.5);
+}
+
+static double split_or_half(double f) {
+	return f > 0 && f < 1 ? f : 0.5;
+}
+
+struct wlr_box tw_container_snap_box(struct sway_container *con, struct wlr_box area) {
+	return split_box(area, con->tw.snap, split_or_half(con->tw.split_x),
+		split_or_half(con->tw.split_y));
+}
+
+static bool snap_left(enum tw_snap snap) {
+	return snap == TW_SNAP_LEFT || snap == TW_SNAP_TOPLEFT || snap == TW_SNAP_BOTTOMLEFT;
+}
+
+static bool snap_right(enum tw_snap snap) {
+	return snap == TW_SNAP_RIGHT || snap == TW_SNAP_TOPRIGHT || snap == TW_SNAP_BOTTOMRIGHT;
+}
+
+static bool snap_quarter(enum tw_snap snap) {
+	return snap >= TW_SNAP_TOPLEFT && snap <= TW_SNAP_BOTTOMRIGHT;
+}
+
+enum wlr_edges tw_snap_inner_edges(enum tw_snap snap) {
+	switch (snap) {
+	case TW_SNAP_LEFT:
+		return WLR_EDGE_RIGHT;
+	case TW_SNAP_RIGHT:
+		return WLR_EDGE_LEFT;
+	case TW_SNAP_TOPLEFT:
+		return WLR_EDGE_RIGHT | WLR_EDGE_BOTTOM;
+	case TW_SNAP_TOPRIGHT:
+		return WLR_EDGE_LEFT | WLR_EDGE_BOTTOM;
+	case TW_SNAP_BOTTOMLEFT:
+		return WLR_EDGE_RIGHT | WLR_EDGE_TOP;
+	case TW_SNAP_BOTTOMRIGHT:
+		return WLR_EDGE_LEFT | WLR_EDGE_TOP;
+	case TW_SNAP_TOP:
+	case TW_SNAP_NONE:
+		break;
+	}
+	return WLR_EDGE_NONE;
+}
+
+/*
+ * A window snapped next to others takes the lines between them as they are,
+ * as on Windows: next to a left half made wider it gets the rest of the width,
+ * under a quarter made taller the rest of the height.
+ */
+static void take_splits(struct sway_container *con, enum tw_snap snap) {
+	con->tw.split_x = con->tw.split_y = 0;
+	struct sway_workspace *ws = con->pending.workspace;
+	for (int i = 0; ws && i < ws->floating->length; i++) {
+		struct sway_container *other = ws->floating->items[i];
+		if (other == con || !other->view || other->pending.tw_minimized ||
+				other->pending.tw_maximized) {
+			continue;
+		}
+		enum tw_snap o = other->tw.snap;
+		if ((snap_left(snap) && snap_right(o)) || (snap_right(snap) && snap_left(o))) {
+			con->tw.split_x = other->tw.split_x;
+		}
+		if (snap_quarter(snap) && snap_quarter(o) &&
+				snap_left(snap) == snap_left(o) && snap != o) {
+			con->tw.split_y = other->tw.split_y;
+		}
+	}
 }
 
 bool tw_container_fills_slot(struct sway_container *con) {
@@ -393,8 +466,9 @@ void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
 		con->pending.tw_maximized = false;
 		tw_view_notify_maximized(con->view, false);
 	}
+	take_splits(con, snap);
 	con->tw.snap = snap;
-	struct wlr_box box = tw_snap_box(tw_workarea(con->pending.workspace), snap);
+	struct wlr_box box = tw_container_snap_box(con, tw_workarea(con->pending.workspace));
 	tw_set_box(con, &box);
 	ipc_event_window(con, "snap");
 	tw_animate_resize(con);
@@ -1009,7 +1083,7 @@ void tw_workarea_changed(struct sway_output *output) {
 			if (con->pending.tw_maximized) {
 				box = area;
 			} else if (con->tw.snap != TW_SNAP_NONE) {
-				box = tw_snap_box(area, con->tw.snap);
+				box = tw_container_snap_box(con, area);
 			} else if (after_switch && con->tw.has_window_geometry) {
 				box = tw_fit_box(con->tw.window_geometry, area);
 			} else {
