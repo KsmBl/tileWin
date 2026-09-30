@@ -52,6 +52,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
   - `Super+Arrow` snapping.
+  - A new window about as big as the screen (90% of it both ways) opens maximized instead of a few pixels short of it; restoring it gives a window of the usual size. Dialogs and windows of a fixed size open as they are.
   - X11 apps that draw their own title bar (Bambu Studio and other slicers built on wxWidgets) can be dragged by it and their minimize, maximize and restore buttons work. They move themselves, ask for maximize over X11, and "restore" by asking to be activated, which a maximized window of that kind gets after a click in its top strip.
   - Moved and resized windows stick to the edges of other windows and of the screen. Hold Shift (`window_group_modifier`) while dragging to move the windows touching it along. Windows snapped to an edge or a corner belong to such a group as well: they come along in the size they have, instead of going back to the size they had before they were snapped.
   - Double-click the left or right side of a window to stretch it to the next window or the screen edge, the top or bottom side to do the same with its height. Double-click again for the old size.
@@ -190,6 +191,9 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   not snap while the outer edge does, that unplugging a screen brings its
   windows onto the desktop on view and plugging it back sends them home as they
   were, and that show desktop clears both screens;
+- opens X11 and Wayland windows nearly as big as the screen and checks they
+  open maximized and restore to the usual size, while a smaller one opens as it
+  is;
 - opens an X11 window with a title bar of its own and checks that it moves
   where it asks to (also partly off the screen), follows the pointer exactly
   when dragged by that title bar, maximizes, restores with its own button (an

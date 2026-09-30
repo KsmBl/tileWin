@@ -1053,6 +1053,7 @@ bool tw_session_apply_placement(struct sway_container *con) {
 		}
 		if (container_is_floating(con)) {
 			if (found->floating && found->box.width > 0 && found->box.height > 0) {
+				tw_unmaximize_new(con);
 				tw_set_box(con, &found->box);
 			}
 			if (found->maximized) {

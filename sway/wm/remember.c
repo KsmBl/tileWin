@@ -145,31 +145,10 @@ static const char *app_id_of(struct sway_view *view) {
 	return app_id ? app_id : view_get_class(view);
 }
 
-/* A dialog, a splash screen or anything else of a size of its own. */
-static bool is_dialog(struct sway_view *view) {
-	switch (view->type) {
-	case SWAY_VIEW_XDG_SHELL:
-		if (view->wlr_xdg_toplevel->parent) {
-			return true;
-		}
-		break;
-#if WLR_HAS_XWAYLAND
-	case SWAY_VIEW_XWAYLAND:
-		if (view->wlr_xwayland_surface->parent || view->wlr_xwayland_surface->modal) {
-			return true;
-		}
-		break;
-#endif
-	}
-	double min_w, max_w, min_h, max_h;
-	view_get_constraints(view, &min_w, &max_w, &min_h, &max_h);
-	return min_w > 0 && min_w == max_w && min_h > 0 && min_h == max_h;
-}
-
 static bool wanted(struct sway_view *view, const char *app_id) {
 	return config && config->tw_remember_places && app_id && *app_id && !strchr(app_id, '\t') &&
 		!strchr(app_id, '\n') && !tw_app_in_list(config->tw_remember_except, app_id) &&
-		!is_dialog(view);
+		!tw_view_is_dialog(view);
 }
 
 void tw_remember_view_closing(struct sway_view *view) {
@@ -258,11 +237,14 @@ bool tw_remember_apply(struct sway_container *con) {
 	wlr_output_layout_get_box(root->output_layout, ws->output->wlr_output, &ob);
 	struct wlr_box box = { ob.x + p->box.x, ob.y + p->box.y, p->box.width, p->box.height };
 	box = tw_fit_box(box, tw_workarea(ws));
+	tw_unmaximize_new(con);
 	tw_set_box(con, &box);
 	if (p->maximized) {
 		tw_maximize(con, true);
 	} else if (p->snap != TW_SNAP_NONE) {
 		tw_snap_to(con, p->snap);
+	} else {
+		tw_maximize_if_nearly_full(con); // on a smaller screen than it was closed on
 	}
 	sway_log(SWAY_DEBUG, "Opened %s where it was last", app_id);
 	return true;

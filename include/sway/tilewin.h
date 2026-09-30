@@ -262,6 +262,9 @@ void tw_floating_resize_in_place(struct sway_container *con);
 /* Positions the content of such a window and fills the rest of the slot. */
 void tw_update_content_fill(struct sway_container *con);
 void tw_place_new_window(struct sway_container *con);
+bool tw_view_is_dialog(struct sway_view *view);
+void tw_maximize_if_nearly_full(struct sway_container *con);
+void tw_unmaximize_new(struct sway_container *con);
 bool tw_arrange_workspace(struct sway_workspace *ws, const char *how, char **error);
 bool tw_show_desktop(struct sway_workspace *ws, char **error);
 void tw_convert_to_window_mode(void);

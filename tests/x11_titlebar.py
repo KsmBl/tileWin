@@ -10,6 +10,8 @@ GTK, forced to X11) does:
    (WM_CHANGE_STATE) and, for restore, only to be activated
    (_NET_ACTIVE_WINDOW), which is what wxWidgets' Restore() does on GTK.
 
+usage: x11_titlebar.py [width height]  (400 by 300 without)
+
 Commands are read from stdin, one per line:
   move X Y      move the window there (root coordinates)
   maximize      ask to be maximized
@@ -28,7 +30,8 @@ screen = d.screen()
 root = screen.root
 atom = lambda name: d.intern_atom(name)
 
-win = root.create_window(100, 100, 400, 300, 0, screen.root_depth, X.InputOutput,
+width, height = (int(sys.argv[1]), int(sys.argv[2])) if len(sys.argv) > 2 else (400, 300)
+win = root.create_window(100, 100, width, height, 0, screen.root_depth, X.InputOutput,
 	X.CopyFromParent, background_pixel=screen.white_pixel,
 	event_mask=X.StructureNotifyMask | X.PropertyChangeMask | X.ButtonPressMask |
 	X.ButtonReleaseMask | X.Button1MotionMask)

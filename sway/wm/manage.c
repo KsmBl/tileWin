@@ -532,6 +532,61 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	return true;
 }
 
+/* A dialog, a splash screen or anything else of a size of its own. */
+bool tw_view_is_dialog(struct sway_view *view) {
+	switch (view->type) {
+	case SWAY_VIEW_XDG_SHELL:
+		if (view->wlr_xdg_toplevel->parent) {
+			return true;
+		}
+		break;
+#if WLR_HAS_XWAYLAND
+	case SWAY_VIEW_XWAYLAND:
+		if (view->wlr_xwayland_surface->parent || view->wlr_xwayland_surface->modal) {
+			return true;
+		}
+		break;
+#endif
+	}
+	double min_w, max_w, min_h, max_h;
+	view_get_constraints(view, &min_w, &max_w, &min_h, &max_h);
+	return min_w > 0 && min_w == max_w && min_h > 0 && min_h == max_h;
+}
+
+#define NEARLY_FULL 0.9 // of the work area, in both directions
+
+/*
+ * A new window about as big as the screen opens maximized, as on Windows,
+ * instead of a few pixels short of it (an app asking for its size on a bigger
+ * screen, or for the whole screen before the taskbar is taken off). Restoring
+ * it gives a window of the usual size in the middle.
+ */
+void tw_maximize_if_nearly_full(struct sway_container *con) {
+	struct sway_workspace *ws = con->pending.workspace;
+	if (!ws || !con->view || !container_is_floating(con) || con->pending.tw_maximized ||
+			con->tw.snap != TW_SNAP_NONE ||
+			con->pending.fullscreen_mode != FULLSCREEN_NONE ||
+			tw_view_is_dialog(con->view)) {
+		return;
+	}
+	struct wlr_box area = tw_workarea(ws);
+	if (con->pending.width < area.width * NEARLY_FULL ||
+			con->pending.height < area.height * NEARLY_FULL) {
+		return;
+	}
+	tw_maximize(con, true);
+	con->tw.restore_box = default_restore_box(con);
+}
+
+/* A new window gets a place and size of its own after all (remembered or
+ * from the session): it was maximized only for being nearly full. */
+void tw_unmaximize_new(struct sway_container *con) {
+	if (con->pending.tw_maximized) {
+		con->pending.tw_maximized = false;
+		tw_view_notify_maximized(con->view, false);
+	}
+}
+
 void tw_place_new_window(struct sway_container *con) {
 	struct sway_workspace *ws = con->pending.workspace;
 	if (!ws || !ws->output || !con->view) {
@@ -567,6 +622,7 @@ void tw_place_new_window(struct sway_container *con) {
 	cascade = (cascade + 1) % 5;
 	box = tw_fit_box(box, area);
 	tw_set_box(con, &box);
+	tw_maximize_if_nearly_full(con);
 }
 
 /* ---------- arranging ---------- */
