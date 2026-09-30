@@ -631,6 +631,12 @@ Keys for the widgets on the desktop:
 - `desktop_widget { look classic|luna|aero|metro|flat|fluent }` picks how the cards and their charts, gauges and clocks are drawn; by default it follows `style` (win95, winxp, win7, win8, win10, win11).
 - `desktop_widget { bg; bg2; fg; dim; accent; accent2; border; track; grid; face; warning; critical; radius; font }` sets their colors; `bg2` is the lower end of the gradient of the XP and 7 looks, `accent2` the green of their progress bars, `face` the face of charts and gauges. Put them in the `dark { }` block for the dark scheme. Without them each look has colors of its own for light and dark; the Windows 8 look gives every widget a tile color of its own. The Sway theme colors them like its bar.
 
+Keys for the flyouts of the taskbar widgets (CPU, memory, network, volume, battery, Bluetooth, clock, quick settings, notifications and the others):
+- `flyout { bg; fg; disabled_fg; border; radius; field_bg; field_fg; font }` color the box; without them it takes the `menu { }` colors. `bg_gradient` fills it with a gradient instead.
+- `flyout { frame_width 4; frame <color>; frame_gradient "..."; frame_gloss "..."; inner_border <color> }` draws a frame around the content: the Luna blue of Windows XP, the glass of Windows 7.
+- `flyout { accent; link; bar }` color switches and buttons, the links at the bottom and the filled part of usage bars; `chart_bg; chart_grid; chart_line; chart_radius` the charts of the last minute (green on black, as the Task Manager drew them, in the 95 and XP themes). On Windows 95 the charts are sunken and the bars filled with blocks.
+- Every built-in theme sets them to match its taskbar and Start menu: the dark panes of Windows 8 and 10, glass on 7, the Luna frame on XP, the raised grey box on 95. Put them in the `dark { }` block for the dark scheme.
+
 Keys for Alt+Tab:
 - `alttab { style flip3d }` shows the windows themselves as a 3D stack that flies past, like Flip 3D on Windows 7, instead of the grid of icons. `alttab { wash <color> }` is what the desktop behind it is covered with. The Windows 7 theme uses it; the others show icons (`style icons`).
 

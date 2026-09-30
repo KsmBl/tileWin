@@ -485,7 +485,7 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
 	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int tw = (cw - 2 * TILE_GAP) / 3;
 	int y = M + PAD;

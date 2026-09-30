@@ -1488,7 +1488,7 @@ static void center_render(struct popup *p, cairo_t *cr) {
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
 	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	fly_draw_frame(p, cr, &st);
 	int x = M + CENTER_PAD, w = W - 2 * M - 2 * CENTER_PAD;
 	pd_text(cr, st.big, "Notifications", x, M + 8, w - 90, CENTER_HEADER - 16, st.fg, PD_LEFT);
 	c->clear_all = (struct pbox){ 0 };
@@ -1500,7 +1500,7 @@ static void center_render(struct popup *p, cairo_t *cr) {
 			fill_hover(cr, &st, c->clear_all);
 		}
 		pd_text(cr, st.font, "Clear all", c->clear_all.x, c->clear_all.y, c->clear_all.width,
-			c->clear_all.height, st.style == PS_CLASSIC ? 0x0000ffff : st.accent, PD_CENTER);
+			c->clear_all.height, st.link, PD_CENTER);
 	}
 
 	int top = M + CENTER_HEADER, bottom = H - M - CENTER_FOOTER;

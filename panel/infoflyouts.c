@@ -1077,13 +1077,7 @@ static int content_height(struct info_flyout *f) {
 
 static void draw_graph(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
 		struct pbox g) {
-	cairo_new_path(cr);
-	pd_rounded(cr, g.x, g.y, g.width, g.height, st->style == PS_CLASSIC ? 0 : 6);
-	pd_color(cr, st->button_bg);
-	cairo_fill(cr);
-	for (int i = 1; i < 4; i++) {
-		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st->line);
-	}
+	fly_draw_chart_bg(cr, st, g);
 	double max = f->graph_max;
 	for (int s = 0; max <= 0 && s < (f->two_series ? 2 : 1); s++) {
 		for (int i = 0; i < f->history_len; i++) {
@@ -1100,7 +1094,7 @@ static void draw_graph(struct info_flyout *f, cairo_t *cr, const struct fly_styl
 	}
 	double step = (double)g.width / (HISTORY - 1);
 	double first_x = g.x + g.width - (f->history_len - 1) * step;
-	uint32_t colors[2] = { st->accent, st->dark ? 0xf0a060ff : 0xc0602aff };
+	uint32_t colors[2] = { st->chart_line, st->dark ? 0xf0a060ff : 0xc0602aff };
 	for (int s = (f->two_series ? 1 : 0); s >= 0 && f->history_len > 1; s--) {
 		cairo_new_path(cr);
 		cairo_move_to(cr, first_x, g.y + g.height);
@@ -1148,8 +1142,8 @@ static void info_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
@@ -1216,16 +1210,8 @@ static void info_render(struct popup *p, cairo_t *cr) {
 			}
 			if (row->bar >= 0) {
 				double share = fmin(fmax(row->bar, 0), 1);
-				cairo_new_path(cr);
-				pd_rounded(cr, x0, y + 24, cw, 6, st.style == PS_CLASSIC ? 0 : 3);
-				pd_color(cr, st.track);
-				cairo_fill(cr);
-				if (share > 0) {
-					cairo_new_path(cr);
-					pd_rounded(cr, x0, y + 24, cw * share, 6, st.style == PS_CLASSIC ? 0 : 3);
-					pd_color(cr, row->full_is_bad && share > 0.9 ? st.error : st.accent);
-					cairo_fill(cr);
-				}
+				fly_draw_bar(cr, &st, x0, y + 24, cw, 6, share,
+					row->full_is_bad && share > 0.9 ? st.error : st.bar);
 			}
 			y += h;
 		}
@@ -1234,7 +1220,7 @@ static void info_render(struct popup *p, cairo_t *cr) {
 
 	if (f->action_count > 0) {
 		draw_line(cr, &st, p, y);
-		uint32_t color = st.style == PS_CLASSIC ? 0x0000ffff : st.accent;
+		uint32_t color = st.link;
 		int x = x0;
 		for (int i = 0; i < f->action_count; i++) {
 			int tw = 0;

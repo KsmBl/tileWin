@@ -32,14 +32,28 @@
 
 /* ================= shared helpers ================= */
 
+/* A color of the flyout section, or of the menu section without one. */
+static uint32_t fly_color(const struct tw_theme *t, const char *name, uint32_t fallback) {
+	char key[64];
+	snprintf(key, sizeof(key), "menu.%s", name);
+	fallback = tw_theme_color(t, key, fallback);
+	snprintf(key, sizeof(key), "flyout.%s", name);
+	return tw_theme_color(t, key, fallback);
+}
+
+/* Whether the theme gives flyouts a box of their own rather than the menus'. */
+static bool fly_own_box(const struct tw_theme *t) {
+	return tw_theme_str(t, "flyout.bg", NULL) || tw_theme_str(t, "flyout.bg_gradient", NULL);
+}
+
 void fly_style_init(struct fly_style *st, struct panel *panel) {
 	const struct tw_theme *t = panel->theme;
 	st->style = panel_style(panel);
-	st->fg = tw_theme_color(t, "menu.fg", 0x000000ff);
-	st->dim = tw_theme_color(t, "menu.disabled_fg", 0x6d6d6dff);
-	st->accent = st->style == PS_CLASSIC ? 0x000080ff :
-		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff);
-	uint32_t bg = tw_theme_color(t, "menu.bg", 0xf2f2f2ff);
+	st->fg = fly_color(t, "fg", 0x000000ff);
+	st->dim = fly_color(t, "disabled_fg", 0x6d6d6dff);
+	st->accent = tw_theme_color(t, "flyout.accent", st->style == PS_CLASSIC ? 0x000080ff :
+		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
+	uint32_t bg = fly_color(t, "bg", 0xf2f2f2ff);
 	int luma = (int)((bg >> 24 & 0xff) * 299 + (bg >> 16 & 0xff) * 587 + (bg >> 8 & 0xff) * 114) / 1000;
 	st->dark = luma < 128;
 	uint32_t overlay = st->dark ? 0xffffff00 : 0x00000000;
@@ -49,10 +63,18 @@ void fly_style_init(struct fly_style *st, struct panel *panel) {
 	st->button_bg = overlay | (st->dark ? 0x18 : 0x10);
 	st->button_hover = overlay | (st->dark ? 0x30 : 0x24);
 	st->button_border = overlay | (st->dark ? 0x30 : 0x26);
-	st->field_bg = tw_theme_color(t, "menu.field_bg", st->dark ? 0x1f1f1fff : 0xffffffff);
-	st->field_fg = tw_theme_color(t, "menu.field_fg", st->dark ? 0xffffffff : 0x000000ff);
+	st->field_bg = fly_color(t, "field_bg", st->dark ? 0x1f1f1fff : 0xffffffff);
+	st->field_fg = fly_color(t, "field_fg", st->dark ? 0xffffffff : 0x000000ff);
 	st->error = 0xc42b1cff;
-	st->font = tw_theme_str(t, "menu.font", bar_font(panel));
+	st->link = tw_theme_color(t, "flyout.link", st->style == PS_CLASSIC ? 0x0000ffff : st->accent);
+	st->bar = tw_theme_color(t, "flyout.bar", st->accent);
+	st->chart_bg = tw_theme_color(t, "flyout.chart_bg", st->button_bg);
+	st->chart_grid = tw_theme_color(t, "flyout.chart_grid", st->line);
+	st->chart_line = tw_theme_color(t, "flyout.chart_line", st->accent);
+	st->chart_radius = tw_theme_double(t, "flyout.chart_radius",
+		st->style == PS_CLASSIC ? 0 : 6);
+	st->frame = tw_theme_int(t, "flyout.frame_width", 0);
+	st->font = tw_theme_str(t, "flyout.font", tw_theme_str(t, "menu.font", bar_font(panel)));
 	st->bold = bar_bold_font(panel);
 	const char *space = strrchr(st->bold, ' ');
 	if (space && atoi(space + 1) > 0) {
@@ -152,8 +174,99 @@ void fill_hover(cairo_t *cr, const struct fly_style *st, struct pbox b) {
 }
 
 void draw_line(cairo_t *cr, const struct fly_style *st, struct popup *p, int y) {
-	int M = popup_shadow_margin(p->panel);
+	int M = popup_shadow_margin(p->panel) + st->frame;
 	pd_rect(cr, M, y, p->surface->width - 2 * M, 1, st->line);
+}
+
+/* The path of the frame: the ring between the box and its content. */
+static void frame_ring(cairo_t *cr, double x, double y, double w, double h, double r, double f) {
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, r);
+	pd_rounded(cr, x + f, y + f, w - 2 * f, h - 2 * f, r > f ? r - f : 0);
+}
+
+void fly_draw_frame(struct popup *p, cairo_t *cr, const struct fly_style *st) {
+	struct panel *panel = p->panel;
+	const struct tw_theme *t = panel->theme;
+	const char *prefix = fly_own_box(t) ? "flyout" : "menu";
+	int M = popup_shadow_margin(panel);
+	int W = p->surface->width, H = p->surface->height;
+	popup_draw_frame(panel, cr, W, H, M, prefix);
+	if (st->frame <= 0) {
+		return;
+	}
+	double r = popup_radius(panel, prefix);
+	double x = M, y = M, w = W - 2 * M, h = H - 2 * M, f = st->frame;
+	cairo_save(cr);
+	cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+	frame_ring(cr, x, y, w, h, r, f);
+	pd_fill(cr, t, "flyout.frame", y, h, 0x1f3c5ce0);
+	// the sheen of glass over its upper part
+	const char *gloss = tw_theme_str(t, "flyout.frame_gloss", NULL);
+	if (gloss) {
+		frame_ring(cr, x, y, w, h, r, f);
+		cairo_pattern_t *g = pd_gradient(gloss, 0, y, 0, y + h * 0.4);
+		cairo_set_source(cr, g);
+		cairo_fill(cr);
+		cairo_pattern_destroy(g);
+	}
+	cairo_restore(cr);
+	// a line along the inner edge, and the outer border again over the frame
+	cairo_set_line_width(cr, 1);
+	uint32_t inner = tw_theme_color(t, "flyout.inner_border", 0);
+	if (inner & 0xff) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x + f - 0.5, y + f - 0.5, w - 2 * f + 1, h - 2 * f + 1, r > f ? r - f : 0);
+		pd_color(cr, inner);
+		cairo_stroke(cr);
+	}
+	uint32_t border = tw_theme_color(t, "flyout.border", 0);
+	if (border & 0xff) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
+		pd_color(cr, border);
+		cairo_stroke(cr);
+	}
+}
+
+void fly_draw_chart_bg(cairo_t *cr, const struct fly_style *st, struct pbox g) {
+	cairo_new_path(cr);
+	pd_rounded(cr, g.x, g.y, g.width, g.height, st->chart_radius);
+	pd_color(cr, st->chart_bg);
+	cairo_fill(cr);
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st->chart_grid);
+	}
+	if (st->style == PS_CLASSIC) {
+		pd_bevel(cr, g.x, g.y, g.width, g.height, true);
+	}
+}
+
+void fly_draw_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
+		double h, double share, uint32_t color) {
+	share = share < 0 ? 0 : share > 1 ? 1 : share;
+	if (st->style == PS_CLASSIC) {
+		// a sunken field with the filled part in blocks, as Windows 95 drew progress
+		pd_rect(cr, x, y, w, h, 0xffffffff);
+		pd_bevel(cr, x - 1, y - 1, w + 2, h + 2, true);
+		double fill = (w - 2) * share;
+		double block = h + 1;
+		for (double bx = 0; bx + 1 < fill; bx += block) {
+			double bw = fmin(block - 2, fill - bx);
+			pd_rect(cr, x + 1 + bx, y + 1, bw, h - 2, color);
+		}
+		return;
+	}
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, h / 2);
+	pd_color(cr, st->track);
+	cairo_fill(cr);
+	if (share > 0) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x, y, w * share, h, h / 2);
+		pd_color(cr, color);
+		cairo_fill(cr);
+	}
 }
 
 int slider_value(struct pbox b, double x) {
@@ -288,7 +401,7 @@ static void draw_link(cairo_t *cr, const struct fly_style *st, struct flyout *f,
 		const char *label, enum pd_align align) {
 	int tw = 0;
 	pd_text_size(cr, st->font, label, &tw, NULL);
-	uint32_t color = st->style == PS_CLASSIC ? 0x0000ffff : st->accent;
+	uint32_t color = st->link;
 	pd_text(cr, st->font, label, b.x, b.y, b.width, b.height, color, align);
 	if (hovered(f, b)) {
 		double lx = align == PD_RIGHT ? b.x + b.width - tw : b.x;
@@ -1076,8 +1189,8 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
@@ -1759,8 +1872,8 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
@@ -2217,8 +2330,8 @@ static void power_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
@@ -2757,17 +2870,7 @@ static void cpu_tick(void *data) {
 
 static void cpu_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
 		double h, int percent) {
-	percent = percent < 0 ? 0 : percent > 100 ? 100 : percent;
-	cairo_new_path(cr);
-	pd_rounded(cr, x, y, w, h, st->style == PS_CLASSIC ? 0 : h / 2);
-	pd_color(cr, st->track);
-	cairo_fill(cr);
-	if (percent > 0) {
-		cairo_new_path(cr);
-		pd_rounded(cr, x, y, w * percent / 100.0, h, st->style == PS_CLASSIC ? 0 : h / 2);
-		pd_color(cr, st->accent);
-		cairo_fill(cr);
-	}
+	fly_draw_bar(cr, st, x, y, w, h, percent / 100.0, st->bar);
 }
 
 static void cpu_render(struct popup *p, cairo_t *cr) {
@@ -2775,8 +2878,8 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 	char text[256];
@@ -2798,13 +2901,7 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 
 	// usage graph of the last minute
 	struct pbox g = { x0, y, cw, CPU_GRAPH - 26 };
-	cairo_new_path(cr);
-	pd_rounded(cr, g.x, g.y, g.width, g.height, st.style == PS_CLASSIC ? 0 : 6);
-	pd_color(cr, st.button_bg);
-	cairo_fill(cr);
-	for (int i = 1; i < 4; i++) {
-		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st.line);
-	}
+	fly_draw_chart_bg(cr, &st, g);
 	if (f->history_len > 1) {
 		double step = (double)g.width / (CPU_HISTORY_LEN - 1);
 		double first_x = g.x + g.width - (f->history_len - 1) * step;
@@ -2815,7 +2912,7 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 		}
 		cairo_line_to(cr, g.x + g.width, g.y + g.height);
 		cairo_close_path(cr);
-		pd_color(cr, (st.accent & 0xffffff00) | 0x40);
+		pd_color(cr, (st.chart_line & 0xffffff00) | 0x40);
 		cairo_fill(cr);
 		cairo_new_path(cr);
 		for (int i = 0; i < f->history_len; i++) {
@@ -2827,7 +2924,7 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 				cairo_line_to(cr, px, py);
 			}
 		}
-		pd_color(cr, st.accent);
+		pd_color(cr, st.chart_line);
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
 	}
@@ -3235,17 +3332,7 @@ static void mem_tick(void *data) {
 /* A bar of the breakdown: a share of the whole in its own color. */
 static void mem_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
 		double h, double share, uint32_t color) {
-	cairo_new_path(cr);
-	pd_rounded(cr, x, y, w, h, st->style == PS_CLASSIC ? 0 : 4);
-	pd_color(cr, st->button_bg);
-	cairo_fill(cr);
-	double filled = share < 0 ? 0 : share > 1 ? 1 : share;
-	if (filled > 0) {
-		cairo_new_path(cr);
-		pd_rounded(cr, x, y, w * filled, h, st->style == PS_CLASSIC ? 0 : 4);
-		pd_color(cr, color);
-		cairo_fill(cr);
-	}
+	fly_draw_bar(cr, st, x, y, w, h, share, color);
 }
 
 static void mem_format_size(char *buffer, size_t size, long long kib) {
@@ -3261,8 +3348,8 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 	char text[256], value[64], second[64];
@@ -3279,13 +3366,7 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 
 	// how much was in use over the last minute
 	struct pbox g = { x0, y, cw, MEM_GRAPH - 26 };
-	cairo_new_path(cr);
-	pd_rounded(cr, g.x, g.y, g.width, g.height, st.style == PS_CLASSIC ? 0 : 6);
-	pd_color(cr, st.button_bg);
-	cairo_fill(cr);
-	for (int i = 1; i < 4; i++) {
-		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st.line);
-	}
+	fly_draw_chart_bg(cr, &st, g);
 	if (f->history_len > 1) {
 		double step = (double)g.width / (MEM_HISTORY_LEN - 1);
 		double first_x = g.x + g.width - (f->history_len - 1) * step;
@@ -3297,7 +3378,7 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 		}
 		cairo_line_to(cr, g.x + g.width, g.y + g.height);
 		cairo_close_path(cr);
-		pd_color(cr, (st.accent & 0xffffff00) | 0x40);
+		pd_color(cr, (st.chart_line & 0xffffff00) | 0x40);
 		cairo_fill(cr);
 		cairo_new_path(cr);
 		for (int i = 0; i < f->history_len; i++) {
@@ -3309,7 +3390,7 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 				cairo_line_to(cr, px, py);
 			}
 		}
-		pd_color(cr, st.accent);
+		pd_color(cr, st.chart_line);
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
 	}
@@ -3326,8 +3407,8 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 		long long kib, of;
 		uint32_t color;
 	} bars[] = {
-		{ "In use", mem_used(f), f->total, st.accent },
-		{ "Cached", cached, f->total, (st.accent & 0xffffff00) | 0x70 },
+		{ "In use", mem_used(f), f->total, st.bar },
+		{ "Cached", cached, f->total, (st.bar & 0xffffff00) | 0x70 },
 		{ "Swap", swap_used, f->swap_total, st.dim },
 	};
 	y += 6;
@@ -3570,7 +3651,7 @@ static void bt_render(struct popup *p, cairo_t *cr) {
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
 	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
@@ -3904,8 +3985,8 @@ static void clock_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	int W = p->surface->width;
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + PAD, cw = W - 2 * M - 2 * PAD;
 	int y = M;
 
