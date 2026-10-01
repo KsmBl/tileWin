@@ -3,7 +3,8 @@
  * all desktops (workspaces) of the output. Click a window to switch to it,
  * click a desktop to go to it and see its windows (click it again to close
  * the view), drag windows onto desktops or "New desktop" to move them, close
- * windows and desktops.
+ * windows and desktops. Drag a desktop along the strip to give it another
+ * place; click its name to rename it.
  */
 #include <ctype.h>
 #include <math.h>
@@ -71,6 +72,7 @@ enum tv_target {
 	TV_WINDOW_CLOSE,
 	TV_DESK,
 	TV_DESK_CLOSE,
+	TV_DESK_LABEL, // the name under a desktop: a click renames it
 };
 
 static struct {
@@ -94,7 +96,13 @@ static struct {
 		double x, y;   // press position, output-local
 		bool dragging;
 		double dx, dy; // pointer offset in the dragged thumbnail
+		int drop_slot; // where a dragged desktop lands: before that desktop
 	} press;
+	struct {
+		struct sway_workspace *ws; // the desktop being renamed, NULL for none
+		char text[64];
+		bool fresh; // the name is selected: typing replaces it
+	} edit;
 	struct wl_event_source *refresh;
 	struct wl_event_source *idle;
 } tv;
@@ -186,6 +194,63 @@ static void draw_close(cairo_t *cr, const struct wlr_box *b, bool hot, uint32_t 
 	cairo_stroke(cr);
 }
 
+/* The name shown under a desktop: the one it was given, or "Desktop <n>". */
+static void desk_label(struct sway_workspace *ws, int number, char *out, size_t size) {
+	const char *given = tw_desktop_label(ws);
+	if (given) {
+		snprintf(out, size, "%s", given);
+	} else {
+		snprintf(out, size, "Desktop %d", number);
+	}
+}
+
+/* The name of a desktop as a field being typed into, with its caret. */
+static void draw_edit(cairo_t *cr, const struct wlr_box *b) {
+	double pad = 6;
+	cairo_rectangle(cr, b->x, b->y + 2, b->width, b->height - 4);
+	cairo_set_source_u32(cr, theme_color("menu.field_bg", 0xffffffff));
+	cairo_fill(cr);
+	cairo_rectangle(cr, b->x + 0.5, b->y + 2.5, b->width - 1, b->height - 5);
+	cairo_set_source_u32(cr, accent());
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	PangoLayout *layout = pango_cairo_create_layout(cr);
+	PangoFontDescription *desc = pango_font_description_from_string(font());
+	pango_layout_set_font_description(layout, desc);
+	pango_font_description_free(desc);
+	pango_layout_set_text(layout, tv.edit.text, -1);
+	int tw, th;
+	pango_layout_get_pixel_size(layout, &tw, &th);
+	double room = b->width - 2 * pad - 2;
+	double tx = b->x + pad + (tw > room ? room - tw : 0); // the end stays in view
+	double ty = b->y + floor((b->height - th) / 2);
+	cairo_save(cr);
+	cairo_rectangle(cr, b->x + 2, b->y + 2, b->width - 4, b->height - 4);
+	cairo_clip(cr);
+	if (tv.edit.fresh && *tv.edit.text) {
+		cairo_rectangle(cr, tx - 1, ty, tw + 2, th);
+		cairo_set_source_u32(cr, accent());
+		cairo_fill(cr);
+	}
+	cairo_set_source_u32(cr, tv.edit.fresh && *tv.edit.text ? 0xffffffff :
+		theme_color("menu.field_fg", 0x000000ff));
+	cairo_move_to(cr, tx, ty);
+	pango_cairo_show_layout(cr, layout);
+	if (!tv.edit.fresh || !*tv.edit.text) {
+		cairo_rectangle(cr, tx + tw + 1, ty + 1, 1, th - 2);
+		cairo_set_source_u32(cr, theme_color("menu.field_fg", 0x000000ff));
+		cairo_fill(cr);
+	}
+	cairo_restore(cr);
+	g_object_unref(layout);
+}
+
+/* The box of the name under a desktop. */
+static struct wlr_box label_box(const struct tv_desk *d) {
+	return (struct wlr_box){ d->preview.x - DESK_GAP / 2 + 4, d->preview.y + d->preview.height,
+		d->preview.width + DESK_GAP - 8, LABEL_H };
+}
+
 static bool target_is(enum tv_target target, int index) {
 	return tv.hover == target && tv.hover_index == index;
 }
@@ -266,7 +331,8 @@ static void render_chrome(void) {
 			continue;
 		}
 		struct wlr_box p = d->preview;
-		bool hot = target_is(TV_DESK, i) || target_is(TV_DESK_CLOSE, i);
+		bool desk_drag = tv.press.dragging && tv.press.target == TV_DESK;
+		bool hot = !desk_drag && (target_is(TV_DESK, i) || target_is(TV_DESK_CLOSE, i));
 		if (d->is_new) {
 			rounded(cr, p.x + 0.5, p.y + 0.5, p.width - 1, p.height - 1, radius());
 			cairo_set_source_u32(cr, hot ? 0xffffff40 : 0xffffff18);
@@ -286,6 +352,16 @@ static void render_chrome(void) {
 			continue;
 		}
 		number++;
+		if (desk_drag && tv.press.index == i) {
+			// its place, while the desktop itself follows the pointer
+			rounded(cr, p.x + 0.5, p.y + 0.5, p.width - 1, p.height - 1, radius());
+			cairo_set_source_u32(cr, 0xffffff18);
+			cairo_fill_preserve(cr);
+			cairo_set_source_u32(cr, 0xffffff60);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+			continue;
+		}
 		cairo_rectangle(cr, p.x, p.y, p.width, p.height);
 		cairo_set_source_u32(cr, wallpaper);
 		cairo_fill(cr);
@@ -296,20 +372,35 @@ static void render_chrome(void) {
 			cairo_set_line_width(cr, hot ? 4 : 3);
 			cairo_stroke(cr);
 		}
-		char label[64];
-		const char *given = tw_desktop_label(d->ws);
-		if (given) {
-			snprintf(label, sizeof(label), "%s", given);
+		struct wlr_box lb = label_box(d);
+		if (tv.edit.ws == d->ws) {
+			draw_edit(cr, &lb);
 		} else {
-			snprintf(label, sizeof(label), "Desktop %d", number);
+			char label[64];
+			desk_label(d->ws, number, label, sizeof(label));
+			if (target_is(TV_DESK_LABEL, i) && !tv.press.dragging &&
+					isdigit((unsigned char)d->ws->name[0])) {
+				// it can be renamed: a field shows on hover, as on Windows
+				rounded(cr, lb.x, lb.y + 2, lb.width, lb.height - 4, radius() > 0 ? 4 : 0);
+				cairo_set_source_u32(cr, hover_bg);
+				cairo_fill(cr);
+			}
+			draw_label(cr, label, p.x, p.y + p.height, p.width, LABEL_H, fg, true);
 		}
-		draw_label(cr, label, p.x, p.y + p.height, p.width, LABEL_H, fg, true);
 		if (hot && !tv.press.dragging && tv.desks->length > 2) {
 			rounded(cr, d->close.x, d->close.y, d->close.width, d->close.height, 4);
 			cairo_set_source_u32(cr, target_is(TV_DESK_CLOSE, i) ? 0xe81123ff : 0x000000a0);
 			cairo_fill(cr);
 			draw_close(cr, &d->close, false, 0xffffffff);
 		}
+	}
+	if (tv.press.dragging && tv.press.target == TV_DESK && tv.press.drop_slot >= 0) {
+		// where the dragged desktop lands: a line in the gap before that desktop
+		struct tv_desk *before = tv.desks->items[tv.press.drop_slot];
+		double lx = before->preview.x - DESK_GAP / 2.0;
+		cairo_rectangle(cr, lx - 2, before->preview.y - 6, 4, before->preview.height + 12);
+		cairo_set_source_u32(cr, accent());
+		cairo_fill(cr);
 	}
 	cairo_destroy(cr);
 	tw_scene_buffer_set_surface(tv.chrome, surface, W, H);
@@ -517,7 +608,8 @@ static void rebuild(void) {
 				w->thumb.width / cw, 0, 0);
 		}
 	}
-	if (tv.hover_index >= (tv.hover == TV_DESK || tv.hover == TV_DESK_CLOSE ?
+	if (tv.hover_index >= (tv.hover == TV_DESK || tv.hover == TV_DESK_CLOSE ||
+			tv.hover == TV_DESK_LABEL ?
 			tv.desks->length : tv.windows->length)) {
 		tv.hover = TV_NONE;
 	}
@@ -697,6 +789,139 @@ bool tw_desktop_close(struct sway_workspace *ws) {
 	return true;
 }
 
+/* ---------- renaming a desktop ---------- */
+
+/* The number a desktop is shown with: its place among the desktops. */
+static int desk_number(struct sway_workspace *ws) {
+	int index = ws && ws->output ? list_find(ws->output->workspaces, ws) : -1;
+	return index + 1;
+}
+
+static void edit_start(struct sway_workspace *ws) {
+	if (!ws || !ws->name || !isdigit((unsigned char)ws->name[0])) {
+		return; // a workspace named by hand keeps the name it was given
+	}
+	tv.edit.ws = ws;
+	desk_label(ws, desk_number(ws), tv.edit.text, sizeof(tv.edit.text));
+	tv.edit.fresh = true;
+}
+
+/* Gives the desktop the name typed; an empty one or the one it has changes nothing. */
+static void edit_commit(void) {
+	struct sway_workspace *ws = tv.edit.ws;
+	tv.edit.ws = NULL;
+	if (!ws || ws->node.destroying) {
+		return;
+	}
+	char shown[64];
+	desk_label(ws, desk_number(ws), shown, sizeof(shown));
+	if (strcmp(tv.edit.text, shown) == 0) {
+		return;
+	}
+	char fallback[32];
+	snprintf(fallback, sizeof(fallback), "Desktop %d", desk_number(ws));
+	// "Desktop 2" typed for desktop 2 is no name of its own
+	tw_desktop_rename(ws, strcmp(tv.edit.text, fallback) == 0 ? NULL : tv.edit.text);
+}
+
+static void edit_append(uint32_t ch) {
+	char utf8[5] = { 0 };
+	if (ch < 0x80) {
+		utf8[0] = (char)ch;
+	} else if (ch < 0x800) {
+		utf8[0] = (char)(0xc0 | (ch >> 6));
+		utf8[1] = (char)(0x80 | (ch & 0x3f));
+	} else if (ch < 0x10000) {
+		utf8[0] = (char)(0xe0 | (ch >> 12));
+		utf8[1] = (char)(0x80 | ((ch >> 6) & 0x3f));
+		utf8[2] = (char)(0x80 | (ch & 0x3f));
+	} else {
+		utf8[0] = (char)(0xf0 | (ch >> 18));
+		utf8[1] = (char)(0x80 | ((ch >> 12) & 0x3f));
+		utf8[2] = (char)(0x80 | ((ch >> 6) & 0x3f));
+		utf8[3] = (char)(0x80 | (ch & 0x3f));
+	}
+	if (tv.edit.fresh) {
+		tv.edit.text[0] = '\0';
+		tv.edit.fresh = false;
+	}
+	if (strlen(tv.edit.text) + strlen(utf8) < 48) {
+		strcat(tv.edit.text, utf8);
+	}
+}
+
+static void edit_backspace(void) {
+	if (tv.edit.fresh) {
+		tv.edit.text[0] = '\0';
+		tv.edit.fresh = false;
+		return;
+	}
+	size_t n = strlen(tv.edit.text);
+	while (n > 0 && ((unsigned char)tv.edit.text[n - 1] & 0xc0) == 0x80) {
+		n--; // the continuation bytes of the last character
+	}
+	if (n > 0) {
+		n--;
+	}
+	tv.edit.text[n] = '\0';
+}
+
+/* Typing into the name of a desktop; true when the key was taken. */
+static bool edit_key(xkb_keysym_t sym, uint32_t modifiers) {
+	switch (sym) {
+	case XKB_KEY_Escape:
+		tv.edit.ws = NULL;
+		break;
+	case XKB_KEY_Return:
+	case XKB_KEY_KP_Enter:
+		edit_commit();
+		rebuild();
+		return true;
+	case XKB_KEY_BackSpace:
+		edit_backspace();
+		break;
+	default: {
+		uint32_t ch = xkb_keysym_to_utf32(sym);
+		if (ch < 0x20 || ch == 0x7f || (modifiers & (WLR_MODIFIER_CTRL | WLR_MODIFIER_LOGO))) {
+			return true; // nothing to type, and nothing for the view either
+		}
+		edit_append(ch);
+		break;
+	}
+	}
+	render_chrome();
+	return true;
+}
+
+/* ---------- dragging a desktop ---------- */
+
+/* The desktop a dragged one would land before; the "New desktop" slot for the end. */
+static int drop_slot(double x) {
+	for (int i = 0; i < tv.desks->length; i++) {
+		struct tv_desk *d = tv.desks->items[i];
+		if (d->is_new || (d->ws && x < d->preview.x + d->preview.width / 2.0)) {
+			return i;
+		}
+	}
+	return tv.desks->length - 1;
+}
+
+/* Moves the dragged desktop to its slot, one place at a time. */
+static void drop_desk(int from, int slot) {
+	struct tv_desk *d = from >= 0 && from < tv.desks->length ? tv.desks->items[from] : NULL;
+	int to = slot > from ? slot - 1 : slot;
+	if (!d || !d->ws || to == from) {
+		return;
+	}
+	struct sway_workspace *ws = d->ws;
+	int steps = to - from;
+	for (int i = 0; i < abs(steps); i++) {
+		if (!tw_desktop_move(ws, steps)) {
+			break; // a workspace named by hand keeps its place
+		}
+	}
+}
+
 /* ---------- open and close ---------- */
 
 void tw_taskview_open(struct sway_seat *seat) {
@@ -742,6 +967,7 @@ void tw_taskview_close(void) {
 	if (!tv.active) {
 		return;
 	}
+	edit_commit(); // leaving the view keeps a name being typed, as leaving a field does
 	tv.active = false;
 	if (tv.refresh) {
 		wl_event_source_remove(tv.refresh);
@@ -809,6 +1035,12 @@ static void hit_test(double x, double y, enum tv_target *target, int *index) {
 		}
 		struct wlr_box area = d->preview;
 		area.height += LABEL_H;
+		struct wlr_box label = label_box(d);
+		if (!d->is_new && in_box(&label, x, y)) {
+			*index = i;
+			*target = TV_DESK_LABEL;
+			return;
+		}
 		if (in_box(&area, x, y)) {
 			*index = i;
 			*target = !d->is_new && tv.desks->length > 2 && in_box(&d->close, x, y) ?
@@ -848,6 +1080,33 @@ void tw_taskview_motion(struct sway_seat *seat) {
 			wlr_scene_node_raise_to_top(&w->tree->node);
 		}
 	}
+	if (tv.press.pressed && tv.press.target == TV_DESK && !tv.press.dragging &&
+			hypot(x - tv.press.x, y - tv.press.y) > DRAG_THRESHOLD &&
+			tv.press.index < tv.desks->length) {
+		struct tv_desk *d = tv.desks->items[tv.press.index];
+		if (d->ws && !d->is_new && isdigit((unsigned char)d->ws->name[0])) {
+			tv.press.dragging = true;
+			tv.press.dx = tv.press.x - d->preview.x;
+			tv.press.dy = tv.press.y - d->preview.y;
+			if (d->tree) {
+				wlr_scene_node_raise_to_top(&d->tree->node);
+			}
+		}
+	}
+	if (tv.press.dragging && tv.press.target == TV_DESK) {
+		// the desktop follows the pointer along the strip
+		struct tv_desk *d = tv.desks->items[tv.press.index];
+		if (d->tree) {
+			wlr_scene_node_set_position(&d->tree->node, round(x - tv.press.dx),
+				d->preview.y);
+		}
+		int slot = drop_slot(x);
+		if (slot != tv.press.drop_slot) {
+			tv.press.drop_slot = slot;
+			render_chrome();
+		}
+		return;
+	}
 	enum tv_target target;
 	int index;
 	hit_test(x, y, &target, &index);
@@ -857,7 +1116,7 @@ void tw_taskview_motion(struct sway_seat *seat) {
 			wlr_scene_node_set_position(&w->tree->node, round(x - tv.press.dx),
 				round(y - tv.press.dy));
 		}
-		if (target != TV_DESK && target != TV_DESK_CLOSE) {
+		if (target != TV_DESK && target != TV_DESK_CLOSE && target != TV_DESK_LABEL) {
 			target = TV_NONE;
 			index = -1;
 		} else {
@@ -898,6 +1157,12 @@ void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed) {
 	int index;
 	hit_test(x, y, &target, &index);
 	if (pressed) {
+		if (tv.edit.ws && !(target == TV_DESK_LABEL && index >= 0 &&
+				((struct tv_desk *)tv.desks->items[index])->ws == tv.edit.ws)) {
+			edit_commit(); // a click elsewhere keeps the name typed
+			rebuild();
+			hit_test(x, y, &target, &index);
+		}
 		if (button == BTN_LEFT || button == BTN_MIDDLE) {
 			tv.press.pressed = true;
 			tv.press.target = button == BTN_MIDDLE && target == TV_WINDOW ?
@@ -906,6 +1171,7 @@ void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed) {
 			tv.press.x = x;
 			tv.press.y = y;
 			tv.press.dragging = false;
+			tv.press.drop_slot = -1;
 		}
 		return;
 	}
@@ -913,9 +1179,17 @@ void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed) {
 		return;
 	}
 	tv.press.pressed = false;
+	if (tv.press.dragging && tv.press.target == TV_DESK) {
+		tv.press.dragging = false;
+		drop_desk(tv.press.index, drop_slot(x));
+		tv.press.drop_slot = -1;
+		rebuild();
+		return;
+	}
 	if (tv.press.dragging) {
 		tv.press.dragging = false;
-		if (tv.press.index < tv.windows->length && (target == TV_DESK || target == TV_DESK_CLOSE)) {
+		if (tv.press.index < tv.windows->length && (target == TV_DESK || target == TV_DESK_CLOSE ||
+				target == TV_DESK_LABEL)) {
 			drop(tv.windows->items[tv.press.index], index);
 		}
 		rebuild();
@@ -975,6 +1249,16 @@ void tw_taskview_button(struct sway_seat *seat, uint32_t button, bool pressed) {
 		}
 		break;
 	}
+	case TV_DESK_LABEL: {
+		struct tv_desk *d = tv.desks->items[index];
+		if (tv.edit.ws && tv.edit.ws == d->ws) {
+			tv.edit.fresh = false; // a second click puts the caret at the end
+		} else {
+			edit_start(d->ws);
+		}
+		render_chrome();
+		break;
+	}
 	}
 }
 
@@ -984,6 +1268,9 @@ bool tw_taskview_handle_key(xkb_keysym_t sym, bool pressed, uint32_t modifiers) 
 	}
 	if (!pressed) {
 		return false;
+	}
+	if (tv.edit.ws) {
+		return edit_key(sym, modifiers);
 	}
 	int n = tv.windows->length;
 	switch (sym) {
@@ -1071,6 +1358,9 @@ void tw_taskview_workspace_destroyed(struct sway_workspace *ws) {
 	}
 	if (tv.shown == ws) {
 		tv.shown = NULL;
+	}
+	if (tv.edit.ws == ws) {
+		tv.edit.ws = NULL;
 	}
 	rebuild_later();
 }
