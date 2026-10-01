@@ -22,6 +22,7 @@ executable(
 		'page_theme.c',
 		'page_wallpaper.c',
 		'page_window.c',
+		'presets.c',
 		'reorder.c',
 		'ui.c',
 		'widgets.c',

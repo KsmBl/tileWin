@@ -2129,7 +2129,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 	gtk_widget_set_size_request(p->lock_entry, 280, -1);
 	g_signal_connect(p->lock_entry, "changed", G_CALLBACK(on_lock_command), p);
 	ui_row(lock, "Lock with", "The program that locks the screen (Win+L uses $locker from "
-		"common.conf)", p->lock_entry);
+		"common.conf)", ui_presets_lockers(p->lock_entry));
 	p->lock_on_sleep_switch = gtk_switch_new();
 	g_signal_connect(p->lock_on_sleep_switch, "state-set", G_CALLBACK(on_lock_on_sleep), p);
 	ui_row(lock, "Lock before sleeping", "Locks the screen before the computer sleeps or "

@@ -712,7 +712,17 @@ void ui_command_dialog(GtkWindow *parent, const char *title, const char *descrip
 		gtk_editable_set_text(GTK_EDITABLE(d->entry), current);
 	}
 	g_signal_connect(d->entry, "activate", G_CALLBACK(on_command_activate), d);
-	GtkWidget *row = ui_row(group, "Command", NULL, d->entry);
+	// the installed apps to choose from; console apps need the compositor's $term, which a
+	// command run from elsewhere does not know, so they stay out
+	GPtrArray *values = ui_strings(), *labels = ui_strings();
+	ui_list_apps(NULL, false, values, labels);
+	for (guint i = values->len; i-- > 0;) {
+		if (g_str_has_prefix(values->pdata[i], "$term")) {
+			g_ptr_array_remove_index(values, i);
+			g_ptr_array_remove_index(labels, i);
+		}
+	}
+	GtkWidget *row = ui_row(group, "Program", NULL, ui_presets(d->entry, values, labels));
 	GtkWidget *browse = gtk_button_new_with_label("Pick a file...");
 	g_signal_connect(browse, "clicked", G_CALLBACK(on_command_browse), d);
 	gtk_box_append(GTK_BOX(ui_row_box(row)), browse);
@@ -731,7 +741,9 @@ void ui_command_dialog(GtkWindow *parent, const char *title, const char *descrip
 
 	gtk_window_set_child(GTK_WINDOW(d->window), page);
 	gtk_window_present(GTK_WINDOW(d->window));
-	gtk_widget_grab_focus(d->entry); // the command can be typed straight away
+	if (gtk_widget_get_visible(d->entry)) {
+		gtk_widget_grab_focus(d->entry); // a command of its own can be changed straight away
+	}
 }
 
 void ui_icon_dialog(GtkWindow *parent, const char *title, const char *description,

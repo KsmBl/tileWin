@@ -1032,10 +1032,10 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 
 	GtkWidget *general = ui_group(content, "General", NULL);
 	p->font_entry = root_entry(p, "font", "Theme font, e.g. Noto Sans 10");
-	ui_row(general, "Font", NULL, p->font_entry);
+	ui_row(general, "Font", NULL, ui_font_field(p->font_entry));
 	p->terminal_entry = root_entry(p, "terminal", "xfce4-terminal -x");
 	ui_row(general, "Terminal for console apps", "Runs apps whose desktop entry asks for a terminal",
-		p->terminal_entry);
+		ui_presets_terminals(p->terminal_entry));
 	p->delay_spin = gtk_spin_button_new_with_range(0, 5000, 100);
 	g_signal_connect(p->delay_spin, "value-changed", G_CALLBACK(on_delay_changed), p);
 	ui_row(general, "Tooltip delay", "Milliseconds", p->delay_spin);

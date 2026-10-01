@@ -16,12 +16,13 @@ static const struct {
 
 static const struct {
 	const char *variable, *title, *hint;
+	const char *categories; // the apps offered; NULL: lockers or screenshot tools
 } programs[] = {
-	{ "$term", "Terminal", "Super+Return" },
-	{ "$filemanager", "File manager", "Super+E in window mode" },
-	{ "$taskmanager", "Task manager", "Ctrl+Shift+Esc in window mode" },
-	{ "$locker", "Screen locker", "Super+L in window mode" },
-	{ "$screenshot", "Screenshot", "Print" },
+	{ "$term", "Terminal", "Super+Return", "TerminalEmulator" },
+	{ "$filemanager", "File manager", "Super+E in window mode", "FileManager" },
+	{ "$taskmanager", "Task manager", "Ctrl+Shift+Esc in window mode", "Monitor" },
+	{ "$locker", "Screen locker", "Super+L in window mode", NULL },
+	{ "$screenshot", "Screenshot", "Print", NULL },
 };
 
 struct launcher_page {
@@ -253,7 +254,11 @@ GtkWidget *launcher_page_new(struct settings *s) {
 		gtk_widget_set_size_request(entry, 360, -1);
 		g_signal_connect(entry, "changed", G_CALLBACK(on_program_changed), p);
 		p->program_entries[i] = entry;
-		ui_row(apps, programs[i].title, programs[i].hint, entry);
+		GtkWidget *control = programs[i].categories ?
+			ui_presets_apps(entry, programs[i].categories) :
+			strcmp(programs[i].variable, "$locker") == 0 ? ui_presets_lockers(entry) :
+			ui_presets_screenshots(entry);
+		ui_row(apps, programs[i].title, programs[i].hint, control);
 	}
 
 	GtkWidget *session = ui_group(content, "Session", NULL);

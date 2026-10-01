@@ -28,12 +28,149 @@ static void list_disks(GPtrArray *values, GPtrArray *labels) {
  * one. The list fills in the values and one more label: the first label
  * stands for the default.
  */
+static void list_seconds(GPtrArray *values, GPtrArray *labels) {
+	static const int n[] = { 1, 2, 3, 5, 10, 15, 30, 60, 120, 300, -1 };
+	ui_list_numbers(values, labels, "Every %d seconds", n);
+}
+
+static void list_pixels(GPtrArray *values, GPtrArray *labels) {
+	static const int n[] = { 8, 16, 24, 32, 48, 64, 80, 100, 120, 160, 200, 240, 300, -1 };
+	ui_list_numbers(values, labels, "%d pixels", n);
+}
+
+static void list_percent(GPtrArray *values, GPtrArray *labels) {
+	static const int n[] = { 50, 60, 70, 75, 80, 85, 90, 95, -1 };
+	ui_list_numbers(values, labels, "%d%%", n);
+}
+
+static void list_step(GPtrArray *values, GPtrArray *labels) {
+	static const int n[] = { 1, 2, 5, 10, 20, -1 };
+	ui_list_numbers(values, labels, "%d%% a notch", n);
+}
+
+static void list_kib(GPtrArray *values, GPtrArray *labels) {
+	static const int n[] = { 10, 50, 100, 500, 1000, 5000, -1 };
+	ui_list_numbers(values, labels, "%d KiB per second", n);
+}
+
+static void list_task_managers(GPtrArray *values, GPtrArray *labels) {
+	ui_list_apps("Monitor", true, values, labels);
+}
+
+static void list_mixers(GPtrArray *values, GPtrArray *labels) {
+	ui_list_apps("Mixer", true, values, labels);
+}
+
+static void list_calendars(GPtrArray *values, GPtrArray *labels) {
+	g_ptr_array_add(values, g_strdup("exec tilewin-settings --page datetime"));
+	g_ptr_array_add(labels, g_strdup("Date & time settings"));
+	ui_list_apps("Calendar", true, values, labels);
+}
+
+/* The options to pick from: by the key alone, or by the widget and key. */
 static const struct {
-	const char *type, *key;
+	const char *type, *key; // a NULL type: every widget
 	void (*list)(GPtrArray *values, GPtrArray *labels);
 } listed_opts[] = {
 	{ "disk", "devices", list_disks },
+	{ "gpu", "device", ui_list_gpus },
+	{ "netspeed", "device", ui_list_net_devices },
+	{ "network", "interface", ui_list_net_devices },
+	{ "battery", "device", ui_list_batteries },
+	{ "power", "device", ui_list_batteries },
+	{ "clock", "settings", list_calendars },
+	{ NULL, "interval", list_seconds },
+	{ NULL, "width", list_pixels },
+	{ NULL, "max_width", list_pixels },
+	{ NULL, "button_width", list_pixels },
+	{ NULL, "warning", list_percent },
+	{ NULL, "critical", list_percent },
+	{ NULL, "step", list_step },
+	{ NULL, "threshold", list_kib },
+	{ NULL, "task_manager", list_task_managers },
+	{ NULL, "mixer", list_mixers },
 };
+
+/*
+ * Formats to pick from, by widget and key; the label shows what comes out.
+ * "\\n" is how a second line looks in the field.
+ */
+static const struct {
+	const char *type, *key;
+	const char *const values[8];
+	const char *const labels[8];
+} format_presets[] = {
+	{ "cpu", "format", { "{usage}%", "CPU {usage}%", "{usage}" },
+		{ "12%", "CPU 12%", "12" } },
+	{ "memory", "format", { "{used_percent}%", "RAM {used_percent}%", "{used}/{total} GiB",
+		"{used} GiB" }, { "45%", "RAM 45%", "7.1/15.4 GiB", "7.1 GiB" } },
+	{ "gpu", "format", { "{usage}%", "GPU {usage}%" }, { "30%", "GPU 30%" } },
+	{ "gpu", "command", { "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits" },
+		{ "NVIDIA (nvidia-smi)" } },
+	{ "netspeed", "format", { "\u2193{down} \u2191{up}", "{total}", "{device} \u2193{down} \u2191{up}" },
+		{ "\u2193 1.2 MB/s \u2191 40 kB/s", "1.2 MB/s", "wlan0 \u2193 1.2 MB/s \u2191 40 kB/s" } },
+	{ "diskspace", "format", { "{used_percent}%", "{free} GiB free", "{used}/{total} GiB",
+		"{path} {used_percent}%" }, { "62%", "180 GiB free", "300/480 GiB", "/ 62%" } },
+	{ "power", "format", { "{watts} W", "{watts}W" }, { "9.5 W", "9.5W" } },
+	{ "battery", "format", { "{capacity}%", "{icon} {capacity}%", "BAT {capacity}%" },
+		{ "80%", "(icon) 80%", "BAT 80%" } },
+	{ "network", "format", { "{essid}", "{essid} {quality}%", "{ifname}" },
+		{ "HomeWifi", "HomeWifi 70%", "wlan0" } },
+	{ "volume", "format", { "{volume}%", "{icon} {volume}%", "VOL {volume}%" },
+		{ "60%", "(icon) 60%", "VOL 60%" } },
+	{ "volume", "format_muted", { "muted", "{icon} muted" }, { "muted", "(icon) muted" } },
+	{ "brightness", "format", { "{percent}%", "{icon} {percent}%" }, { "70%", "(icon) 70%" } },
+	{ "clock", "format", { "%H:%M", "%H:%M:%S", "%I:%M %p", "%H:%M\\n%d.%m.%Y",
+		"%H:%M\\n%Y-%m-%d", "%a %d %b  %H:%M", "%d.%m.%Y  %H:%M" }, { NULL } },
+	{ "clock", "tooltip_format", { "%A, %d %B %Y", "%d.%m.%Y", "%Y-%m-%d", "%A %H:%M" },
+		{ NULL } },
+};
+
+static bool color_key(const char *key) {
+	size_t len = strlen(key);
+	return strcmp(key, "fg") == 0 || (len > 3 && strcmp(key + len - 3, "_fg") == 0) ||
+		strstr(key, "color") != NULL;
+}
+
+/* A text option as presets: what fits the key, at least Default and Custom. */
+static GtkWidget *text_option_control(const char *widget, const char *key, GtkWidget *entry) {
+	if (color_key(key)) {
+		return ui_color_field(entry);
+	}
+	if (strcmp(key, "path") == 0) {
+		return ui_folder_field(entry, "Folder to watch");
+	}
+	char *type = widget_type_of(widget);
+	GPtrArray *values = ui_strings(), *labels = ui_strings();
+	g_ptr_array_add(values, g_strdup(""));
+	g_ptr_array_add(labels, g_strdup("Default"));
+	for (size_t i = 0; i < G_N_ELEMENTS(format_presets); i++) {
+		if (strcmp(format_presets[i].type, type) != 0 || strcmp(format_presets[i].key, key) != 0) {
+			continue;
+		}
+		for (int v = 0; v < 8 && format_presets[i].values[v]; v++) {
+			const char *value = format_presets[i].values[v];
+			g_ptr_array_add(values, g_strdup(value));
+			if (format_presets[i].labels[v]) {
+				g_ptr_array_add(labels, g_strdup(format_presets[i].labels[v]));
+				continue;
+			}
+			// a strftime format: what it shows now, its lines joined
+			char *format = g_strdup(value);
+			for (char *n; (n = strstr(format, "\\n"));) {
+				n[0] = ' ';
+				n[1] = '/';
+			}
+			GDateTime *now = g_date_time_new_now_local();
+			char *shown = g_date_time_format(now, format);
+			g_ptr_array_add(labels, shown ? shown : g_strdup(value));
+			g_date_time_unref(now);
+			g_free(format);
+		}
+	}
+	g_free(type);
+	return ui_presets(entry, values, labels);
+}
 
 /* The screens a desktop widget can go on: the main one, all of them, or one by name. */
 static void list_desktop_screens(GPtrArray *values, GPtrArray *labels) {
@@ -157,9 +294,14 @@ static void (*opt_lister(const char *widget, const struct tw_widget_option *opt,
 	}
 	char *type = widget_type_of(widget);
 	void (*list)(GPtrArray *, GPtrArray *) = NULL;
-	for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
-		if (strcmp(listed_opts[i].type, type) == 0 && strcmp(listed_opts[i].key, opt->key) == 0) {
-			list = listed_opts[i].list;
+	// the ones of this widget first, then those of every widget
+	for (int pass = 0; pass < 2 && !list; pass++) {
+		for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
+			bool mine = listed_opts[i].type && strcmp(listed_opts[i].type, type) == 0;
+			if ((pass == 0 ? mine : !listed_opts[i].type) &&
+					strcmp(listed_opts[i].key, opt->key) == 0) {
+				list = listed_opts[i].list;
+			}
 		}
 	}
 	g_free(type);
@@ -241,6 +383,7 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 		g_free(display);
 		g_signal_connect_data(control, "changed", G_CALLBACK(on_option_text), b,
 			opt_binding_free, 0);
+		control = text_option_control(widget, opt->key, control);
 	}
 	ui_row(list, opt->title, opt->hint, control);
 	g_free(value);

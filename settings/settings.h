@@ -124,6 +124,37 @@ GtkWidget *ui_row_box(GtkWidget *row);
 void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
 	const char *title, const char *hint, bool is_switch, int low, int high, int fallback);
 void ui_taskbar_keys_refresh(GPtrArray *keys);
+/*
+ * presets.c: choosing instead of typing. Each wraps the entry a page saves
+ * from and hides it; only "Custom…" of a presets dropdown shows it.
+ * ui_presets takes over both arrays (of char *).
+ */
+GtkWidget *ui_presets(GtkWidget *entry, GPtrArray *values, GPtrArray *labels);
+GtkWidget *ui_presets_static(GtkWidget *entry, const char *const *values,
+	const char *const *labels);
+GtkWidget *ui_color_field(GtkWidget *entry);
+GtkWidget *ui_font_field(GtkWidget *entry);
+GtkWidget *ui_folder_field(GtkWidget *entry, const char *title);
+GPtrArray *ui_strings(void);
+/* Installed apps with any of the categories (";" separated, NULL for all): their
+ * commands ("exec ..." with exec_prefix, terminal ones in $term) and names. */
+void ui_list_apps(const char *categories, bool exec_prefix, GPtrArray *values,
+	GPtrArray *labels);
+/* Presets of the installed screen lockers, screenshot tools, or apps of the
+ * categories (their commands without "exec"). */
+GtkWidget *ui_presets_lockers(GtkWidget *entry);
+GtkWidget *ui_presets_screenshots(GtkWidget *entry);
+GtkWidget *ui_presets_apps(GtkWidget *entry, const char *categories);
+/* Presets of the installed terminals, each with its flag to run a command. */
+GtkWidget *ui_presets_terminals(GtkWidget *entry);
+/* The app ids (or X11 classes) and names of the installed apps. */
+void ui_list_app_ids(GPtrArray *ids, GPtrArray *names);
+void ui_list_net_devices(GPtrArray *values, GPtrArray *labels);
+void ui_list_batteries(GPtrArray *values, GPtrArray *labels);
+void ui_list_gpus(GPtrArray *values, GPtrArray *labels);
+/* The numbers (ending with -1) as values, each labelled with label_format. */
+void ui_list_numbers(GPtrArray *values, GPtrArray *labels, const char *label_format,
+	const int *numbers);
 /* The same as a choice: values[0] (labels[0]) is the default, written as nothing. */
 void ui_taskbar_choice(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
 	const char *title, const char *hint, const char *const *values, const char *const *labels);

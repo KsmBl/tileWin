@@ -41,7 +41,7 @@ struct appwin_page {
 	struct app_list *pause_except, *remember_except;
 	GtkWidget *rules;       // the list of rules
 	GtkWidget *rule_app;    // entry: app id
-	GtkWidget *open_apps;   // dropdown of the apps with a window open
+	GtkWidget *app_holder;  // holds the choice of the app: the open ones, then all
 	GtkWidget *rule_action, *rule_desktop;
 	GPtrArray *open;        // struct tw_open_app *
 };
@@ -258,16 +258,6 @@ static void rebuild_rules(struct appwin_page *p) {
 	g_ptr_array_free(rules, TRUE);
 }
 
-static void on_open_app(GObject *object, GParamSpec *pspec, gpointer data) {
-	struct appwin_page *p = data;
-	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
-	if (sel == 0 || sel == GTK_INVALID_LIST_POSITION || !p->open || sel > p->open->len) {
-		return;
-	}
-	struct tw_open_app *app = p->open->pdata[sel - 1];
-	gtk_editable_set_text(GTK_EDITABLE(p->rule_app), app->id);
-}
-
 static void on_action(GObject *object, GParamSpec *pspec, gpointer data) {
 	struct appwin_page *p = data;
 	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
@@ -310,22 +300,42 @@ static void on_add_rule(GtkButton *button, gpointer data) {
 	g_free(id);
 }
 
+/* The apps a rule can be for: those with a window open first, then every installed one. */
 static void fill_open_apps(struct appwin_page *p) {
 	if (p->open) {
 		g_ptr_array_free(p->open, TRUE);
 	}
 	p->open = tw_ipc_open_apps();
-	GtkStringList *names = gtk_string_list_new(NULL);
-	gtk_string_list_append(names, "Pick an open app…");
+	GPtrArray *values = ui_strings(), *labels = ui_strings();
+	g_ptr_array_add(values, g_strdup(""));
+	g_ptr_array_add(labels, g_strdup("Pick an app…"));
+	GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
 	for (guint i = 0; i < p->open->len; i++) {
 		struct tw_open_app *app = p->open->pdata[i];
-		char *label = g_strdup_printf("%s (%s)", app->title, app->id);
-		gtk_string_list_append(names, label);
-		g_free(label);
+		if (g_hash_table_contains(seen, app->id)) {
+			continue;
+		}
+		g_hash_table_add(seen, app->id);
+		g_ptr_array_add(values, g_strdup(app->id));
+		g_ptr_array_add(labels, g_strdup_printf("%s (open)", app->title));
 	}
-	gtk_drop_down_set_model(GTK_DROP_DOWN(p->open_apps), G_LIST_MODEL(names));
-	g_object_unref(names);
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->open_apps), 0);
+	GPtrArray *names = ui_strings(), *ids = ui_strings();
+	ui_list_app_ids(ids, names);
+	for (guint i = 0; i < ids->len; i++) {
+		if (!g_hash_table_contains(seen, ids->pdata[i])) {
+			g_ptr_array_add(values, g_strdup(ids->pdata[i]));
+			g_ptr_array_add(labels, g_strdup(names->pdata[i]));
+		}
+	}
+	g_ptr_array_unref(names);
+	g_ptr_array_unref(ids);
+	g_hash_table_destroy(seen);
+	GtkWidget *old = gtk_widget_get_first_child(p->app_holder);
+	if (old) {
+		gtk_box_remove(GTK_BOX(p->app_holder), old);
+	}
+	gtk_editable_set_text(GTK_EDITABLE(p->rule_app), "");
+	gtk_box_append(GTK_BOX(p->app_holder), ui_presets(p->rule_app, values, labels));
 }
 
 /* ---------- reading ---------- */
@@ -456,15 +466,11 @@ GtkWidget *appwin_page_new(struct settings *s) {
 		"What happens to the windows of an app when they open. The rules are for_window lines "
 		"in common.conf and apply to windows opened after they were made.");
 	GtkWidget *add = ui_group(content, NULL, NULL);
-	p->open_apps = gtk_drop_down_new(NULL, NULL);
-	g_signal_connect(p->open_apps, "notify::selected", G_CALLBACK(on_open_app), p);
-	p->rule_app = gtk_entry_new();
+	p->rule_app = g_object_ref_sink(gtk_entry_new());
 	gtk_entry_set_placeholder_text(GTK_ENTRY(p->rule_app), "App id, e.g. firefox");
 	gtk_widget_set_size_request(p->rule_app, 220, -1);
-	GtkWidget *pick = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	gtk_box_append(GTK_BOX(pick), p->open_apps);
-	gtk_box_append(GTK_BOX(pick), p->rule_app);
-	ui_row(add, "App", "Pick one that is open, or type its app id", pick);
+	p->app_holder = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	ui_row(add, "App", "The apps with a window open come first", p->app_holder);
 
 	GtkStringList *labels = gtk_string_list_new(NULL);
 	for (size_t i = 0; i < G_N_ELEMENTS(actions); i++) {

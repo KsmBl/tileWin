@@ -624,6 +624,48 @@ static void ntp_settings_write(struct datetime_page *p) {
 	settings_taskbar_changed(p->s);
 }
 
+/* Time servers to pick from; the one of the country of the locale second. */
+static const char *country_pool(void) {
+	static char pool[32];
+	const char *lang = g_getenv("LC_TIME");
+	lang = lang && *lang ? lang : g_getenv("LANG");
+	const char *underscore = lang ? strchr(lang, '_') : NULL;
+	if (!underscore || !g_ascii_isalpha(underscore[1]) || !g_ascii_isalpha(underscore[2])) {
+		return NULL;
+	}
+	snprintf(pool, sizeof(pool), "%c%c.pool.ntp.org", g_ascii_tolower(underscore[1]),
+		g_ascii_tolower(underscore[2]));
+	return pool;
+}
+
+static GPtrArray *ntp_values(void) {
+	GPtrArray *v = ui_strings();
+	g_ptr_array_add(v, g_strdup(NTP_DEFAULT_SERVERS));
+	g_ptr_array_add(v, g_strdup("0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org"));
+	if (country_pool()) {
+		g_ptr_array_add(v, g_strdup(country_pool()));
+	}
+	g_ptr_array_add(v, g_strdup("time.cloudflare.com"));
+	g_ptr_array_add(v, g_strdup("time.google.com"));
+	g_ptr_array_add(v, g_strdup("ptbtime1.ptb.de ptbtime2.ptb.de ptbtime3.ptb.de"));
+	g_ptr_array_add(v, g_strdup("0.arch.pool.ntp.org 1.arch.pool.ntp.org"));
+	return v;
+}
+
+static GPtrArray *ntp_labels(void) {
+	GPtrArray *l = ui_strings();
+	g_ptr_array_add(l, g_strdup("Default: the NTP pool and Cloudflare"));
+	g_ptr_array_add(l, g_strdup("The NTP pool, worldwide"));
+	if (country_pool()) {
+		g_ptr_array_add(l, g_strdup_printf("The NTP pool of your country (%s)", country_pool()));
+	}
+	g_ptr_array_add(l, g_strdup("Cloudflare"));
+	g_ptr_array_add(l, g_strdup("Google"));
+	g_ptr_array_add(l, g_strdup("PTB (the German national time)"));
+	g_ptr_array_add(l, g_strdup("Arch Linux pool"));
+	return l;
+}
+
 static void on_ntp_servers_changed(GtkEditable *editable, gpointer data) {
 	ntp_settings_write(data);
 }
@@ -1028,8 +1070,8 @@ GtkWidget *datetime_page_new(struct settings *s) {
 	gtk_entry_set_placeholder_text(GTK_ENTRY(p->ntp_servers), NTP_DEFAULT_SERVERS);
 	gtk_widget_set_size_request(p->ntp_servers, 300, -1);
 	g_signal_connect(p->ntp_servers, "changed", G_CALLBACK(on_ntp_servers_changed), p);
-	ui_row(servers, "Time servers", "Separated by spaces; all of them are asked at once",
-		p->ntp_servers);
+	ui_row(servers, "Time servers", "All of them are asked at once",
+		ui_presets(p->ntp_servers, ntp_values(), ntp_labels()));
 	p->ntp_mode_dd = gtk_drop_down_new_from_strings(ntp_mode_labels);
 	g_signal_connect(p->ntp_mode_dd, "notify::selected", G_CALLBACK(on_ntp_mode_changed), p);
 	ui_row(servers, "Which answer to use", NULL, p->ntp_mode_dd);

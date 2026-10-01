@@ -503,33 +503,6 @@ static void add_own_rows(struct screensaver_page *p, GtkWidget *group) {
 	}
 }
 
-static void on_folder_chosen(GObject *source, GAsyncResult *result, gpointer data) {
-	struct screensaver_page *p = data;
-	GFile *folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, NULL);
-	if (folder) {
-		char *path = g_file_get_path(folder);
-		if (path) {
-			gtk_editable_set_text(GTK_EDITABLE(p->photos_entry), path); // writes it
-		}
-		g_free(path);
-		g_object_unref(folder);
-	}
-}
-
-static void on_choose_folder(GtkButton *button, gpointer data) {
-	struct screensaver_page *p = data;
-	GtkFileDialog *dialog = gtk_file_dialog_new();
-	gtk_file_dialog_set_title(dialog, "Pictures for the slideshow");
-	const char *pictures = g_get_user_special_dir(G_USER_DIRECTORY_PICTURES);
-	if (pictures) {
-		GFile *folder = g_file_new_for_path(pictures);
-		gtk_file_dialog_set_initial_folder(dialog, folder);
-		g_object_unref(folder);
-	}
-	gtk_file_dialog_select_folder(dialog, p->s->window, NULL, on_folder_chosen, p);
-	g_object_unref(dialog);
-}
-
 static void on_preview(GtkButton *button, gpointer data) {
 	struct screensaver_page *p = data;
 	const char *name = picked(p);
@@ -636,20 +609,26 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 	gtk_widget_set_size_request(p->text_entry, 260, -1);
 	g_object_set_data(G_OBJECT(p->text_entry), "key", (gpointer)"text");
 	g_signal_connect(p->text_entry, "changed", G_CALLBACK(on_text), p);
-	p->text_row = ui_row(options, "3D Text", "The words it shows; \"time\" shows the clock",
-		p->text_entry);
-	GtkWidget *folder = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GPtrArray *text_values = ui_strings(), *text_labels = ui_strings();
+	g_ptr_array_add(text_values, g_strdup(""));
+	g_ptr_array_add(text_labels, g_strdup("tileWin"));
+	g_ptr_array_add(text_values, g_strdup("time"));
+	g_ptr_array_add(text_labels, g_strdup("The time"));
+	const char *name = g_get_real_name();
+	if (name && *name && strcmp(name, "Unknown") != 0) {
+		g_ptr_array_add(text_values, g_strdup(name));
+		g_ptr_array_add(text_labels, g_strdup_printf("Your name (%s)", name));
+	}
+	g_ptr_array_add(text_values, g_strdup("Hello"));
+	g_ptr_array_add(text_labels, g_strdup("Hello"));
+	p->text_row = ui_row(options, "3D Text", "The words it shows",
+		ui_presets(p->text_entry, text_values, text_labels));
 	p->photos_entry = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(p->photos_entry), "Pictures");
-	gtk_widget_set_size_request(p->photos_entry, 220, -1);
 	g_object_set_data(G_OBJECT(p->photos_entry), "key", (gpointer)"photos");
 	g_signal_connect(p->photos_entry, "changed", G_CALLBACK(on_text), p);
-	gtk_box_append(GTK_BOX(folder), p->photos_entry);
-	GtkWidget *browse = gtk_button_new_with_label("Choose…");
-	g_signal_connect(browse, "clicked", G_CALLBACK(on_choose_folder), p);
-	gtk_box_append(GTK_BOX(folder), browse);
 	p->photos_row = ui_row(options, "Photos", "The folder of the slideshow, with its "
-		"subfolders; your Pictures folder by default", folder);
+		"subfolders; your Pictures folder by default",
+		ui_folder_field(p->photos_entry, "Folder of the slideshow"));
 	p->seconds_spin = gtk_spin_button_new_with_range(2, 120, 1);
 	g_signal_connect(p->seconds_spin, "value-changed", G_CALLBACK(on_seconds), p);
 	p->seconds_row = ui_row(options, "Slide show speed", "Seconds each photo stays",
