@@ -79,9 +79,10 @@ if [ -z "$display" ]; then
 fi
 sleep 6 # the settings app has to be up and laid out before it is clicked
 
-# maximize the window and scroll down to the Left section: its rows are then
+# maximize the window, click the page so the wheel reaches it, and scroll down
+# to the Left section: its rows are then
 # start at y 377, search at 434 and taskbar at 491, with the handles at x 283
-WAYLAND_DISPLAY=$display "$tool" 1280 720 click 1008 15 scroll 690 400 7 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 720 click 1008 15 click 690 100 scroll 690 400 7 >/dev/null 2>&1
 sleep 1
 # the start button, dropped onto the lower half of the window buttons
 WAYLAND_DISPLAY=$display "$tool" 1280 720 drag 283 377 400 503 >/dev/null 2>&1

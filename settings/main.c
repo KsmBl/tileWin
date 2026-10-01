@@ -372,8 +372,87 @@ static void on_window_mapped(GtkWidget *window, gpointer data) {
 	}
 }
 
+/* ---------- the sidebar: pages in folders ---------- */
+
+/*
+ * The pages sit in folders, like the categories of the Windows settings: a
+ * click on a folder opens or closes it, and the folder of the page shown is
+ * always open, also when the search jumps to a page elsewhere.
+ */
+struct side_folder {
+	const char *title, *icon;
+	GtkWidget *row, *arrow;
+	GPtrArray *pages; // GtkListBoxRow * of its pages
+	bool open;
+};
+
+static GPtrArray *folders; // struct side_folder *
+static GtkWidget *side_list;
+static bool side_syncing;
+
+static void folder_set_open(struct side_folder *f, bool open) {
+	f->open = open;
+	for (guint i = 0; i < f->pages->len; i++) {
+		gtk_widget_set_visible(f->pages->pdata[i], open);
+	}
+	gtk_image_set_from_icon_name(GTK_IMAGE(f->arrow), open ? "pan-down-symbolic" :
+		"pan-end-symbolic");
+}
+
+static void on_side_row(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+	struct settings *s = data;
+	struct side_folder *f = g_object_get_data(G_OBJECT(row), "folder");
+	if (f) {
+		folder_set_open(f, !f->open);
+		return;
+	}
+	const char *page = g_object_get_data(G_OBJECT(row), "page");
+	if (page && !side_syncing) {
+		lazy_build_named(page);
+		gtk_stack_set_visible_child_name(s->stack, page);
+	}
+}
+
+/* The row of the page shown is selected, and its folder open. */
+static void side_sync(const char *page) {
+	for (guint i = 0; folders && page && i < folders->len; i++) {
+		struct side_folder *f = folders->pdata[i];
+		for (guint j = 0; j < f->pages->len; j++) {
+			GtkListBoxRow *row = f->pages->pdata[j];
+			if (strcmp(g_object_get_data(G_OBJECT(row), "page"), page) == 0) {
+				if (!f->open) {
+					folder_set_open(f, true);
+				}
+				side_syncing = true;
+				gtk_list_box_select_row(GTK_LIST_BOX(side_list), row);
+				side_syncing = false;
+				return;
+			}
+		}
+	}
+}
+
+static GtkWidget *side_row_box(const char *icon, const char *title, bool folder) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	gtk_widget_set_margin_start(box, folder ? 6 : 26);
+	gtk_widget_set_margin_end(box, 6);
+	gtk_widget_set_margin_top(box, folder ? 6 : 3);
+	gtk_widget_set_margin_bottom(box, folder ? 6 : 3);
+	GtkWidget *image = gtk_image_new_from_icon_name(icon);
+	gtk_box_append(GTK_BOX(box), image);
+	GtkWidget *label = gtk_label_new(title);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_widget_set_hexpand(label, TRUE);
+	if (folder) {
+		gtk_widget_add_css_class(label, "tw-heading");
+	}
+	gtk_box_append(GTK_BOX(box), label);
+	return box;
+}
+
 static void on_visible_page(GObject *stack, GParamSpec *pspec, gpointer data) {
 	lazy_build_named(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
+	side_sync(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
 }
 
 /* Everything has to exist before the search can look through it. */
@@ -493,46 +572,58 @@ static void build_window(struct settings *s) {
 	gtk_widget_add_css_class(status, "tw-status");
 	gtk_box_append(GTK_BOX(right), status);
 
+	// the folders of the sidebar, in this order; each page names its folder
+	static const struct {
+		const char *title, *icon;
+	} folder_list[] = {
+		{ "Personalize", "preferences-desktop-theme-symbolic" },
+		{ "Windows", "focus-windows-symbolic" },
+		{ "Taskbar & Start", "view-app-grid-symbolic" },
+		{ "Devices", "computer-symbolic" },
+		{ "System", "preferences-system-symbolic" },
+	};
 	static const struct {
 		const char *name, *title, *keywords;
 		GtkWidget *(*create)(struct settings *s);
+		int folder;
+		const char *icon;
 	} pages[] = {
-		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new },
-		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new },
+		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new, 0, "preferences-desktop-theme-symbolic" },
+		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new, 0, "preferences-desktop-wallpaper-symbolic" },
 		{ "desktop", "Desktop", "icons grid cells widgets gadgets clock analog binary digital "
-			"chart gauge ring bar cpu memory power", desktop_page_new },
+			"chart gauge ring bar cpu memory power", desktop_page_new, 0, "user-desktop-symbolic" },
 		{ "animations", "Animations", "effects motion speed fade zoom slide minimize maximize "
-			"open close desktop switch", animations_page_new },
+			"open close desktop switch", animations_page_new, 0, "media-playlist-repeat-symbolic" },
 		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
-			"double click focus follows mouse attention activation priority nice cpu fast", window_page_new },
+			"double click focus follows mouse attention activation priority nice cpu fast", window_page_new, 1, "focus-windows-symbolic" },
 		{ "appwindows", "App windows", "not responding hang hung frozen freeze end task kill "
 			"minimized pause stop suspend battery efficiency sound remember position place size "
 			"open where rules for_window always on top maximized desktop workspace",
-			appwin_page_new },
+			appwin_page_new, 1, "application-x-executable-symbolic" },
 		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
-			"night light sleep lock lid power", screen_page_new },
+			"night light sleep lock lid power", screen_page_new, 3, "video-display-symbolic" },
 		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
 			"slideshow starfield pipes maze flying windows aurora word clock tiling diggers miners "
 			"doomsday end of the world apocalypse hellfire fire burn thunderstorm storm rain "
 			"lightning blizzard snow ice frost icicles winter decay time dust age cracks ruin "
 			"jungle plants vines leaves flowers moss butterflies gravity privacy falling matrix "
 			"microslop copilot ad commercial idle lock fps frames per second cpu usage source code "
-			"password resume", screensaver_page_new },
-		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new },
+			"password resume", screensaver_page_new, 0, "preferences-desktop-screensaver-symbolic" },
+		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new, 3, "audio-speakers-symbolic" },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "
-			"12 24 seconds automatic", datetime_page_new },
+			"12 24 seconds automatic", datetime_page_new, 4, "preferences-system-time-symbolic" },
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
-			bluetooth_page_new },
+			bluetooth_page_new, 3, "bluetooth-symbolic" },
 		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications clipboard "
-			"history right click context menu", taskbar_page_new },
-		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new },
-		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new },
-		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new },
+			"history right click context menu", taskbar_page_new, 2, "view-continuous-symbolic" },
+		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new, 2, "start-here-symbolic" },
+		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new, 2, "system-search-symbolic" },
+		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new, 3, "input-keyboard-symbolic" },
 		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap magnifier zoom "
-			"magnify enlarge", mouse_page_new },
-		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new },
-		{ "account", "Account", "user picture photo avatar profile name", account_page_new },
-		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new },
+			"magnify enlarge", mouse_page_new, 3, "input-mouse-symbolic" },
+		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new, 4, "applications-system-symbolic" },
+		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 4, "avatar-default-symbolic" },
+		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 4, "help-about-symbolic" },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
 	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
@@ -552,11 +643,47 @@ static void build_window(struct settings *s) {
 	g_signal_connect(s->stack, "notify::visible-child-name", G_CALLBACK(on_visible_page), s);
 	g_signal_connect(window, "map", G_CALLBACK(on_window_mapped), NULL);
 
-	GtkWidget *sidebar = gtk_stack_sidebar_new();
-	gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), s->stack);
-	gtk_widget_set_size_request(sidebar, 190, -1);
+	side_list = gtk_list_box_new();
+	gtk_widget_add_css_class(side_list, "navigation-sidebar");
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(side_list), GTK_SELECTION_SINGLE);
+	gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(side_list), TRUE);
+	g_signal_connect(side_list, "row-activated", G_CALLBACK(on_side_row), s);
+	folders = g_ptr_array_new();
+	for (size_t i = 0; i < G_N_ELEMENTS(folder_list); i++) {
+		struct side_folder *f = g_new0(struct side_folder, 1);
+		f->title = folder_list[i].title;
+		f->icon = folder_list[i].icon;
+		f->pages = g_ptr_array_new();
+		GtkWidget *box = side_row_box(f->icon, f->title, true);
+		f->arrow = gtk_image_new_from_icon_name("pan-end-symbolic");
+		gtk_box_append(GTK_BOX(box), f->arrow);
+		f->row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(f->row), box);
+		gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(f->row), FALSE);
+		g_object_set_data(G_OBJECT(f->row), "folder", f);
+		gtk_list_box_append(GTK_LIST_BOX(side_list), f->row);
+		for (size_t j = 0; j < G_N_ELEMENTS(pages); j++) {
+			if (pages[j].folder != (int)i) {
+				continue;
+			}
+			GtkWidget *row = gtk_list_box_row_new();
+			gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row),
+				side_row_box(pages[j].icon, pages[j].title, false));
+			g_object_set_data(G_OBJECT(row), "page", (gpointer)pages[j].name);
+			gtk_list_box_append(GTK_LIST_BOX(side_list), row);
+			g_ptr_array_add(f->pages, row);
+		}
+		folder_set_open(f, false);
+		g_ptr_array_add(folders, f);
+	}
+	GtkWidget *sidebar = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sidebar), GTK_POLICY_NEVER,
+		GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar), side_list);
+	gtk_widget_set_size_request(sidebar, 210, -1);
 	gtk_widget_set_vexpand(sidebar, TRUE);
 	s->sidebar = sidebar;
+	side_sync(gtk_stack_get_visible_child_name(s->stack));
 
 	// search across all settings: typing anywhere in the window starts it
 	GtkWidget *search = gtk_search_entry_new();
