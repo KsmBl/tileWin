@@ -569,6 +569,7 @@ The size of the cells is `desktop_icon_width` and `desktop_icon_height`, so bigg
 All styles and their sizes are listed with the widgets in `common/tw_widgets.c`; `panel/gadgets.c` draws them.
 
 **Commands and menus:**
+- A `themes` line in a submenu (`submenu "Theme" { themes }`, the default in the taskbar's right-click menu) lists every installed theme, the current one checked; the Menus settings add it with "Add theme list".
 - Every widget accepts `on_click`, `on_middle_click`, `on_right_click`, `on_scroll_up`, `on_scroll_down` and a `menu { ... }` block.
 - Commands are tileWin commands (`exec ...`, `arrange cascade`, ...) or `panel <action>`.
 - `menu taskbar` is the right-click menu of the empty taskbar area.

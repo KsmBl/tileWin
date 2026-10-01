@@ -7,6 +7,7 @@ enum entry_kind {
 	ENTRY_ITEM,
 	ENTRY_SEPARATOR,
 	ENTRY_SUBMENU,
+	ENTRY_THEMES, // "themes": every installed theme, listed by the taskbar itself
 };
 
 struct mentry {
@@ -95,6 +96,10 @@ static GPtrArray *parse_entries(struct cstmt *block) {
 			g_ptr_array_add(items, mentry_new(ENTRY_SEPARATOR, NULL));
 			continue;
 		}
+		if (strcmp(c->name, "themes") == 0) {
+			g_ptr_array_add(items, mentry_new(ENTRY_THEMES, NULL));
+			continue;
+		}
 		bool submenu = strcmp(c->name, "submenu") == 0;
 		if ((!submenu && strcmp(c->name, "item") != 0) || cstmt_argc(c) < 1) {
 			continue;
@@ -148,6 +153,10 @@ static void serialize(GString *out, GPtrArray *items, int depth) {
 		}
 		if (e->kind == ENTRY_SEPARATOR) {
 			g_string_append(out, "separator\n");
+			continue;
+		}
+		if (e->kind == ENTRY_THEMES) {
+			g_string_append(out, "themes\n");
 			continue;
 		}
 		char *label = quote_label(e->label);
@@ -315,12 +324,16 @@ static const struct choice action_choices[] = {
 	{ "Log off", "system-log-out", "panel shutdown logoff" },
 	{ "Shut down or sign out", "system-shutdown", "panel shutdown" },
 	{ "Restart tileWin", "system-reboot", "restart" },
+	{ "Theme: Windows 3", "preferences-desktop-theme", "exec tilewin-theme set win3" },
 	{ "Theme: Windows 95", "preferences-desktop-theme", "exec tilewin-theme set win95" },
 	{ "Theme: Windows XP", "preferences-desktop-theme", "exec tilewin-theme set winxp" },
+	{ "Theme: Windows XP (dark)", "preferences-desktop-theme",
+		"exec tilewin-theme set winxp-dark" },
 	{ "Theme: Windows 7", "preferences-desktop-theme", "exec tilewin-theme set win7" },
 	{ "Theme: Windows 8", "preferences-desktop-theme", "exec tilewin-theme set win8" },
 	{ "Theme: Windows 10", "preferences-desktop-theme", "exec tilewin-theme set win10" },
 	{ "Theme: Windows 11", "preferences-desktop-theme", "exec tilewin-theme set win11" },
+	{ "Theme: Sway", "preferences-desktop-theme", "exec tilewin-theme set sway" },
 };
 
 /* Folders, opened with the file manager of the Default apps page. */
@@ -652,8 +665,9 @@ static void rebuild_menu(struct menus_page *p) {
 		gtk_widget_set_margin_end(box, 6);
 		gtk_widget_set_margin_top(box, 4);
 		gtk_widget_set_margin_bottom(box, 4);
-		if (e->kind == ENTRY_SEPARATOR) {
-			GtkWidget *label = gtk_label_new("Separator");
+		if (e->kind == ENTRY_SEPARATOR || e->kind == ENTRY_THEMES) {
+			GtkWidget *label = gtk_label_new(e->kind == ENTRY_THEMES ?
+				"All installed themes" : "Separator");
 			gtk_widget_add_css_class(label, "dim-label");
 			gtk_label_set_xalign(GTK_LABEL(label), 0);
 			gtk_widget_set_hexpand(label, TRUE);
@@ -713,7 +727,8 @@ static void on_add_entry(GtkButton *button, gpointer data) {
 	struct menus_page *p = data;
 	int kind = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "kind"));
 	const char *label = kind == ENTRY_SUBMENU ? "New submenu" : "New item";
-	g_ptr_array_add(current_level(p), mentry_new(kind, kind == ENTRY_SEPARATOR ? NULL : label));
+	g_ptr_array_add(current_level(p), mentry_new(kind,
+		kind == ENTRY_SEPARATOR || kind == ENTRY_THEMES ? NULL : label));
 	write_menu(p);
 	schedule_menu_rebuild(p);
 }
@@ -1083,6 +1098,7 @@ void menus_section_attach(struct settings *s, GtkWidget *content) {
 	} adds[] = {
 		{ "Add separator", ENTRY_SEPARATOR },
 		{ "Add submenu", ENTRY_SUBMENU },
+		{ "Add theme list", ENTRY_THEMES },
 	};
 	for (size_t i = 0; i < G_N_ELEMENTS(adds); i++) {
 		GtkWidget *button = gtk_button_new_with_label(adds[i].label);

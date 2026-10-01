@@ -195,6 +195,29 @@ void menu_items_default_icons(list_t *items) {
 	}
 }
 
+/*
+ * A submenu of the installed themes: one with a "themes" line, or one that is
+ * only a list of "tilewin-theme set" entries (the default before themes were
+ * listed by themselves), so themes added later show up there as well.
+ */
+static bool themes_submenu(list_t *children, struct twconf_node *node) {
+	for (int i = 0; i < twconf_count(node); i++) {
+		if (strcmp(twconf_at(node, i)->name, "themes") == 0) {
+			return true;
+		}
+	}
+	if (children->length == 0) {
+		return false;
+	}
+	for (int i = 0; i < children->length; i++) {
+		struct menu_item *item = children->items[i];
+		if (!item->command || !strstr(item->command, "tilewin-theme set ")) {
+			return false;
+		}
+	}
+	return true;
+}
+
 list_t *menu_items_parse(struct twconf_node *node) {
 	list_t *items = create_list();
 	for (int i = 0; i < twconf_count(node); i++) {
@@ -202,6 +225,9 @@ list_t *menu_items_parse(struct twconf_node *node) {
 		if (strcmp(child->name, "separator") == 0) {
 			list_add(items, menu_item_separator());
 			continue;
+		}
+		if (strcmp(child->name, "themes") == 0) {
+			continue; // makes its submenu the list of themes
 		}
 		bool submenu = strcmp(child->name, "submenu") == 0;
 		if (!submenu && strcmp(child->name, "item") != 0) {
@@ -237,6 +263,7 @@ list_t *menu_items_parse(struct twconf_node *node) {
 		}
 		if (submenu) {
 			item->children = child->children ? menu_items_parse(child) : create_list();
+			item->themes = themes_submenu(item->children, child);
 		} else if (arg < child->argc) {
 			item->command = twconf_join(child, arg);
 			// configs copied from older defaults opened the file in an editor

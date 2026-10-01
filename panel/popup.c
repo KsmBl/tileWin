@@ -495,6 +495,11 @@ static void menu_open_submenu(struct popup *p, int index, bool select_first) {
 			return;
 		}
 	}
+	if (item->themes) {
+		// the themes installed now, the current one checked
+		menu_items_free(item->children);
+		item->children = theme_menu_items(p->panel);
+	}
 	int x = p->x + p->width - m->margin - 3;
 	int y = p->y + m->ys[index] - m->pad - m->margin;
 	struct popup *child = menu_open_at(p->panel, p, p->output, item->children, false,

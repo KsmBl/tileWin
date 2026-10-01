@@ -193,6 +193,7 @@ struct menu_item {
 	char *icon;
 	list_t *children; // struct menu_item *, submenu if non-NULL
 	bool separator, disabled, checked, bold;
+	bool themes; // a submenu of the installed themes, filled each time it opens
 };
 
 struct panel_config {
