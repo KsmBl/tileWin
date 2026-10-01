@@ -157,7 +157,7 @@ Start tileWin:
 
 **Dependencies:**
 - **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), meson and ninja.
-- **Optional:** pam (the lock screen is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+- **Optional:** pam (the lock screen is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 ### Tests
 
@@ -223,6 +223,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   that a part of one snaps the window there and snap assist puts the other
   window into the rest, that `snap left 0.66` gives two thirds, and that
   `snap_layouts disable` turns them off;
+- reads the text in a part of the screen with a fake tesseract and checks it
+  lands in the clipboard and a notification, read in the session's language
+  too, that a missing tesseract is reported, and that the Text button of the
+  snipping toolbar starts it;
 - puts widgets on the desktop and checks their cards take the cells the config
   gives them (and the upper right corner without one), that the icons make room,
   that a card dragged with a pointer lands on whole cells and keeps them while
@@ -292,7 +296,7 @@ Both mode configs `include common.conf`. Missing files fall back to the installe
 | Super+Ctrl+Shift+← / → | Move window to previous / next desktop |
 | Super+Shift+← / → | Move window to another monitor |
 | Print | Screenshot of all screens to the clipboard and ~/Pictures/Screenshots |
-| Win+Shift+S | Snipping tool: rectangle, window or full screen to the clipboard |
+| Win+Shift+S | Snipping tool: rectangle, window or full screen to the clipboard, or **Text**: the text in a rectangle, read with tesseract (in English and the session's language when its data is installed) |
 | Super+Shift+W | Switch to tile mode |
 | Super+Shift+C | Reload config |
 | Super+Shift+Ctrl+R | Restart tileWin |

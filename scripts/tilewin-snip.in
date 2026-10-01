@@ -3,7 +3,8 @@
 # shows a toolbar that runs it, Print runs "tilewin-snip screen".
 #
 # The picture is copied to the clipboard, saved in ~/Pictures/Screenshots and
-# shown in a notification (click it to open the picture).
+# shown in a notification (click it to open the picture). "text" reads the
+# text in a rectangle instead (with tesseract) and copies that.
 
 usage() {
 	cat <<'USAGE'
@@ -12,8 +13,10 @@ tilewin-snip takes a screenshot.
   tilewin-snip area      select a rectangle with the mouse
   tilewin-snip window    click a window
   tilewin-snip screen    all screens
+  tilewin-snip text      select a rectangle and copy the text in it
 
-The picture goes to the clipboard and to ~/Pictures/Screenshots.
+The picture goes to the clipboard and to ~/Pictures/Screenshots; with "text"
+the text in it goes to the clipboard (it needs tesseract).
 USAGE
 }
 
@@ -60,13 +63,18 @@ walk(json.load(sys.stdin))'
 
 mode=${1:-area}
 case "$mode" in
-area|window|screen) ;;
+area|window|screen|text) ;;
 -h|--help|help) usage; exit 0 ;;
 *) usage >&2; exit 1 ;;
 esac
 
 if ! have grim; then
 	notify "Can't take a screenshot" "Please install grim."
+	exit 1
+fi
+if [ "$mode" = text ] && ! have tesseract; then
+	notify "Can't read text from the screen" \
+		"Please install tesseract and the language data for your language (tesseract-data-eng and the like)."
 	exit 1
 fi
 if [ "$mode" != screen ] && ! have slurp; then
@@ -80,7 +88,7 @@ select_area() {
 
 geometry=""
 case "$mode" in
-area)
+area|text)
 	geometry=$(select_area) || exit 0
 	;;
 window)
@@ -97,6 +105,50 @@ screen)
 	;;
 esac
 [ -n "$geometry" ] && sleep 0.1 # the selection overlay has to disappear
+
+# the languages to read: English and the one of the session, as far as
+# tesseract has them
+ocr_languages() {
+	installed=$(tesseract --list-langs 2>/dev/null | tail -n +2)
+	case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
+	de*) mine=deu ;; fr*) mine=fra ;; es*) mine=spa ;; it*) mine=ita ;;
+	nl*) mine=nld ;; pl*) mine=pol ;; pt*) mine=por ;; ru*) mine=rus ;;
+	cs*) mine=ces ;; sv*) mine=swe ;; da*) mine=dan ;; fi*) mine=fin ;;
+	nb*|no*) mine=nor ;; tr*) mine=tur ;; uk*) mine=ukr ;; ja*) mine=jpn ;;
+	zh*) mine=chi_sim ;; ko*) mine=kor ;; *) mine="" ;;
+	esac
+	langs=""
+	for lang in $mine eng; do
+		if printf '%s\n' "$installed" | grep -qx "$lang"; then
+			langs="${langs:+$langs+}$lang"
+		fi
+	done
+	printf '%s\n' "${langs:-eng}"
+}
+
+if [ "$mode" = text ]; then
+	picture=$(mktemp --suffix=.png) || exit 1
+	trap 'rm -f "$picture"' EXIT
+	grim -g "$geometry" "$picture" || {
+		notify "The screenshot failed" "grim couldn't capture the screen."
+		exit 1
+	}
+	text=$(tesseract "$picture" stdout -l "$(ocr_languages)" 2>/dev/null |
+		sed -e 's/[[:space:]]*$//' | sed -e '/./,$!d')
+	if [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ]; then
+		notify "No text found" "There was no text to read in the rectangle."
+		exit 0
+	fi
+	if have wl-copy; then
+		printf '%s' "$text" | wl-copy --type text/plain
+		first=$(printf '%s\n' "$text" | head -n 1 | cut -c 1-80)
+		notify -i edit-copy "Text copied to the clipboard" "$first"
+	else
+		notify "Can't copy the text" "Please install wl-clipboard."
+	fi
+	printf '%s\n' "$text"
+	exit 0
+fi
 
 dir="$(pictures_dir)/Screenshots"
 mkdir -p "$dir" || exit 1

@@ -1,7 +1,8 @@
 /*
  * The snipping toolbar (Win+Shift+S, "panel snip"): rectangle, window and
- * full screen buttons at the top of the screen, like on Windows. A button runs
- * tilewin-snip, which selects, captures, copies and notifies.
+ * full screen buttons at the top of the screen, like on Windows, and one that
+ * copies the text in a rectangle. A button runs tilewin-snip, which selects,
+ * captures (or reads), copies and notifies.
  */
 #include <linux/input-event-codes.h>
 #include <stdlib.h>
@@ -20,12 +21,13 @@ enum snip_button {
 	SNIP_AREA,
 	SNIP_WINDOW,
 	SNIP_SCREEN,
+	SNIP_TEXT,
 	SNIP_CLOSE,
 	SNIP_COUNT,
 };
 
-static const char *const labels[] = { "Rectangle", "Window", "Full screen", "" };
-static const char *const modes[] = { "area", "window", "screen", NULL };
+static const char *const labels[] = { "Rectangle", "Window", "Full screen", "Text", "" };
+static const char *const modes[] = { "area", "window", "screen", "text", NULL };
 
 struct snip {
 	struct pbox buttons[SNIP_COUNT];
@@ -51,6 +53,19 @@ static void draw_icon(cairo_t *cr, enum snip_button b, double cx, double cy, uin
 		cairo_rectangle(cr, cx - 9.5, cy - 7.5, 19, 15);
 		cairo_stroke(cr);
 		pd_rect(cr, cx - 9.5, cy - 7.5, 19, 4, color);
+		break;
+	case SNIP_TEXT:
+		// a T over lines of text in a dashed rectangle
+		cairo_set_line_width(cr, 2);
+		cairo_move_to(cr, cx - 6, cy - 6);
+		cairo_line_to(cr, cx + 6, cy - 6);
+		cairo_move_to(cr, cx, cy - 6);
+		cairo_line_to(cr, cx, cy + 3);
+		cairo_stroke(cr);
+		cairo_set_line_width(cr, 1.5);
+		cairo_move_to(cr, cx - 9, cy + 7.5);
+		cairo_line_to(cr, cx + 9, cy + 7.5);
+		cairo_stroke(cr);
 		break;
 	case SNIP_SCREEN:
 		cairo_rectangle(cr, cx - 10.5, cy - 8.5, 21, 14);
@@ -179,7 +194,7 @@ void snip_toolbar_toggle(struct panel *panel, struct panel_output *output) {
 	struct snip *s = calloc(1, sizeof(*s));
 	s->selected = SNIP_AREA;
 	int M = popup_shadow_margin(panel);
-	int width = 3 * BUTTON_W + CLOSE_W + 4 * GAP + 1 + 2 * PAD + 2 * M;
+	int width = 4 * BUTTON_W + CLOSE_W + 5 * GAP + 1 + 2 * PAD + 2 * M;
 	int height = BUTTON_H + 2 * PAD + 2 * M;
 	bool bottom = panel->config ? panel->config->layouts[panel->layout].bottom : true;
 	int bar = output->bar ? output->bar->height : 0;
