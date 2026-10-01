@@ -2,6 +2,7 @@
 #include <string.h>
 #include "settings.h"
 #include "tw_desktop.h"
+#include "tw_theme.h"
 
 enum entry_kind {
 	ENTRY_ITEM,
@@ -88,6 +89,39 @@ static struct mentry *mentry_new(enum entry_kind kind, const char *label) {
 	return e;
 }
 
+/* A submenu of only "tilewin-theme set" entries, as configs from before the
+ * "themes" line had it. */
+/* "All installed themes: Windows 3, Windows 95, …", as the taskbar lists them. */
+static char *themes_label(void) {
+	GString *text = g_string_new("All installed themes");
+	list_t *names = tw_theme_list();
+	for (int i = 0; names && i < names->length; i++) {
+		char *error = NULL;
+		struct tw_theme *theme = tw_theme_load(names->items[i], &error);
+		free(error);
+		g_string_append(text, i == 0 ? ": " : ", ");
+		g_string_append(text, theme && theme->title ? theme->title :
+			(const char *)names->items[i]);
+		if (theme) {
+			tw_theme_free(theme);
+		}
+	}
+	if (names) {
+		list_free_items_and_destroy(names);
+	}
+	return g_string_free(text, FALSE);
+}
+
+static bool only_theme_items(GPtrArray *items) {
+	for (guint i = 0; i < items->len; i++) {
+		struct mentry *e = items->pdata[i];
+		if (e->kind != ENTRY_ITEM || !e->command || !strstr(e->command, "tilewin-theme set ")) {
+			return false;
+		}
+	}
+	return items->len > 0;
+}
+
 static GPtrArray *parse_entries(struct cstmt *block) {
 	GPtrArray *items = g_ptr_array_new_with_free_func(mentry_free);
 	for (guint i = 0; block && block->children && i < block->children->len; i++) {
@@ -127,6 +161,12 @@ static GPtrArray *parse_entries(struct cstmt *block) {
 		if (submenu) {
 			g_ptr_array_unref(e->children);
 			e->children = parse_entries(c);
+			if (only_theme_items(e->children)) {
+				// the taskbar lists every installed theme there, so this does too, and
+				// saving writes it as "themes": themes added later show up as well
+				g_ptr_array_set_size(e->children, 0);
+				g_ptr_array_add(e->children, mentry_new(ENTRY_THEMES, NULL));
+			}
 		} else {
 			e->command = cstmt_join(c, arg);
 		}
@@ -666,17 +706,22 @@ static void rebuild_menu(struct menus_page *p) {
 		gtk_widget_set_margin_top(box, 4);
 		gtk_widget_set_margin_bottom(box, 4);
 		if (e->kind == ENTRY_SEPARATOR || e->kind == ENTRY_THEMES) {
-			GtkWidget *label = gtk_label_new(e->kind == ENTRY_THEMES ?
-				"All installed themes" : "Separator");
+			char *themes = e->kind == ENTRY_THEMES ? themes_label() : NULL;
+			GtkWidget *label = gtk_label_new(themes ? themes : "Separator");
+			g_free(themes);
 			gtk_widget_add_css_class(label, "dim-label");
 			gtk_label_set_xalign(GTK_LABEL(label), 0);
+			gtk_label_set_wrap(GTK_LABEL(label), TRUE);
 			gtk_widget_set_hexpand(label, TRUE);
 			gtk_box_append(GTK_BOX(box), label);
 		} else {
 			gtk_box_append(GTK_BOX(box), entry_icon_button(p, e));
 			gtk_box_append(GTK_BOX(box), bound_entry(p, e, false));
 			if (e->kind == ENTRY_SUBMENU) {
-				char *text = g_strdup_printf("%u entries", e->children->len);
+				bool all_themes = e->children->len == 1 &&
+					((struct mentry *)e->children->pdata[0])->kind == ENTRY_THEMES;
+				char *text = all_themes ? g_strdup("All installed themes") :
+					g_strdup_printf("%u entries", e->children->len);
 				GtkWidget *label = gtk_label_new(text);
 				g_free(text);
 				gtk_widget_add_css_class(label, "dim-label");
