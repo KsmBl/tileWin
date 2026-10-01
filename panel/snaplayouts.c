@@ -15,6 +15,12 @@
  * (the compositor says so with the tilewin event "snap_layouts") shows small
  * pictures of the layouts it can go into. A click on a part of one snaps the
  * window there.
+ *
+ * The layouts are those of "snap_layouts { layout <kind> <width> [<height>] }"
+ * in taskbar.conf, which the settings app writes, or else the ones Windows 11
+ * shows. A kind is columns (two side by side), quarters, left_quarters (one
+ * part on the left, two quarters on the right) or quarters_right; width and
+ * height are where the lines between the parts go, 0.1 to 0.9 of the screen.
  */
 
 #define TILE_W 64
@@ -33,7 +39,9 @@ struct layout {
 	struct slot slots[4];
 };
 
-static const struct layout layouts[] = {
+#define MAX_LAYOUTS 8
+
+static const struct layout default_layouts[] = {
 	{ 2, { { "left", 0.5, 0.5 }, { "right", 0.5, 0.5 } } },
 	{ 2, { { "left", 0.66, 0.5 }, { "right", 0.66, 0.5 } } },
 	{ 2, { { "left", 0.34, 0.5 }, { "right", 0.34, 0.5 } } },
@@ -41,7 +49,60 @@ static const struct layout layouts[] = {
 		{ "bottomright", 0.5, 0.5 } } },
 	{ 3, { { "left", 0.5, 0.5 }, { "topright", 0.5, 0.5 }, { "bottomright", 0.5, 0.5 } } },
 };
-#define LAYOUT_COUNT (int)(sizeof(layouts) / sizeof(layouts[0]))
+
+static struct layout layouts[MAX_LAYOUTS];
+static int layout_count;
+
+/* One "layout <kind> <width> [<height>]" line; false for one that is not. */
+static bool parse_layout(const struct twconf_node *node, struct layout *out) {
+	if (node->argc < 2) {
+		return false;
+	}
+	double fx = atof(node->argv[1]), fy = node->argc > 2 ? atof(node->argv[2]) : 0.5;
+	if (fx < 0.1 || fx > 0.9 || fy < 0.1 || fy > 0.9) {
+		return false;
+	}
+	const char *kind = node->argv[0];
+	static const struct {
+		const char *kind;
+		int count;
+		const char *slots[4];
+	} kinds[] = {
+		{ "columns", 2, { "left", "right" } },
+		{ "quarters", 4, { "topleft", "topright", "bottomleft", "bottomright" } },
+		{ "left_quarters", 3, { "left", "topright", "bottomright" } },
+		{ "quarters_right", 3, { "topleft", "bottomleft", "right" } },
+	};
+	for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+		if (strcmp(kind, kinds[i].kind) == 0) {
+			out->count = kinds[i].count;
+			for (int s = 0; s < out->count; s++) {
+				out->slots[s] = (struct slot){ kinds[i].slots[s], fx, fy };
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+/* The layouts of taskbar.conf, or the default ones. */
+static void load_layouts(struct panel *panel) {
+	layout_count = 0;
+	struct twconf_node *block = panel->config && panel->config->root ?
+		twconf_child(panel->config->root, "snap_layouts") : NULL;
+	for (int i = 0; block && i < twconf_count(block) && layout_count < MAX_LAYOUTS; i++) {
+		struct twconf_node *node = twconf_at(block, i);
+		if (strcmp(node->name, "layout") == 0 &&
+				parse_layout(node, &layouts[layout_count])) {
+			layout_count++;
+		}
+	}
+	if (layout_count == 0) {
+		layout_count = (int)(sizeof(default_layouts) / sizeof(default_layouts[0]));
+		memcpy(layouts, default_layouts, sizeof(default_layouts));
+	}
+}
+#define LAYOUT_COUNT layout_count
 
 struct snaplayouts {
 	struct panel *panel;
@@ -220,6 +281,7 @@ void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t 
 	sl->panel = panel;
 	sl->con_id = con_id;
 	sl->hover_layout = sl->hover_slot = -1;
+	load_layouts(panel);
 	int M = popup_shadow_margin(panel);
 	int width = 2 * M + 2 * PAD + LAYOUT_COUNT * TILE_W + (LAYOUT_COUNT - 1) * GAP;
 	int height = 2 * M + 2 * PAD + TILE_H;

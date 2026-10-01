@@ -57,8 +57,8 @@ static const struct control move_controls[] = {
 		.hint = "Drag a window to a side for half the screen, to a corner for a quarter, "
 		"to the top to maximize it", .kind = CONTROL_SWITCH, .default_on = true },
 	{ .doc = DOC_COMMON, .key = "snap_layouts", .title = "Snap layouts",
-		.hint = "Rest the pointer on a window's maximize button to pick a layout to snap "
-		"it into, then the windows for the other parts", .kind = CONTROL_SWITCH,
+		.hint = "Rest the pointer on a window's maximize button to pick a layout and a part "
+		"of it to snap the window into; the layouts are listed below", .kind = CONTROL_SWITCH,
 		.default_on = true },
 	{ .doc = DOC_COMMON, .key = "window_stick", .title = "Stick windows together",
 		.hint = "Moved and resized windows stick to the edges of other windows and of the "
@@ -263,6 +263,7 @@ void window_page_refresh(struct settings *s) {
 		return;
 	}
 	p->updating = true;
+	snaplayouts_section_refresh(s);
 	for (guint i = 0; i < p->bindings->len; i++) {
 		struct binding *b = p->bindings->pdata[i];
 		const struct control *c = b->control;
@@ -305,6 +306,7 @@ GtkWidget *window_page_new(struct settings *s) {
 		"settings.", &content);
 	GtkWidget *moving = ui_group(content, "Moving and resizing", NULL);
 	add_controls(p, moving, move_controls);
+	snaplayouts_section_attach(s, content);
 	GtkWidget *gravity = ui_group(content, "Gravity mode",
 		"Not a pull downwards: a window behaves like a flat thing pushed across a table.");
 	add_controls(p, gravity, gravity_controls);

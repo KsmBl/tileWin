@@ -6,6 +6,8 @@
 #    a click where it used to be leaves the other window where it is;
 #  - "snap left 0.66" gives a window two thirds of the screen, and the window
 #    snapped beside it takes the third left;
+#  - the layouts of a snap_layouts block in taskbar.conf replace the default
+#    ones;
 #  - "snap_layouts disable" turns the layouts off.
 #
 # usage: snap_layouts.sh <build dir> <source dir>
@@ -185,6 +187,21 @@ ipc '[title=two] snap right 0.34' >/dev/null
 sleep 0.5
 set -- $(window one)
 [ "$3" = 435 ] || fail "the window beside a two thirds one on the right kept its width: $*"
+
+# a layout of the user's own from taskbar.conf: the only one, three quarters
+# on the left; the popup is centered under the button, so its single picture
+# starts 32 pixels left of the button's middle
+printf 'snap_layouts {\n\tlayout columns 0.75\n}\n' >> "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
+sleep 1.5
+place_one
+set -- $(window one)
+bx=$(($1 + $3 - 69)) by=$(($2 - 16))
+"$pointer" 1280 720 move $((bx - 4)) "$by" wait 200 move "$bx" $((by + 1)) wait 900 \
+	move $((bx - 10)) $((by + 30)) wait 100 move $((bx - 20)) $((by + 50)) wait 300 \
+	click $((bx - 20)) $((by + 50)) >/dev/null 2>&1
+sleep 1.5
+set -- $(window one)
+[ "$3" = 960 ] || fail "the layout from taskbar.conf did not give three quarters: $*"
 
 ipc snap_layouts disable >/dev/null
 place_one

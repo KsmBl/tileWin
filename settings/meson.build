@@ -26,6 +26,7 @@ executable(
 		'page_window.c',
 		'presets.c',
 		'reorder.c',
+		'snaplayouts.c',
 		'ui.c',
 		'widgets.c',
 		tilewin_version_h,

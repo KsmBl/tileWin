@@ -204,6 +204,21 @@ All styles and their sizes are listed with the widgets in `common/tw_widgets.c`;
 
 The `startmenu { }` block sets the style of the menu (`layout theme|classic|twocolumn|list|tiles|centered`, `theme` being the one the current theme asks for), pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
 
+### Snap layouts
+
+The layouts on a window's maximize button, in order (up to eight). Without the block the layouts of Windows 11 show. The Window behavior page of the settings edits the list.
+
+```
+snap_layouts {
+    layout columns 0.66              # two side by side, the line at two thirds
+    layout quarters 0.5 0.5          # four quarters
+    layout left_quarters 0.5 0.5     # one on the left, two on the right
+    layout quarters_right 0.66 0.5   # two on the left, one on the right
+}
+```
+
+The numbers are where the line down and the line across go, 0.1 to 0.9 of the screen.
+
 ## Your own themes: theme.conf
 
 A theme is a directory with:

@@ -350,6 +350,17 @@ test(
 )
 
 test(
+	'settings-snap-layouts',
+	find_program('settings_snap_layouts.sh'),
+	args: [meson.project_build_root()],
+	depends: [pointer_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'settings-drag-widget',
 	find_program('settings_drag_widget.sh'),
 	args: [meson.project_build_root()],
