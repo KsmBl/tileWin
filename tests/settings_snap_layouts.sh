@@ -81,6 +81,18 @@ written=$XDG_CONFIG_HOME/tileWin/taskbar.conf
 layouts() { sed -n '/^snap_layouts {/,/^}/p' "$written" 2>/dev/null | grep -c '^\s*layout '; }
 first() { sed -n '/^snap_layouts {/,/^}/p' "$written" 2>/dev/null | grep -m1 '^\s*layout ' | xargs; }
 
+# the page is ready once its blue "Add layout" button is drawn
+attempt=0
+while [ $attempt -lt 60 ]; do
+	rgb=$(WAYLAND_DISPLAY=$display grim -g "1178,1200 1x1" -t ppm - 2>/dev/null | tail -c 3 |
+		od -An -tu1 | tr -s ' ' | sed 's/^ //')
+	set -- $rgb
+	[ "${3:-0}" -gt 150 ] && [ "${1:-255}" -lt 120 ] && break
+	sleep 0.5
+	attempt=$((attempt + 1))
+done
+command -v grim >/dev/null 2>&1 || { echo "grim is not installed: skipping"; exit 77; }
+
 # "Add layout" with what the dropdowns start at: two side by side, two thirds
 WAYLAND_DISPLAY=$display "$tool" 1280 1400 click 1178 1200 >/dev/null 2>&1
 sleep 1.5
