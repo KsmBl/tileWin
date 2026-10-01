@@ -14,8 +14,7 @@
  * Snap Layouts, as on Windows 11: resting on the maximize button of a window
  * (the compositor says so with the tilewin event "snap_layouts") shows small
  * pictures of the layouts it can go into. A click on a part of one snaps the
- * window there; then snap assist offers the other windows of the desktop for
- * the parts still free, one menu each ("panel snap_assist ...").
+ * window there.
  */
 
 #define TILE_W 64
@@ -164,25 +163,11 @@ static void leave(struct popup *p) {
 	close_soon(sl);
 }
 
-/* Snaps that window into a slot, then offers the others for the next free one. */
-static void snap_into(struct panel *panel, int64_t con_id, int layout, int slot,
-		const char *used) {
+/* Snaps that window into a slot of a layout. */
+static void snap_into(struct panel *panel, int64_t con_id, int layout, int slot) {
 	const struct slot *s = &layouts[layout].slots[slot];
-	char *ids = used && *used ? format_str("%s,%lld", used, (long long)con_id) :
-		format_str("%lld", (long long)con_id);
 	ipc_panel_commandf(panel, "[con_id=%lld] snap %s %.2f %.2f", (long long)con_id, s->name,
 		s->fx, s->fy);
-	// how many parts are taken: one per id
-	int taken = 1;
-	for (const char *c = ids; *c; c++) {
-		taken += *c == ',';
-	}
-	if (taken < layouts[layout].count) {
-		// the free parts follow the clicked one, round the layout
-		ipc_panel_commandf(panel, "panel snap_assist %d %d %s", layout,
-			(slot + 1) % layouts[layout].count, ids);
-	}
-	free(ids);
 }
 
 static void button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
@@ -198,7 +183,7 @@ static void button(struct popup *p, double x, double y, uint32_t button, bool pr
 	struct panel *panel = sl->panel;
 	int64_t con_id = sl->con_id;
 	popup_close_later(panel);
-	snap_into(panel, con_id, layout, slot, NULL);
+	snap_into(panel, con_id, layout, slot);
 }
 
 static void destroy(struct popup *p) {
@@ -258,91 +243,3 @@ void snaplayouts_leave(struct panel *panel, int64_t con_id) {
 	}
 }
 
-/*
- * "panel snap_assist <layout> <slot> <ids>": the other windows of the desktop
- * the windows in ids (comma separated, the first one snapped) are on, to fill
- * that slot of the layout.
- */
-void snaplayouts_assist(struct panel *panel, int argc, char **argv) {
-	if (argc < 3) {
-		return;
-	}
-	int layout = atoi(argv[0]), slot = atoi(argv[1]);
-	const char *ids = argv[2];
-	if (layout < 0 || layout >= LAYOUT_COUNT || slot < 0 || slot >= layouts[layout].count) {
-		return;
-	}
-	struct pwindow *first = panel_find_window(panel, atoll(ids));
-	if (!first) {
-		return;
-	}
-	list_t *items = create_list();
-	struct menu_item *title = menu_item_new("Snap here", NULL);
-	title->disabled = true;
-	title->bold = true;
-	list_add(items, title);
-	for (int i = 0; i < panel->state.windows->length; i++) {
-		struct pwindow *w = panel->state.windows->items[i];
-		char idtext[32];
-		snprintf(idtext, sizeof(idtext), "%lld", (long long)w->id);
-		bool used = false;
-		for (const char *c = ids; c && *c;) {
-			size_t len = strcspn(c, ",");
-			if (len == strlen(idtext) && strncmp(c, idtext, len) == 0) {
-				used = true;
-			}
-			c += len + (c[len] == ',');
-		}
-		if (used || !w->workspace || !first->workspace ||
-				strcmp(w->workspace, first->workspace) != 0) {
-			continue;
-		}
-		const struct slot *s = &layouts[layout].slots[slot];
-		char *taken = format_str("%s,%lld", ids, (long long)w->id);
-		int count = 1;
-		for (const char *c = taken; *c; c++) {
-			count += *c == ',';
-		}
-		char *cmd = count < layouts[layout].count ?
-			format_str("[con_id=%lld] snap %s %.2f %.2f; panel snap_assist %d %d %s",
-				(long long)w->id, s->name, s->fx, s->fy, layout,
-				(slot + 1) % layouts[layout].count, taken) :
-			format_str("[con_id=%lld] snap %s %.2f %.2f", (long long)w->id, s->name, s->fx,
-				s->fy);
-		struct menu_item *item = menu_item_new(w->title && *w->title ? w->title : w->app_id,
-			cmd);
-		struct tw_desktop_entry *entry = apps_find(w->app_id);
-		free(item->icon);
-		item->icon = entry && entry->icon ? strdup(entry->icon) :
-			w->app_id ? strdup(w->app_id) : NULL;
-		list_add(items, item);
-		free(cmd);
-		free(taken);
-	}
-	if (items->length == 1) {
-		menu_items_free(items); // only the heading: nothing to offer
-		return;
-	}
-	// over the middle of the free part of the screen of the first window
-	struct panel_output *output = NULL, *iter;
-	wl_list_for_each(iter, &panel->outputs, link) {
-		if (first->output && iter->name && strcmp(iter->name, first->output) == 0) {
-			output = iter;
-		}
-	}
-	if (!output) {
-		output = panel_focused_output(panel);
-	}
-	if (!output) {
-		menu_items_free(items);
-		return;
-	}
-	struct pbox part = slot_box(&layouts[layout].slots[slot], 0, 0, output->width,
-		output->height);
-	struct popup_anchor anchor = {
-		.output = output,
-		.x = part.x + part.width / 2 - 100,
-		.y = part.y + part.height / 3,
-	};
-	menu_open(panel, items, true, anchor, NULL);
-}

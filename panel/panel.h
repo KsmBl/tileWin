@@ -769,7 +769,6 @@ void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
 void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t con_id,
 	int x, int y, int button_width);
 void snaplayouts_leave(struct panel *panel, int64_t con_id);
-void snaplayouts_assist(struct panel *panel, int argc, char **argv);
 
 /* minicons.c: minimized windows as icons on the desktop (Windows 3) */
 void minicons_update(struct panel *panel);

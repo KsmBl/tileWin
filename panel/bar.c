@@ -609,8 +609,6 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 	struct panel_output *output = panel_focused_output(panel);
 	if (strcmp(cmd, "identify") == 0) {
 		identify_screens(panel, argc - 1, argv + 1);
-	} else if (strcmp(cmd, "snap_assist") == 0) {
-		snaplayouts_assist(panel, argc - 1, argv + 1);
 	} else if (strcmp(cmd, "startmenu") == 0) {
 		// the Super key opens it on the main display, whichever screen has the focus
 		output = panel_main_output(panel);

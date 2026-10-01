@@ -2,8 +2,8 @@
 # Snap Layouts, in a nested tileWin with the taskbar (Windows 10 theme):
 #  - resting the pointer on a window's maximize button opens the layouts;
 #  - a click on the left part of the halves snaps the window to the left half;
-#  - snap assist then offers the other window for the right half, and picking
-#    it snaps it there;
+#  - no menu offers the other windows for the rest of the layout afterwards:
+#    a click where it used to be leaves the other window where it is;
 #  - "snap left 0.66" gives a window two thirds of the screen;
 #  - "snap_layouts disable" turns the layouts off.
 #
@@ -156,14 +156,16 @@ over=$(mean $((lx - 10)) $((ly - 10)) 60 20)
 wait "$held"
 [ "$over" != "$under" ] || fail "resting on the maximize button shows no layouts"
 
+two_before=$(window two)
 "$pointer" 1280 720 move $((bx - 4)) "$by" wait 200 move "$bx" $((by + 1)) wait 900 \
 	move $((lx + 60)) $((ly - 20)) wait 100 move "$lx" "$ly" wait 300 click "$lx" "$ly" >/dev/null 2>&1
 sleep 1.5
 [ "$(window one)" = "0 $title 640 $h" ] || fail "the left part did not snap the window there: $(window one)"
-# snap assist: "two" in the menu over the right half
+# where the menu of the other windows used to be over the right half
 "$pointer" 1280 720 move 900 297 wait 300 click 900 297 >/dev/null 2>&1
 sleep 1
-[ "$(window two)" = "640 $title 640 $h" ] || fail "snap assist did not put the other window into the right half: $(window two)"
+[ "$(window two)" = "$two_before" ] ||
+	fail "a menu still offered the other window for the right half: $(window two)"
 
 ipc '[title=one] snap left 0.66' >/dev/null
 sleep 0.5
