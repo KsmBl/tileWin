@@ -721,18 +721,44 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 		break;
 	}
 	case PSV_LUNA: {
-		pd_rounded4(cr, b.x, b.y, b.width, b.height, 0, b.height / 2.0, b.height / 2.0, 0);
-		pd_fill(cr, t, hover || pressed ? "start.hover" : "start.bg", b.y, b.height, 0x379f37ff);
+		// the green pill of Windows XP: square on the left, rounded on the right,
+		// a glossy band near its top, lit on the left and shaded towards the right
+		double r = b.height * 0.42;
+		const char *key = pressed && tw_theme_str(t, "start.pressed_gradient", NULL) ?
+			"start.pressed" : hover || pressed ? "start.hover" : "start.bg";
+		pd_rounded4(cr, b.x, b.y, b.width, b.height, 0, r, r, 0);
+		pd_fill(cr, t, key, b.y, b.height, 0x379f37ff);
 		cairo_save(cr);
-		pd_rounded4(cr, b.x, b.y, b.width, b.height, 0, b.height / 2.0, b.height / 2.0, 0);
+		pd_rounded4(cr, b.x, b.y, b.width, b.height, 0, r, r, 0);
 		cairo_clip(cr);
-		pd_rect(cr, b.x, b.y, b.width, 1, 0xffffff60);
+		cairo_pattern_t *side = cairo_pattern_create_linear(b.x, 0, b.x + b.width, 0);
+		cairo_pattern_add_color_stop_rgba(side, 0, 1, 1, 1, 0.18);
+		cairo_pattern_add_color_stop_rgba(side, 0.05, 1, 1, 1, 0.04);
+		cairo_pattern_add_color_stop_rgba(side, 0.15, 1, 1, 1, 0);
+		cairo_pattern_add_color_stop_rgba(side, 0.75, 0, 0, 0, 0);
+		cairo_pattern_add_color_stop_rgba(side, 1, 0, 0, 0, 0.22);
+		cairo_set_source(cr, side);
+		cairo_paint(cr);
+		cairo_pattern_destroy(side);
 		cairo_restore(cr);
-		pd_glyph_windows(cr, b.x + 10, b.y + (b.height - 18) / 2.0, 18,
-			0xf35325ff, 0x81bc06ff, 0x05a6f0ff, 0xffba08ff, true);
-		const char *font = tw_theme_str(t, "start.font", "Trebuchet MS, Noto Sans Bold Italic 12");
-		pd_text(cr, font, label, b.x + 34, b.y + 1, b.width - 36, b.height, 0x00000060, PD_LEFT);
-		pd_text(cr, font, label, b.x + 33, b.y, b.width - 36, b.height, fg, PD_LEFT);
+		// the dark rim around the rounded end
+		cairo_new_path(cr);
+		cairo_arc(cr, b.x + b.width - r - 0.5, b.y + r, r, -M_PI / 2, 0);
+		cairo_arc(cr, b.x + b.width - r - 0.5, b.y + b.height - r, r, 0, M_PI / 2);
+		cairo_set_source_u32(cr, 0x0f3a0f80);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+		int off = pressed ? 1 : 0;
+		double flag = b.height * 0.58;
+		pd_glyph_xp_flag(cr, b.x + 9 + off, b.y + (b.height - flag) / 2.0 + off, flag);
+		const char *font = tw_theme_str(t, "start.font", "Trebuchet MS, Noto Sans Bold Italic 13");
+		double tx = b.x + 13 + flag + off;
+		// a soft dark green shadow under the white letters, as on XP
+		pd_text(cr, font, label, tx + 1, b.y + 2 + off, b.width - (tx - b.x), b.height,
+			0x0a3a0a50, PD_LEFT);
+		pd_text(cr, font, label, tx + 1, b.y + 1 + off, b.width - (tx - b.x), b.height,
+			0x1a4a1aa0, PD_LEFT);
+		pd_text(cr, font, label, tx, b.y + off, b.width - (tx - b.x), b.height, fg, PD_LEFT);
 		break;
 	}
 	case PSV_AERO: {

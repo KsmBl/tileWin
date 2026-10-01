@@ -216,6 +216,60 @@ void pd_icon(cairo_t *cr, cairo_surface_t *icon, double x, double y, double size
 
 /* ---------- glyphs ---------- */
 
+/* One panel of the XP flag: its top and bottom edges wave, the right ones lifted. */
+static void xp_panel_path(cairo_t *cr, double x, double y, double w, double h, double wave) {
+	cairo_move_to(cr, x, y + wave);
+	cairo_curve_to(cr, x + w * 0.4, y - wave * 0.6, x + w * 0.6, y + wave * 0.4, x + w, y - wave);
+	cairo_line_to(cr, x + w, y + h - wave);
+	cairo_curve_to(cr, x + w * 0.6, y + h + wave * 0.4, x + w * 0.4, y + h - wave * 0.6, x,
+		y + h + wave);
+	cairo_close_path(cr);
+}
+
+void pd_glyph_xp_flag(cairo_t *cr, double x, double y, double size) {
+	// light and dark of each panel: red, green, blue and yellow
+	static const uint32_t colors[4][2] = {
+		{ 0xff8a4aff, 0xd8380aff }, { 0xb6ec5aff, 0x58a412ff },
+		{ 0x6cb8ffff, 0x1c62d4ff }, { 0xffe050ff, 0xe8a000ff },
+	};
+	double gap = size * 0.07, wave = size * 0.07, drop = size * 0.1;
+	double half_w = (size - gap) / 2, half = (size - gap - drop) / 2;
+	cairo_save(cr);
+	cairo_new_path(cr);
+	// the shadow under the whole flag
+	for (int i = 0; i < 4; i++) {
+		double px = x + (i % 2) * (half_w + gap) + size * 0.06;
+		double py = y + (i / 2) * (half + gap) + size * 0.08 + (i % 2) * drop;
+		xp_panel_path(cr, px, py, half_w, half, wave);
+	}
+	cairo_set_source_rgba(cr, 0, 0, 0, 0.35);
+	cairo_fill(cr);
+	for (int i = 0; i < 4; i++) {
+		// the right column hangs a little lower: the flag is tilted as it waves
+		double px = x + (i % 2) * (half_w + gap);
+		double py = y + (i / 2) * (half + gap) + (i % 2) * drop;
+		xp_panel_path(cr, px, py, half_w, half, wave);
+		cairo_pattern_t *g = cairo_pattern_create_linear(px, py, px + half_w * 0.4, py + half);
+		uint32_t a = colors[i][0], b = colors[i][1];
+		cairo_pattern_add_color_stop_rgb(g, 0, ((a >> 24) & 0xff) / 255.0,
+			((a >> 16) & 0xff) / 255.0, ((a >> 8) & 0xff) / 255.0);
+		cairo_pattern_add_color_stop_rgb(g, 1, ((b >> 24) & 0xff) / 255.0,
+			((b >> 16) & 0xff) / 255.0, ((b >> 8) & 0xff) / 255.0);
+		cairo_set_source(cr, g);
+		cairo_fill_preserve(cr);
+		cairo_pattern_destroy(g);
+		// a gloss over its upper left
+		cairo_pattern_t *gloss = cairo_pattern_create_linear(px, py, px, py + half);
+		cairo_pattern_add_color_stop_rgba(gloss, 0, 1, 1, 1, 0.45);
+		cairo_pattern_add_color_stop_rgba(gloss, 0.5, 1, 1, 1, 0.05);
+		cairo_pattern_add_color_stop_rgba(gloss, 1, 1, 1, 1, 0);
+		cairo_set_source(cr, gloss);
+		cairo_fill(cr);
+		cairo_pattern_destroy(gloss);
+	}
+	cairo_restore(cr);
+}
+
 void pd_glyph_windows(cairo_t *cr, double x, double y, double size, uint32_t c1,
 		uint32_t c2, uint32_t c3, uint32_t c4, bool wavy) {
 	cairo_new_path(cr);

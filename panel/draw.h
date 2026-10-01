@@ -43,6 +43,8 @@ int pd_text_wrapped(cairo_t *cr, const char *font, const char *text, double x, d
 void pd_icon(cairo_t *cr, cairo_surface_t *icon, double x, double y, double size);
 
 /* glyphs, drawn inside a size x size square */
+/* The flag of Windows XP: four glossy panels waving, with a shadow. */
+void pd_glyph_xp_flag(cairo_t *cr, double x, double y, double size);
 void pd_glyph_windows(cairo_t *cr, double x, double y, double size, uint32_t c1,
 	uint32_t c2, uint32_t c3, uint32_t c4, bool wavy);
 void pd_glyph_speaker(cairo_t *cr, double x, double y, double size, int level,

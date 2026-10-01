@@ -563,6 +563,16 @@ test(
 )
 
 test(
+	'xp-start-button',
+	find_program('xp_start_button.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'panel-config-appears',
 	find_program('panel_config_appears.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
