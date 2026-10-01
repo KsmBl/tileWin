@@ -479,6 +479,8 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 			(int)jint(event, "y"), (int)jint(event, "width"));
 	} else if (strcmp(change, "snap_layouts_leave") == 0) {
 		snaplayouts_leave(panel, jint(event, "con_id"));
+	} else if (strcmp(change, "snap_layouts_close") == 0) {
+		snaplayouts_close(panel, jint(event, "con_id"));
 	} else if (strcmp(change, "window_menu") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

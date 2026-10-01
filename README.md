@@ -53,7 +53,8 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Double-click the title bar to maximize; double-click the icon to close. `double_click_time` sets how fast the two clicks have to follow each other.
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
-  - **Snap Layouts**, as on Windows 11: rest the pointer on a window's maximize button and pick a part of a layout (halves, two thirds and one third either way, quarters, a half and two quarters); the window snaps there. `snap <slot> <fraction> [<fraction>]` snaps into a part of such a layout (`snap left 0.66`); `snap_layouts disable` (or the switch on the Windows page) turns it off.
+  - **Snap Layouts**, as on Windows 11: rest the pointer on a window's maximize button and pick a part of a layout (halves, two thirds and one third either way, quarters, a half and two quarters); the window snaps there; a click on one of the window's buttons closes the layouts at once. `snap <slot> <fraction> [<fraction>]` snaps into a part of such a layout (`snap left 0.66`); `snap_layouts disable` (or the switch on the Windows page) turns it off.
+  - The buttons of a window against the top of the screen (maximized, or snapped to a half or a quarter there) reach up to the edge, and the last one into the corner beside it: push the pointer to the top or into the top right corner and click, without aiming at the button.
   - Snapped windows side by side resize together, as on Windows: drag the line between a left and a right half (or between two quarters of a column) and the windows on both sides follow, staying snapped. The line is easy to grab (6 pixels on each side), a window snapped next to them later takes the space that is left, and an outer side still unsnaps the window when dragged.
   - `Super+Arrow` snapping.
   - A new window about as big as the screen (90% of it both ways) opens maximized instead of a few pixels short of it; restoring it gives a window of the usual size. Dialogs and windows of a fixed size open as they are.
@@ -221,6 +222,9 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
 - gives an app a desktop entry with tasks and recent files and checks the
   right-click menu of its taskbar button lists the files newest first, leaves
   out one that is gone, opens them with the app, and runs the tasks;
+- clicks the top edge and the top right corner of the screen over maximized and
+  snapped windows, in the Windows 95 and 10 styles, and checks their buttons
+  are hit;
 - rests the pointer on a window's maximize button and checks the layouts show,
   that a part of one snaps the window there and no menu of the other windows
   follows, that `snap left 0.66` gives two thirds, and that

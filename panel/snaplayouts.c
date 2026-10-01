@@ -243,3 +243,9 @@ void snaplayouts_leave(struct panel *panel, int64_t con_id) {
 	}
 }
 
+void snaplayouts_close(struct panel *panel, int64_t con_id) {
+	if (current && current->con_id == con_id) {
+		stop_close_timer(current);
+		popup_close_later(panel);
+	}
+}

@@ -87,6 +87,18 @@ static void layouts_hover(struct sway_container *con) {
 	}
 }
 
+/* A button of the window was pressed: the layouts go away at once, as on Windows. */
+static void layouts_cancel(void) {
+	if (layouts_con && layouts_shown) {
+		layouts_event("snap_layouts_close", layouts_con);
+	}
+	layouts_con = NULL;
+	layouts_shown = false;
+	if (layouts_timer) {
+		wl_event_source_timer_update(layouts_timer, 0);
+	}
+}
+
 static struct {
 	struct sway_container *con;
 	enum tw_hit hit;
@@ -271,6 +283,53 @@ static bool box_contains(const struct wlr_box *box, double x, double y) {
 
 #define SHARED_EDGE_ZONE 6 // on each side of the line between snapped windows
 
+/*
+ * A window against the top of its screen (maximized, or snapped to a half or
+ * a quarter there) has its buttons reach up to the edge, and against the right
+ * edge too the last one reaches into the corner: the pointer pushed against the
+ * edge, where it stops by itself, is on them, as on Windows.
+ */
+static void reach_screen_edges(struct sway_container *con, struct tw_buttons *b, int W,
+		int grab) {
+	struct sway_output *output = con->pending.workspace ? con->pending.workspace->output : NULL;
+	if (!output) {
+		return;
+	}
+	// a maximized frame may hang over the edges by its border
+	bool top = con->current.y <= output->ly + 0.5;
+	double screen_right = output->lx + output->width - con->current.x; // in the frame
+	bool right = con->current.x + W >= output->lx + output->width - 0.5;
+	if (!top) {
+		return;
+	}
+	double screen_top = output->ly - con->current.y; // in the frame, 0 or above it
+	struct wlr_box *boxes[] = { &b->close, &b->maximize, &b->minimize };
+	int rightmost = 0;
+	for (size_t i = 0; i < 3; i++) {
+		if (boxes[i]->width > 0 && boxes[i]->x + boxes[i]->width > rightmost) {
+			rightmost = boxes[i]->x + boxes[i]->width;
+		}
+	}
+	int reach = grab > 0 ? grab : 1; // the pointer can sit just outside the frame
+	for (size_t i = 0; i < 3; i++) {
+		struct wlr_box *box = boxes[i];
+		if (box->width <= 0 || box->height <= 0) {
+			continue;
+		}
+		int top_y = (int)floor(screen_top) - reach;
+		if (top_y < box->y) {
+			box->height += box->y - top_y;
+			box->y = top_y;
+		}
+		if (right && box->x + box->width == rightmost) {
+			int right_x = (int)ceil(screen_right) + reach;
+			if (right_x > box->x + box->width) {
+				box->width = right_x - box->x;
+			}
+		}
+	}
+}
+
 enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 		enum wlr_edges *edges) {
 	*edges = WLR_EDGE_NONE;
@@ -290,6 +349,7 @@ enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 
 	struct tw_buttons b;
 	tw_style_buttons(tw_theme, W, maximized, &b);
+	reach_screen_edges(con, &b, W, grab);
 	if (box_contains(&b.close, x, y)) {
 		return TW_HIT_CLOSE;
 	}
@@ -453,6 +513,7 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 	case TW_HIT_MAXIMIZE:
 	case TW_HIT_CLOSE:
 		if (button == BTN_LEFT) {
+			layouts_cancel();
 			set_pressed(cont, hit);
 		}
 		return true;
