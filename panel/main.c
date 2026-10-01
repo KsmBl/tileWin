@@ -36,7 +36,7 @@ enum pstyle panel_style(struct panel *p) {
 		style = p->theme && p->theme->style ? p->theme->style : "win10";
 	}
 	if (strcmp(style, "classic") == 0 || strcmp(style, "win95") == 0 ||
-			strcmp(style, "win3") == 0) {
+			strcmp(style, "win3") == 0 || strcmp(style, "win1") == 0) {
 		return PS_CLASSIC;
 	} else if (strcmp(style, "luna") == 0 || strcmp(style, "winxp") == 0) {
 		return PS_LUNA;

@@ -292,7 +292,7 @@ static void scan_theme_dir(list_t *names, const char *dir) {
 
 /* Built-in themes in the order Windows came out, then all others by name. */
 static int theme_order(const void *a, const void *b) {
-	static const char *const order[] = { "win3", "win95", "winxp", "winxp-dark", "win7", "win8",
+	static const char *const order[] = { "win1", "win3", "win95", "winxp", "winxp-dark", "win7", "win8",
 		"win10", "win11", "sway" };
 	const char *x = *(const char **)a, *y = *(const char **)b;
 	int rx = 100, ry = 100;

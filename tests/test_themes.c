@@ -56,8 +56,27 @@ int main(void) {
 		}
 		tw_theme_free(t);
 	}
+	// in the order Windows came out
+	if (names && names->length > 1 && (strcmp(names->items[0], "win1") != 0 ||
+			strcmp(names->items[1], "win3") != 0)) {
+		fail("themes", "are not in the order Windows came out", names->items[0]);
+	}
 	if (names) {
 		list_free_items_and_destroy(names);
+	}
+
+	// Windows 1 on EGA: bright blue title bars, yellow menus, the cyan icon area
+	struct tw_theme *w1 = load("win1");
+	if (w1) {
+		check_str(w1, "decoration.active.title_bg", "#5555ff");
+		check_color(w1, "wallpaper.color", 0x55ffffff);
+		check_color(w1, "panel.bg", 0x55ffffff);
+		check_color(w1, "menu.bg", 0xffff55ff);
+		check_color(w1, "decoration.title_box", 0x000000ff);
+		if (!w1->style || strcmp(w1->style, "win1") != 0) {
+			fail("win1", "does not draw its windows in the style of Windows 1", w1->style);
+		}
+		tw_theme_free(w1);
 	}
 
 	// Windows 3.1 came without a wallpaper: the light grey of "Windows Default"
