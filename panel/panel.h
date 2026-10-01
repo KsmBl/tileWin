@@ -726,6 +726,18 @@ struct app_badge {
 void badges_init(struct panel *panel);
 /* What the app of that app id shows, filled into out; NULL for nothing. */
 const struct app_badge *badges_for_app(const char *app_id, struct app_badge *out);
+
+/* appsound.c: windows playing sound, for the speaker on their taskbar buttons */
+struct app_sound {
+	bool muted;
+	int volume; // percent
+};
+void appsound_init(struct panel *panel);
+/* Whether the window (or with group, any window of its app) plays sound. */
+bool appsound_for_window(struct panel *panel, struct pwindow *win, bool group,
+	struct app_sound *out);
+void appsound_toggle_mute(struct panel *panel, struct pwindow *win, bool group);
+void appsound_change_volume(struct panel *panel, struct pwindow *win, bool group, int step);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);

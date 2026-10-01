@@ -12,6 +12,8 @@
 enum hotspot_kind {
 	HS_WINDOW = 1,
 	HS_GROUP,
+	HS_SOUND, // the speaker of a window playing sound
+	HS_GROUP_SOUND,
 };
 
 struct taskbar_entry {
@@ -20,6 +22,7 @@ struct taskbar_entry {
 	bool focused;
 	bool urgent;
 	bool minimized;
+	struct pbox sound; // its speaker, while it plays sound
 };
 
 struct taskbar_data {
@@ -201,6 +204,33 @@ static void draw_badge(struct render_ctx *ctx, struct taskbar_entry *e, double i
 	pd_text(cr, font, text, x, y, w, h, fg, PD_CENTER);
 }
 
+/*
+ * A speaker on the button of a window playing sound (struck through when it is
+ * muted): a click mutes or unmutes it, the wheel changes its volume. Returns
+ * its box, or a zero box for none.
+ */
+static struct pbox draw_sound(struct render_ctx *ctx, struct taskbar_entry *e, double x,
+		double y, double size, bool plate) {
+	struct app_sound sound;
+	if (!appsound_for_window(ctx->panel, e->window, e->count > 1, &sound)) {
+		return (struct pbox){ 0 };
+	}
+	cairo_t *cr = ctx->cairo;
+	const struct tw_theme *t = ctx->panel->theme;
+	uint32_t fg = tw_theme_color(t, "taskbar.fg", bar_fg(ctx->panel));
+	if (plate) {
+		// on top of the icon: a disc in the color of the taskbar behind it
+		uint32_t bg = tw_theme_color(t, "taskbar.sound_bg", ctx->style == PSV_CLASSIC ?
+			0xc0c0c0ff : tw_theme_color(t, "panel.bg", 0x202020ff) | 0xff);
+		cairo_arc(cr, x + size / 2, y + size / 2, size / 2 + 1, 0, 2 * M_PI);
+		pd_color(cr, bg);
+		cairo_fill(cr);
+	}
+	ti_speaker(ctx->panel, cr, x + 1, y + 1, size - 2, sound.muted ? 0 : sound.volume,
+		sound.muted, fg);
+	return (struct pbox){ (int)x - 2, (int)y - 2, (int)size + 4, (int)size + 4 };
+}
+
 static bool badge_urgent(struct taskbar_entry *e) {
 	struct app_badge badge;
 	return badges_for_app(e->window->app_id, &badge) && badge.urgent;
@@ -277,8 +307,14 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 	} else {
 		snprintf(label, sizeof(label), "%s", e->window->title);
 	}
+	double end = b.x + b.width - 6;
+	struct pbox speaker = draw_sound(ctx, e, end - 14, b.y + (b.height - 14) / 2.0, 14, false);
+	if (speaker.width > 0) {
+		end -= 18;
+		e->sound = speaker;
+	}
 	pd_text(cr, font, label, tx, b.y + (active && ctx->style == PSV_CLASSIC ? 1 : 0),
-		b.x + b.width - tx - 6, b.height, fg, PD_LEFT);
+		end - tx, b.height, fg, PD_LEFT);
 }
 
 static void draw_icon_button(struct widget *w, struct render_ctx *ctx,
@@ -328,6 +364,7 @@ static void draw_icon_button(struct widget *w, struct render_ctx *ctx,
 	double iy = b.y + (b.height - icon) / 2.0 + dy - (ctx->style == PSV_FLUENT ? 2 : 0);
 	pd_icon(cr, surface, ix, iy, icon);
 	draw_badge(ctx, e, ix, iy, icon);
+	e->sound = draw_sound(ctx, e, ix + icon - 8, iy + icon - 8, 12, true);
 	if (e->count > 1 && ctx->style == PSV_AERO) {
 		// stacked look for grouped windows
 		pd_rect(cr, b.x + b.width - 4, b.y + 5, 1, b.height - 10, 0xffffff50);
@@ -358,6 +395,11 @@ static void taskbar_render(struct widget *w, struct render_ctx *ctx, struct pbox
 		}
 		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w,
 			e->count > 1 ? HS_GROUP : HS_WINDOW, e->window->id, e->window->app_id);
+		if (e->sound.width > 0) {
+			psurface_add_hotspot(ctx->surface, e->sound.x, e->sound.y, e->sound.width,
+				e->sound.height, w, e->count > 1 ? HS_GROUP_SOUND : HS_SOUND, e->window->id,
+				e->window->app_id);
+		}
 		x += bw;
 		free(e);
 	}
@@ -495,6 +537,12 @@ static bool taskbar_click(struct widget *w, struct psurface *s, struct hotspot *
 	if (!win) {
 		return false;
 	}
+	if (hs->kind == HS_SOUND || hs->kind == HS_GROUP_SOUND) {
+		if (button == BTN_LEFT) {
+			appsound_toggle_mute(panel, win, hs->kind == HS_GROUP_SOUND);
+		}
+		return true;
+	}
 	if (button == BTN_LEFT) {
 		if (hs->kind == HS_GROUP) {
 			list_t *items = create_list();
@@ -535,10 +583,31 @@ static bool taskbar_click(struct widget *w, struct psurface *s, struct hotspot *
 	return false;
 }
 
+/* The wheel on the speaker of a button: that app's volume, 5 at a time. */
+static bool taskbar_scroll(struct widget *w, struct psurface *s, struct hotspot *hs,
+		int direction) {
+	if (hs->kind != HS_SOUND && hs->kind != HS_GROUP_SOUND) {
+		return false;
+	}
+	struct pwindow *win = panel_find_window(w->panel, hs->id);
+	if (win) {
+		appsound_change_volume(w->panel, win, hs->kind == HS_GROUP_SOUND,
+			direction < 0 ? 5 : -5);
+	}
+	return true;
+}
+
 static char *taskbar_tooltip(struct widget *w, struct hotspot *hs) {
 	struct pwindow *win = panel_find_window(w->panel, hs->id);
 	if (!win) {
 		return NULL;
+	}
+	if (hs->kind == HS_SOUND || hs->kind == HS_GROUP_SOUND) {
+		struct app_sound sound;
+		bool muted = appsound_for_window(w->panel, win, hs->kind == HS_GROUP_SOUND, &sound) &&
+			sound.muted;
+		return format_str("%s: %s (scroll for the volume)", apps_display_name(win->app_id),
+			muted ? "click to unmute" : "click to mute");
 	}
 	if (hs->kind == HS_GROUP) {
 		int count = 0;
@@ -584,6 +653,7 @@ const struct widget_impl widget_taskbar = {
 	.measure = taskbar_measure,
 	.render = taskbar_render,
 	.click = taskbar_click,
+	.scroll = taskbar_scroll,
 	.tooltip = taskbar_tooltip,
 };
 
