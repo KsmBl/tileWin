@@ -738,6 +738,10 @@ bool appsound_for_window(struct panel *panel, struct pwindow *win, bool group,
 	struct app_sound *out);
 void appsound_toggle_mute(struct panel *panel, struct pwindow *win, bool group);
 void appsound_change_volume(struct panel *panel, struct pwindow *win, bool group, int step);
+
+/* jumplist.c: recent files and tasks of an app, ahead of its window menu */
+struct tw_desktop_entry;
+void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);

@@ -411,6 +411,7 @@ list_t *taskbar_window_menu(struct panel *panel, struct pwindow *win) {
 	bool window_mode = panel->layout == LAYOUT_WINDOW;
 	char cmd[256];
 	struct tw_desktop_entry *entry = apps_find(win->app_id);
+	jumplist_add(entry, items);
 	if (entry) {
 		char *exec = tw_desktop_exec_command(entry);
 		if (exec) {

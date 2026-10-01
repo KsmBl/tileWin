@@ -40,6 +40,7 @@ executable(
 		'draw.c',
 		'flyouts.c',
 		'ipc.c',
+		'jumplist.c',
 		'launcher.c',
 		'main.c',
 		'notify.c',
