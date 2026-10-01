@@ -227,6 +227,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   lands in the clipboard and a notification, read in the session's language
   too, that a missing tesseract is reported, and that the Text button of the
   snipping toolbar starts it;
+- opens the Program Manager of the Windows 3 theme and checks a program group
+  opens as a window whose icon starts its app, that a minimized window lies as
+  an icon on the desktop which a double click restores, and that
+  `minimized_icons no` leaves it on the taskbar only;
 - puts widgets on the desktop and checks their cards take the cells the config
   gives them (and the upper right corner without one), that the icons make room,
   that a card dragged with a pointer lands on whole cells and keeps them while
@@ -617,7 +621,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | Theme | Look |
 |---|---|
 | `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
-| `win3` | Windows 3.x: navy title bars with the title in the middle, the control-menu box (a click opens the window menu, a double click closes the window) and arrow buttons, thick grey borders notched at the corners, flat white menus, a tiled argyle wallpaper |
+| `win3` | Windows 3.x: navy title bars with the title in the middle, the control-menu box (a click opens the window menu, a double click closes the window) and arrow buttons, thick grey borders notched at the corners, flat white menus, a tiled argyle wallpaper, the **Program Manager** as the Start menu (program groups made from the apps' categories, the pinned apps as Main; a group opens as a window of icons) and minimized windows as **icons along the bottom of the desktop** (a double click restores one) |
 | `winxp` | Luna blue title bars, green start button, two-column start menu |
 | `winxp-dark` | Windows XP in black: the same glossy Luna title bars, taskbar, Start menu and dialogs in black and greys, under a night sky; apps go dark while it is on |
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |

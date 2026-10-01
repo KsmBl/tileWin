@@ -143,6 +143,7 @@ static void notify_widgets(struct panel *panel) {
 		}
 	}
 	deskwidgets_state_changed(panel);
+	minicons_update(panel);
 	panel_set_dirty(panel);
 }
 

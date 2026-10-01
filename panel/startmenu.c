@@ -30,6 +30,7 @@ enum sm_layout {
 	SM_LIST,
 	SM_CENTERED,
 	SM_TILES,
+	SM_PROGMAN, // the Program Manager of Windows 3
 };
 
 enum sm_hotspot {
@@ -41,6 +42,7 @@ enum sm_hotspot {
 	HS_SEARCH,
 	HS_THEMES,
 	HS_RUN,
+	HS_GROUP, // a program group of the Program Manager
 };
 
 struct place {
@@ -66,6 +68,7 @@ struct startmenu {
 	list_t *hits; // borrowed entries in display order
 	bool inside;
 	double px, py;
+	int group; // the open program group of the Program Manager, -1 for none
 };
 
 /* ---------- data ---------- */
@@ -1170,6 +1173,248 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 	}
 }
 
+/* ---------- Program Manager (Windows 3) ---------- */
+
+/*
+ * The program groups: the pinned apps as "Main", then the apps by the
+ * category of their desktop entry, as Windows 3 sorted them into groups.
+ */
+static const struct {
+	const char *name;
+	const char *categories; // any of these
+} pm_groups[] = {
+	{ "Main", NULL },
+	{ "Accessories", "Utility;TextEditor;Accessibility;" },
+	{ "Office", "Office;" },
+	{ "Graphics", "Graphics;" },
+	{ "Internet", "Network;WebBrowser;Email;" },
+	{ "Multimedia", "AudioVideo;Audio;Video;" },
+	{ "Games", "Game;" },
+	{ "Development", "Development;" },
+	{ "System", "System;Settings;" },
+	{ "Other", "" },
+};
+#define PM_GROUPS (int)(sizeof(pm_groups) / sizeof(pm_groups[0]))
+#define PM_TITLE 20
+#define PM_MENU 20
+#define PM_CELL_W 92
+#define PM_CELL_H 72
+
+static bool in_categories(const struct tw_desktop_entry *e, const char *wanted) {
+	if (!e->categories) {
+		return false;
+	}
+	for (const char *w = wanted; *w;) {
+		size_t len = strcspn(w, ";");
+		for (const char *c = e->categories; *c;) {
+			size_t clen = strcspn(c, ";");
+			if (clen == len && strncmp(c, w, len) == 0) {
+				return true;
+			}
+			c += clen + (c[clen] == ';');
+		}
+		w += len + (w[len] == ';');
+	}
+	return false;
+}
+
+/* The apps of a group, borrowed from sm->apps. */
+static list_t *pm_group_apps(struct startmenu *sm, int group) {
+	list_t *out = create_list();
+	if (group == 0) {
+		for (int i = 0; i < sm->pinned->length; i++) {
+			list_add(out, sm->pinned->items[i]);
+		}
+		return out;
+	}
+	for (int i = 0; i < sm->apps->length; i++) {
+		struct tw_desktop_entry *e = sm->apps->items[i];
+		int first = -1;
+		for (int g = 1; g < PM_GROUPS - 1 && first < 0; g++) {
+			if (in_categories(e, pm_groups[g].categories)) {
+				first = g;
+			}
+		}
+		if (first < 0) {
+			first = PM_GROUPS - 1; // Other
+		}
+		if (first == group) {
+			list_add(out, e);
+		}
+	}
+	return out;
+}
+
+/* A window of Windows 3 inside the Program Manager: frame, title, control box. */
+static void pm_window(struct sm_ctx *c, double x, double y, double w, double h,
+		const char *title, bool active, uint32_t frame, uint32_t title_bg,
+		uint32_t title_fg, int back_kind) {
+	cairo_t *cr = c->cr;
+	pd_rect(cr, x, y, w, h, frame);
+	cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+	pd_color(cr, 0x000000ff);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	double tx = x + 4, ty = y + 4, tw = w - 8;
+	pd_rect(cr, tx, ty, tw, PM_TITLE, active ? title_bg : 0xffffffff);
+	pd_rect(cr, tx, ty + PM_TITLE, tw, 1, 0x000000ff);
+	// the control-menu box: a bar like the space bar
+	pd_rect(cr, tx, ty, PM_TITLE, PM_TITLE, 0xc0c0c0ff);
+	pd_rect(cr, tx + PM_TITLE, ty, 1, PM_TITLE, 0x000000ff);
+	pd_rect(cr, tx + 4, ty + PM_TITLE / 2 - 1, PM_TITLE - 8, 3, 0xffffffff);
+	cairo_rectangle(cr, tx + 4.5, ty + PM_TITLE / 2 - 0.5, PM_TITLE - 9, 2);
+	pd_color(cr, 0x000000ff);
+	cairo_stroke(cr);
+	if (back_kind) {
+		psurface_add_hotspot(c->p->surface, tx, ty, PM_TITLE, PM_TITLE, NULL, back_kind, 0,
+			NULL);
+	}
+	pd_text(cr, tw_theme_str(c->panel->theme, "decoration.title_font",
+		"MS Sans Serif, Noto Sans Bold 8"), title, tx + PM_TITLE, ty, tw - PM_TITLE, PM_TITLE,
+		active ? title_fg : 0x000000ff, PD_CENTER);
+}
+
+/* A grid of icons with their names under them; the name of the hovered one
+ * highlighted as Windows 3 did. */
+static void pm_icons(struct sm_ctx *c, list_t *apps, double x, double y, double w, double h,
+		uint32_t fg, uint32_t hl_bg, uint32_t hl_fg) {
+	cairo_t *cr = c->cr;
+	int columns = (int)(w / PM_CELL_W);
+	columns = columns < 1 ? 1 : columns;
+	int rows = (apps->length + columns - 1) / columns;
+	double content = rows * PM_CELL_H;
+	c->sm->max_scroll = content > h ? (int)(content - h) : 0;
+	if (c->sm->scroll > c->sm->max_scroll) {
+		c->sm->scroll = c->sm->max_scroll;
+	}
+	cairo_save(cr);
+	cairo_rectangle(cr, x, y, w, h);
+	cairo_clip(cr);
+	for (int i = 0; i < apps->length; i++) {
+		struct tw_desktop_entry *e = apps->items[i];
+		double cx = x + (i % columns) * PM_CELL_W, cy = y + (i / columns) * PM_CELL_H -
+			c->sm->scroll;
+		int hit_index = c->sm->hits->length;
+		add_hit(c, e);
+		if (cy + PM_CELL_H < y || cy > y + h) {
+			continue;
+		}
+		bool on = hovered(c, cx, cy, PM_CELL_W, PM_CELL_H) || hit_index == c->sm->selected;
+		cairo_surface_t *icon = e->icon ? apps_icon(c->panel, e->icon, 32 * c->scale) : NULL;
+		pd_icon(cr, icon, cx + (PM_CELL_W - 32) / 2.0, cy + 6, 32);
+		int tw = 0;
+		pd_text_size(cr, bar_font(c->panel), e->name, &tw, NULL);
+		tw = tw > PM_CELL_W - 6 ? PM_CELL_W - 6 : tw;
+		double lx = cx + (PM_CELL_W - tw - 4) / 2.0;
+		if (on) {
+			pd_rect(cr, lx, cy + 42, tw + 4, 16, hl_bg);
+		}
+		pd_text(cr, bar_font(c->panel), e->name, lx + 2, cy + 42, tw, 16, on ? hl_fg : fg,
+			PD_LEFT);
+		psurface_add_hotspot(c->p->surface, cx, cy, PM_CELL_W, PM_CELL_H, NULL, HS_APP,
+			list_find(c->sm->apps, e), NULL);
+	}
+	cairo_restore(cr);
+}
+
+/* The picture of a program group: a little window with icons in it. */
+static void pm_group_icon(cairo_t *cr, double x, double y, uint32_t title_bg) {
+	pd_rect(cr, x, y, 32, 26, 0xffffffff);
+	cairo_rectangle(cr, x + 0.5, y + 0.5, 31, 25);
+	pd_color(cr, 0x000000ff);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	pd_rect(cr, x + 1, y + 1, 30, 5, title_bg);
+	static const uint32_t colors[] = { 0xc00000ff, 0x00a000ff, 0x0000c0ff, 0xc0c000ff,
+		0x00a0a0ff, 0xa000a0ff };
+	for (int i = 0; i < 6; i++) {
+		pd_rect(cr, x + 4 + (i % 3) * 9, y + 9 + (i / 3) * 8, 6, 5, colors[i]);
+	}
+}
+
+static void render_progman(struct popup *p, cairo_t *cr) {
+	struct startmenu *sm = p->data;
+	struct panel *panel = p->panel;
+	const struct tw_theme *t = panel->theme;
+	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
+	double W = p->surface->width, H = p->surface->height;
+	uint32_t frame = tw_theme_color(t, "decoration.active.frame", 0xc0c0c0ff);
+	uint32_t title_bg = tw_theme_color(t, "decoration.active.title_bg", 0x000080ff);
+	uint32_t title_fg = tw_theme_color(t, "decoration.active.title_fg", 0xffffffff);
+	uint32_t bg = tw_theme_color(t, "startmenu.bg", tw_theme_color(t, "menu.bg", 0xffffffff));
+	uint32_t fg = tw_theme_color(t, "startmenu.fg", tw_theme_color(t, "menu.fg", 0x000000ff));
+	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg",
+		tw_theme_color(t, "menu.hl_bg", 0x000080ff));
+	uint32_t hl_fg = tw_theme_color(t, "startmenu.hl_fg",
+		tw_theme_color(t, "menu.hl_fg", 0xffffffff));
+	sm->hits->length = 0;
+
+	pm_window(&c, 0, 0, W, H, "Program Manager", true, frame, title_bg, title_fg, 0);
+	// the menu bar, as it was (only the look: the groups are below)
+	double mx = 4, my = 4 + PM_TITLE + 1, mw = W - 8;
+	pd_rect(cr, mx, my, mw, PM_MENU, bg);
+	pd_rect(cr, mx, my + PM_MENU, mw, 1, 0x000000ff);
+	static const char *const menus[] = { "File", "Options", "Window", "Help" };
+	double ix = mx + 8;
+	for (int i = 0; i < 4; i++) {
+		int tw = 0;
+		pd_text_size(cr, bar_font(panel), menus[i], &tw, NULL);
+		pd_text(cr, bar_font(panel), menus[i], ix, my, tw + 4, PM_MENU, fg, PD_LEFT);
+		ix += tw + 16;
+	}
+	// the client area: the open group as a window, the others as icons below
+	double ax = mx, ay = my + PM_MENU + 1, aw = mw, ah = H - ay - 4;
+	pd_rect(cr, ax, ay, aw, ah, bg);
+
+	if (sm->search[0] || sm->group >= 0) {
+		list_t *apps = sm->search[0] ? search_results(sm) : pm_group_apps(sm, sm->group);
+		char title[300];
+		if (sm->search[0]) {
+			snprintf(title, sizeof(title), "Search: %s", sm->search);
+		} else {
+			snprintf(title, sizeof(title), "%s", pm_groups[sm->group].name);
+		}
+		double gx = ax + 8, gy = ay + 8, gw = aw - 16, gh = ah - 16;
+		pm_window(&c, gx, gy, gw, gh, title, true, frame, title_bg, title_fg, HS_BACK);
+		double cx = gx + 4, cy = gy + 4 + PM_TITLE + 1, cw = gw - 8, ch = gh - PM_TITLE - 9;
+		pd_rect(cr, cx, cy, cw, ch, bg);
+		if (apps->length == 0) {
+			pd_text(cr, bar_font(panel), sm->search[0] ? "No program matches" :
+				"This group is empty", cx + 12, cy + 8, cw - 24, 20, fg, PD_LEFT);
+		}
+		pm_icons(&c, apps, cx + 4, cy + 4, cw - 8, ch - 8, fg, hl_bg, hl_fg);
+		list_free(apps);
+		return;
+	}
+
+	// the program groups, minimized to their icons
+	int columns = (int)((aw - 16) / PM_CELL_W);
+	columns = columns < 1 ? 1 : columns;
+	int shown = 0;
+	for (int g = 0; g < PM_GROUPS; g++) {
+		list_t *apps = pm_group_apps(sm, g);
+		int count = apps->length;
+		list_free(apps);
+		if (count == 0) {
+			continue;
+		}
+		double cx = ax + 8 + (shown % columns) * PM_CELL_W;
+		double cy = ay + 8 + (shown / columns) * PM_CELL_H;
+		shown++;
+		bool on = hovered(&c, cx, cy, PM_CELL_W, PM_CELL_H);
+		pm_group_icon(cr, cx + (PM_CELL_W - 32) / 2.0, cy + 8, title_bg);
+		int tw = 0;
+		pd_text_size(cr, bar_font(panel), pm_groups[g].name, &tw, NULL);
+		double lx = cx + (PM_CELL_W - tw - 4) / 2.0;
+		if (on) {
+			pd_rect(cr, lx, cy + 42, tw + 4, 16, hl_bg);
+		}
+		pd_text(cr, bar_font(panel), pm_groups[g].name, lx + 2, cy + 42, tw, 16,
+			on ? hl_fg : fg, PD_LEFT);
+		psurface_add_hotspot(p->surface, cx, cy, PM_CELL_W, PM_CELL_H, NULL, HS_GROUP, g, NULL);
+	}
+}
+
 /* ---------- input ---------- */
 
 static void sm_render(struct popup *p, cairo_t *cr) {
@@ -1183,6 +1428,9 @@ static void sm_render(struct popup *p, cairo_t *cr) {
 		break;
 	case SM_TILES:
 		render_tiles(p, cr);
+		break;
+	case SM_PROGMAN:
+		render_progman(p, cr);
 		break;
 	default:
 		render_centered(p, cr);
@@ -1276,6 +1524,12 @@ static void sm_button(struct popup *p, double x, double y, uint32_t button, bool
 		break;
 	case HS_BACK:
 		sm->all_apps = false;
+		sm->group = -1;
+		sm->scroll = 0;
+		popup_set_dirty(p);
+		break;
+	case HS_GROUP:
+		sm->group = (int)hs->id;
 		sm->scroll = 0;
 		popup_set_dirty(p);
 		break;
@@ -1400,7 +1654,8 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	enum sm_layout layout = strcmp(layout_name, "classic") == 0 ? SM_CLASSIC :
 		strcmp(layout_name, "twocolumn") == 0 ? SM_TWOCOLUMN :
 		strcmp(layout_name, "list") == 0 ? SM_LIST :
-		strcmp(layout_name, "tiles") == 0 ? SM_TILES : SM_CENTERED;
+		strcmp(layout_name, "tiles") == 0 ? SM_TILES :
+		strcmp(layout_name, "progman") == 0 ? SM_PROGMAN : SM_CENTERED;
 	if (layout == SM_CLASSIC) {
 		open_classic(panel, output);
 		return;
@@ -1411,6 +1666,7 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	sm->apps = load_apps();
 	sm->hits = create_list();
 	sm->selected = -1;
+	sm->group = -1;
 	sm->show_search = search;
 	load_config(panel, sm);
 	if (layout == SM_TILES) {
@@ -1419,11 +1675,11 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 		return;
 	}
 
-	int M = layout == SM_LIST ? 0 : popup_shadow_margin(panel);
+	int M = layout == SM_LIST || layout == SM_PROGMAN ? 0 : popup_shadow_margin(panel);
 	int def_w = layout == SM_TWOCOLUMN ? (style == PS_AERO ? 400 : 380) :
-		layout == SM_LIST ? 360 : 640;
+		layout == SM_LIST ? 360 : layout == SM_PROGMAN ? 480 : 640;
 	int def_h = layout == SM_TWOCOLUMN ? (style == PS_AERO ? 520 : 470) :
-		layout == SM_LIST ? 560 : 700;
+		layout == SM_LIST ? 560 : layout == SM_PROGMAN ? 340 : 700;
 	int width = tw_theme_int(panel->theme, "startmenu.width", def_w) + 2 * M;
 	int height = tw_theme_int(panel->theme, "startmenu.height", def_h) + 2 * M;
 	int bar = output->bar ? output->bar->height : 0;

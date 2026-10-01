@@ -1330,6 +1330,7 @@ struct ui_taskbar_key {
 	bool is_switch, refreshing;
 	int fallback;
 	guint timer;
+	const char *const *values; // a choice: values[0] is the default, written as nothing
 };
 
 static bool setting_is_on(const char *value) {
@@ -1341,7 +1342,10 @@ static bool setting_is_on(const char *value) {
 static void taskbar_key_write(struct ui_taskbar_key *r) {
 	char number[16];
 	const char *value;
-	if (r->is_switch) {
+	if (r->values) {
+		guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(r->widget));
+		value = i == 0 || i == GTK_INVALID_LIST_POSITION ? NULL : r->values[i];
+	} else if (r->is_switch) {
 		bool on = gtk_switch_get_active(GTK_SWITCH(r->widget));
 		value = on == (r->fallback != 0) ? NULL : on ? "yes" : "no";
 	} else {
@@ -1365,7 +1369,7 @@ static void on_taskbar_key(GObject *object, gpointer data) {
 	if (r->refreshing) {
 		return;
 	}
-	if (r->is_switch) {
+	if (r->is_switch || r->values) {
 		taskbar_key_write(r);
 		return;
 	}
@@ -1399,12 +1403,33 @@ void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const
 	g_ptr_array_add(keys, r);
 }
 
+void ui_taskbar_choice(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
+		const char *title, const char *hint, const char *const *values,
+		const char *const *labels) {
+	struct ui_taskbar_key *r = g_new0(struct ui_taskbar_key, 1);
+	r->s = s;
+	r->key = key;
+	r->values = values;
+	r->widget = gtk_drop_down_new_from_strings(labels);
+	g_signal_connect(r->widget, "notify::selected", G_CALLBACK(on_taskbar_key_switch), r);
+	ui_row(group, title, hint, r->widget);
+	g_ptr_array_add(keys, r);
+}
+
 void ui_taskbar_keys_refresh(GPtrArray *keys) {
 	for (guint i = 0; i < keys->len; i++) {
 		struct ui_taskbar_key *r = keys->pdata[i];
 		const char *value = cstmt_arg(confdoc_child(r->s->taskbar->root, r->key, NULL), 0);
 		r->refreshing = true;
-		if (r->is_switch) {
+		if (r->values) {
+			guint selected = 0;
+			for (guint v = 1; value && r->values[v]; v++) {
+				if (g_ascii_strcasecmp(value, r->values[v]) == 0) {
+					selected = v;
+				}
+			}
+			gtk_drop_down_set_selected(GTK_DROP_DOWN(r->widget), selected);
+		} else if (r->is_switch) {
 			gtk_switch_set_active(GTK_SWITCH(r->widget),
 				value ? setting_is_on(value) : r->fallback != 0);
 		} else {

@@ -124,6 +124,9 @@ GtkWidget *ui_row_box(GtkWidget *row);
 void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
 	const char *title, const char *hint, bool is_switch, int low, int high, int fallback);
 void ui_taskbar_keys_refresh(GPtrArray *keys);
+/* The same as a choice: values[0] (labels[0]) is the default, written as nothing. */
+void ui_taskbar_choice(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
+	const char *title, const char *hint, const char *const *values, const char *const *labels);
 GtkWidget *ui_icon_button(const char *icon, const char *tooltip, bool sensitive,
 		GCallback callback, gpointer data);
 void ui_closure_free(gpointer data, GClosure *closure);

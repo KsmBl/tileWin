@@ -7,6 +7,7 @@
  * where a step is one of
  *   move <x> <y>                  put the pointer there
  *   click <x> <y>                 put it there and press the left button
+ *   doubleclick <x> <y>           put it there and click twice, quickly
  *   scroll <x> <y> <notches>      put it there and turn the wheel
  *   shake <swings> <steps> <px> <ms>   swing it back and forth
  *   throw <x1> <y1> <x2> <y2>     press at the first point, sweep to the second
@@ -184,6 +185,21 @@ int main(int argc, char **argv) {
 		} else if (strcmp(argv[i], "click") == 0 && i + 2 < argc) {
 			move(atoi(argv[i + 1]), atoi(argv[i + 2]));
 			click();
+			i += 3;
+		} else if (strcmp(argv[i], "doubleclick") == 0 && i + 2 < argc) {
+			move(atoi(argv[i + 1]), atoi(argv[i + 2]));
+			for (int n = 0; n < 2; n++) {
+				zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+					WL_POINTER_BUTTON_STATE_PRESSED);
+				zwlr_virtual_pointer_v1_frame(pointer);
+				wl_display_flush(display);
+				rest(60);
+				zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT,
+					WL_POINTER_BUTTON_STATE_RELEASED);
+				zwlr_virtual_pointer_v1_frame(pointer);
+				wl_display_flush(display);
+				rest(n == 0 ? 80 : 900);
+			}
 			i += 3;
 		} else if (strcmp(argv[i], "scroll") == 0 && i + 3 < argc) {
 			move(atoi(argv[i + 1]), atoi(argv[i + 2]));

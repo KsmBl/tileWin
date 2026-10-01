@@ -763,7 +763,7 @@ static struct cstmt *startmenu_block(struct menus_page *p, bool create) {
 
 /* The style of the start menu, normally the one the theme asks for. */
 static const char *const layout_names[] = {
-	NULL, "classic", "twocolumn", "list", "tiles", "centered",
+	NULL, "classic", "twocolumn", "list", "tiles", "centered", "progman",
 };
 
 static void on_layout_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
@@ -1124,7 +1124,8 @@ GtkWidget *startmenu_page_new(struct settings *s) {
 	GtkWidget *start = ui_group(content, "Style", NULL);
 	p->layout_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"From the theme", "Classic (Windows 95)", "Two columns (Windows XP, 7)",
-		"List (Windows 10)", "Tiles (Windows 8)", "Centered (Windows 11)", NULL });
+		"List (Windows 10)", "Tiles (Windows 8)", "Centered (Windows 11)",
+		"Program Manager (Windows 3)", NULL });
 	ui_row(start, "Style", "How the start menu is laid out", p->layout_dd);
 	g_signal_connect(p->layout_dd, "notify::selected", G_CALLBACK(on_layout_selected), p);
 

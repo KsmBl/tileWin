@@ -451,6 +451,17 @@ test(
 )
 
 test(
+	'win3-extras',
+	find_program('win3_extras.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'snap-resize',
 	find_program('snap_resize.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

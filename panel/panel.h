@@ -749,6 +749,10 @@ void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t 
 	int x, int y, int button_width);
 void snaplayouts_leave(struct panel *panel, int64_t con_id);
 void snaplayouts_assist(struct panel *panel, int argc, char **argv);
+
+/* minicons.c: minimized windows as icons on the desktop (Windows 3) */
+void minicons_update(struct panel *panel);
+void minicons_output_removed(struct panel_output *output);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);

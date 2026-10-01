@@ -277,6 +277,12 @@ GtkWidget *desktop_page_new(struct settings *s) {
 		"Pixels of a cell of the grid", false, 48, 400, 100);
 	ui_taskbar_key(s, p->keys, icons, "desktop_margin", "Margin", "Pixels around the whole grid",
 		false, 0, 200, 10);
+	static const char *const minimized_values[] = { "theme", "yes", "no", NULL };
+	static const char *const minimized_labels[] = { "As the theme has it (Windows 3)",
+		"On the desktop as well", "Only on the taskbar", NULL };
+	ui_taskbar_choice(s, p->keys, icons, "minimized_icons", "Minimized windows",
+		"Windows 3 kept minimized windows as icons along the bottom of the desktop; a "
+		"double click restores one", minimized_values, minimized_labels);
 
 	p->widgets = ui_group(content, "Widgets",
 		"The widgets of the taskbar, on the desktop: as on the taskbar, or as a chart, a "

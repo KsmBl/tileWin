@@ -43,6 +43,7 @@ executable(
 		'jumplist.c',
 		'launcher.c',
 		'main.c',
+		'minicons.c',
 		'notify.c',
 		'osd.c',
 		'popup.c',
