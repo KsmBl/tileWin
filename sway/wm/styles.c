@@ -16,6 +16,7 @@
  */
 
 enum style {
+	STYLE_WIN3,
 	STYLE_WIN95,
 	STYLE_WINXP,
 	STYLE_WIN7,
@@ -37,7 +38,9 @@ struct metrics {
 
 static enum style get_style(const struct tw_theme *theme) {
 	const char *s = theme && theme->style ? theme->style : "win10";
-	if (strcasecmp(s, "win95") == 0 || strcasecmp(s, "classic") == 0) {
+	if (strcasecmp(s, "win3") == 0 || strcasecmp(s, "win31") == 0) {
+		return STYLE_WIN3;
+	} else if (strcasecmp(s, "win95") == 0 || strcasecmp(s, "classic") == 0) {
 		return STYLE_WIN95;
 	} else if (strcasecmp(s, "winxp") == 0 || strcasecmp(s, "luna") == 0) {
 		return STYLE_WINXP;
@@ -55,6 +58,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 	static const struct {
 		int top, max_top, border, grab, radius;
 	} defaults[] = {
+		[STYLE_WIN3] = { 24, 19, 4, 2, 0 },
 		[STYLE_WIN95] = { 23, 19, 4, 2, 0 },
 		[STYLE_WINXP] = { 30, 26, 4, 3, 8 },
 		[STYLE_WIN7] = { 30, 22, 8, 0, 6 },
@@ -94,6 +98,17 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 	struct metrics m;
 	get_metrics(t, maximized, &m);
 	switch (get_style(t)) {
+	case STYLE_WIN3: {
+		// square arrow buttons at the right end of the title bar; there is no
+		// close button: the control-menu box on the left closes on a double click
+		int y = m.side;
+		int bh = m.top - m.side - 1;
+		int right = width - m.side;
+		b->maximize = (struct wlr_box){ right - bh, y, bh, bh };
+		b->minimize = (struct wlr_box){ b->maximize.x - bh, y, bh, bh };
+		b->close = (struct wlr_box){ 0, 0, 0, 0 };
+		break;
+	}
 	case STYLE_WIN95: {
 		int bw = tw_theme_int(t, "decoration.button_width", 16);
 		int bh = tw_theme_int(t, "decoration.button_height", 14);
@@ -484,6 +499,122 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 		draw_95_glyph(cr, buttons[i].glyph, box.x + off, box.y + off,
 			tw_theme_color(t, "decoration.glyph", 0x000000ff));
 	}
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+}
+
+/* ---------- Windows 3 ---------- */
+
+/* A black triangle pointing up or down, as on the arrow buttons of Windows 3. */
+static void win3_triangle(cairo_t *cr, double cx, double tip_y, int half, bool up, uint32_t c) {
+	for (int r = 0; r <= half; r++) {
+		double y = up ? tip_y + r : tip_y - r;
+		fill_rect(cr, cx - r, y, 2 * r + 1, 1, c);
+	}
+}
+
+static void draw_win3_button(cairo_t *cr, const struct tw_theme *t, const struct wlr_box *b,
+		enum glyph glyph, bool pressed) {
+	uint32_t face = tw_theme_color(t, "decoration.face", 0xc0c0c0ff);
+	uint32_t hi = tw_theme_color(t, "decoration.highlight", 0xffffffff);
+	uint32_t shadow = tw_theme_color(t, "decoration.shadow", 0x808080ff);
+	uint32_t dark = tw_theme_color(t, "decoration.dark", 0x000000ff);
+	uint32_t glyph_color = tw_theme_color(t, "decoration.glyph", 0x000000ff);
+	// a black line on the left, then the raised face with a two pixel shadow
+	fill_rect(cr, b->x, b->y, 1, b->height, dark);
+	struct wlr_box f = { b->x + 1, b->y, b->width - 1, b->height };
+	fill_rect(cr, f.x, f.y, f.width, f.height, face);
+	if (pressed) {
+		fill_rect(cr, f.x, f.y, f.width, 1, shadow);
+		fill_rect(cr, f.x, f.y, 1, f.height, shadow);
+	} else {
+		fill_rect(cr, f.x, f.y, f.width - 1, 1, hi);
+		fill_rect(cr, f.x, f.y, 1, f.height - 1, hi);
+		fill_rect(cr, f.x, f.y + f.height - 2, f.width, 2, shadow);
+		fill_rect(cr, f.x + f.width - 2, f.y, 2, f.height, shadow);
+	}
+	int off = pressed ? 1 : 0;
+	double cx = floor(f.x + (f.width - 2) / 2.0) + off;
+	double cy = floor(f.y + (f.height - 2) / 2.0) + off;
+	switch (glyph) {
+	case GLYPH_MINIMIZE:
+		win3_triangle(cr, cx, cy + 2, 3, false, glyph_color);
+		break;
+	case GLYPH_MAXIMIZE:
+		win3_triangle(cr, cx, cy - 2, 3, true, glyph_color);
+		break;
+	case GLYPH_RESTORE:
+		win3_triangle(cr, cx, cy - 5, 3, true, glyph_color);
+		win3_triangle(cr, cx, cy + 5, 3, false, glyph_color);
+		break;
+	case GLYPH_CLOSE:
+		break;
+	}
+}
+
+static void draw_win3(cairo_t *cr, const struct tw_theme *t,
+		const struct tw_frame *f, const struct metrics *m) {
+	uint32_t face = tw_theme_color(t, "decoration.face", 0xc0c0c0ff);
+	uint32_t dark = tw_theme_color(t, "decoration.dark", 0x000000ff);
+	uint32_t frame = state_color(t, f, "frame", 0xc0c0c0ff, 0xffffffff);
+	int W = f->width, H = f->height;
+	int bar_h = m->top - m->side - 1;
+
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	if (m->side > 0) {
+		// the sizing border: black outside and inside, notched at the corners
+		int s = m->side;
+		fill_rect(cr, 0, 0, W, H, frame);
+		fill_rect(cr, 0, 0, W, 1, dark);
+		fill_rect(cr, 0, H - 1, W, 1, dark);
+		fill_rect(cr, 0, 0, 1, H, dark);
+		fill_rect(cr, W - 1, 0, 1, H, dark);
+		fill_rect(cr, s - 1, s - 1, W - 2 * s + 2, 1, dark);
+		fill_rect(cr, s - 1, H - s, W - 2 * s + 2, 1, dark);
+		fill_rect(cr, s - 1, s - 1, 1, H - 2 * s + 2, dark);
+		fill_rect(cr, W - s, s - 1, 1, H - 2 * s + 2, dark);
+		int notch = bar_h + s;
+		fill_rect(cr, notch, 0, 1, s, dark);
+		fill_rect(cr, W - notch - 1, 0, 1, s, dark);
+		fill_rect(cr, notch, H - s, 1, s, dark);
+		fill_rect(cr, W - notch - 1, H - s, 1, s, dark);
+		fill_rect(cr, 0, notch, s, 1, dark);
+		fill_rect(cr, W - s, notch, s, 1, dark);
+		fill_rect(cr, 0, H - notch - 1, s, 1, dark);
+		fill_rect(cr, W - s, H - notch - 1, s, 1, dark);
+	}
+
+	int bx = m->side, by = m->side, bw = W - 2 * m->side;
+	fill_rect(cr, bx, by, bw, bar_h, state_color(t, f, "title_bg", 0x000080ff, 0xffffffff));
+	fill_rect(cr, bx, by + bar_h, bw, 1, dark);
+
+	// the control-menu box, a bar like the space bar: a click opens the window
+	// menu, a double click closes the window
+	struct wlr_box ctl = { bx, by, bar_h, bar_h };
+	fill_rect(cr, ctl.x, ctl.y, ctl.width, ctl.height, face);
+	fill_rect(cr, ctl.x + ctl.width, ctl.y, 1, ctl.height, dark);
+	int bar_w = bar_h - 6, bar_x = ctl.x + 3, bar_y = ctl.y + bar_h / 2 - 2;
+	fill_rect(cr, bar_x + 1, bar_y + 1, bar_w, 3, tw_theme_color(t, "decoration.shadow",
+		0x808080ff));
+	fill_rect(cr, bar_x, bar_y, bar_w, 3, tw_theme_color(t, "decoration.highlight",
+		0xffffffff));
+	cairo_rectangle(cr, bar_x + 0.5, bar_y + 0.5, bar_w - 1, 2);
+	cairo_set_source_u32(cr, dark);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+
+	struct tw_buttons b;
+	tw_style_buttons(t, W, f->maximized, &b);
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+	double tx = ctl.x + ctl.width + 4;
+	draw_text(cr, tw_theme_str(t, "decoration.title_font", "MS Sans Serif, Noto Sans Bold 8"),
+		f->title, tx, by, b.minimize.x - tx - 4, bar_h,
+		state_color(t, f, "title_fg", 0xffffffff, 0x000000ff), true, TEXT_PLAIN, 0);
+
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	draw_win3_button(cr, t, &b.minimize, GLYPH_MINIMIZE,
+		f->pressed == TW_HIT_MINIMIZE && f->hover == TW_HIT_MINIMIZE);
+	draw_win3_button(cr, t, &b.maximize, max_glyph(f),
+		f->pressed == TW_HIT_MAXIMIZE && f->hover == TW_HIT_MAXIMIZE);
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 }
 
@@ -931,6 +1062,9 @@ void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 	struct metrics m;
 	get_metrics(theme, frame->maximized, &m);
 	switch (get_style(theme)) {
+	case STYLE_WIN3:
+		draw_win3(cr, theme, frame, &m);
+		break;
 	case STYLE_WIN95:
 		draw_win95(cr, theme, frame, &m);
 		break;
@@ -980,7 +1114,7 @@ void tw_style_draw_alttab(cairo_t *cr, const struct tw_theme *t,
 		const struct tw_alttab_item *items, int count, int selected,
 		int width, int height, int columns) {
 	enum style style = get_style(t);
-	bool classic = style == STYLE_WIN95;
+	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3;
 	double radius = tw_theme_int(t, "alttab.radius",
 		style == STYLE_WIN11 ? 8 : style == STYLE_WINXP ? 6 : style == STYLE_WIN7 ? 6 : 0);
 	uint32_t bg = tw_theme_color(t, "alttab.bg",
@@ -1055,7 +1189,7 @@ uint32_t tw_style_alttab_wash(const struct tw_theme *theme) {
 void tw_style_draw_alttab_title(cairo_t *cr, const struct tw_theme *t,
 		const char *title, int width, int height) {
 	enum style style = get_style(t);
-	bool classic = style == STYLE_WIN95;
+	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3;
 	uint32_t fg = tw_theme_color(t, "alttab.fg", classic ? 0x000000ff : 0xffffffff);
 	const char *font = tw_theme_str(t, "alttab.font",
 		classic ? "Tahoma, Noto Sans 8" : "Segoe UI, Noto Sans 12");
@@ -1064,5 +1198,5 @@ void tw_style_draw_alttab_title(cairo_t *cr, const struct tw_theme *t,
 
 uint32_t tw_style_snap_color(const struct tw_theme *theme) {
 	return tw_theme_color(theme, "snap.color",
-		get_style(theme) == STYLE_WIN95 ? 0x80808060 : 0xcfe3ff50);
+		get_style(theme) <= STYLE_WIN95 ? 0x80808060 : 0xcfe3ff50);
 }

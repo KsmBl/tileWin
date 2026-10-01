@@ -476,9 +476,17 @@ cairo_surface_t *saver_wallpaper(const char *output, int width, int height) {
 				double k = fmin((double)width / iw, (double)height / ih);
 				cairo_translate(cr, (width - iw * k) / 2, (height - ih * k) / 2);
 				cairo_scale(cr, k, k);
-			} else { // center
+			} else if (strcmp(mode, "center") != 0) { // tile
+				cairo_set_source_surface(cr, picture, 0, 0);
+				cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
+				cairo_paint(cr);
+				cairo_surface_destroy(picture);
+				picture = NULL;
+			} else {
 				cairo_translate(cr, (width - iw) / 2.0, (height - ih) / 2.0);
 			}
+		}
+		if (picture) {
 			cairo_set_source_surface(cr, picture, 0, 0);
 			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
 			cairo_paint(cr);

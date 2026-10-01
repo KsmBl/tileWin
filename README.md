@@ -32,8 +32,8 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows XP](docs/screenshots/theme-winxp.png) |
 | **Windows 7** | **Windows 11** |
 | ![Windows 7](docs/screenshots/theme-win7.png) | ![Windows 11](docs/screenshots/theme-win11.png) |
-| **Windows XP (dark)** | |
-| ![Windows XP (dark)](docs/screenshots/theme-winxp-dark.png) | |
+| **Windows XP (dark)** | **Windows 3** |
+| ![Windows XP (dark)](docs/screenshots/theme-winxp-dark.png) | ![Windows 3](docs/screenshots/theme-win3.png) |
 
 Windows 8 replaces the start menu with a full-screen start screen of colored tiles:
 
@@ -391,7 +391,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |
 | `panel_command <cmd>\|none` | Taskbar program started and restarted by tileWin |
-| `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center]` | Wallpaper drawn by the compositor |
+| `wallpaper theme\|none\|solid <color>\|gradient <c1> <c2> [vertical\|horizontal]\|image <path> [fill\|fit\|stretch\|center\|tile]` | Wallpaper drawn by the compositor (`tile` repeats the picture over the screen) |
 | `output_wallpaper <screen> <wallpaper>\|default` | A wallpaper of its own for one screen, with the arguments of `wallpaper`; the screen is its name (`DP-1`) or `"make model serial"`. `default` gives it the wallpaper of every screen again |
 | `main_output <screen>\|auto` | The main display: it gets the desktop icons and the taskbar that `outputs main` fills with the windows of every screen. `auto` (default) takes the screen at the top left |
 | `idle_timeout dim\|screen_off\|lock\|sleep\|screensaver <seconds>\|never` | After that long without input: dim the screen, turn it off, lock it (`lock_command`), sleep, or start the screen saver (`screensaver_command`), which input ends again. Apps that keep the screen on (videos) pause it. |
@@ -593,6 +593,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | Theme | Look |
 |---|---|
 | `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
+| `win3` | Windows 3.x: navy title bars with the title in the middle, the control-menu box (a click opens the window menu, a double click closes the window) and arrow buttons, thick grey borders notched at the corners, flat white menus, a tiled argyle wallpaper |
 | `winxp` | Luna blue title bars, green start button, two-column start menu |
 | `winxp-dark` | Windows XP in black: the same glossy Luna title bars, taskbar, Start menu and dialogs in black and greys, under a night sky; apps go dark while it is on |
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |

@@ -933,6 +933,16 @@ void tw_wallpaper_update(struct sway_output *output) {
 					dh = ih;
 					dx = (w - iw) / 2;
 					dy = (h - ih) / 2;
+				} else if (strcasecmp(mode, "tile") == 0) {
+					// the picture repeated over the whole screen, as Windows 3 did
+					cairo_surface_t *tiled = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+					cairo_t *tcr = cairo_create(tiled);
+					cairo_set_source_surface(tcr, image, 0, 0);
+					cairo_pattern_set_extend(cairo_get_source(tcr), CAIRO_EXTEND_REPEAT);
+					cairo_paint(tcr);
+					cairo_destroy(tcr);
+					cairo_surface_destroy(image);
+					image = tiled;
 				}
 				tw_scene_buffer_set_surface(buffer, image, dw, dh);
 				if (strcasecmp(mode, "fill") == 0) {

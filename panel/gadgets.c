@@ -100,7 +100,7 @@ static enum gadget_look look_of(const struct tw_theme *t) {
 		const char *name;
 		enum gadget_look look;
 	} names[] = {
-		{ "classic", GADGET_CLASSIC }, { "win95", GADGET_CLASSIC },
+		{ "classic", GADGET_CLASSIC }, { "win95", GADGET_CLASSIC }, { "win3", GADGET_CLASSIC },
 		{ "luna", GADGET_LUNA }, { "winxp", GADGET_LUNA },
 		{ "aero", GADGET_AERO }, { "win7", GADGET_AERO },
 		{ "metro", GADGET_METRO }, { "win8", GADGET_METRO },

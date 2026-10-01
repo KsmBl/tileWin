@@ -303,11 +303,12 @@ void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,
 	pd_rounded(cr, x, y, w, h, r);
 	pd_fill(cr, t, key, y, h, bg_fallback);
 
-	if (style == PS_CLASSIC) {
+	snprintf(key, sizeof(key), "%s.border", prefix);
+	// the classic look is raised, unless the theme gives a color (Windows 3)
+	if (style == PS_CLASSIC && strcmp(tw_theme_str(t, key, "bevel"), "bevel") == 0) {
 		pd_bevel(cr, x, y, w, h, false);
 		return;
 	}
-	snprintf(key, sizeof(key), "%s.border", prefix);
 	uint32_t border = tw_theme_color(t, key, style == PS_LUNA ? 0x8a867aff :
 		style == PS_AERO ? 0x979797ff : style == PS_FLUENT ? 0x00000024 : 0xccccccff);
 	pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);

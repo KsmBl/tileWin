@@ -19,7 +19,7 @@ enum {
 };
 
 static const char *const type_names[] = { "solid", "gradient", "image", "none", NULL };
-static const char *const fit_names[] = { "fill", "fit", "stretch", "center", NULL };
+static const char *const fit_names[] = { "fill", "fit", "stretch", "center", "tile", NULL };
 static const char *const image_exts[] = { "jpg", "jpeg", "png", "webp", "svg", NULL };
 
 /* Basename of the drop-in picture used for all themes. */
@@ -561,7 +561,7 @@ GtkWidget *wallpaper_page_new(struct settings *s) {
 	g_signal_connect(p->image_button, "clicked", G_CALLBACK(on_choose_all), p);
 	p->row_image = ui_row(all, "Picture", "The picture is copied to ~/.config/tileWin/wallpapers.",
 		p->image_button);
-	p->fit_dd = dropdown(p, (const char *const[]){ "Fill", "Fit", "Stretch", "Center", NULL });
+	p->fit_dd = dropdown(p, (const char *const[]){ "Fill", "Fit", "Stretch", "Center", "Tile", NULL });
 	p->row_fit = ui_row(all, "Fit", NULL, p->fit_dd);
 	p->bg = color_button(p);
 	p->row_bg = ui_row(all, "Background color", "Visible around pictures that don't fill the screen.",

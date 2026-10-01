@@ -112,7 +112,8 @@ static uint32_t theme_color(const char *key, uint32_t fallback) {
 }
 
 static bool classic_style(void) {
-	return tw_theme && tw_theme->style && strcmp(tw_theme->style, "win95") == 0;
+	return tw_theme && tw_theme->style && (strcmp(tw_theme->style, "win95") == 0 ||
+		strcmp(tw_theme->style, "win3") == 0);
 }
 
 static double radius(void) {
