@@ -213,6 +213,12 @@ void settings_refresh(struct settings *s) {
 	account_page_refresh(s);
 }
 
+static void flush_saves(struct settings *s);
+
+void settings_flush(struct settings *s) {
+	flush_saves(s);
+}
+
 static void flush_saves(struct settings *s) {
 	if (s->common_timer) {
 		g_source_remove(s->common_timer);
@@ -623,6 +629,8 @@ static void build_window(struct settings *s) {
 			"magnify enlarge", mouse_page_new, 3, "input-mouse-symbolic" },
 		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new, 4, "applications-system-symbolic" },
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 4, "avatar-default-symbolic" },
+		{ "backup", "Backup", "restore save export import copy settings file another computer",
+			backup_page_new, 4, "document-save-symbolic" },
 		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 4, "help-about-symbolic" },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
@@ -807,6 +815,22 @@ int main(int argc, char **argv) {
 		if (strcmp(argv[i], "--pick-file") == 0) {
 			return pick_file(i + 1 < argc ? argv[i + 1] : NULL);
 		}
+		// what the Backup page does, without the window
+		bool backup = strcmp(argv[i], "--backup") == 0;
+		if ((backup || strcmp(argv[i], "--restore") == 0) && i + 1 < argc) {
+			char *error = NULL, *saved_as = NULL;
+			bool ok = backup ? tw_backup_save(argv[i + 1], &error) :
+				tw_backup_restore(argv[i + 1], &saved_as, &error);
+			if (!ok) {
+				g_printerr("%s\n", error ? error : "failed");
+			} else if (saved_as) {
+				printf("The settings before are kept in %s\n", saved_as);
+				tw_ipc_command("reload", NULL);
+			}
+			g_free(error);
+			g_free(saved_as);
+			return ok ? 0 : 1;
+		}
 	}
 	struct settings *s = &settings;
 	s->common = confdoc_open("common.conf");
@@ -816,7 +840,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account or about", "PAGE");
+		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

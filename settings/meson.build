@@ -1,5 +1,6 @@
 executable(
 	'tilewin-settings', [
+		'backup.c',
 		'confdoc.c',
 		'ipc.c',
 		'main.c',
@@ -8,6 +9,7 @@ executable(
 		'page_animations.c',
 		'page_apps.c',
 		'page_appwindows.c',
+		'page_backup.c',
 		'page_bluetooth.c',
 		'page_datetime.c',
 		'page_desktop.c',

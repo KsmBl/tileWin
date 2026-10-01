@@ -276,6 +276,14 @@ void bluetooth_page_refresh(struct settings *s);
 GtkWidget *apps_page_new(struct settings *s);
 void apps_page_refresh(struct settings *s);
 GtkWidget *account_page_new(struct settings *s);
+GtkWidget *backup_page_new(struct settings *s);
+/* backup.c: all settings as one .tar.gz. A restore keeps the settings it
+ * replaces in tw_backup_auto_dir() first (saved_as: that copy). */
+bool tw_backup_save(const char *file, char **error);
+bool tw_backup_restore(const char *file, char **saved_as, char **error);
+char *tw_backup_auto_dir(void);
+/* Saves at once whatever is still waiting to be saved. */
+void settings_flush(struct settings *s);
 void account_page_refresh(struct settings *s);
 GtkWidget *animations_page_new(struct settings *s);
 void animations_page_refresh(struct settings *s);

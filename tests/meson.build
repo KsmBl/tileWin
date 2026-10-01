@@ -414,6 +414,13 @@ if gdk_pixbuf.found()
 	)
 endif
 
+test(
+	'settings-backup',
+	find_program('settings_backup.sh'),
+	args: [meson.project_build_root()],
+	suite: 'unit',
+)
+
 python = find_program('python3', required: false)
 if python.found()
 	test(
