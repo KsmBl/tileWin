@@ -607,6 +607,39 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	return true;
 }
 
+/*
+ * The windows snapped beside one put into a part of a layout move their line
+ * with it, as on Windows: the window on the other side gets the rest of the
+ * width, the quarter above or below it the rest of the height, so nothing is
+ * left covering the part just chosen.
+ */
+static void move_neighbours(struct sway_container *con, struct wlr_box area) {
+	struct sway_workspace *ws = con->pending.workspace;
+	enum tw_snap snap = con->tw.snap;
+	for (int i = 0; ws && i < ws->floating->length; i++) {
+		struct sway_container *other = ws->floating->items[i];
+		if (other == con || !other->view || other->pending.tw_minimized ||
+				other->pending.tw_maximized || other->tw.snap == TW_SNAP_NONE) {
+			continue;
+		}
+		enum tw_snap o = other->tw.snap;
+		bool moved = false;
+		if ((snap_left(snap) && snap_right(o)) || (snap_right(snap) && snap_left(o))) {
+			other->tw.split_x = con->tw.split_x;
+			moved = true;
+		}
+		if (snap_quarter(snap) && snap_quarter(o) && snap_left(snap) == snap_left(o) &&
+				snap != o) {
+			other->tw.split_y = con->tw.split_y;
+			moved = true;
+		}
+		if (moved) {
+			struct wlr_box box = tw_container_snap_box(other, area);
+			tw_set_box(other, &box);
+		}
+	}
+}
+
 bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double fy,
 		char **error) {
 	static const struct {
@@ -626,9 +659,10 @@ bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double 
 			tw_snap_to(con, slots[i].snap);
 			con->tw.split_x = fx;
 			con->tw.split_y = fy;
-			struct wlr_box box = tw_container_snap_box(con,
-				tw_workarea(con->pending.workspace));
+			struct wlr_box area = tw_workarea(con->pending.workspace);
+			struct wlr_box box = tw_container_snap_box(con, area);
 			tw_set_box(con, &box);
+			move_neighbours(con, area);
 			return true;
 		}
 	}

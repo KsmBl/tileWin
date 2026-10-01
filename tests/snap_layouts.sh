@@ -4,7 +4,8 @@
 #  - a click on the left part of the halves snaps the window to the left half;
 #  - no menu offers the other windows for the rest of the layout afterwards:
 #    a click where it used to be leaves the other window where it is;
-#  - "snap left 0.66" gives a window two thirds of the screen;
+#  - "snap left 0.66" gives a window two thirds of the screen, and the window
+#    snapped beside it takes the third left;
 #  - "snap_layouts disable" turns the layouts off.
 #
 # usage: snap_layouts.sh <build dir> <source dir>
@@ -171,6 +172,19 @@ ipc '[title=one] snap left 0.66' >/dev/null
 sleep 0.5
 set -- $(window one)
 [ "$3" = 844 ] || fail "snap left 0.66 does not give two thirds: $*"
+
+# the window snapped beside it moves its line along, so it covers nothing
+ipc '[title=one] snap left' >/dev/null
+ipc '[title=two] snap right' >/dev/null
+sleep 0.5
+ipc '[title=one] snap left 0.66' >/dev/null
+sleep 0.5
+set -- $(window two)
+[ "$1 $3" = "844 436" ] || fail "the window beside a two thirds one did not take the third left: $*"
+ipc '[title=two] snap right 0.34' >/dev/null
+sleep 0.5
+set -- $(window one)
+[ "$3" = 435 ] || fail "the window beside a two thirds one on the right kept its width: $*"
 
 ipc snap_layouts disable >/dev/null
 place_one
