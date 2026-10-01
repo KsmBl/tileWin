@@ -540,6 +540,16 @@ test(
 )
 
 test(
+	'startmenu-styles',
+	find_program('startmenu_styles.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 180,
+)
+
+test(
 	'media-buttons',
 	find_program('media_buttons.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

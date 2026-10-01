@@ -4,6 +4,7 @@
 #include <math.h>
 #include <pwd.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -617,6 +618,175 @@ static void draw_search_box(struct sm_ctx *c, double x, double y, double w, doub
 	psurface_add_hotspot(c->p->surface, x, y, w, h, NULL, HS_SEARCH, 0, NULL);
 }
 
+/* ---------- colors ---------- */
+
+/*
+ * The colors a theme gives "startmenu.*" are made for the style of Start menu
+ * it brings. Picked in another style, the menu takes the colors the rest of
+ * the desktop has instead: the menus, the accent of the flyouts and the title
+ * bars of the windows, in light and in dark.
+ */
+static struct sm_palette {
+	bool foreign; // the style is not the one the theme brings
+	uint32_t bg, fg, dim, hl_bg, hl_fg, field_bg, field_fg, border, line;
+	uint32_t title, title_fg, accent, alt, button, button_hover;
+	uint32_t screen_bg, screen_fg; // the start screen of tiles
+} pal;
+
+static uint32_t mix(uint32_t a, uint32_t b, double t) {
+	uint32_t out = 0;
+	for (int shift = 24; shift >= 0; shift -= 8) {
+		double ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
+		out |= (uint32_t)(ca + (cb - ca) * t + 0.5) << shift;
+	}
+	return out;
+}
+
+static double luminance(uint32_t c) {
+	return (0.2126 * ((c >> 24) & 0xff) + 0.7152 * ((c >> 16) & 0xff) +
+		0.0722 * ((c >> 8) & 0xff)) / 255.0;
+}
+
+/* How far apart two colors are: the sum of the differences of red, green and blue. */
+static int color_distance(uint32_t a, uint32_t b) {
+	int d = 0;
+	for (int shift = 24; shift >= 8; shift -= 8) {
+		d += abs((int)((a >> shift) & 0xff) - (int)((b >> shift) & 0xff));
+	}
+	return d;
+}
+
+static double saturation(uint32_t c) {
+	double r = (c >> 24) & 0xff, g = (c >> 16) & 0xff, b = (c >> 8) & 0xff;
+	double hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+	double lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+	return hi > 0 ? (hi - lo) / hi : 0;
+}
+
+/* A color of its own: solid enough to stand alone and not a grey. */
+static bool colorful(uint32_t c) {
+	return (c & 0xff) >= 0xc0 && saturation(c) >= 0.3;
+}
+
+static uint32_t opaque(uint32_t c) {
+	return c | 0xff;
+}
+
+/* The color of the active title bars: their own, or where their gradient starts. */
+static uint32_t title_color(const struct tw_theme *t, uint32_t fallback) {
+	uint32_t c;
+	// a color of its own first: a theme may inherit the gradient of another
+	if (tw_theme_str(t, "decoration.active.title_bg", NULL)) {
+		return opaque(tw_theme_color(t, "decoration.active.title_bg", fallback));
+	}
+	const char *gradient = tw_theme_str(t, "decoration.active.title_gradient", NULL);
+	const char *hash = gradient ? strchr(gradient, '#') : NULL;
+	if (hash) {
+		char first[16] = "";
+		sscanf(hash, "%15[#0-9a-fA-F]", first);
+		if (tw_parse_color(first, &c)) {
+			return opaque(c);
+		}
+	}
+	return opaque(tw_theme_color(t, "decoration.active.title_bg", fallback));
+}
+
+static void palette_init(struct panel *panel, bool foreign) {
+	const struct tw_theme *t = panel->theme;
+	pal.foreign = foreign;
+	if (!foreign) {
+		return;
+	}
+	enum pstyle style = panel_style(panel);
+	pal.bg = opaque(tw_theme_color(t, "menu.bg", style == PS_CLASSIC ? 0xc0c0c0ff : 0xf2f2f2ff));
+	pal.fg = tw_theme_color(t, "menu.fg", 0x000000ff);
+	pal.dim = tw_theme_color(t, "menu.disabled_fg", mix(pal.fg, pal.bg, 0.45));
+	pal.hl_bg = tw_theme_color(t, "menu.hl_bg", 0x0078d7ff);
+	pal.hl_fg = tw_theme_color(t, "menu.hl_fg", 0xffffffff);
+	pal.field_bg = tw_theme_color(t, "menu.field_bg", mix(pal.bg, 0xffffffff, 0.6));
+	pal.field_fg = tw_theme_color(t, "menu.field_fg", pal.fg);
+	pal.border = tw_theme_color(t, "menu.border", mix(pal.fg, pal.bg, 0.7));
+	pal.line = mix(pal.fg, pal.bg, 0.8);
+	// the accent: the first color of its own among the flyouts, the menus and the
+	// title bars (Windows 11 highlights with a shade of grey)
+	pal.title = title_color(t, 0x0078d7ff);
+	uint32_t candidates[] = { tw_theme_color(t, "flyout.accent", 0), tw_theme_color(t, "flyout.bar", 0),
+		pal.hl_bg, pal.title };
+	pal.accent = style == PS_FLUENT ? 0x0067c0ff : 0x0078d7ff;
+	for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+		if (colorful(candidates[i])) {
+			pal.accent = opaque(candidates[i]);
+			break;
+		}
+	}
+	pal.title_fg = tw_theme_color(t, "decoration.active.title_fg",
+		luminance(pal.title) > 0.6 ? 0x000000ff : 0xffffffff);
+	// a band beside the menu, as the right column of XP or the strip of 10
+	pal.alt = mix(pal.bg, pal.fg, luminance(pal.bg) > 0.5 ? 0.06 : 0.1);
+	pal.button = mix(pal.bg, pal.fg, 0.07);
+	pal.button_hover = mix(pal.bg, pal.fg, 0.14);
+	// the start screen fills the screen: the title bars' color, deep enough for
+	// white text, or the accent darkened where the title bars are light
+	uint32_t base = luminance(pal.title) < 0.55 ? pal.title : pal.accent;
+	pal.screen_bg = luminance(base) < 0.55 ? base : mix(base, 0x000000ff, 0.55);
+	pal.screen_fg = luminance(pal.screen_bg) > 0.6 ? 0x000000ff : 0xffffffff;
+}
+
+/* A "startmenu.*" color of the theme, or the desktop's own for a style it does not bring. */
+static uint32_t smc(const struct tw_theme *t, const char *key, uint32_t fallback) {
+	if (!pal.foreign) {
+		return tw_theme_color(t, key, fallback);
+	}
+	static const struct {
+		const char *key;
+		size_t offset;
+	} map[] = {
+		{ "startmenu.bg", offsetof(struct sm_palette, bg) },
+		{ "startmenu.fg", offsetof(struct sm_palette, fg) },
+		{ "startmenu.dim", offsetof(struct sm_palette, dim) },
+		{ "startmenu.hl_bg", offsetof(struct sm_palette, hl_bg) },
+		{ "startmenu.hl_fg", offsetof(struct sm_palette, hl_fg) },
+		{ "startmenu.left_bg", offsetof(struct sm_palette, bg) },
+		{ "startmenu.left_fg", offsetof(struct sm_palette, fg) },
+		{ "startmenu.right_bg", offsetof(struct sm_palette, alt) },
+		{ "startmenu.right_fg", offsetof(struct sm_palette, fg) },
+		{ "startmenu.right_hl_bg", offsetof(struct sm_palette, hl_bg) },
+		{ "startmenu.strip_bg", offsetof(struct sm_palette, alt) },
+		{ "startmenu.footer_bg", offsetof(struct sm_palette, alt) },
+		{ "startmenu.border", offsetof(struct sm_palette, border) },
+		{ "startmenu.header_fg", offsetof(struct sm_palette, title_fg) },
+		{ "startmenu.footer_fg", offsetof(struct sm_palette, title_fg) },
+		{ "startmenu.header_line", offsetof(struct sm_palette, accent) },
+		{ "startmenu.divider", offsetof(struct sm_palette, line) },
+		{ "startmenu.separator", offsetof(struct sm_palette, line) },
+		{ "startmenu.search_bg", offsetof(struct sm_palette, field_bg) },
+		{ "startmenu.search_fg", offsetof(struct sm_palette, field_fg) },
+		{ "startmenu.search_border", offsetof(struct sm_palette, border) },
+	};
+	for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+		if (strcmp(map[i].key, key) == 0) {
+			return *(uint32_t *)((char *)&pal + map[i].offset);
+		}
+	}
+	return fallback;
+}
+
+/* The header and footer bands of the two column menu: the theme's gradient, or a title bar's color. */
+static void sm_band(cairo_t *cr, const struct tw_theme *t, const char *key, double y, double h,
+		uint32_t fallback) {
+	if (pal.foreign) {
+		pd_color(cr, pal.title);
+		cairo_fill(cr);
+	} else {
+		pd_fill(cr, t, key, y, h, fallback);
+	}
+}
+
+/* The prefix of the box around the menu: the theme's start menu, or its menus. */
+static const char *frame_prefix(void) {
+	return pal.foreign ? "menu" : "startmenu";
+}
+
 /* ---------- two column (XP / 7) ---------- */
 
 static void render_twocolumn(struct popup *p, cairo_t *cr) {
@@ -628,13 +798,14 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 	int M = popup_shadow_margin(panel);
 	double W = p->surface->width - 2 * M, H = p->surface->height - 2 * M;
 	bool xp = style != PS_AERO;
-	double r = tw_theme_double(t, "startmenu.radius", xp ? 7 : 6);
+	double r = pal.foreign ? popup_radius(panel, "menu") :
+		tw_theme_double(t, "startmenu.radius", xp ? 7 : 6);
 	cairo_translate(cr, M, M);
 
-	uint32_t left_fg = tw_theme_color(t, "startmenu.left_fg", 0x000000ff);
-	uint32_t right_fg = tw_theme_color(t, "startmenu.right_fg", xp ? 0x0a246aff : 0xffffffff);
-	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg", xp ? 0x316ac5ff : 0xd9e8fbff);
-	uint32_t hl_fg = tw_theme_color(t, "startmenu.hl_fg", xp ? 0xffffffff : 0x000000ff);
+	uint32_t left_fg = smc(t, "startmenu.left_fg", 0x000000ff);
+	uint32_t right_fg = smc(t, "startmenu.right_fg", xp ? 0x0a246aff : 0xffffffff);
+	uint32_t hl_bg = smc(t, "startmenu.hl_bg", xp ? 0x316ac5ff : 0xd9e8fbff);
+	uint32_t hl_fg = smc(t, "startmenu.hl_fg", xp ? 0xffffffff : 0x000000ff);
 	const char *bold = bar_bold_font(panel);
 
 	double lx, ly, lw, lh, rx, ry, rw;
@@ -649,21 +820,21 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		}
 		cairo_translate(cr, M, M);
 		pd_rounded4(cr, 0, 0, W, H, r, r, 0, 0);
-		pd_color(cr, tw_theme_color(t, "startmenu.border", 0x1c52b8ff));
+		pd_color(cr, smc(t, "startmenu.border", 0x1c52b8ff));
 		cairo_fill(cr);
 		// header
 		double hh = 64;
 		pd_rounded4(cr, 1, 1, W - 2, hh, r, r, 0, 0);
-		pd_fill(cr, t, "startmenu.header", 1, hh, 0x2468d4ff);
+		sm_band(cr, t, "startmenu.header", 1, hh, 0x2468d4ff);
 		draw_avatar(&c, 10, 8, 48, 0xffffffff, 0x5a8ee0ff, false);
 		pd_text(cr, "Trebuchet MS, Noto Sans Bold 13", sm->user, 67, 9, W - 80, hh - 16,
 			0x00000060, PD_LEFT);
 		pd_text(cr, "Trebuchet MS, Noto Sans Bold 13", sm->user, 66, 8, W - 80, hh - 16,
-			tw_theme_color(t, "startmenu.header_fg", 0xffffffff), PD_LEFT);
+			smc(t, "startmenu.header_fg", 0xffffffff), PD_LEFT);
 		// footer
 		double fh = 44;
 		cairo_rectangle(cr, 1, H - fh, W - 2, fh - 1);
-		pd_fill(cr, t, "startmenu.footer", H - fh, fh, 0x2163d8ff);
+		sm_band(cr, t, "startmenu.footer", H - fh, fh, 0x2163d8ff);
 		double bx = W - 12;
 		const char *labels[] = { "Turn Off Computer", "Log Off" };
 		uint32_t colors[] = { 0xe0532bff, 0xf2b82bff };
@@ -683,7 +854,7 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 			cairo_fill(cr);
 			pd_glyph_power(cr, bx + 7, H - fh / 2 - 8, 16, 0xffffffff);
 			pd_text(cr, bar_font(panel), labels[i], bx + 30, H - fh, tw + 4, fh,
-				tw_theme_color(t, "startmenu.footer_fg", 0xffffffff), PD_LEFT);
+				smc(t, "startmenu.footer_fg", 0xffffffff), PD_LEFT);
 			psurface_add_hotspot(p->surface, M + bx, M + H - fh, bw, fh, NULL, HS_POWER, i, NULL);
 			bx -= 6;
 		}
@@ -691,19 +862,19 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		ly = hh + 1;
 		lw = (W - 2) * 0.52;
 		lh = H - hh - fh - 1;
-		pd_rect(cr, lx, ly, lw, lh, tw_theme_color(t, "startmenu.left_bg", 0xffffffff));
+		pd_rect(cr, lx, ly, lw, lh, smc(t, "startmenu.left_bg", 0xffffffff));
 		rx = lx + lw;
 		ry = ly;
 		rw = W - 1 - rx;
-		pd_rect(cr, rx, ry, rw, lh, tw_theme_color(t, "startmenu.right_bg", 0xd3e5faff));
-		pd_rect(cr, rx, ry, 1, lh, tw_theme_color(t, "startmenu.divider", 0x95bdeeff));
-		pd_rect(cr, lx, ly, W - 2, 2, tw_theme_color(t, "startmenu.header_line", 0xf5a14dff));
+		pd_rect(cr, rx, ry, rw, lh, smc(t, "startmenu.right_bg", 0xd3e5faff));
+		pd_rect(cr, rx, ry, 1, lh, smc(t, "startmenu.divider", 0x95bdeeff));
+		pd_rect(cr, lx, ly, W - 2, 2, smc(t, "startmenu.header_line", 0xf5a14dff));
 	} else {
 		cairo_translate(cr, -M, -M);
-		popup_draw_frame(panel, cr, W + 2 * M, H + 2 * M, M, "startmenu");
+		popup_draw_frame(panel, cr, W + 2 * M, H + 2 * M, M, frame_prefix());
 		cairo_translate(cr, M, M);
 		pd_rounded(cr, 0, 0, W, H, r);
-		pd_color(cr, tw_theme_color(t, "startmenu.glass", 0x1f3c5ce0));
+		pd_color(cr, smc(t, "startmenu.glass", 0x1f3c5ce0));
 		cairo_fill(cr);
 		pd_rounded(cr, 0, 0, W, H * 0.4, r);
 		cairo_pattern_t *g = pd_gradient("0:#ffffff30 1:#ffffff00", 0, 0, 0, H * 0.4);
@@ -715,10 +886,10 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		lw = W * 0.6;
 		lh = H - 16 - 40;
 		pd_rounded(cr, lx, ly, lw, lh, 4);
-		pd_color(cr, tw_theme_color(t, "startmenu.left_bg", 0xffffffff));
+		pd_color(cr, smc(t, "startmenu.left_bg", 0xffffffff));
 		cairo_fill(cr);
-		draw_search_box(&c, lx, H - 38, lw, 28, tw_theme_color(t, "startmenu.search_bg", 0xffffffff),
-			tw_theme_color(t, "startmenu.search_fg", 0x6d6d6dff), 0x00000060, 3,
+		draw_search_box(&c, lx, H - 38, lw, 28, smc(t, "startmenu.search_bg", 0xffffffff),
+			smc(t, "startmenu.search_fg", 0x6d6d6dff), 0x00000060, 3,
 			"Search programs and files");
 		rx = lx + lw + 10;
 		ry = 70;
@@ -741,9 +912,9 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 	}
 
 	// left column content (hotspots are in surface coordinates)
-	uint32_t right_hl = tw_theme_color(t, "startmenu.right_hl_bg", xp ? 0x316ac5ff : 0xffffff30);
-	uint32_t separator = tw_theme_color(t, "startmenu.separator", 0xd0d0d0ff);
-	uint32_t dim = tw_theme_color(t, "startmenu.dim", 0x6d6d6dff);
+	uint32_t right_hl = smc(t, "startmenu.right_hl_bg", xp ? 0x316ac5ff : 0xffffff30);
+	uint32_t separator = smc(t, "startmenu.separator", 0xd0d0d0ff);
+	uint32_t dim = smc(t, "startmenu.dim", 0x6d6d6dff);
 	cairo_save(cr);
 	cairo_translate(cr, -M, -M);
 	c.sm->hits->length = 0;
@@ -754,11 +925,11 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		if (xp) {
 			// the XP menu has no search box of its own: show what is typed
 			draw_search_box(&c, col_x + 2, top, col_w - 4, 26,
-				tw_theme_color(t, "startmenu.search_bg",
+				smc(t, "startmenu.search_bg",
 					tw_theme_color(t, "menu.field_bg", 0xffffffff)),
-				tw_theme_color(t, "startmenu.search_fg",
+				smc(t, "startmenu.search_fg",
 					tw_theme_color(t, "menu.field_fg", 0x000000ff)),
-				tw_theme_color(t, "startmenu.search_border", 0x7f9db9ff), 0,
+				smc(t, "startmenu.search_border", 0x7f9db9ff), 0,
 				"Type to search programs");
 			top += 32;
 		}
@@ -797,7 +968,7 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 		rcy += 32;
 	}
 	pd_rect(cr, rcx + 6, rcy + 3, rcw - 12, 1,
-		tw_theme_color(t, "startmenu.divider", xp ? 0x95bdeeff : 0xffffff40));
+		smc(t, "startmenu.divider", xp ? 0x95bdeeff : 0xffffff40));
 	rcy += 8;
 	draw_simple_row(&c, HS_THEMES, 0, "preferences-desktop-theme", "Change theme", rcx, rcy,
 		rcw, 32, xp ? 24 : 0, bar_font(panel), right_fg, right_hl,
@@ -817,13 +988,13 @@ static void render_list(struct popup *p, cairo_t *cr) {
 	const struct tw_theme *t = panel->theme;
 	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
 	double W = p->surface->width, H = p->surface->height;
-	uint32_t fg = tw_theme_color(t, "startmenu.fg", 0xffffffff);
-	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg", 0xffffff1f);
-	uint32_t hl_fg = tw_theme_color(t, "startmenu.hl_fg", fg);
+	uint32_t fg = smc(t, "startmenu.fg", 0xffffffff);
+	uint32_t hl_bg = smc(t, "startmenu.hl_bg", 0xffffff1f);
+	uint32_t hl_fg = smc(t, "startmenu.hl_fg", fg);
 
-	pd_rect(cr, 0, 0, W, H, tw_theme_color(t, "startmenu.bg", 0x1f1f1ff2));
+	pd_rect(cr, 0, 0, W, H, smc(t, "startmenu.bg", 0x1f1f1ff2));
 	double strip = 48;
-	pd_rect(cr, 0, 0, strip, H, tw_theme_color(t, "startmenu.strip_bg", 0x1a1a1af2));
+	pd_rect(cr, 0, 0, strip, H, smc(t, "startmenu.strip_bg", 0x1a1a1af2));
 	// strip icons from the bottom: power, settings, pictures, documents, user
 	double sy = H - strip;
 	struct {
@@ -862,8 +1033,8 @@ static void render_list(struct popup *p, cairo_t *cr) {
 	sm->hits->length = 0;
 	double mx = strip + 8, my = 8, mw = W - strip - 16, mh = H - 16;
 	if (sm->show_search || sm->search[0]) {
-		draw_search_box(&c, mx, my, mw, 36, tw_theme_color(t, "startmenu.search_bg", 0xffffffff),
-			tw_theme_color(t, "startmenu.search_fg", 0x000000ff), 0x0078d7ff, 0,
+		draw_search_box(&c, mx, my, mw, 36, smc(t, "startmenu.search_bg", 0xffffffff),
+			smc(t, "startmenu.search_fg", 0x000000ff), 0x0078d7ff, 0,
 			"Type here to search");
 		my += 44;
 		mh -= 44;
@@ -897,17 +1068,18 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
 	int M = popup_shadow_margin(panel);
 	double W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(panel, cr, W, H, M, "startmenu");
-	uint32_t fg = tw_theme_color(t, "startmenu.fg", 0x000000ff);
-	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg", 0x0000000f);
-	uint32_t hl_fg = tw_theme_color(t, "startmenu.hl_fg", fg);
+	popup_draw_frame(panel, cr, W, H, M, frame_prefix());
+	uint32_t fg = smc(t, "startmenu.fg", 0x000000ff);
+	uint32_t hl_bg = smc(t, "startmenu.hl_bg", 0x0000000f);
+	uint32_t hl_fg = smc(t, "startmenu.hl_fg", fg);
 	double x0 = M + 32, w0 = W - 2 * M - 64;
 	const char *bold = bar_bold_font(panel);
 
-	draw_search_box(&c, x0, M + 24, w0, 36, tw_theme_color(t, "startmenu.search_bg", 0xffffffff),
-		tw_theme_color(t, "startmenu.search_fg", 0x5f5f5fff), 0x00000020, 18,
+	draw_search_box(&c, x0, M + 24, w0, 36, smc(t, "startmenu.search_bg", 0xffffffff),
+		smc(t, "startmenu.search_fg", 0x5f5f5fff), 0x00000020, 18,
 		"Type here to search");
-	pd_rect(cr, x0 + 18, M + 24 + 35, w0 - 36, 1, sm->show_search ? 0x005fb8ff : 0x00000000);
+	pd_rect(cr, x0 + 18, M + 24 + 35, w0 - 36, 1, !sm->show_search ? 0x00000000 :
+		pal.foreign ? pal.accent : 0x005fb8ff);
 
 	double footer_h = 64;
 	double content_y = M + 80, content_h = H - M - footer_h - content_y - 8;
@@ -924,9 +1096,12 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 		double bw = 84, bx = x0 + w0 - bw - 16;
 		bool hov = hovered(&c, bx, content_y + 2, bw, 28);
 		pd_rounded(cr, bx + 0.5, content_y + 2.5, bw - 1, 27, 4);
-		pd_color(cr, hov ? 0xf6f6f6ff : 0xfbfbfbff);
+		pd_color(cr, pal.foreign ? (hov ? pal.button_hover : pal.button) :
+			luminance(fg) > 0.5 ? (fg & 0xffffff00) | (hov ? 0x30 : 0x18) :
+			hov ? 0xf6f6f6ff : 0xfbfbfbff);
 		cairo_fill_preserve(cr);
-		pd_color(cr, 0x00000020);
+		pd_color(cr, pal.foreign ? pal.line : luminance(fg) > 0.5 ? (fg & 0xffffff00) | 0x30 :
+			0x00000020);
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 		pd_glyph_arrow(cr, bx + 8, content_y + 10, 12, 2, fg);
@@ -939,9 +1114,12 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 		double bw = 96, bx = x0 + w0 - bw - 16;
 		bool hov = hovered(&c, bx, content_y + 2, bw, 28);
 		pd_rounded(cr, bx + 0.5, content_y + 2.5, bw - 1, 27, 4);
-		pd_color(cr, hov ? 0xf6f6f6ff : 0xfbfbfbff);
+		pd_color(cr, pal.foreign ? (hov ? pal.button_hover : pal.button) :
+			luminance(fg) > 0.5 ? (fg & 0xffffff00) | (hov ? 0x30 : 0x18) :
+			hov ? 0xf6f6f6ff : 0xfbfbfbff);
 		cairo_fill_preserve(cr);
-		pd_color(cr, 0x00000020);
+		pd_color(cr, pal.foreign ? pal.line : luminance(fg) > 0.5 ? (fg & 0xffffff00) | 0x30 :
+			0x00000020);
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 		pd_text(cr, bar_font(panel), "All apps", bx + 10, content_y + 2, bw - 30, 28, fg, PD_LEFT);
@@ -972,11 +1150,11 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 
 	// footer
 	double fy = H - M - footer_h;
-	pd_rounded4(cr, M, fy, W - 2 * M, footer_h, 0, 0, popup_radius(panel, "startmenu"),
-		popup_radius(panel, "startmenu"));
-	pd_color(cr, tw_theme_color(t, "startmenu.footer_bg", 0xe7e7e7f5));
+	pd_rounded4(cr, M, fy, W - 2 * M, footer_h, 0, 0, popup_radius(panel, frame_prefix()),
+		popup_radius(panel, frame_prefix()));
+	pd_color(cr, smc(t, "startmenu.footer_bg", 0xe7e7e7f5));
 	cairo_fill(cr);
-	pd_rect(cr, M, fy, W - 2 * M, 1, 0x00000014);
+	pd_rect(cr, M, fy, W - 2 * M, 1, pal.foreign ? pal.line : 0x00000014);
 	draw_avatar(&c, x0 + 16, fy + 16, 32, 0xd0d0d0ff, 0x808080ff, true);
 	pd_text(cr, bar_font(panel), sm->user, x0 + 58, fy, 300, footer_h, fg, PD_LEFT);
 	double pbx = x0 + w0 - 40, pby = fy + 12;
@@ -997,6 +1175,29 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 #define APPS_ROW 40
 
 static uint32_t tile_color(struct panel *panel, const struct tw_desktop_entry *e) {
+	if (pal.foreign) {
+		// shades of the theme's own colors, each deep enough for white text
+		uint32_t base[] = { pal.accent, colorful(pal.title) ? pal.title : pal.accent,
+			colorful(pal.hl_bg) ? pal.hl_bg : mix(pal.accent, 0xffffffff, 0.2) };
+		unsigned long hash = 5381;
+		for (const char *s = e->id; s && *s; s++) {
+			hash = hash * 33 + (unsigned char)*s;
+		}
+		uint32_t c = opaque(base[hash % 3]);
+		double shade = (double)((hash / 3) % 3) * 0.12;
+		c = mix(c, 0x000000ff, shade);
+		while (luminance(c) > 0.5) {
+			c = mix(c, 0x000000ff, 0.2);
+		}
+		// a tile has to stand out from the screen it is on
+		if (color_distance(c, pal.screen_bg) < 90) {
+			c = mix(pal.screen_bg, 0xffffffff, 0.16 + 0.08 * (double)((hash / 9) % 3));
+			while (luminance(c) > 0.5) {
+				c = mix(c, 0x000000ff, 0.2);
+			}
+		}
+		return c;
+	}
 	const char *list = tw_theme_str(panel->theme, "startmenu.tile_colors",
 		"#2672ec #00a300 #dc572e #8c0095 #00aba9 #ac193d #2e8def #d24726");
 	char *copy = strdup(list);
@@ -1073,9 +1274,10 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 	const struct tw_theme *t = panel->theme;
 	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
 	double W = p->surface->width, H = p->surface->height;
-	uint32_t bg = tw_theme_color(t, "startmenu.bg", 0x180052ff);
-	uint32_t fg = tw_theme_color(t, "startmenu.fg", 0xffffffff);
-	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg", 0xffffff26);
+	uint32_t bg = pal.foreign ? pal.screen_bg : smc(t, "startmenu.bg", 0x180052ff);
+	uint32_t fg = pal.foreign ? pal.screen_fg : smc(t, "startmenu.fg", 0xffffffff);
+	uint32_t hl_bg = pal.foreign ? (pal.screen_fg & 0xffffff00) | 0x26 :
+		smc(t, "startmenu.hl_bg", 0xffffff26);
 	pd_rect(cr, 0, 0, W, H, bg);
 	sm->hits->length = 0;
 
@@ -1086,8 +1288,8 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 	pd_text(cr, title_font, title, left, top, 260, 56, fg, PD_LEFT);
 	if (sm->show_search || sm->search[0]) {
 		draw_search_box(&c, left + 220, top + 12, W - left - 220 - 300 > 360 ? 360 :
-			W - left - 520, 34, tw_theme_color(t, "startmenu.search_bg", 0xffffffff),
-			tw_theme_color(t, "startmenu.search_fg", 0x000000ff), 0x00000000, 0, "Search");
+			W - left - 520, 34, smc(t, "startmenu.search_bg", 0xffffffff),
+			smc(t, "startmenu.search_fg", 0x000000ff), 0x00000000, 0, "Search");
 	}
 
 	// account and power at the top right, like the Windows 8.1 start screen
@@ -1339,13 +1541,17 @@ static void render_progman(struct popup *p, cairo_t *cr) {
 	struct sm_ctx c = { p, sm, panel, cr, p->surface->scale };
 	double W = p->surface->width, H = p->surface->height;
 	uint32_t frame = tw_theme_color(t, "decoration.active.frame", 0xc0c0c0ff);
-	uint32_t title_bg = tw_theme_color(t, "decoration.active.title_bg", 0x000080ff);
+	uint32_t title_bg = title_color(t, 0x000080ff);
 	uint32_t title_fg = tw_theme_color(t, "decoration.active.title_fg", 0xffffffff);
-	uint32_t bg = tw_theme_color(t, "startmenu.bg", tw_theme_color(t, "menu.bg", 0xffffffff));
-	uint32_t fg = tw_theme_color(t, "startmenu.fg", tw_theme_color(t, "menu.fg", 0x000000ff));
-	uint32_t hl_bg = tw_theme_color(t, "startmenu.hl_bg",
+	if (fabs(luminance(title_bg) - luminance(title_fg)) < 0.4) {
+		// title bars of glass carry dark text; on a solid bar it has to be readable
+		title_fg = luminance(title_bg) > 0.5 ? 0x000000ff : 0xffffffff;
+	}
+	uint32_t bg = smc(t, "startmenu.bg", tw_theme_color(t, "menu.bg", 0xffffffff));
+	uint32_t fg = smc(t, "startmenu.fg", tw_theme_color(t, "menu.fg", 0x000000ff));
+	uint32_t hl_bg = smc(t, "startmenu.hl_bg",
 		tw_theme_color(t, "menu.hl_bg", 0x000080ff));
-	uint32_t hl_fg = tw_theme_color(t, "startmenu.hl_fg",
+	uint32_t hl_fg = smc(t, "startmenu.hl_fg",
 		tw_theme_color(t, "menu.hl_fg", 0xffffffff));
 	sm->hits->length = 0;
 
@@ -1645,6 +1851,7 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	const char *layout_name = tw_theme_str(panel->theme, "startmenu.layout",
 		style == PS_CLASSIC ? "classic" : style == PS_LUNA || style == PS_AERO ? "twocolumn" :
 		style == PS_FLAT ? "list" : "centered");
+	const char *theme_layout = layout_name;
 	// taskbar.conf wins over the theme, unless it says "layout theme"
 	const char *chosen = panel->config ?
 		twconf_value(panel->config->startmenu, "layout") : NULL;
@@ -1656,6 +1863,8 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 		strcmp(layout_name, "list") == 0 ? SM_LIST :
 		strcmp(layout_name, "tiles") == 0 ? SM_TILES :
 		strcmp(layout_name, "progman") == 0 ? SM_PROGMAN : SM_CENTERED;
+	bool foreign = strcmp(layout_name, theme_layout) != 0;
+	palette_init(panel, foreign);
 	if (layout == SM_CLASSIC) {
 		open_classic(panel, output);
 		return;
@@ -1680,8 +1889,9 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 		layout == SM_LIST ? 360 : layout == SM_PROGMAN ? 480 : 640;
 	int def_h = layout == SM_TWOCOLUMN ? (style == PS_AERO ? 520 : 470) :
 		layout == SM_LIST ? 560 : layout == SM_PROGMAN ? 340 : 700;
-	int width = tw_theme_int(panel->theme, "startmenu.width", def_w) + 2 * M;
-	int height = tw_theme_int(panel->theme, "startmenu.height", def_h) + 2 * M;
+	// the theme's size is for the style it brings
+	int width = (foreign ? def_w : tw_theme_int(panel->theme, "startmenu.width", def_w)) + 2 * M;
+	int height = (foreign ? def_h : tw_theme_int(panel->theme, "startmenu.height", def_h)) + 2 * M;
 	int bar = output->bar ? output->bar->height : 0;
 	bool bottom = panel->config->layouts[panel->layout].bottom;
 	if (height > output->height - bar - 8) {
