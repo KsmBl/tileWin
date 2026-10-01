@@ -49,6 +49,7 @@ executable(
 		'proc.c',
 		'quicksettings.c',
 		'shutdown.c',
+		'snaplayouts.c',
 		'snip.c',
 		'startmenu.c',
 		'surface.c',

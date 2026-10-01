@@ -5,7 +5,11 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_output_layout.h>
 #include "sway/desktop/transaction.h"
+#include "sway/ipc-server.h"
+#include "sway/server.h"
+#include "sway/tree/root.h"
 #include "sway/input/cursor.h"
 #include "sway/input/seat.h"
 #include "sway/output.h"
@@ -24,6 +28,64 @@ static struct {
 } press;
 
 static struct sway_container *hover_con = NULL;
+
+/*
+ * Snap Layouts, as on Windows 11: resting on the maximize button of a window
+ * for a moment has the taskbar show the layouts it can be snapped into
+ * (tilewin event "snap_layouts"), and leaving the button lets it close them
+ * again ("snap_layouts_leave"), unless the pointer went over to them.
+ */
+#define SNAP_LAYOUTS_MS 500
+static struct sway_container *layouts_con = NULL;
+static bool layouts_shown = false;
+static struct wl_event_source *layouts_timer = NULL;
+
+static void layouts_event(const char *change, struct sway_container *con) {
+	json_object *data = json_object_new_object();
+	json_object_object_add(data, "con_id", json_object_new_int64((int64_t)con->node.id));
+	if (strcmp(change, "snap_layouts") == 0) {
+		struct tw_buttons b;
+		tw_style_buttons(tw_theme, con->current.width, con->current.tw_maximized, &b);
+		double lx = con->current.x + b.maximize.x;
+		double ly = con->current.y + b.maximize.y + b.maximize.height;
+		struct wlr_output *wo = wlr_output_layout_output_at(root->output_layout,
+			lx + b.maximize.width / 2.0, ly - 1);
+		struct wlr_box ob = { 0 };
+		if (wo) {
+			wlr_output_layout_get_box(root->output_layout, wo, &ob);
+			json_object_object_add(data, "output", json_object_new_string(wo->name));
+		}
+		json_object_object_add(data, "x", json_object_new_int((int)(lx - ob.x)));
+		json_object_object_add(data, "y", json_object_new_int((int)(ly - ob.y)));
+		json_object_object_add(data, "width", json_object_new_int(b.maximize.width));
+	}
+	ipc_event_tilewin(change, data);
+}
+
+static int layouts_timeout(void *data) {
+	if (layouts_con && hover_con == layouts_con) {
+		layouts_shown = true;
+		layouts_event("snap_layouts", layouts_con);
+	}
+	return 0;
+}
+
+static void layouts_hover(struct sway_container *con) {
+	if (con == layouts_con) {
+		return;
+	}
+	if (layouts_con && layouts_shown) {
+		layouts_event("snap_layouts_leave", layouts_con);
+	}
+	layouts_con = con;
+	layouts_shown = false;
+	if (!layouts_timer) {
+		layouts_timer = wl_event_loop_add_timer(server.wl_event_loop, layouts_timeout, NULL);
+	}
+	if (layouts_timer) {
+		wl_event_source_timer_update(layouts_timer, con ? SNAP_LAYOUTS_MS : 0);
+	}
+}
 
 static struct {
 	struct sway_container *con;
@@ -182,6 +244,9 @@ void tw_container_destroy(struct sway_container *con) {
 	}
 	if (hover_con == con) {
 		hover_con = NULL;
+	}
+	if (layouts_con == con) {
+		layouts_hover(NULL);
 	}
 	if (last_click.con == con) {
 		last_click.con = NULL;
@@ -465,6 +530,8 @@ bool tw_handle_motion(struct sway_seat *seat, struct sway_container *cont,
 		refresh_top(hover_con);
 	}
 	hover_con = new_hover;
+	layouts_hover(button_hit == TW_HIT_MAXIMIZE && config->tw_snap_layouts &&
+		tw_mode == TW_MODE_WINDOW && container_is_floating(new_hover) ? new_hover : NULL);
 	if (new_hover && new_hover->tw.hover != button_hit) {
 		new_hover->tw.hover = button_hit;
 		refresh_top(new_hover);

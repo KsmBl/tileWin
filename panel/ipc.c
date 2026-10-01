@@ -456,6 +456,18 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 		hungdialog_open(panel, jint(event, "con_id"), jstr(event, "title"), jstr(event, "app_id"));
 	} else if (strcmp(change, "responding") == 0) {
 		hungdialog_close(panel, jint(event, "con_id"));
+	} else if (strcmp(change, "snap_layouts") == 0) {
+		const char *output_name = jstr(event, "output");
+		struct panel_output *output = NULL, *iter;
+		wl_list_for_each(iter, &panel->outputs, link) {
+			if (output_name && iter->name && strcmp(iter->name, output_name) == 0) {
+				output = iter;
+			}
+		}
+		snaplayouts_open(panel, output, jint(event, "con_id"), (int)jint(event, "x"),
+			(int)jint(event, "y"), (int)jint(event, "width"));
+	} else if (strcmp(change, "snap_layouts_leave") == 0) {
+		snaplayouts_leave(panel, jint(event, "con_id"));
 	} else if (strcmp(change, "window_menu") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

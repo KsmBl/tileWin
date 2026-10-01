@@ -53,6 +53,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
   - Double-click the title bar to maximize; double-click the icon to close. `double_click_time` sets how fast the two clicks have to follow each other.
   - Resize from the borders (with invisible grab margins on thin-border themes).
   - Drag to a screen edge to snap left/right, drag to a corner for quarters, drag to the top edge to maximize. A preview shows first.
+  - **Snap Layouts**, as on Windows 11: rest the pointer on a window's maximize button and pick a part of a layout (halves, two thirds and one third either way, quarters, a half and two quarters); the window snaps there, and snap assist then offers the other windows of the desktop for the parts still free. `snap <slot> <fraction> [<fraction>]` snaps into a part of such a layout (`snap left 0.66`); `snap_layouts disable` (or the switch on the Windows page) turns it off.
   - Snapped windows side by side resize together, as on Windows: drag the line between a left and a right half (or between two quarters of a column) and the windows on both sides follow, staying snapped. The line is easy to grab (6 pixels on each side), a window snapped next to them later takes the space that is left, and an outer side still unsnaps the window when dragged.
   - `Super+Arrow` snapping.
   - A new window about as big as the screen (90% of it both ways) opens maximized instead of a few pixels short of it; restoring it gives a window of the usual size. Dialogs and windows of a fixed size open as they are.
@@ -218,6 +219,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
 - gives an app a desktop entry with tasks and recent files and checks the
   right-click menu of its taskbar button lists the files newest first, leaves
   out one that is gone, opens them with the app, and runs the tasks;
+- rests the pointer on a window's maximize button and checks the layouts show,
+  that a part of one snaps the window there and snap assist puts the other
+  window into the rest, that `snap left 0.66` gives two thirds, and that
+  `snap_layouts disable` turns them off;
 - puts widgets on the desktop and checks their cards take the cells the config
   gives them (and the upper right corner without one), that the icons make room,
   that a card dragged with a pointer lands on whole cells and keeps them while
@@ -392,6 +397,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `maximize [enable\|disable\|toggle]` | Maximize a floating window |
 | `minimize [enable\|disable\|toggle]` | Minimize to the taskbar (tile mode: scratchpad) |
 | `snap left\|right\|up\|down\|topleft\|topright\|bottomleft\|bottomright\|restore` | Snap a window |
+| `snap left\|right\|topleft\|topright\|bottomleft\|bottomright <fraction> [<fraction>]` | Snap a window into that part of a layout whose lines are at those fractions of the screen (`snap left 0.66`: two thirds) |
+| `snap_layouts enable\|disable` | Resting on the maximize button offers layouts to snap into (default enable) |
 | `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
 | `showdesktop` | Minimize all windows / restore them |
 | `always_on_top [enable\|disable\|toggle]` | Keeps a floating window over the other ones; also in the right-click menu of a window |

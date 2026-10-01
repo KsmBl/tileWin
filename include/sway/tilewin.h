@@ -254,6 +254,9 @@ void tw_maximize(struct sway_container *con, bool enable);
 void tw_minimize(struct sway_container *con, bool enable);
 void tw_restore(struct sway_container *con);
 bool tw_snap(struct sway_container *con, const char *direction, char **error);
+/* Snaps into that slot with the lines between the slots at those fractions. */
+bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double fy,
+	char **error);
 void tw_snap_to(struct sway_container *con, enum tw_snap snap);
 /* Ends the snapped state of a window that was moved away, keeping its size. */
 void tw_unsnap_in_place(struct sway_container *con);

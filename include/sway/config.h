@@ -578,6 +578,7 @@ struct sway_config {
 	uint32_t tw_group_modifier; // held: touching windows move together
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
+	bool tw_snap_layouts; // resting on the maximize button offers layouts to snap to
 	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
 	/*
 	 * Gravity mode: a window let go of while it is still moving carries on

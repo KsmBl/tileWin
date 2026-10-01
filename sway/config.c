@@ -354,6 +354,7 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_double_click_time = 400;
 	config->tw_snap = true;
 	config->tw_stretch = true;
+	config->tw_snap_layouts = true;
 	config->tw_stretch_both = true;
 
 	if (!(config->config_chain = create_list())) goto cleanup;

@@ -83,10 +83,26 @@ struct cmd_results *cmd_arrange(int argc, char **argv) {
 
 struct cmd_results *cmd_snap(int argc, char **argv) {
 	struct cmd_results *error = NULL;
-	if ((error = checkarg(argc, "snap", EXPECTED_EQUAL_TO, 1))) {
+	if ((error = checkarg(argc, "snap", EXPECTED_AT_LEAST, 1)) ||
+			(error = checkarg(argc, "snap", EXPECTED_AT_MOST, 3))) {
 		return error;
 	}
 	char *err = NULL;
+	if (argc > 1) {
+		// snap <slot> <fraction x> [<fraction y>]: into exactly that slot of a
+		// layout, its lines where the fractions say (Snap Layouts)
+		char *end = NULL;
+		double fx = strtod(argv[1], &end);
+		double fy = argc > 2 ? strtod(argv[2], NULL) : 0.5;
+		if (!end || *end || fx <= 0.05 || fx >= 0.95 || fy <= 0.05 || fy >= 0.95) {
+			return cmd_results_new(CMD_INVALID, "Expected snap <slot> <fraction 0.1-0.9> "
+				"[<fraction>]");
+		}
+		if (!tw_snap_at(target_window(), argv[0], fx, fy, &err)) {
+			return result_from_error(err);
+		}
+		return cmd_results_new(CMD_SUCCESS, NULL);
+	}
 	if (!tw_snap(target_window(), argv[0], &err)) {
 		return result_from_error(err);
 	}
@@ -611,6 +627,15 @@ struct cmd_results *cmd_window_snap(int argc, char **argv) {
 		return error;
 	}
 	config->tw_snap = parse_boolean(argv[0], config->tw_snap);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_snap_layouts(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "snap_layouts", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_snap_layouts = parse_boolean(argv[0], config->tw_snap_layouts);
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 

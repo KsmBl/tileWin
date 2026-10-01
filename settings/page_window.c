@@ -56,6 +56,10 @@ static const struct control move_controls[] = {
 	{ .doc = DOC_COMMON, .key = "window_snap", .title = "Snap to screen edges",
 		.hint = "Drag a window to a side for half the screen, to a corner for a quarter, "
 		"to the top to maximize it", .kind = CONTROL_SWITCH, .default_on = true },
+	{ .doc = DOC_COMMON, .key = "snap_layouts", .title = "Snap layouts",
+		.hint = "Rest the pointer on a window's maximize button to pick a layout to snap "
+		"it into, then the windows for the other parts", .kind = CONTROL_SWITCH,
+		.default_on = true },
 	{ .doc = DOC_COMMON, .key = "window_stick", .title = "Stick windows together",
 		.hint = "Moved and resized windows stick to the edges of other windows and of the "
 		"screen", .kind = CONTROL_SWITCH, .default_on = true },

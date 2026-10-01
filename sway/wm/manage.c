@@ -606,6 +606,36 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error) {
 	return true;
 }
 
+bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double fy,
+		char **error) {
+	static const struct {
+		const char *name;
+		enum tw_snap snap;
+	} slots[] = {
+		{ "left", TW_SNAP_LEFT }, { "right", TW_SNAP_RIGHT },
+		{ "topleft", TW_SNAP_TOPLEFT }, { "topright", TW_SNAP_TOPRIGHT },
+		{ "bottomleft", TW_SNAP_BOTTOMLEFT }, { "bottomright", TW_SNAP_BOTTOMRIGHT },
+	};
+	if (!con || !con->view || !container_is_floating(con) || !con->pending.workspace) {
+		*error = strdup("snap only works on floating windows (window mode)");
+		return false;
+	}
+	for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+		if (strcasecmp(slot, slots[i].name) == 0) {
+			tw_snap_to(con, slots[i].snap);
+			con->tw.split_x = fx;
+			con->tw.split_y = fy;
+			struct wlr_box box = tw_container_snap_box(con,
+				tw_workarea(con->pending.workspace));
+			tw_set_box(con, &box);
+			return true;
+		}
+	}
+	*error = strdup("Expected snap left|right|topleft|topright|bottomleft|bottomright "
+		"<fraction> [<fraction>]");
+	return false;
+}
+
 /* A dialog, a splash screen or anything else of a size of its own. */
 bool tw_view_is_dialog(struct sway_view *view) {
 	switch (view->type) {

@@ -471,6 +471,7 @@ enum popup_kind {
 	POPUP_CLIPBOARD,
 	POPUP_INFO,
 	POPUP_HUNG,
+	POPUP_SNAPLAYOUTS,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -742,6 +743,12 @@ void appsound_change_volume(struct panel *panel, struct pwindow *win, bool group
 /* jumplist.c: recent files and tasks of an app, ahead of its window menu */
 struct tw_desktop_entry;
 void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
+
+/* snaplayouts.c: the layouts offered on the maximize button (Windows 11) */
+void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t con_id,
+	int x, int y, int button_width);
+void snaplayouts_leave(struct panel *panel, int64_t con_id);
+void snaplayouts_assist(struct panel *panel, int argc, char **argv);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);
