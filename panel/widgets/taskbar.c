@@ -135,6 +135,77 @@ static int taskbar_measure(struct widget *w, struct render_ctx *ctx) {
 	return count * button_width(w, ctx, icons_only) + (icons_only ? 0 : 4);
 }
 
+/*
+ * What the app reports (badges.c): a download or copy filling its button, as
+ * on Windows 7, in the theme's colors (blocks in the classic look).
+ */
+static void draw_progress(struct render_ctx *ctx, struct taskbar_entry *e, struct pbox b) {
+	struct app_badge badge;
+	if (!badges_for_app(e->window->app_id, &badge) || badge.progress < 0) {
+		return;
+	}
+	cairo_t *cr = ctx->cairo;
+	const struct tw_theme *t = ctx->panel->theme;
+	if (ctx->style == PSV_CLASSIC) {
+		uint32_t color = tw_theme_color(t, "taskbar.progress", 0x000080ff);
+		double x = b.x + 4, w = (b.width - 8) * badge.progress, y = b.y + b.height - 6;
+		for (double bx = 0; bx + 1 < w; bx += 6) {
+			pd_rect(cr, x + bx, y, fmin(4, w - bx), 3, color);
+		}
+		return;
+	}
+	uint32_t color = tw_theme_color(t, "taskbar.progress", 0x06b025a0);
+	pd_rounded(cr, b.x + 2, b.y + 3, (b.width - 4) * badge.progress, b.height - 6,
+		ctx->style == PSV_FLUENT || ctx->style == PSV_LUNA ? 3 : 0);
+	pd_color(cr, color);
+	cairo_fill(cr);
+}
+
+/* The number an app shows (unread mail, messages) on the corner of its icon. */
+static void draw_badge(struct render_ctx *ctx, struct taskbar_entry *e, double ix, double iy,
+		int icon) {
+	struct app_badge badge;
+	if (!badges_for_app(e->window->app_id, &badge) || badge.count <= 0) {
+		return;
+	}
+	cairo_t *cr = ctx->cairo;
+	const struct tw_theme *t = ctx->panel->theme;
+	char text[16];
+	if (badge.count > 99) {
+		snprintf(text, sizeof(text), "99+");
+	} else {
+		snprintf(text, sizeof(text), "%lld", (long long)badge.count);
+	}
+	const char *font = tw_theme_str(t, "taskbar.badge_font", "Noto Sans Bold 7");
+	int tw = 0, th = 0;
+	pd_text_size(cr, font, text, &tw, &th);
+	double h = icon >= 24 ? 14 : 12, w = fmax(h, tw + 6);
+	double x = ix + icon - w / 2 - 1, y = iy - 3;
+	uint32_t bg = tw_theme_color(t, "taskbar.badge_bg", ctx->style == PSV_CLASSIC ?
+		0x800000ff : 0xd13438ff);
+	uint32_t fg = tw_theme_color(t, "taskbar.badge_fg", 0xffffffff);
+	if (ctx->style == PSV_CLASSIC) {
+		pd_rect(cr, x, y, w, h, bg);
+		cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+		pd_color(cr, 0x000000ff);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	} else {
+		pd_rounded(cr, x, y, w, h, h / 2);
+		pd_color(cr, bg);
+		cairo_fill_preserve(cr);
+		pd_color(cr, 0x00000060);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	}
+	pd_text(cr, font, text, x, y, w, h, fg, PD_CENTER);
+}
+
+static bool badge_urgent(struct taskbar_entry *e) {
+	struct app_badge badge;
+	return badges_for_app(e->window->app_id, &badge) && badge.urgent;
+}
+
 static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 		struct taskbar_entry *e, struct pbox b) {
 	cairo_t *cr = ctx->cairo;
@@ -192,9 +263,12 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 		}
 		break;
 	}
+	draw_progress(ctx, e, b);
 
 	cairo_surface_t *surface = apps_icon_for_window(panel, e->window, icon * ctx->surface->scale);
-	pd_icon(cr, surface, inner_x, b.y + (b.height - icon) / 2.0 + (active && ctx->style == PSV_CLASSIC ? 1 : 0), icon);
+	double icon_y = b.y + (b.height - icon) / 2.0 + (active && ctx->style == PSV_CLASSIC ? 1 : 0);
+	pd_icon(cr, surface, inner_x, icon_y, icon);
+	draw_badge(ctx, e, inner_x, icon_y, icon);
 	double tx = inner_x + icon + 5;
 	const char *font = active && ctx->style == PSV_CLASSIC ? bar_bold_font(panel) : bar_font(panel);
 	char label[512];
@@ -244,13 +318,16 @@ static void draw_icon_button(struct widget *w, struct render_ctx *ctx,
 		break;
 	}
 	}
-	if (e->urgent) {
+	draw_progress(ctx, e, b);
+	if (e->urgent || badge_urgent(e)) {
 		pd_rect(cr, b.x + 2, b.y + 2, b.width - 4, 3, 0xf7a71fff);
 	}
 	cairo_surface_t *surface = apps_icon_for_window(panel, e->window, icon * ctx->surface->scale);
 	double dy = pressed ? 1 : 0;
-	pd_icon(cr, surface, b.x + (b.width - icon) / 2.0, b.y + (b.height - icon) / 2.0 + dy -
-		(ctx->style == PSV_FLUENT ? 2 : 0), icon);
+	double ix = b.x + (b.width - icon) / 2.0;
+	double iy = b.y + (b.height - icon) / 2.0 + dy - (ctx->style == PSV_FLUENT ? 2 : 0);
+	pd_icon(cr, surface, ix, iy, icon);
+	draw_badge(ctx, e, ix, iy, icon);
 	if (e->count > 1 && ctx->style == PSV_AERO) {
 		// stacked look for grouped windows
 		pd_rect(cr, b.x + b.width - 4, b.y + 5, 1, b.height - 10, 0xffffff50);

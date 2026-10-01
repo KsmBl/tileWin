@@ -716,6 +716,16 @@ void ti_disk(struct panel *panel, cairo_t *cr, double x, double y, double size,
 	bool active, uint32_t color);
 /* Forgets loaded icons, e.g. after a theme switch. */
 void apps_icon_cache_clear(void);
+
+/* badges.c: progress and counts apps show on their taskbar buttons */
+struct app_badge {
+	double progress; // 0-1, below 0 for none
+	int64_t count;   // 0 for none
+	bool urgent;
+};
+void badges_init(struct panel *panel);
+/* What the app of that app id shows, filled into out; NULL for nothing. */
+const struct app_badge *badges_for_app(const char *app_id, struct app_badge *out);
 const char *apps_display_name(const char *app_id);
 /* 0 = no match, higher is better. */
 int apps_match_score(const struct tw_desktop_entry *entry, const char *query);

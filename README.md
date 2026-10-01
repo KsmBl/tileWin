@@ -87,6 +87,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
+  - **Progress and counts on the buttons:** apps that report them (Firefox and Chromium downloads, file managers copying, mail and chat apps with unread counts; the `com.canonical.Unity.LauncherEntry` signal) fill their taskbar button green as it goes, as on Windows 7, and show the number on the corner of their icon. The colors come from the theme (`taskbar.progress`, `taskbar.badge_bg`, `taskbar.badge_fg`), and the classic look draws navy blocks.
 - **Start menu** in the style of the active theme:
   - Windows 95: cascading menu with banner.
   - XP / 7: two-column menu.
@@ -206,6 +207,9 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   when dragged by that title bar, maximizes, restores with its own button (an
   activation right after a click in its top strip, but not without the click)
   and minimizes;
+- has an app report progress and a count over D-Bus and checks its taskbar
+  button fills (in blocks on Windows 95) and shows the number, and that both go
+  when the app leaves the bus;
 - puts widgets on the desktop and checks their cards take the cells the config
   gives them (and the upper right corner without one), that the icons make room,
   that a card dragged with a pointer lands on whole cells and keeps them while

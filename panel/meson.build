@@ -26,6 +26,7 @@ endif
 executable(
 	'tilewin-panel', [
 		'apps.c',
+		'badges.c',
 		'bar.c',
 		'bluetooth.c',
 		'clipboard.c',

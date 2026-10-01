@@ -397,6 +397,16 @@ test(
 )
 
 test(
+	'taskbar-badges',
+	find_program('taskbar_badges.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 90,
+)
+
+test(
 	'snap-resize',
 	find_program('snap_resize.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

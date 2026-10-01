@@ -352,6 +352,7 @@ int main(int argc, char **argv) {
 	}
 	panel_outputs_update_bars(&panel);
 	notify_init(&panel);
+	badges_init(&panel);
 	bt_init(&panel);
 	clipboard_init(&panel);
 
