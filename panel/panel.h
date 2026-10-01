@@ -632,6 +632,8 @@ void thumbnails_list_bound(struct panel *panel);
 /* Shows previews instead of a tooltip; false if the hotspot has none. */
 bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *hs);
 void thumbnails_hide_later(struct panel *panel);
+/* A media player changed: the buttons under the previews show it. */
+void thumbnails_media_changed(void);
 /* identify.c: "panel identify <output>=<number>...", big numbers on the screens */
 void identify_screens(struct panel *panel, int argc, char **argv);
 /*
@@ -731,6 +733,19 @@ struct app_badge {
 void badges_init(struct panel *panel);
 /* What the app of that app id shows, filled into out; NULL for nothing. */
 const struct app_badge *badges_for_app(const char *app_id, struct app_badge *out);
+
+/* media.c: the media players there are, for the buttons under window previews */
+struct media_player {
+	const char *name; // org.mpris.MediaPlayer2.<name>
+	int pid;
+	char *desktop_entry, *identity;
+	bool playing, can_play, can_pause, can_previous, can_next;
+};
+void media_init(struct panel *panel);
+/* The player of the window, NULL for none. */
+const struct media_player *media_for_window(struct panel *panel, struct pwindow *win);
+/* Calls Previous, PlayPause or Next of the player, without waiting. */
+void media_send(const struct media_player *player, const char *method);
 
 /* appsound.c: windows playing sound, for the speaker on their taskbar buttons */
 struct app_sound {

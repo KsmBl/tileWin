@@ -8,6 +8,9 @@
  * toplevel handles and are refreshed every second while the previews are
  * shown; nothing is captured otherwise. "thumbnails no" on the taskbar widget
  * or the theme key taskbar.thumbnails keeps the text tooltips.
+ *
+ * A window that is a media player gets previous, play/pause and next buttons
+ * under its picture, as on Windows (media.c knows the players).
  */
 #define _GNU_SOURCE
 #include <linux/input-event-codes.h>
@@ -26,10 +29,19 @@
 #define PAD 8
 #define GAP 8
 #define MAX_THUMBS 6
+#define MEDIA_H 34 // the row of media buttons under the pictures
+#define MEDIA_W 34
 #define REFRESH_MS 1000
 #define HIDE_MS 250
 #define PEEK_MS 500      // resting on a preview this long shows only its window
 #define PEEK_NEXT_MS 120 // and moving on to the next one while peeking
+
+enum media_button {
+	MEDIA_PREVIOUS,
+	MEDIA_PLAY_PAUSE,
+	MEDIA_NEXT,
+	MEDIA_BUTTONS,
+};
 
 struct handle {
 	struct ext_foreign_toplevel_handle_v1 *handle;
@@ -51,6 +63,7 @@ struct thumb {
 	cairo_surface_t *image;
 	struct loop_timer *timer;
 	struct pbox box, close;
+	struct pbox media[MEDIA_BUTTONS]; // empty while the window has no player
 };
 
 enum op {
@@ -58,6 +71,7 @@ enum op {
 	OP_ACTIVATE,
 	OP_CLOSE,
 };
+
 
 static struct {
 	struct panel *panel;
@@ -73,6 +87,7 @@ static struct {
 	enum op op;
 	int64_t op_id;
 	bool peek; // resting on a preview peeks at its window
+	bool media; // the previews have a row for media buttons
 } tn;
 
 /* ---------- peek ---------- */
@@ -448,6 +463,75 @@ bool thumbnails_visible(void) {
 	return tn.surface != NULL;
 }
 
+/* A triangle pointing right (or left), of the media buttons. */
+static void media_triangle(cairo_t *cr, double x, double cy, double size, bool left) {
+	cairo_move_to(cr, left ? x + size : x, cy - size);
+	cairo_line_to(cr, left ? x + size : x, cy + size);
+	cairo_line_to(cr, left ? x : x + size, cy);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+}
+
+static void draw_media_glyph(cairo_t *cr, enum media_button which, bool playing, double cx,
+		double cy) {
+	switch (which) {
+	case MEDIA_PREVIOUS:
+		cairo_rectangle(cr, cx - 6, cy - 5, 2, 10);
+		cairo_fill(cr);
+		media_triangle(cr, cx - 4, cy, 5, true);
+		media_triangle(cr, cx + 1, cy, 5, true);
+		break;
+	case MEDIA_PLAY_PAUSE:
+		if (playing) {
+			cairo_rectangle(cr, cx - 5, cy - 6, 3.5, 12);
+			cairo_rectangle(cr, cx + 1.5, cy - 6, 3.5, 12);
+			cairo_fill(cr);
+		} else {
+			media_triangle(cr, cx - 4, cy, 6, false);
+		}
+		break;
+	case MEDIA_NEXT:
+		media_triangle(cr, cx - 6, cy, 5, false);
+		media_triangle(cr, cx - 1, cy, 5, false);
+		cairo_rectangle(cr, cx + 4, cy - 5, 2, 10);
+		cairo_fill(cr);
+		break;
+	case MEDIA_BUTTONS:
+		break;
+	}
+}
+
+/* Previous, play/pause and next under the picture, when the window plays media. */
+static void draw_media(cairo_t *cr, const struct fly_style *st, struct panel *panel,
+		struct thumb *t, struct pwindow *win, int x) {
+	memset(t->media, 0, sizeof(t->media));
+	const struct media_player *player = tn.media ? media_for_window(panel, win) : NULL;
+	if (!player) {
+		return;
+	}
+	int y = PAD + TITLE_H + THUMB_H;
+	int left = x + (THUMB_W - MEDIA_BUTTONS * MEDIA_W) / 2;
+	for (int i = 0; i < MEDIA_BUTTONS; i++) {
+		struct pbox b = { left + i * MEDIA_W, y + 2, MEDIA_W - 2, MEDIA_H - 4 };
+		t->media[i] = b;
+		bool enabled = i == MEDIA_PREVIOUS ? player->can_previous :
+			i == MEDIA_NEXT ? player->can_next :
+			player->playing ? player->can_pause : player->can_play;
+		if (enabled && tn.hover && pbox_contains(&b, tn.px, tn.py)) {
+			fill_hover(cr, st, b);
+		}
+		cairo_new_path(cr);
+		pd_color(cr, enabled ? st->fg : st->dim);
+		draw_media_glyph(cr, i, player->playing, b.x + b.width / 2.0, b.y + b.height / 2.0);
+	}
+}
+
+void thumbnails_media_changed(void) {
+	if (tn.surface && tn.media) {
+		psurface_set_dirty(tn.surface);
+	}
+}
+
 static void render(struct psurface *s, cairo_t *cr) {
 	struct panel *panel = s->panel;
 	struct fly_style st;
@@ -457,7 +541,7 @@ static void render(struct psurface *s, cairo_t *cr) {
 		struct thumb *t = &tn.thumbs[i];
 		struct pwindow *win = panel_find_window(panel, t->con_id);
 		int x = PAD + i * (THUMB_W + GAP);
-		t->box = (struct pbox){ x, PAD, THUMB_W, TITLE_H + THUMB_H };
+		t->box = (struct pbox){ x, PAD, THUMB_W, TITLE_H + THUMB_H + (tn.media ? MEDIA_H : 0) };
 		t->close = (struct pbox){ x + THUMB_W - 28, PAD + 3, 24, 24 };
 		if (!win) {
 			continue;
@@ -485,6 +569,7 @@ static void render(struct psurface *s, cairo_t *cr) {
 			cairo_set_line_width(cr, 1.3);
 			cairo_stroke(cr);
 		}
+		draw_media(cr, &st, panel, t, win, x);
 		double area_y = PAD + TITLE_H, area_h = THUMB_H - 4;
 		if (t->image) {
 			int w = cairo_image_surface_get_width(t->image);
@@ -560,6 +645,15 @@ static void pointer_button(struct psurface *s, double x, double y, uint32_t butt
 		if (!pbox_contains(&t->box, x, y)) {
 			continue;
 		}
+		struct pwindow *win = panel_find_window(s->panel, t->con_id);
+		for (int m = 0; button == BTN_LEFT && m < MEDIA_BUTTONS; m++) {
+			if (t->media[m].width > 0 && pbox_contains(&t->media[m], x, y)) {
+				// the previews stay, so the next click can follow
+				static const char *const methods[] = { "Previous", "PlayPause", "Next" };
+				media_send(media_for_window(s->panel, win), methods[m]);
+				return;
+			}
+		}
 		tn.op_id = t->con_id;
 		if (button == BTN_MIDDLE || (button == BTN_LEFT && pbox_contains(&t->close, x, y))) {
 			tn.op = OP_CLOSE;
@@ -631,9 +725,14 @@ bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *
 		windows[count++] = win;
 	}
 
+	tn.media = false;
+	for (int i = 0; i < count; i++) {
+		tn.media = tn.media || media_for_window(panel, windows[i]);
+	}
+
 	struct panel_output *output = bar->output;
 	int width = 2 * PAD + count * THUMB_W + (count - 1) * GAP;
-	int height = 2 * PAD + TITLE_H + THUMB_H;
+	int height = 2 * PAD + TITLE_H + THUMB_H + (tn.media ? MEDIA_H : 0);
 	int x = hs->box.x + hs->box.width / 2 - width / 2;
 	x = x + width > output->width - 4 ? output->width - width - 4 : x;
 	x = x < 4 ? 4 : x;

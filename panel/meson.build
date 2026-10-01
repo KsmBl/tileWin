@@ -28,6 +28,7 @@ executable(
 		'apps.c',
 		'appsound.c',
 		'badges.c',
+		'media.c',
 		'bar.c',
 		'bluetooth.c',
 		'clipboard.c',
