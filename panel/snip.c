@@ -78,7 +78,7 @@ static void snip_render(struct popup *p, cairo_t *cr) {
 	struct fly_style st;
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
-	popup_draw_frame(p->panel, cr, p->surface->width, p->surface->height, M, "menu");
+	fly_draw_frame(p, cr, &st);
 	int x = M + PAD, y = M + PAD;
 	for (int i = 0; i < SNIP_COUNT; i++) {
 		int w = i == SNIP_CLOSE ? CLOSE_W : BUTTON_W;

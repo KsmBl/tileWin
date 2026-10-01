@@ -457,7 +457,7 @@ static void view_render(struct popup *p, cairo_t *cr) {
 	fly_style_init(&st, p->panel);
 	int M = popup_shadow_margin(p->panel);
 	int W = p->surface->width, H = p->surface->height;
-	popup_draw_frame(p->panel, cr, W, H, M, "menu");
+	fly_draw_frame(p, cr, &st);
 	int x0 = M + CARD_GAP + 4, cw = W - 2 * M - 2 * (CARD_GAP + 4);
 	pd_text(cr, st.big, "Clipboard", x0 + 4, M + 10, cw - 100, 36, st.fg, PD_LEFT);
 	v->clear_all = (struct pbox){ 0 };

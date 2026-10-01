@@ -452,7 +452,7 @@ static void render(struct psurface *s, cairo_t *cr) {
 	struct panel *panel = s->panel;
 	struct fly_style st;
 	fly_style_init(&st, panel);
-	popup_draw_frame(panel, cr, s->width, s->height, 0, "menu");
+	popup_draw_frame(panel, cr, s->width, s->height, 0, fly_frame_prefix(panel));
 	for (int i = 0; i < tn.count; i++) {
 		struct thumb *t = &tn.thumbs[i];
 		struct pwindow *win = panel_find_window(panel, t->con_id);

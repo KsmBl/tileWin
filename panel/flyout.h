@@ -24,6 +24,8 @@ struct fly_style {
 };
 
 void fly_style_init(struct fly_style *st, struct panel *panel);
+/* "flyout" when the theme gives flyouts a box of their own, else "menu". */
+const char *fly_frame_prefix(struct panel *panel);
 /* The box of a flyout, with its shadow and the theme's frame. */
 void fly_draw_frame(struct popup *p, cairo_t *cr, const struct fly_style *st);
 /* The background of a chart of the last minute, with its grid lines. */

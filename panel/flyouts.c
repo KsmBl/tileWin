@@ -46,6 +46,10 @@ static bool fly_own_box(const struct tw_theme *t) {
 	return tw_theme_str(t, "flyout.bg", NULL) || tw_theme_str(t, "flyout.bg_gradient", NULL);
 }
 
+const char *fly_frame_prefix(struct panel *panel) {
+	return fly_own_box(panel->theme) ? "flyout" : "menu";
+}
+
 void fly_style_init(struct fly_style *st, struct panel *panel) {
 	const struct tw_theme *t = panel->theme;
 	st->style = panel_style(panel);
