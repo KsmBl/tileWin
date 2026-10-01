@@ -42,7 +42,7 @@ struct appwin_page {
 	GtkWidget *rules;       // the list of rules
 	GtkWidget *rule_app;    // entry: app id
 	GtkWidget *app_holder;  // holds the choice of the app: the open ones, then all
-	GtkWidget *rule_action, *rule_desktop;
+	GtkWidget *rule_action, *rule_desktop, *rule_desktop_box;
 	GPtrArray *open;        // struct tw_open_app *
 };
 
@@ -261,7 +261,7 @@ static void rebuild_rules(struct appwin_page *p) {
 static void on_action(GObject *object, GParamSpec *pspec, gpointer data) {
 	struct appwin_page *p = data;
 	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
-	gtk_widget_set_visible(p->rule_desktop, sel == DESKTOP_ACTION);
+	gtk_widget_set_visible(p->rule_desktop_box, sel == DESKTOP_ACTION);
 }
 
 static void on_add_rule(GtkButton *button, gpointer data) {
@@ -479,12 +479,13 @@ GtkWidget *appwin_page_new(struct settings *s) {
 	p->rule_action = gtk_drop_down_new(G_LIST_MODEL(labels), NULL);
 	g_signal_connect(p->rule_action, "notify::selected", G_CALLBACK(on_action), p);
 	p->rule_desktop = gtk_spin_button_new_with_range(1, 20, 1);
-	gtk_widget_set_visible(p->rule_desktop, false);
+	p->rule_desktop_box = ui_spin_choice(p->rule_desktop, NULL, "Desktop %d", NULL);
+	gtk_widget_set_visible(p->rule_desktop_box, false);
 	GtkWidget *button = gtk_button_new_with_label("Add rule");
 	g_signal_connect(button, "clicked", G_CALLBACK(on_add_rule), p);
 	GtkWidget *what = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	gtk_box_append(GTK_BOX(what), p->rule_action);
-	gtk_box_append(GTK_BOX(what), p->rule_desktop);
+	gtk_box_append(GTK_BOX(what), p->rule_desktop_box);
 	gtk_box_append(GTK_BOX(what), button);
 	ui_row(add, "Rule", NULL, what);
 	fill_open_apps(p);

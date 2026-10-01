@@ -631,8 +631,9 @@ GtkWidget *screensaver_page_new(struct settings *s) {
 		ui_folder_field(p->photos_entry, "Folder of the slideshow"));
 	p->seconds_spin = gtk_spin_button_new_with_range(2, 120, 1);
 	g_signal_connect(p->seconds_spin, "value-changed", G_CALLBACK(on_seconds), p);
-	p->seconds_row = ui_row(options, "Slide show speed", "Seconds each photo stays",
-		p->seconds_spin);
+	p->seconds_row = ui_row(options, "Slide show speed", "How long each photo stays",
+		ui_spin_choice(p->seconds_spin,
+			(const int[]){ 3, 5, 8, 10, 15, 20, 30, 45, 60, 90, 120, -1 }, "%d seconds", NULL));
 	add_own_rows(p, options);
 
 	s->screensaver_page = p;

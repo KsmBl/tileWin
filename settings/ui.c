@@ -1411,7 +1411,8 @@ void ui_taskbar_key(struct settings *s, GPtrArray *keys, GtkWidget *group, const
 		r->widget = gtk_spin_button_new_with_range(low, high, 1);
 		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_taskbar_key), r);
 	}
-	ui_row(group, title, hint, r->widget);
+	ui_row(group, title, hint, is_switch ? r->widget : ui_spin_choice(r->widget, NULL, NULL,
+		NULL));
 	g_ptr_array_add(keys, r);
 }
 

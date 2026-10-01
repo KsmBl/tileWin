@@ -116,6 +116,134 @@ GtkWidget *ui_presets_static(GtkWidget *entry, const char *const *values,
 	return ui_presets(entry, v, l);
 }
 
+/* ---------- numbers ---------- */
+
+struct spin_choice {
+	GtkWidget *dropdown, *spin;
+	GArray *numbers; // int, one per row; the last row is Custom when custom
+	bool custom, syncing;
+};
+
+static void spin_choice_free(gpointer data) {
+	struct spin_choice *sc = data;
+	g_array_unref(sc->numbers);
+	g_free(sc);
+}
+
+/* Shows the number the spin button holds, or Custom and the spin button. */
+static void spin_choice_sync(struct spin_choice *sc) {
+	int value = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(sc->spin));
+	guint found = sc->numbers->len;
+	for (guint i = 0; i < sc->numbers->len; i++) {
+		if (g_array_index(sc->numbers, int, i) == value) {
+			found = i;
+			break;
+		}
+	}
+	if (found == sc->numbers->len && !sc->custom) {
+		found = 0; // cannot happen with every number of the range listed
+	}
+	sc->syncing = true;
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(sc->dropdown), found);
+	sc->syncing = false;
+	gtk_widget_set_visible(sc->spin, found == sc->numbers->len);
+}
+
+static void on_spin_choice_value(GtkSpinButton *spin, gpointer data) {
+	struct spin_choice *sc = data;
+	if (!sc->syncing) {
+		spin_choice_sync(sc);
+	}
+}
+
+static void on_spin_choice_selected(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct spin_choice *sc = data;
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	if (sc->syncing || i == GTK_INVALID_LIST_POSITION) {
+		return;
+	}
+	if (i < sc->numbers->len) {
+		sc->syncing = true;
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(sc->spin), g_array_index(sc->numbers, int, i));
+		sc->syncing = false;
+		gtk_widget_set_visible(sc->spin, false);
+	} else {
+		gtk_widget_set_visible(sc->spin, true);
+		gtk_widget_grab_focus(sc->spin);
+	}
+}
+
+/* Round numbers for a range too wide to list all of. */
+static const int round_numbers[] = {
+	1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24, 25, 30, 32, 40, 48, 50, 60, 64, 75, 80, 96,
+	100, 120, 128, 150, 200, 250, 256, 300, 400, 500, 600, 750, 800, 1000, 1500, 2000, 2500,
+	3000, 4000, 5000, 7500, 10000, 20000, 50000, 100000,
+};
+
+GtkWidget *ui_spin_choice(GtkWidget *spin, const int *numbers, const char *format,
+		const char *zero_label) {
+	struct spin_choice *sc = g_new0(struct spin_choice, 1);
+	sc->spin = spin;
+	sc->numbers = g_array_new(FALSE, FALSE, sizeof(int));
+	double low, high, step, page;
+	gtk_spin_button_get_range(GTK_SPIN_BUTTON(spin), &low, &high);
+	gtk_spin_button_get_increments(GTK_SPIN_BUTTON(spin), &step, &page);
+	int istep = step >= 1 ? (int)step : 1;
+	if (numbers) {
+		for (int i = 0; numbers[i] >= 0; i++) {
+			g_array_append_val(sc->numbers, numbers[i]);
+		}
+		sc->custom = true;
+	} else if ((high - low) / istep <= 60) {
+		for (int n = (int)low; n <= (int)high; n += istep) {
+			g_array_append_val(sc->numbers, n);
+		}
+	} else {
+		if (low <= 0) {
+			int zero = 0;
+			g_array_append_val(sc->numbers, zero);
+		}
+		for (size_t i = 0; i < G_N_ELEMENTS(round_numbers); i++) {
+			int n = round_numbers[i];
+			if (n >= low && n <= high && (n - (int)low) % istep == 0) {
+				g_array_append_val(sc->numbers, n);
+			}
+		}
+		sc->custom = true;
+	}
+	GtkStringList *model = gtk_string_list_new(NULL);
+	for (guint i = 0; i < sc->numbers->len; i++) {
+		int n = g_array_index(sc->numbers, int, i);
+		if (n == 0 && zero_label) {
+			gtk_string_list_append(model, zero_label);
+		} else {
+			char *label = g_strdup_printf(format ? format : "%d", n);
+			gtk_string_list_append(model, label);
+			g_free(label);
+		}
+	}
+	if (sc->custom) {
+		gtk_string_list_append(model, CUSTOM_LABEL);
+	}
+	sc->dropdown = gtk_drop_down_new(G_LIST_MODEL(model), NULL);
+	if (sc->numbers->len >= SEARCH_FROM * 2) {
+		gtk_drop_down_set_expression(GTK_DROP_DOWN(sc->dropdown),
+			gtk_property_expression_new(GTK_TYPE_STRING_OBJECT, NULL, "string"));
+		gtk_drop_down_set_enable_search(GTK_DROP_DOWN(sc->dropdown), TRUE);
+	}
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_widget_set_halign(box, GTK_ALIGN_END);
+	gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
+	gtk_box_append(GTK_BOX(box), sc->dropdown);
+	gtk_box_append(GTK_BOX(box), spin);
+	g_object_set_data_full(G_OBJECT(box), "spin-choice", sc, spin_choice_free);
+	// after the page's own handler, so the value the page set is shown
+	g_signal_connect_after(spin, "value-changed", G_CALLBACK(on_spin_choice_value), sc);
+	g_signal_connect(sc->dropdown, "notify::selected", G_CALLBACK(on_spin_choice_selected), sc);
+	spin_choice_sync(sc);
+	return box;
+}
+
 /* ---------- colors ---------- */
 
 struct color_field {

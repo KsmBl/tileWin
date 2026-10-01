@@ -1099,7 +1099,7 @@ GtkWidget *datetime_page_new(struct settings *s) {
 		gtk_editable_set_width_chars(GTK_EDITABLE(*spins[i]), 2);
 		// 09:05:03 rather than 9:5:3
 		g_signal_connect(*spins[i], "output", G_CALLBACK(on_spin_leading_zero), NULL);
-		gtk_box_append(GTK_BOX(clock), *spins[i]);
+		gtk_box_append(GTK_BOX(clock), ui_spin_choice(*spins[i], NULL, "%02d", NULL));
 	}
 	gtk_box_append(GTK_BOX(p->manual), clock);
 	GtkWidget *row = ui_row(set, NULL, NULL, NULL);

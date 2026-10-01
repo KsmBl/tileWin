@@ -1038,7 +1038,9 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 		ui_presets_terminals(p->terminal_entry));
 	p->delay_spin = gtk_spin_button_new_with_range(0, 5000, 100);
 	g_signal_connect(p->delay_spin, "value-changed", G_CALLBACK(on_delay_changed), p);
-	ui_row(general, "Tooltip delay", "Milliseconds", p->delay_spin);
+	ui_row(general, "Tooltip delay", NULL, ui_spin_choice(p->delay_spin,
+		(const int[]){ 0, 100, 200, 300, 400, 500, 600, 800, 1000, 1500, 2000, -1 }, "%d ms",
+		"Right away"));
 
 	GtkWidget *layout = ui_group(content, "Layout",
 		"tileWin keeps a separate taskbar layout for window mode and for tile mode.");
@@ -1055,7 +1057,9 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	ui_row(layout, "Position", NULL, p->position_dd);
 	p->height_spin = gtk_spin_button_new_with_range(0, 200, 1);
 	g_signal_connect(p->height_spin, "value-changed", G_CALLBACK(on_height_changed), p);
-	ui_row(layout, "Height", "Pixels; 0 uses the theme's height", p->height_spin);
+	ui_row(layout, "Height", NULL, ui_spin_choice(p->height_spin,
+		(const int[]){ 0, 24, 28, 30, 32, 36, 40, 44, 48, 56, 64, -1 }, "%d pixels",
+		"The theme's height"));
 	ui_taskbar_key(s, p->root_settings, layout, "theme_layout", "Let the theme bring its own layout",
 		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
 

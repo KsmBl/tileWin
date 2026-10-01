@@ -292,7 +292,7 @@ static void on_test_pressed(GtkGestureClick *gesture, int n_press, double x, dou
 enum root_kind {
 	ROOT_SWITCH,
 	ROOT_SLIDER,
-	ROOT_NUMBER, // a box to type in, for ranges too wide to drag through
+	ROOT_NUMBER, // round numbers to choose from, for ranges too wide to drag through
 };
 
 struct root_setting {
@@ -376,7 +376,8 @@ static struct root_setting *root_setting_new(struct mouse_page *p, GtkWidget *gr
 		gtk_scale_add_mark(GTK_SCALE(r->widget), fallback, GTK_POS_BOTTOM, NULL);
 		g_signal_connect(r->widget, "value-changed", G_CALLBACK(on_root_setting), r);
 	}
-	ui_row(group, title, hint, r->widget);
+	ui_row(group, title, hint, kind == ROOT_NUMBER ? ui_spin_choice(r->widget, NULL, "%d %%",
+		NULL) : r->widget);
 	g_ptr_array_add(p->root_settings, r);
 	return r;
 }

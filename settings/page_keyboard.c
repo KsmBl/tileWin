@@ -1365,11 +1365,14 @@ GtkWidget *keyboard_page_new(struct settings *s) {
 	p->delay_spin = gtk_spin_button_new_with_range(100, 2000, 25);
 	g_object_set_data(G_OBJECT(p->delay_spin), "key", "repeat_delay");
 	g_signal_connect(p->delay_spin, "value-changed", G_CALLBACK(on_repeat_changed), p);
-	ui_row(typing, "Repeat delay", "Milliseconds before a held key repeats", p->delay_spin);
+	ui_row(typing, "Repeat delay", "Before a held key repeats", ui_spin_choice(p->delay_spin,
+		(const int[]){ 150, 200, 250, 300, 400, 500, 600, 750, 1000, -1 }, "%d ms", NULL));
 	p->rate_spin = gtk_spin_button_new_with_range(5, 100, 1);
 	g_object_set_data(G_OBJECT(p->rate_spin), "key", "repeat_rate");
 	g_signal_connect(p->rate_spin, "value-changed", G_CALLBACK(on_repeat_changed), p);
-	ui_row(typing, "Repeat rate", "Characters per second", p->rate_spin);
+	ui_row(typing, "Repeat rate", NULL, ui_spin_choice(p->rate_spin,
+		(const int[]){ 10, 15, 20, 25, 30, 35, 40, 50, 60, -1 }, "%d characters a second",
+		NULL));
 	GtkWidget *test = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(test), "Type here to try the settings");
 	gtk_widget_set_size_request(test, 300, -1);

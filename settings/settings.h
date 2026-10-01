@@ -147,6 +147,13 @@ GtkWidget *ui_presets_screenshots(GtkWidget *entry);
 GtkWidget *ui_presets_apps(GtkWidget *entry, const char *categories);
 /* Presets of the installed terminals, each with its flag to run a command. */
 GtkWidget *ui_presets_terminals(GtkWidget *entry);
+/*
+ * A dropdown of numbers for the spin button, which only "Custom…" shows: the
+ * numbers ending with -1, or NULL for all of a narrow range or round ones of
+ * a wide one. Each is labelled with format (NULL: "%d"), 0 with zero_label.
+ */
+GtkWidget *ui_spin_choice(GtkWidget *spin, const int *numbers, const char *format,
+	const char *zero_label);
 /* The app ids (or X11 classes) and names of the installed apps. */
 void ui_list_app_ids(GPtrArray *ids, GPtrArray *names);
 void ui_list_net_devices(GPtrArray *values, GPtrArray *labels);
