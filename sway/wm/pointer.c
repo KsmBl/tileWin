@@ -458,7 +458,7 @@ static void shake_motion(struct sway_cursor *cursor, double x, double y) {
 
 /* How long one copy of the pointer lives, in milliseconds; 0 turns it off. */
 static int trail_lifetime(void) {
-	int ms = config ? config->tw_pointer_trail : 0;
+	int ms = config && !tw_battery_saver_active() ? config->tw_pointer_trail : 0;
 	return ms < 0 ? 0 : ms > 2000 ? 2000 : ms;
 }
 

@@ -409,6 +409,7 @@ int main(int argc, char **argv) {
 	}
 
 	tw_pause_recover(); // apps a crashed tileWin left stopped
+	tw_battery_saver_init();
 	server_run(&server);
 
 shutdown:
@@ -418,6 +419,7 @@ shutdown:
 	tw_priority_forget(); // the focused window's process gets its nice value back
 	tw_pause_forget(); // and the stopped apps go on
 	tw_power_fini(); // its timers belong to the event loop server_fini ends
+	tw_battery_saver_fini();
 	server_fini(&server);
 	root_destroy(root);
 	root = NULL;

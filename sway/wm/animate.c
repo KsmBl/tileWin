@@ -150,7 +150,8 @@ const char *const *tw_animation_styles(int kind) {
 
 static bool enabled(enum tw_anim_kind kind) {
 	return !shutting_down && config && config->active && !config->reading &&
-		config->tw_animations && config->tw_animation_on[kind] && server.wl_event_loop;
+		config->tw_animations && config->tw_animation_on[kind] && server.wl_event_loop &&
+		!tw_battery_saver_active();
 }
 
 static int style(enum tw_anim_kind kind) {

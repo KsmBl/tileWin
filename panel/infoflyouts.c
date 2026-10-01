@@ -1265,7 +1265,11 @@ static void refill(struct info_flyout *f) {
 static void tick(void *data) {
 	struct info_flyout *f = data;
 	f->tick = NULL;
-	refill(f);
+	// the battery saver stops the reading in the background; an open flyout
+	// still reads what it shows
+	if (!f->panel->state.battery_saver || (f->popup && f->panel->popup == f->popup)) {
+		refill(f);
+	}
 	f->tick = loop_add_timer(f->panel->loop, f->source->interval_ms, tick, f);
 }
 

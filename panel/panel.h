@@ -172,6 +172,7 @@ struct panel_state {
 	char *keyboard_layout;
 	int64_t focused_window;
 	int double_click_ms; // "double_click_time" of the compositor
+	bool battery_saver; // on battery and low: the charts stop reading in the background
 };
 
 /* ---------- config ---------- */
@@ -616,6 +617,9 @@ void notify_init(struct panel *panel);
 void notify_fini(struct panel *panel);
 void notify_theme_changed(struct panel *panel);
 /* "notifications [toggle|open|close|clear]" and "dnd [toggle|on|off]" */
+/* A notification of the taskbar itself (not over D-Bus). */
+void notify_local(struct panel *panel, const char *app_name, const char *icon,
+	const char *summary, const char *body);
 void notify_handle_command(struct panel *panel, int argc, char **argv);
 bool notify_dnd(void);
 void notify_set_dnd(struct panel *panel, bool on);

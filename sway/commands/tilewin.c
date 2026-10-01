@@ -630,6 +630,28 @@ struct cmd_results *cmd_window_snap(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_battery_saver(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "battery_saver", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	// battery_saver off|<percent>: on battery at or below that level
+	if (strcasecmp(argv[0], "off") == 0 || strcasecmp(argv[0], "never") == 0) {
+		config->tw_battery_saver = 0;
+	} else {
+		char *end = NULL;
+		long level = strtol(argv[0], &end, 10);
+		if (!end || (*end && strcmp(end, "%") != 0) || level < 0 || level > 100) {
+			return cmd_results_new(CMD_INVALID, "Expected 'battery_saver off|<percent>'");
+		}
+		config->tw_battery_saver = (int)level;
+	}
+	if (!config->reading) {
+		tw_battery_saver_check();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_snap_layouts(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "snap_layouts", EXPECTED_EQUAL_TO, 1))) {

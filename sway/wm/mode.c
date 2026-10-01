@@ -397,6 +397,8 @@ json_object *tw_describe_state(void) {
 	}
 	json_object_object_add(obj, "theme_title",
 		json_object_new_string(tw_theme && tw_theme->title ? tw_theme->title : ""));
+	json_object_object_add(obj, "battery_saver",
+		json_object_new_boolean(tw_battery_saver_active()));
 	json_object_object_add(obj, "color_scheme",
 		json_object_new_string(tw_theme && tw_theme->dark ? "dark" : "light"));
 	json_object_object_add(obj, "theme_style",

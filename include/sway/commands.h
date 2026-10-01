@@ -167,6 +167,7 @@ sway_cmd cmd_window_stick;
 sway_cmd cmd_window_stick_distance;
 sway_cmd cmd_window_stretch;
 sway_cmd cmd_snap_layouts;
+sway_cmd cmd_battery_saver;
 sway_cmd cmd_window_stretch_mode;
 sway_cmd cmd_assign;
 sway_cmd cmd_bar;

@@ -1074,6 +1074,25 @@ static uint32_t add_notification(uint32_t replaces, struct notification *fields)
 	return id;
 }
 
+void notify_local(struct panel *panel, const char *app_name, const char *icon,
+		const char *summary, const char *body) {
+	if (!nt.items) {
+		return;
+	}
+	struct notification *n = calloc(1, sizeof(*n));
+	if (!n) {
+		return;
+	}
+	n->urgency = 1;
+	n->timeout = -1;
+	n->app_name = app_name ? strdup(app_name) : NULL;
+	n->app_icon = icon ? strdup(icon) : NULL;
+	n->summary = strdup(summary ? summary : "");
+	n->body = strdup(body ? body : "");
+	n->actions = create_list();
+	add_notification(0, n);
+}
+
 #if HAVE_TRAY
 
 static cairo_surface_t *image_from_data(int width, int height, int rowstride, bool alpha,

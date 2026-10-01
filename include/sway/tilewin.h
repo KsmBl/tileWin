@@ -254,6 +254,12 @@ void tw_maximize(struct sway_container *con, bool enable);
 void tw_minimize(struct sway_container *con, bool enable);
 void tw_restore(struct sway_container *con);
 bool tw_snap(struct sway_container *con, const char *direction, char **error);
+
+/* batterysaver.c: on battery and low, animations and the pointer trail stop */
+void tw_battery_saver_init(void);
+void tw_battery_saver_fini(void);
+void tw_battery_saver_check(void);
+bool tw_battery_saver_active(void);
 /* Snaps into that slot with the lines between the slots at those fractions. */
 bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double fy,
 	char **error);

@@ -308,6 +308,7 @@ static void refresh_mode(struct panel *panel) {
 	int64_t ms = jint(state, "double_click_time");
 	panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
 	set_main_output(panel, jstr(state, "main_output"));
+	panel->state.battery_saver = jbool(state, "battery_saver");
 	json_object_put(state);
 }
 
@@ -457,6 +458,15 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 		hungdialog_open(panel, jint(event, "con_id"), jstr(event, "title"), jstr(event, "app_id"));
 	} else if (strcmp(change, "responding") == 0) {
 		hungdialog_close(panel, jint(event, "con_id"));
+	} else if (strcmp(change, "battery_saver") == 0) {
+		bool active = jbool(event, "active");
+		if (active && !panel->state.battery_saver) {
+			notify_local(panel, "Battery saver", "battery-caution",
+				"Battery saver is on",
+				"The battery is low: animations, the pointer trail and the charts of the "
+				"taskbar widgets are off until the computer is plugged in.");
+		}
+		panel->state.battery_saver = active;
 	} else if (strcmp(change, "snap_layouts") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

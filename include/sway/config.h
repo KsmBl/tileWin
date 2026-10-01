@@ -579,6 +579,7 @@ struct sway_config {
 	bool tw_snap; // dragging a window to a screen edge snaps it
 	bool tw_stretch; // double-clicking a frame side stretches the window
 	bool tw_snap_layouts; // resting on the maximize button offers layouts to snap to
+	int tw_battery_saver; // battery level (percent) at which the battery saver starts, 0 never
 	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
 	/*
 	 * Gravity mode: a window let go of while it is still moving carries on

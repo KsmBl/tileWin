@@ -199,7 +199,7 @@ static int flip_tick(void *data) {
 
 /* Starts the slide after the selection moved by one. */
 static void flip_step_started(int direction) {
-	if (!config || !config->tw_animations) {
+	if (!config || !config->tw_animations || tw_battery_saver_active()) {
 		state.offset = 0;
 		return;
 	}
