@@ -203,6 +203,12 @@ static void do_reload(void *data) {
 	popup_close_all(p);
 	tooltip_cancel(p);
 	load_theme(p);
+	if (!p->config_path_given) {
+		// the installed taskbar.conf until there is one of the user's, which the
+		// settings app writes on the first change
+		free(p->config_path);
+		p->config_path = panel_default_config_path();
+	}
 	struct panel_config *config = panel_config_load(p, p->config_path);
 	if (!config) {
 		sway_log(SWAY_ERROR, "Keeping the previous taskbar config");
@@ -299,6 +305,7 @@ int main(int argc, char **argv) {
 		case 'c':
 			free(panel.config_path);
 			panel.config_path = tw_expand_home(optarg);
+			panel.config_path_given = true;
 			break;
 		case 's':
 			free(panel.socket_path);

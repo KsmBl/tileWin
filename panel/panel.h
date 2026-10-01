@@ -372,6 +372,8 @@ struct panel {
 	struct loop_timer *tree_timer;
 
 	char *config_path;
+
+	bool config_path_given; // -c: no looking for the file again
 	struct panel_config *config;
 	struct tw_theme *theme;
 	enum layout_index layout;
