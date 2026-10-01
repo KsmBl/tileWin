@@ -27,6 +27,7 @@
 #include "sway/tree/view.h"
 #include "sway/tree/workspace.h"
 #include "list.h"
+#include "tw_grid.h"
 #include "log.h"
 #include "stringop.h"
 
@@ -790,19 +791,7 @@ static void floating_arrange(list_t *windows, struct wlr_box area, const char *h
 		cols = 1;
 		rows = n;
 	} else {
-		// choose the grid whose cells are closest to a 4:3 aspect ratio
-		double best = 1e9;
-		cols = 1;
-		for (int c = 1; c <= n; c++) {
-			int r = (n + c - 1) / c;
-			double cell = ((double)area.width / c) / ((double)area.height / r);
-			double score = fabs(log(cell / (4.0 / 3.0)));
-			if (score < best - 1e-9) {
-				best = score;
-				cols = c;
-			}
-		}
-		rows = (n + cols - 1) / cols;
+		tw_grid_choose(n, area.width, area.height, TW_GRID_ASPECT, &cols, &rows);
 	}
 
 	for (int i = 0; i < n; i++) {
@@ -865,8 +854,8 @@ static void tiling_arrange(struct sway_workspace *ws, const char *how) {
 		cols = 1;
 		rows = n;
 	} else if (strcasecmp(how, "optimal") == 0) {
-		cols = (int)ceil(sqrt(n));
-		rows = (n + cols - 1) / cols;
+		struct wlr_box area = tw_workarea(ws);
+		tw_grid_choose(n, area.width, area.height, TW_GRID_ASPECT, &cols, &rows);
 	}
 
 	if (rows == 1 || cols == 1) {

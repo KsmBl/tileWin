@@ -12,6 +12,7 @@ lib_sway_common = static_library(
 		'util.c',
 		'tw_paths.c',
 		'tw_disks.c',
+		'tw_grid.c',
 		'tw_widgets.c',
 		'twconf.c',
 		'tw_theme.c',

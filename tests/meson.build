@@ -13,6 +13,17 @@ test(
 )
 
 test(
+	'grid',
+	executable(
+		'test-grid',
+		['test_grid.c', '../common/tw_grid.c'],
+		include_directories: sway_inc,
+		dependencies: [math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'themes',
 	executable(
 		'test-themes',
