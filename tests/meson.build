@@ -13,6 +13,23 @@ test(
 )
 
 test(
+	'themes',
+	executable(
+		'test-themes',
+		'test_themes.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	# the themes of the source tree, and no user themes beside them
+	env: {
+		'TILEWIN_DATADIR': meson.project_source_root(),
+		'XDG_CONFIG_HOME': meson.current_build_dir() / 'no-config',
+	},
+	suite: 'unit',
+)
+
+test(
 	'confdoc',
 	executable(
 		'test-confdoc',
