@@ -50,7 +50,8 @@ cat > "$work/bin/pactl" <<EOP
 case "\$*" in
 subscribe)
 	seen=\$(cat "$work/trigger")
-	while true; do
+	# ends with the taskbar that started it, like the real one
+	while kill -0 \$PPID 2>/dev/null; do
 		now=\$(cat "$work/trigger")
 		if [ "\$now" != "\$seen" ]; then
 			seen=\$now

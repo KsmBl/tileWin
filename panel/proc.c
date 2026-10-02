@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 #include "log.h"
 #include "panel.h"
@@ -115,6 +116,7 @@ struct proc *proc_run(struct panel *panel, const char *command, bool listen,
 	if (pipe(fds) != 0) {
 		return NULL;
 	}
+	pid_t parent = getpid();
 	pid_t pid = fork();
 	if (pid < 0) {
 		close(fds[0]);
@@ -122,6 +124,12 @@ struct proc *proc_run(struct panel *panel, const char *command, bool listen,
 		return NULL;
 	}
 	if (pid == 0) {
+		// a helper ends with the taskbar: one that listens (pactl subscribe)
+		// would otherwise run on for good after every restart of the taskbar
+		prctl(PR_SET_PDEATHSIG, SIGTERM);
+		if (getppid() != parent) {
+			_exit(0);
+		}
 		setsid();
 		dup2(fds[1], STDOUT_FILENO);
 		int devnull = open("/dev/null", O_RDWR);
