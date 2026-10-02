@@ -17,4 +17,10 @@ extern const int emoji_group_count;
 extern const struct emoji emoji_list[];
 extern const int emoji_count;
 
+/* The tabs that are no emoji (symbols.c): math symbols and text emoticons. */
+extern const struct emoji math_symbols[];
+extern const int math_symbol_count;
+extern const struct emoji ascii_emoticons[];
+extern const int ascii_emoticon_count;
+
 #endif

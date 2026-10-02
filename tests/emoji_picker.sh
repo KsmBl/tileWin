@@ -3,6 +3,8 @@
 # clipboard program: a search typed into it finds the emoji by name, Enter
 # types it into the window that had the keyboard (text_target.py), the
 # clipboard gets back what it held, and the emoji is among the recent ones.
+# The math symbols and text emoticons are found by name too, and the
+# emoticons are the last tab.
 #
 # usage: emoji_picker.sh <build dir> <source dir>
 set -u
@@ -130,6 +132,33 @@ sleep 2
 	fail "the clipboard did not get back what it held: [$(wl-paste -n 2>/dev/null)]"
 grep -qx "$(printf '\360\237\232\200')" "$XDG_STATE_HOME/tileWin/emoji-recent" 2>/dev/null ||
 	fail "the rocket is not among the recent emoji"
+
+# the tabs that are no emoji, found by name like the emoji: a math symbol,
+# and a text emoticon made of ASCII alone (the kaomoji need a Japanese font)
+ipc panel emoji >/dev/null
+sleep 1
+"$keys" text integral >/dev/null 2>&1
+sleep 0.5
+"$keys" key none return >/dev/null 2>&1
+sleep 2
+ipc panel emoji >/dev/null
+sleep 1
+"$keys" text homer >/dev/null 2>&1
+sleep 0.5
+"$keys" key none return >/dev/null 2>&1
+sleep 2
+want="$(printf '\360\237\232\200\342\210\253')~(_8^(I)"
+[ "$(cat "$typed" 2>/dev/null)" = "$want" ] ||
+	fail "the integral and the Homer emoticon were not typed: [$(cat "$typed" 2>/dev/null)]"
+# Shift+Tab from the recent ones goes round to the last tab, the emoticons
+ipc panel emoji >/dev/null
+sleep 1
+"$keys" key shift tab >/dev/null 2>&1
+sleep 0.5
+"$keys" key none return >/dev/null 2>&1
+sleep 2
+[ "$(cat "$typed" 2>/dev/null)" = "$want:-)" ] ||
+	fail "the emoticons are not the last tab, :-) first: [$(cat "$typed" 2>/dev/null)]"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

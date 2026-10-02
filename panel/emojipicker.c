@@ -15,7 +15,9 @@
 
 /*
  * The emoji picker of Windows (Win+. or Win+;): the emoji of Unicode in their
- * groups and the ones used lately, searched by name as soon as one types. A
+ * groups and the ones used lately, then a tab of math symbols and one of text
+ * emoticons (:-) and the like, in wider cells), all searched by name as soon
+ * as one types. A
  * click or Enter types the emoji into the window that had the keyboard, by
  * way of the clipboard, which gets back what it held (clipboard.c); with Shift
  * the picker stays open for more. It takes the colors of the flyouts.
@@ -29,13 +31,18 @@
 #define FOOTER_H 28
 #define ROWS 7
 #define RECENT_MAX 36
-#define TAB_RECENT 0 // the tabs: the recent ones, then the groups of emoji_groups
+#define ASCII_COLUMNS 3
+// the tabs: the recent ones, the groups of emoji_groups, math, text emoticons
+#define TAB_RECENT 0
+#define TAB_MATH (emoji_group_count + 1)
+#define TAB_ASCII (emoji_group_count + 2)
+#define TAB_COUNT (emoji_group_count + 3)
 
 static const char *const tab_icons[] = {
 	"\xf0\x9f\x95\x92", // the clock of "recent"
 	"\xf0\x9f\x98\x80", "\xf0\x9f\x91\x8b", "\xf0\x9f\x90\xb6", "\xf0\x9f\x8d\x94",
 	"\xf0\x9f\x9a\x97", "\xe2\x9a\xbd", "\xf0\x9f\x92\xa1", "\xe2\x9d\xa4\xef\xb8\x8f",
-	"\xf0\x9f\x8f\x81",
+	"\xf0\x9f\x8f\x81", // math and the text emoticons are drawn as text
 };
 
 struct picker {
@@ -55,6 +62,21 @@ struct picker {
 };
 
 static struct picker *current;
+
+/* Whether it is text rather than an emoji: drawn in the text color. */
+static bool is_text(const struct emoji *e) {
+	return (e >= math_symbols && e < math_symbols + math_symbol_count) ||
+		(e >= ascii_emoticons && e < ascii_emoticons + ascii_emoticon_count);
+}
+
+/* The text emoticons are wide: their tab has fewer, wider cells. */
+static int columns(const struct picker *pk) {
+	return !pk->search[0] && pk->tab == TAB_ASCII ? ASCII_COLUMNS : COLUMNS;
+}
+
+static double cell_w(const struct picker *pk) {
+	return (double)COLUMNS * CELL / columns(pk);
+}
 static list_t *recent; // char *, newest first
 
 /* ---------- the recent ones ---------- */
@@ -122,10 +144,21 @@ static void recent_use(const char *chars) {
 	free(path);
 }
 
+static const struct {
+	const struct emoji *list;
+	const int *count;
+} all_lists[] = {
+	{ emoji_list, &emoji_count },
+	{ math_symbols, &math_symbol_count },
+	{ ascii_emoticons, &ascii_emoticon_count },
+};
+
 static const struct emoji *emoji_by_chars(const char *chars) {
-	for (int i = 0; i < emoji_count; i++) {
-		if (strcmp(emoji_list[i].chars, chars) == 0) {
-			return &emoji_list[i];
+	for (size_t l = 0; l < sizeof(all_lists) / sizeof(all_lists[0]); l++) {
+		for (int i = 0; i < *all_lists[l].count; i++) {
+			if (strcmp(all_lists[l].list[i].chars, chars) == 0) {
+				return &all_lists[l].list[i];
+			}
 		}
 	}
 	return NULL;
@@ -153,12 +186,54 @@ static bool matches(const char *name, const char *search) {
 	return true;
 }
 
+/*
+ * Whether the fonts have every character of a text item: kaomoji like
+ * ¯\_(ツ)_/¯ need a Japanese font, and boxes in their place help nobody.
+ * Asked once for each.
+ */
+static bool can_draw(const struct emoji *e) {
+	if (!is_text(e)) {
+		return true;
+	}
+	static signed char *known[2];
+	bool math = e >= math_symbols && e < math_symbols + math_symbol_count;
+	int count = math ? math_symbol_count : ascii_emoticon_count;
+	int index = (int)(e - (math ? math_symbols : ascii_emoticons));
+	if (!known[math]) {
+		known[math] = calloc(count, 1);
+	}
+	if (!known[math][index]) {
+		PangoFontMap *map = pango_cairo_font_map_get_default();
+		PangoContext *context = pango_font_map_create_context(map);
+		PangoLayout *layout = pango_layout_new(context);
+		PangoFontDescription *desc = pango_font_description_from_string("Sans 13");
+		pango_layout_set_font_description(layout, desc);
+		pango_font_description_free(desc);
+		pango_layout_set_text(layout, e->chars, -1);
+		known[math][index] = pango_layout_get_unknown_glyphs_count(layout) == 0 ? 1 : -1;
+		g_object_unref(layout);
+		g_object_unref(context);
+	}
+	return known[math][index] > 0;
+}
+
 static void fill_shown(struct picker *pk) {
 	pk->shown->length = 0;
 	if (pk->search[0]) {
-		for (int i = 0; i < emoji_count; i++) {
-			if (matches(emoji_list[i].name, pk->search)) {
-				list_add(pk->shown, (void *)&emoji_list[i]);
+		for (size_t l = 0; l < sizeof(all_lists) / sizeof(all_lists[0]); l++) {
+			for (int i = 0; i < *all_lists[l].count; i++) {
+				if (matches(all_lists[l].list[i].name, pk->search) &&
+						can_draw(&all_lists[l].list[i])) {
+					list_add(pk->shown, (void *)&all_lists[l].list[i]);
+				}
+			}
+		}
+	} else if (pk->tab == TAB_MATH || pk->tab == TAB_ASCII) {
+		const struct emoji *list = pk->tab == TAB_MATH ? math_symbols : ascii_emoticons;
+		int count = pk->tab == TAB_MATH ? math_symbol_count : ascii_emoticon_count;
+		for (int i = 0; i < count; i++) {
+			if (can_draw(&list[i])) {
+				list_add(pk->shown, (void *)&list[i]);
 			}
 		}
 	} else if (pk->tab == TAB_RECENT) {
@@ -181,7 +256,7 @@ static void fill_shown(struct picker *pk) {
 }
 
 static void keep_selected_in_view(struct picker *pk) {
-	int row = pk->selected / COLUMNS;
+	int row = pk->selected / columns(pk);
 	if (row < pk->scroll) {
 		pk->scroll = row;
 	} else if (row >= pk->scroll + ROWS) {
@@ -190,6 +265,34 @@ static void keep_selected_in_view(struct picker *pk) {
 }
 
 /* ---------- drawing ---------- */
+
+/* Text in the color of the flyout, made smaller until it fits the width. */
+static void draw_text_item(cairo_t *cr, const char *chars, double x, double y, double width,
+		double size, uint32_t color) {
+	PangoLayout *layout = pango_cairo_create_layout(cr);
+	int w = 0, h = 0;
+	for (; size >= 6; size -= 1) {
+		char font[64];
+		snprintf(font, sizeof(font), "Sans %.0f", size);
+		PangoFontDescription *desc = pango_font_description_from_string(font);
+		pango_layout_set_font_description(layout, desc);
+		pango_font_description_free(desc);
+		pango_layout_set_text(layout, chars, -1);
+		pango_layout_get_pixel_size(layout, &w, &h);
+		if (w <= width) {
+			break;
+		}
+	}
+	if (w > width) {
+		pango_layout_set_width(layout, (int)(width * PANGO_SCALE));
+		pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+		pango_layout_get_pixel_size(layout, &w, &h);
+	}
+	cairo_move_to(cr, x - w / 2.0, y - h / 2.0);
+	pd_color(cr, color);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+}
 
 static void draw_emoji(cairo_t *cr, const char *chars, double x, double y, double size) {
 	PangoLayout *layout = pango_cairo_create_layout(cr);
@@ -233,8 +336,8 @@ static void render(struct popup *p, cairo_t *cr) {
 	text_draw(cr, &ts, pk->search, &pk->tc, x0 + 34, y, w0 - 44, SEARCH_H);
 	y += SEARCH_H + 6;
 
-	// the tabs: recent and the groups
-	int tabs = 1 + emoji_group_count;
+	// the tabs: recent, the groups, math and text emoticons
+	int tabs = TAB_COUNT;
 	double tw = w0 / tabs;
 	pk->tabs = (struct pbox){ x0, y, w0, TABS_H };
 	for (int i = 0; i < tabs; i++) {
@@ -246,22 +349,29 @@ static void render(struct popup *p, cairo_t *cr) {
 		if (on) {
 			pd_rect(cr, b.x + 6, b.y + b.height - 3, b.width - 12, 3, st.accent);
 		}
-		draw_emoji(cr, tab_icons[i < (int)(sizeof(tab_icons) / sizeof(tab_icons[0])) ? i : 1],
-			b.x + b.width / 2, b.y + TABS_H / 2.0 - 1, 14);
+		if (i == TAB_MATH || i == TAB_ASCII) {
+			draw_text_item(cr, i == TAB_MATH ? "∑" : ":-)", b.x + b.width / 2,
+				b.y + TABS_H / 2.0 - 1, b.width - 4, i == TAB_MATH ? 14 : 10, st.fg);
+		} else {
+			draw_emoji(cr, tab_icons[i < (int)(sizeof(tab_icons) / sizeof(tab_icons[0])) ?
+				i : 1], b.x + b.width / 2, b.y + TABS_H / 2.0 - 1, 14);
+		}
 	}
 	y += TABS_H + 4;
 
 	// the grid
 	pk->grid = (struct pbox){ x0, y, w0, ROWS * CELL };
 	if (pk->shown->length == 0) {
-		pd_text(cr, st.font, pk->search[0] ? "No emoji by that name" :
+		pd_text(cr, st.font, pk->search[0] ? "Nothing by that name" :
 			"The emoji you use show up here", x0, y, w0, ROWS * CELL, st.dim, PD_CENTER);
 	}
-	for (int i = pk->scroll * COLUMNS; i < pk->shown->length && i < (pk->scroll + ROWS) *
-			COLUMNS; i++) {
+	int cols = columns(pk);
+	double cw = cell_w(pk);
+	for (int i = pk->scroll * cols; i < pk->shown->length && i < (pk->scroll + ROWS) * cols;
+			i++) {
 		const struct emoji *e = pk->shown->items[i];
-		int row = i / COLUMNS - pk->scroll, col = i % COLUMNS;
-		struct pbox b = { x0 + col * CELL, y + row * CELL, CELL, CELL };
+		int row = i / cols - pk->scroll, col = i % cols;
+		struct pbox b = { x0 + col * cw, y + row * CELL, cw, CELL };
 		if (i == pk->selected || i == pk->hover) {
 			fill_hover(cr, &st, b);
 		}
@@ -272,10 +382,15 @@ static void render(struct popup *p, cairo_t *cr) {
 			cairo_set_line_width(cr, 1.5);
 			cairo_stroke(cr);
 		}
-		draw_emoji(cr, e->chars, b.x + CELL / 2.0, b.y + CELL / 2.0, 19);
+		if (is_text(e)) {
+			draw_text_item(cr, e->chars, b.x + cw / 2.0, b.y + CELL / 2.0, cw - 6,
+				cols == COLUMNS ? 17 : 13, st.fg);
+		} else {
+			draw_emoji(cr, e->chars, b.x + CELL / 2.0, b.y + CELL / 2.0, 19);
+		}
 	}
 	// a scroll bar when there is more
-	int rows = (pk->shown->length + COLUMNS - 1) / COLUMNS;
+	int rows = (pk->shown->length + cols - 1) / cols;
 	if (rows > ROWS) {
 		double track = ROWS * CELL, thumb = track * ROWS / rows;
 		double top = y + (track - thumb) * pk->scroll / (rows - ROWS);
@@ -297,9 +412,10 @@ static int cell_at(struct picker *pk, double x, double y) {
 	if (!pbox_contains(&pk->grid, x, y)) {
 		return -1;
 	}
-	int col = (int)((x - pk->grid.x) / CELL), row = (int)((y - pk->grid.y) / CELL);
-	int i = (row + pk->scroll) * COLUMNS + col;
-	return col < COLUMNS && i < pk->shown->length ? i : -1;
+	int cols = columns(pk);
+	int col = (int)((x - pk->grid.x) / cell_w(pk)), row = (int)((y - pk->grid.y) / CELL);
+	int i = (row + pk->scroll) * cols + col;
+	return col < cols && i < pk->shown->length ? i : -1;
 }
 
 static void pick(struct picker *pk, int index, bool stay) {
@@ -322,7 +438,7 @@ static void motion(struct popup *p, double x, double y) {
 	pk->py = y;
 	pk->hover = cell_at(pk, x, y);
 	pk->hover_tab = pbox_contains(&pk->tabs, x, y) ?
-		(int)((x - pk->tabs.x) / (pk->tabs.width / (1 + emoji_group_count))) : -1;
+		(int)((x - pk->tabs.x) / (pk->tabs.width / TAB_COUNT)) : -1;
 	popup_set_dirty(p);
 }
 
@@ -339,7 +455,7 @@ static void button(struct popup *p, double x, double y, uint32_t btn, bool press
 		return;
 	}
 	if (pbox_contains(&pk->tabs, x, y)) {
-		int tab = (int)((x - pk->tabs.x) / (pk->tabs.width / (1 + emoji_group_count)));
+		int tab = (int)((x - pk->tabs.x) / (pk->tabs.width / TAB_COUNT));
 		pk->search[0] = '\0';
 		text_cursor_end(pk->search, &pk->tc, false);
 		pk->tab = tab;
@@ -352,7 +468,7 @@ static void button(struct popup *p, double x, double y, uint32_t btn, bool press
 
 static void axis(struct popup *p, double x, double y, int direction) {
 	struct picker *pk = p->data;
-	int rows = (pk->shown->length + COLUMNS - 1) / COLUMNS;
+	int rows = (pk->shown->length + columns(pk) - 1) / columns(pk);
 	pk->scroll += direction > 0 ? 2 : -2;
 	pk->scroll = pk->scroll > rows - ROWS ? rows - ROWS : pk->scroll;
 	pk->scroll = pk->scroll < 0 ? 0 : pk->scroll;
@@ -377,7 +493,7 @@ static void key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mo
 	case XKB_KEY_Down:
 		if (n > 0) {
 			int step = sym == XKB_KEY_Left ? -1 : sym == XKB_KEY_Right ? 1 :
-				sym == XKB_KEY_Up ? -COLUMNS : COLUMNS;
+				sym == XKB_KEY_Up ? -columns(pk) : columns(pk);
 			int next = pk->selected + step;
 			pk->selected = next < 0 ? pk->selected : next >= n ? pk->selected : next;
 			keep_selected_in_view(pk);
@@ -387,8 +503,7 @@ static void key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mo
 	case XKB_KEY_Tab:
 	case XKB_KEY_ISO_Left_Tab:
 		pk->search[0] = '\0';
-		pk->tab = (pk->tab + (sym == XKB_KEY_Tab ? 1 : emoji_group_count)) %
-			(1 + emoji_group_count);
+		pk->tab = (pk->tab + (sym == XKB_KEY_Tab ? 1 : TAB_COUNT - 1)) % TAB_COUNT;
 		text_cursor_end(pk->search, &pk->tc, false);
 		fill_shown(pk);
 		popup_set_dirty(p);
