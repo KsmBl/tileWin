@@ -586,6 +586,7 @@ static void build_window(struct settings *s) {
 		{ "Windows", "focus-windows-symbolic" },
 		{ "Taskbar & Start", "view-app-grid-symbolic" },
 		{ "Devices", "computer-symbolic" },
+		{ "Network & internet", "network-workgroup-symbolic" },
 		{ "System", "preferences-system-symbolic" },
 	};
 	static const struct {
@@ -617,9 +618,14 @@ static void build_window(struct settings *s) {
 			"password resume", screensaver_page_new, 0, "preferences-desktop-screensaver-symbolic" },
 		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new, 3, "audio-speakers-symbolic" },
 		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "
-			"12 24 seconds automatic", datetime_page_new, 4, "preferences-system-time-symbolic" },
+			"12 24 seconds automatic", datetime_page_new, 5, "preferences-system-time-symbolic" },
 		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 			bluetooth_page_new, 3, "bluetooth-symbolic" },
+		{ "network", "Network", "wifi wi-fi wlan ethernet cable ip address dhcp fixed static "
+			"gateway subnet mask router password key dns servers", network_page_new, 4,
+			"network-wireless-symbolic" },
+		{ "dns", "DNS", "dns servers name resolver cache prefetch fastest block lists pihole "
+			"pi-hole ads adblock trackers hosts allow", dns_page_new, 4, "network-server-symbolic" },
 		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications clipboard "
 			"history right click context menu", taskbar_page_new, 2, "view-continuous-symbolic" },
 		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new, 2, "start-here-symbolic" },
@@ -627,11 +633,11 @@ static void build_window(struct settings *s) {
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new, 3, "input-keyboard-symbolic" },
 		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap magnifier zoom "
 			"magnify enlarge", mouse_page_new, 3, "input-mouse-symbolic" },
-		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new, 4, "applications-system-symbolic" },
-		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 4, "avatar-default-symbolic" },
+		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new, 5, "applications-system-symbolic" },
+		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 5, "avatar-default-symbolic" },
 		{ "backup", "Backup", "restore save export import copy settings file another computer",
-			backup_page_new, 4, "document-save-symbolic" },
-		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 4, "help-about-symbolic" },
+			backup_page_new, 5, "document-save-symbolic" },
+		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 5, "help-about-symbolic" },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
 	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
@@ -764,7 +770,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
+				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
 		}
 	}
 	gtk_window_present(s->window);
@@ -840,7 +846,7 @@ int main(int argc, char **argv) {
 
 	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup or about", "PAGE");
+		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

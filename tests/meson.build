@@ -450,6 +450,17 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'settings-network',
+	find_program('settings_network.sh'),
+	args: [meson.project_build_root()],
+	depends: [pointer_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'settings-backup',
 	find_program('settings_backup.sh'),
 	args: [meson.project_build_root()],

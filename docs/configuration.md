@@ -224,6 +224,38 @@ snap_layouts {
 
 The numbers are where the line down and the line across go, 0.1 to 0.9 of the screen.
 
+## The DNS service: /etc/tileWin/dns.conf
+
+`tilewin-dnsd` (the systemd service `tilewin-dnsd.service`) answers on `127.0.0.153`. While it is on (the switch on the DNS page, or `pkexec /usr/local/libexec/tilewin-dns-apply enable`), `/etc/NetworkManager/conf.d/zz-tilewin-dns.conf` makes it the DNS server for all networks and `/etc/systemd/resolved.conf.d/tilewin-dns.conf` turns resolved's own cache off; `disable` removes both. The config, readable by all, written as root:
+
+```
+servers 1.1.1.1 9.9.9.9 8.8.8.8   # for all networks; none: those of each network
+fastest 2                         # ask the 2 fastest at once; 0: all in order
+test_interval 3600                # seconds between timing the servers
+
+cache yes
+cache_min 0                       # keep an answer at least this long (0: as it says)
+cache_max 86400                   # and at most this long (0: as it says)
+cache_size 10000
+
+prefetch yes
+prefetch_percent 5                # the top 5% of the names asked for ...
+prefetch_days 7                   # ... in the last 7 days
+prefetch_add example.com          # always prefetched
+prefetch_skip example.org         # never, with the names below it
+
+blocking yes
+block_answer null                 # 0.0.0.0 and ::, or nxdomain
+blocklist https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+blocklist file:/var/lib/tilewin-dns/imported/mine.list
+block ads.example.com             # with the names below it
+allow good.example.com            # never blocked, with the names below it
+```
+
+Which servers are asked: a network with DNS servers of its own (NetworkManager's `ipv4.dns` with `ignore-auto-dns`, set on the Network page) uses them; else the `servers` above; else the servers the network hands out. Block lists may be hosts files (`0.0.0.0 name`), one name per line, `*.name` for a name and those below it, or adblock rules (`||name^`; exceptions and rules with paths are skipped). Only the questions of apps are counted for prefetching, kept per day in `/var/lib/tilewin-dns/stats`; the prefetches are not.
+
+What the service is doing is in `/run/tilewin-dns/status`, the names it prefetches in `/run/tilewin-dns/prefetch` (readable by the group wheel). `systemctl reload tilewin-dnsd` reads the config again; `tilewin-dns-apply test` times the servers now and `update-lists` downloads the lists now.
+
 ## Your own themes: theme.conf
 
 A theme is a directory with:

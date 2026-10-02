@@ -25,6 +25,8 @@ struct datetime_page;
 struct desktop_page;
 struct screensaver_page;
 struct appwin_page;
+struct dns_page;
+struct network_page;
 
 struct settings {
 	GtkApplication *app;
@@ -56,6 +58,8 @@ struct settings {
 	struct desktop_page *desktop_page;
 	struct screensaver_page *screensaver_page;
 	struct appwin_page *appwin_page;
+	struct dns_page *dns_page;
+	struct network_page *network_page;
 	GtkWidget *sidebar, *search, *results, *results_scroll;
 };
 
@@ -295,6 +299,25 @@ GtkWidget *datetime_page_new(struct settings *s);
 void datetime_page_refresh(struct settings *s);
 void window_page_refresh(struct settings *s);
 GtkWidget *appwin_page_new(struct settings *s);
+/* page_dns.c: the DNS service of tileWin (dns/), and what the Network page shares */
+struct dns_preset {
+	const char *value, *name;
+};
+/* Well-known DNS servers: address and provider, ending with NULL. */
+extern const struct dns_preset dns_server_presets[];
+/* The name of a value of presets (NULL: the servers), NULL if it is not one. */
+const char *dns_preset_name(const struct dns_preset *presets, const char *value);
+bool dns_valid_name(const char *text);
+bool dns_service_installed(void);
+/* Whether the DNS of the computer goes through the service. */
+bool dns_service_enabled(void);
+/* NetworkManager's own servers for all networks, with their files; "" if none. */
+char *dns_networkmanager_global(void);
+GtkWidget *dns_page_new(struct settings *s);
+void dns_page_refresh(struct settings *s);
+/* page_network.c: IP address, DNS servers and Wi-Fi password of each network */
+GtkWidget *network_page_new(struct settings *s);
+void network_page_refresh(struct settings *s);
 void appwin_page_refresh(struct settings *s);
 
 #endif

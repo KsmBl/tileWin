@@ -13,10 +13,12 @@ executable(
 		'page_bluetooth.c',
 		'page_datetime.c',
 		'page_desktop.c',
+		'page_dns.c',
 		'page_keyboard.c',
 		'page_launcher.c',
 		'page_menus.c',
 		'page_mouse.c',
+		'page_network.c',
 		'page_screen.c',
 		'page_screensaver.c',
 		'page_sound.c',
@@ -37,6 +39,7 @@ executable(
 	# the kit whole, its functions lent to the savers the preview loads
 	link_whole: [lib_saver_kit],
 	link_with: [lib_sway_common],
+	c_args: ['-DTILEWIN_LIBEXECDIR="@0@"'.format(join_paths(prefix, get_option('libexecdir')))],
 	export_dynamic: true,
 	install: true,
 )
