@@ -105,6 +105,9 @@ static struct {
 	uint32_t ctrl_mask, shift_mask;
 	struct loop_timer *paste_timer;
 	bool paste_shift;
+	// typed in with "paste": what the clipboard held before, put back afterwards
+	struct clip *restore;
+	char *pasted;
 	int listen_fd;
 	list_t *watchers; // subscribed connections, as int fds cast to pointers
 	bool running;
@@ -684,6 +687,24 @@ static void send_key(uint32_t key, bool down, uint32_t mods) {
 	zwp_virtual_keyboard_v1_modifiers(cb.keyboard, mods, 0, 0, 0);
 }
 
+/* After "paste": the text is gone from the history, the clipboard is what it was. */
+static void restore_fired(void *data) {
+	for (int i = cb.entries->length - 1; cb.pasted && i >= 0; i--) {
+		struct clip *c = cb.entries->items[i];
+		if (!c->image && !c->pinned && strcmp(c->data, cb.pasted) == 0) {
+			remove_at(i);
+		}
+	}
+	if (cb.restore) {
+		set_clipboard(cb.restore->image, cb.restore->data, cb.restore->len);
+		free(cb.restore->data);
+		free(cb.restore);
+		cb.restore = NULL;
+	}
+	free(cb.pasted);
+	cb.pasted = NULL;
+}
+
 static void paste_fired(void *data) {
 	cb.paste_timer = NULL;
 	if (!setup_keyboard()) {
@@ -703,6 +724,10 @@ static void paste_fired(void *data) {
 	}
 	send_key(KEY_LEFTCTRL, false, 0);
 	wl_display_flush(cb.display);
+	if (cb.pasted) {
+		// once the window has taken it: the clipboard as it was before
+		loop_add_timer(cb.loop, 400, restore_fired, NULL);
+	}
 }
 
 /* The taskbar knows which window has the keyboard, so it says whether the
@@ -738,6 +763,9 @@ static void use_entry(uint64_t id, bool shift) {
  *   remove <id>           -> nothing
  *   clear                 -> nothing; forgets everything that is not pinned
  *   copy <bytes>\n<text>  -> nothing; puts that text on the clipboard
+ *   paste <bytes> <shift>\n<text>
+ *                         -> nothing; types that text into the focused window
+ *                            by way of the clipboard, which gets back what it had
  *   watch                 -> stays open, a "." arrives whenever the list changes
  *
  * Only this user can reach the socket, and the only program that speaks to it
@@ -922,6 +950,30 @@ static void handle_request(int fd) {
 		}
 	} else if (strcmp(line, "clear") == 0) {
 		clear_unpinned();
+	} else if (sscanf(line, "paste %zu %d", &len, &flag) == 2 && len > 0 && len <= MAX_TEXT) {
+		// text typed into the focused window (the emoji picker): pasted, and the
+		// clipboard given back what it held
+		char *text = malloc(len + 1);
+		if (text && read_all(fd, text, len) && !cb.pasted) {
+			text[len] = '\0';
+			struct clip *newest = cb.entries->length > 0 ? cb.entries->items[0] : NULL;
+			if (newest) {
+				cb.restore = calloc(1, sizeof(*cb.restore));
+				cb.restore->image = newest->image;
+				cb.restore->len = newest->len;
+				cb.restore->data = malloc(newest->len + 1);
+				memcpy(cb.restore->data, newest->data, newest->len);
+				cb.restore->data[newest->len] = '\0';
+			}
+			cb.pasted = strdup(text);
+			set_clipboard(false, text, len);
+			cb.paste_shift = flag;
+			if (cb.paste_timer) {
+				loop_remove_timer(cb.loop, cb.paste_timer);
+			}
+			cb.paste_timer = loop_add_timer(cb.loop, 150, paste_fired, NULL);
+		}
+		free(text);
 	} else if (sscanf(line, "copy %zu", &len) == 1 && len > 0 && len <= MAX_TEXT) {
 		char *text = malloc(len + 1);
 		if (text && read_all(fd, text, len)) {

@@ -317,6 +317,26 @@ static void try_connect(void *data) {
 	view_changed();
 }
 
+static bool focused_terminal(struct panel *panel);
+
+void clipboard_paste_text(struct panel *panel, const char *text) {
+	if (!text || !*text) {
+		return;
+	}
+	size_t len = strlen(text);
+	int fd = clip_connect();
+	if (fd < 0) {
+		clipboard_copy_text(panel, text); // at least it can be pasted by hand
+		return;
+	}
+	char *head = format_str("paste %zu %d\n", len, focused_terminal(panel) ? 1 : 0);
+	if (!write_all(fd, head, strlen(head)) || !write_all(fd, text, len)) {
+		sway_log(SWAY_ERROR, "Could not hand the text to tilewin-clipboard");
+	}
+	free(head);
+	close(fd);
+}
+
 void clipboard_copy_text(struct panel *panel, const char *text) {
 	if (!text || !*text) {
 		return;

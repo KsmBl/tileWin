@@ -44,6 +44,8 @@ executable(
 		'jumplist.c',
 		'launcher.c',
 		'main.c',
+		'emoji_data.c',
+		'emojipicker.c',
 		'minicons.c',
 		'notes.c',
 		'notify.c',

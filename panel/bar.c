@@ -672,6 +672,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		calendar_toggle(panel, anchor, NULL);
 	} else if (strcmp(cmd, "clipboard") == 0) {
 		clipboard_toggle(panel, output);
+	} else if (strcmp(cmd, "emoji") == 0) {
+		emojipicker_toggle(panel, output);
 	} else if (strcmp(cmd, "snip") == 0) {
 		snip_toolbar_toggle(panel, output);
 	} else if (strcmp(cmd, "bluetooth") == 0 && output) {

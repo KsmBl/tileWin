@@ -472,6 +472,7 @@ enum popup_kind {
 	POPUP_BLUETOOTH,
 	POPUP_SNIP,
 	POPUP_CLIPBOARD,
+	POPUP_EMOJI,
 	POPUP_INFO,
 	POPUP_HUNG,
 	POPUP_SNAPLAYOUTS,
@@ -654,6 +655,8 @@ void clipboard_fini(struct panel *panel);
 void clipboard_toggle(struct panel *panel, struct panel_output *output);
 /* Puts text on the clipboard. */
 void clipboard_copy_text(struct panel *panel, const char *text);
+/* Types text into the focused window by way of the clipboard, which keeps what it had. */
+void clipboard_paste_text(struct panel *panel, const char *text);
 
 /* snip.c: the snipping toolbar (Win+Shift+S) */
 void snip_toolbar_toggle(struct panel *panel, struct panel_output *output);
@@ -769,6 +772,8 @@ void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
 void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t con_id,
 	int x, int y, int button_width);
 void snaplayouts_leave(struct panel *panel, int64_t con_id);
+/* emojipicker.c: the emoji picker (Win+.) */
+void emojipicker_toggle(struct panel *panel, struct panel_output *output);
 /* notes.c: Sticky Notes on the desktop */
 void notes_init(struct panel *panel);
 void notes_command(struct panel *panel, int argc, char **argv);
