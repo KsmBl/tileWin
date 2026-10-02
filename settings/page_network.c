@@ -5,8 +5,10 @@
 
 /*
  * Network page: each saved network of NetworkManager (Wi-Fi, cable, ...) with
- * its IP address (from DHCP or fixed), its own DNS servers or those for all
- * networks, and the password of a Wi-Fi network to show and change. All of it
+ * its IP address (from DHCP or fixed) and the password of a Wi-Fi network to
+ * show and change. The same code, with only the network picker and the DNS
+ * servers, is the "Servers of single networks" section of the DNS page, so
+ * all DNS is set in one place. All of it
  * goes through nmcli; changing a connection and reading its password take
  * polkit's yes, which NetworkManager gives administrators at the computer.
  * For tests TILEWIN_NMCLI is run instead of nmcli.
@@ -26,7 +28,7 @@ struct network_page {
 	char *key_mgmt;   // its Wi-Fi security, "" for an open network
 	GtkWidget *conn_dd, *conn_sub, *details, *message;
 	GtkWidget *method_dd, *address, *prefix_dd, *gateway, *fixed_rows[3], *apply_row, *now_sub;
-	GtkWidget *dns_dd, *dns_list, *dns_pick, *dns_entry_row, *dns_entry, *dns_note, *dns_empty;
+	GtkWidget *dns_now, *dns_dd, *dns_list, *dns_pick, *dns_entry_row, *dns_entry, *dns_note, *dns_empty;
 	GPtrArray *dns, *dns_rows, *dns_picks;
 	GtkWidget *wifi_group, *password, *show_button, *save_password, *password_sub;
 	bool dns_syncing, was_fixed, shown;
@@ -147,30 +149,37 @@ static void show_details(struct network_page *p);
 static void dns_sync(struct network_page *p);
 
 static bool is_fixed(struct network_page *p) {
-	return gtk_drop_down_get_selected(GTK_DROP_DOWN(p->method_dd)) == 1;
+	return p->method_dd ? gtk_drop_down_get_selected(GTK_DROP_DOWN(p->method_dd)) == 1 :
+		p->was_fixed;
 }
 
 static void sync_rows(struct network_page *p) {
 	bool fixed = is_fixed(p);
-	for (int i = 0; i < 3; i++) {
-		gtk_widget_set_visible(p->fixed_rows[i], fixed);
+	if (p->method_dd) {
+		for (int i = 0; i < 3; i++) {
+			gtk_widget_set_visible(p->fixed_rows[i], fixed);
+		}
+		// DHCP to DHCP changes nothing
+		gtk_widget_set_visible(p->apply_row, fixed || p->was_fixed);
 	}
-	gtk_widget_set_visible(p->apply_row, fixed || p->was_fixed); // DHCP to DHCP changes nothing
+	if (!p->dns_dd) {
+		return;
+	}
 	bool own = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->dns_dd)) == 1;
 	gtk_widget_set_visible(gtk_widget_get_parent(p->dns_list), own);
 	// without DHCP the network hands out no servers: say where they come from
 	char *global = dns_networkmanager_global();
 	const char *note = NULL;
 	if (!own && dns_service_enabled()) {
-		note = "Asked: the servers for all networks of the DNS page";
+		note = "Asked: the servers for all networks above";
 	} else if (!own && *global) {
-		note = "Asked: NetworkManager's servers for all networks (see the DNS page)";
+		note = "Asked: NetworkManager's own servers for all networks";
 	} else if (!own && fixed) {
-		note = "A fixed address gets no servers from the network: choose some here, or for "
-			"all networks on the DNS page";
+		note = "This network has a fixed address (Network page), so it hands out no servers: "
+			"choose some here, or for all networks above";
 	} else if (own && *global && !dns_service_enabled()) {
 		note = "NetworkManager has servers for all networks of its own, which win over these "
-			"while the DNS service of the DNS page is off";
+			"while the DNS service is off";
 	}
 	gtk_label_set_text(GTK_LABEL(p->dns_note), note ? note : "");
 	gtk_widget_set_visible(p->dns_note, note != NULL);
@@ -235,21 +244,23 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 	p->updating = true;
 	bool fixed = g_strcmp0(method, "manual") == 0;
 	p->was_fixed = fixed;
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->method_dd), fixed ? 1 : 0);
-	// a fixed address as it is set, else the one of the lease to start from
-	const char *address = fixed && addresses && *addresses ? addresses : p->now_address;
-	char *first = address ? g_strndup(address, strcspn(address, ",")) : g_strdup("");
-	char *slash = strchr(first, '/');
-	int prefix = slash ? atoi(slash + 1) : 24;
-	if (slash) {
-		*slash = '\0';
+	if (p->method_dd) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->method_dd), fixed ? 1 : 0);
+		// a fixed address as it is set, else the one of the lease to start from
+		const char *address = fixed && addresses && *addresses ? addresses : p->now_address;
+		char *first = address ? g_strndup(address, strcspn(address, ",")) : g_strdup("");
+		char *slash = strchr(first, '/');
+		int prefix = slash ? atoi(slash + 1) : 24;
+		if (slash) {
+			*slash = '\0';
+		}
+		gtk_editable_set_text(GTK_EDITABLE(p->address), first);
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->prefix_dd),
+			(guint)(prefix >= 8 && prefix <= 32 ? 32 - prefix : 8));
+		g_free(first);
+		const char *gw = fixed && gateway && *gateway ? gateway : p->now_gateway;
+		gtk_editable_set_text(GTK_EDITABLE(p->gateway), gw ? gw : "");
 	}
-	gtk_editable_set_text(GTK_EDITABLE(p->address), first);
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->prefix_dd), (guint)(prefix >= 8 && prefix <= 32 ?
-		32 - prefix : 8));
-	g_free(first);
-	const char *gw = fixed && gateway && *gateway ? gateway : p->now_gateway;
-	gtk_editable_set_text(GTK_EDITABLE(p->gateway), gw ? gw : "");
 
 	g_ptr_array_set_size(p->dns, 0);
 	char *both = g_strdup_printf("%s,%s", dns4 ? dns4 : "", dns6 ? dns6 : "");
@@ -262,12 +273,16 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 	g_strfreev(servers);
 	g_free(both);
 	bool own = p->dns->len > 0 && g_strcmp0(ignore, "yes") == 0;
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dns_dd), own ? 1 : 0);
+	if (p->dns_dd) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dns_dd), own ? 1 : 0);
+	}
 	if (!own) {
 		g_ptr_array_set_size(p->dns, 0);
 	}
 	p->updating = false;
-	dns_sync(p);
+	if (p->dns_dd) {
+		dns_sync(p);
+	}
 
 	GString *now = g_string_new(NULL);
 	if (p->now_address) {
@@ -275,29 +290,36 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 		if (p->now_gateway) {
 			g_string_append_printf(now, ", gateway %s", p->now_gateway);
 		}
-		if (now_dns->len) {
-			g_string_append_printf(now, ", DNS from the network %s", now_dns->str);
-		}
 	} else {
 		g_string_append(now, "Not connected now");
 	}
-	gtk_label_set_text(GTK_LABEL(p->now_sub), now->str);
+	if (p->now_sub) {
+		gtk_label_set_text(GTK_LABEL(p->now_sub), now->str);
+	}
+	if (p->dns_now) {
+		char *text = now_dns->len ? g_strdup_printf("The network hands out %s", now_dns->str) :
+			g_strdup(p->now_address ? "The network hands out no servers" : "Not connected now");
+		gtk_label_set_text(GTK_LABEL(p->dns_now), text);
+		g_free(text);
+	}
 	g_string_free(now, TRUE);
 	g_string_free(now_dns, TRUE);
 
-	bool wifi = g_strcmp0(type, "802-11-wireless") == 0;
-	gtk_widget_set_visible(gtk_widget_get_parent(p->wifi_group), wifi);
-	bool open = !p->key_mgmt || !*p->key_mgmt || strcmp(p->key_mgmt, "none") == 0 ||
-		strcmp(p->key_mgmt, "owe") == 0;
-	gtk_editable_set_text(GTK_EDITABLE(p->password), "");
-	p->shown = false;
-	gtk_button_set_label(GTK_BUTTON(p->show_button), "Show");
-	gtk_widget_set_sensitive(p->password, !open);
-	gtk_widget_set_sensitive(p->show_button, !open);
-	gtk_widget_set_sensitive(p->save_password, !open);
-	gtk_label_set_text(GTK_LABEL(p->password_sub), open ? "This network has no password" :
-		strcmp(p->key_mgmt, "wpa-eap") == 0 ? "The password of your account on this network" :
-		"Hidden until you show it");
+	if (p->wifi_group) {
+		bool wifi = g_strcmp0(type, "802-11-wireless") == 0;
+		gtk_widget_set_visible(gtk_widget_get_parent(p->wifi_group), wifi);
+		bool open = !p->key_mgmt || !*p->key_mgmt || strcmp(p->key_mgmt, "none") == 0 ||
+			strcmp(p->key_mgmt, "owe") == 0;
+		gtk_editable_set_text(GTK_EDITABLE(p->password), "");
+		p->shown = false;
+		gtk_button_set_label(GTK_BUTTON(p->show_button), "Show");
+		gtk_widget_set_sensitive(p->password, !open);
+		gtk_widget_set_sensitive(p->show_button, !open);
+		gtk_widget_set_sensitive(p->save_password, !open);
+		gtk_label_set_text(GTK_LABEL(p->password_sub), open ? "This network has no password" :
+			strcmp(p->key_mgmt, "wpa-eap") == 0 ?
+			"The password of your account on this network" : "Hidden until you show it");
+	}
 	sync_rows(p);
 	gtk_widget_set_sensitive(p->details, true);
 	g_free(method);
@@ -392,14 +414,16 @@ static void conns_loaded(struct network_page *p, bool ok, char *out, char *err, 
 	on_conn_picked(G_OBJECT(p->conn_dd), NULL, p);
 }
 
-void network_page_refresh(struct settings *s) {
-	struct network_page *p = s->network_page;
-	if (!p) {
-		return;
-	}
+static void load_conns(struct network_page *p) {
 	const char *argv[] = { "-t", "-f", "NAME,UUID,TYPE,DEVICE,ACTIVE", "connection", "show",
 		NULL };
 	run(p, argv, conns_loaded, NULL);
+}
+
+void network_page_refresh(struct settings *s) {
+	if (s->network_page) {
+		load_conns(s->network_page);
+	}
 }
 
 /* ---------- changing a network ---------- */
@@ -533,22 +557,33 @@ static void dns_add(struct network_page *p, const char *value) {
 	save_dns(p);
 }
 
-static void on_dns_pick(GObject *dd, GParamSpec *pspec, gpointer data) {
+/* As on_pick of the DNS page: the list of the dropdown is made anew by the
+ * pick, so that waits until its popup is done with the click. */
+static gboolean dns_picked(gpointer data) {
 	struct network_page *p = data;
-	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
-	if (p->dns_syncing || sel == 0 || sel > p->dns_picks->len) {
-		return;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->dns_pick));
+	if (sel == 0 || sel == GTK_INVALID_LIST_POSITION || sel > p->dns_picks->len) {
+		return G_SOURCE_REMOVE;
 	}
-	const char *value = p->dns_picks->pdata[sel - 1];
+	char *value = g_strdup(p->dns_picks->pdata[sel - 1]);
+	p->dns_syncing = true;
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dns_pick), 0);
+	p->dns_syncing = false;
 	if (!*value) {
 		gtk_widget_set_visible(p->dns_entry_row, true);
 		gtk_widget_grab_focus(p->dns_entry);
 	} else {
 		dns_add(p, value);
 	}
-	p->dns_syncing = true;
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), 0);
-	p->dns_syncing = false;
+	g_free(value);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_dns_pick(GObject *dd, GParamSpec *pspec, gpointer data) {
+	struct network_page *p = data;
+	if (!p->dns_syncing && gtk_drop_down_get_selected(GTK_DROP_DOWN(dd)) != 0) {
+		g_idle_add(dns_picked, p);
+	}
 }
 
 static void on_dns_typed(GtkWidget *widget, gpointer data) {
@@ -711,7 +746,7 @@ static GtkWidget *prefix_dropdown(void) {
 }
 
 static gboolean on_mapped_refresh(gpointer data) {
-	network_page_refresh(((struct network_page *)data)->s);
+	load_conns(data);
 	return G_SOURCE_REMOVE;
 }
 
@@ -719,19 +754,20 @@ static void on_map(GtkWidget *widget, gpointer data) {
 	g_idle_add(on_mapped_refresh, data); // the networks may have changed meanwhile
 }
 
-GtkWidget *network_page_new(struct settings *s) {
+static struct network_page *section_new(struct settings *s) {
 	struct network_page *p = g_new0(struct network_page, 1);
 	p->s = s;
 	p->conns = g_ptr_array_new_with_free_func(conn_free);
 	p->dns = g_ptr_array_new_with_free_func(g_free);
 	p->dns_rows = g_ptr_array_new();
 	p->dns_picks = g_ptr_array_new_with_free_func(g_free);
-	GtkWidget *content;
-	GtkWidget *page = ui_page("Network",
-		"The address, the DNS servers and the password of each saved network. New Wi-Fi "
-		"networks are joined from the network menu of the taskbar.", &content);
+	return p;
+}
 
-	GtkWidget *which = ui_group(content, NULL, NULL);
+/* The network to show, the message under it and the box of its settings. */
+static void add_picker(struct network_page *p, GtkWidget *content, const char *title,
+		const char *description) {
+	GtkWidget *which = ui_group(content, title, description);
 	p->conn_dd = gtk_drop_down_new(NULL, NULL);
 	g_signal_connect(p->conn_dd, "notify::selected", G_CALLBACK(on_conn_picked), p);
 	GtkWidget *row = ui_row(which, "Network", " ", p->conn_dd);
@@ -742,34 +778,22 @@ GtkWidget *network_page_new(struct settings *s) {
 	gtk_widget_set_margin_start(p->message, 12);
 	gtk_box_append(GTK_BOX(gtk_widget_get_parent(which)), p->message);
 	gtk_widget_set_visible(p->message, false);
-
 	p->details = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
 	gtk_box_append(GTK_BOX(content), p->details);
+	gtk_widget_set_sensitive(p->details, false);
+	g_signal_connect(which, "map", G_CALLBACK(on_map), p);
+}
 
-	GtkWidget *ip = ui_group(p->details, "IP address", NULL);
-	p->method_dd = gtk_drop_down_new_from_strings(method_labels);
-	g_signal_connect(p->method_dd, "notify::selected", G_CALLBACK(on_method), p);
-	row = ui_row(ip, "Get the address", " ", p->method_dd);
-	p->now_sub = gtk_widget_get_last_child(gtk_widget_get_first_child(ui_row_box(row)));
-	p->address = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(p->address), "192.168.1.50");
-	p->fixed_rows[0] = ui_row(ip, "Address", "One that no other device of the network has, "
-		"outside the range the router hands out", p->address);
-	p->prefix_dd = prefix_dropdown();
-	p->fixed_rows[1] = ui_row(ip, "Subnet mask", NULL, p->prefix_dd);
-	p->gateway = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(p->gateway), "192.168.1.1");
-	p->fixed_rows[2] = ui_row(ip, "Gateway", "The router", p->gateway);
-	GtkWidget *apply = gtk_button_new_with_label("Apply");
-	gtk_widget_add_css_class(apply, "suggested-action");
-	g_signal_connect(apply, "clicked", G_CALLBACK(on_apply_address), p);
-	p->apply_row = ui_row(ip, NULL, "A connected network connects again with the new address",
-		apply);
-
-	GtkWidget *dns = ui_group(p->details, "DNS servers", NULL);
+void network_dns_section_attach(struct settings *s, GtkWidget *content) {
+	struct network_page *p = section_new(s);
+	add_picker(p, content, "Servers of single networks",
+		"A network can ask servers of its own instead of those for all networks, e.g. the "
+		"router at home for the names of the devices there.");
+	GtkWidget *dns = ui_group(p->details, NULL, NULL);
 	p->dns_dd = gtk_drop_down_new_from_strings(dns_labels);
 	g_signal_connect(p->dns_dd, "notify::selected", G_CALLBACK(on_dns_mode), p);
-	ui_row(dns, "This network asks", NULL, p->dns_dd);
+	GtkWidget *row = ui_row(dns, "This network asks", " ", p->dns_dd);
+	p->dns_now = gtk_widget_get_last_child(gtk_widget_get_first_child(ui_row_box(row)));
 	p->dns_note = gtk_label_new(NULL);
 	gtk_label_set_xalign(GTK_LABEL(p->dns_note), 0);
 	gtk_label_set_wrap(GTK_LABEL(p->dns_note), TRUE);
@@ -792,6 +816,39 @@ GtkWidget *network_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(ui_row_box(p->dns_entry_row)), p->dns_entry);
 	gtk_box_append(GTK_BOX(ui_row_box(p->dns_entry_row)), add);
 	gtk_widget_set_visible(p->dns_entry_row, false);
+	sync_rows(p);
+	dns_sync(p);
+	load_conns(p);
+}
+
+GtkWidget *network_page_new(struct settings *s) {
+	struct network_page *p = section_new(s);
+	GtkWidget *content;
+	GtkWidget *page = ui_page("Network",
+		"The address and the password of each saved network; its DNS servers are set on the "
+		"DNS page. New Wi-Fi networks are joined from the network menu of the taskbar.",
+		&content);
+	add_picker(p, content, NULL, NULL);
+
+	GtkWidget *ip = ui_group(p->details, "IP address", NULL);
+	p->method_dd = gtk_drop_down_new_from_strings(method_labels);
+	g_signal_connect(p->method_dd, "notify::selected", G_CALLBACK(on_method), p);
+	GtkWidget *row = ui_row(ip, "Get the address", " ", p->method_dd);
+	p->now_sub = gtk_widget_get_last_child(gtk_widget_get_first_child(ui_row_box(row)));
+	p->address = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->address), "192.168.1.50");
+	p->fixed_rows[0] = ui_row(ip, "Address", "One that no other device of the network has, "
+		"outside the range the router hands out", p->address);
+	p->prefix_dd = prefix_dropdown();
+	p->fixed_rows[1] = ui_row(ip, "Subnet mask", NULL, p->prefix_dd);
+	p->gateway = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->gateway), "192.168.1.1");
+	p->fixed_rows[2] = ui_row(ip, "Gateway", "The router", p->gateway);
+	GtkWidget *apply = gtk_button_new_with_label("Apply");
+	gtk_widget_add_css_class(apply, "suggested-action");
+	g_signal_connect(apply, "clicked", G_CALLBACK(on_apply_address), p);
+	p->apply_row = ui_row(ip, NULL, "A connected network connects again with the new address",
+		apply);
 
 	p->wifi_group = ui_group(p->details, "Wi-Fi password", NULL);
 	p->password = gtk_password_entry_new();
@@ -806,11 +863,8 @@ GtkWidget *network_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(ui_row_box(row)), p->show_button);
 	gtk_box_append(GTK_BOX(ui_row_box(row)), p->save_password);
 
-	gtk_widget_set_sensitive(p->details, false);
 	sync_rows(p);
-	dns_sync(p);
 	s->network_page = p;
-	g_signal_connect(page, "map", G_CALLBACK(on_map), p);
-	network_page_refresh(s);
+	load_conns(p);
 	return page;
 }

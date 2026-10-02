@@ -489,22 +489,33 @@ static void add_word(struct word_list *w, const char *value) {
 	}
 }
 
-static void on_pick(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+/* What a pick does, once the dropdown is done with the click: its list is
+ * made anew, which must not happen while its popup is still handling it. */
+static gboolean picked(gpointer data) {
 	struct word_list *w = data;
-	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-	if (w->syncing || sel == 0 || sel == GTK_INVALID_LIST_POSITION || sel > w->picks->len) {
-		return;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(w->pick));
+	if (sel == 0 || sel == GTK_INVALID_LIST_POSITION || sel > w->picks->len) {
+		return G_SOURCE_REMOVE;
 	}
-	const char *value = w->picks->pdata[sel - 1];
+	char *value = g_strdup(w->picks->pdata[sel - 1]);
+	w->syncing = true;
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(w->pick), 0);
+	w->syncing = false;
 	if (strcmp(value, "") == 0) {
 		gtk_widget_set_visible(w->entry_row, true); // "Other…": type it
 		gtk_widget_grab_focus(w->entry);
 	} else {
 		add_word(w, value);
 	}
-	w->syncing = true;
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(dropdown), 0);
-	w->syncing = false;
+	g_free(value);
+	return G_SOURCE_REMOVE;
+}
+
+static void on_pick(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct word_list *w = data;
+	if (!w->syncing && gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown)) != 0) {
+		g_idle_add(picked, w);
+	}
 }
 
 static void on_add_typed(GtkWidget *widget, gpointer data) {
@@ -1183,8 +1194,7 @@ GtkWidget *dns_page_new(struct settings *s) {
 	GtkWidget *content;
 	GtkWidget *page = ui_page("DNS",
 		"Which servers turn names like example.com into addresses, how long their answers "
-		"are kept, which are fetched ahead of time, and which names are blocked. The servers "
-		"of single networks are set on the Network page.", &content);
+		"are kept, which are fetched ahead of time, and which names are blocked.", &content);
 
 	GtkWidget *service = ui_group(content, "DNS service",
 		"tileWin's own DNS service does all of this page; while it is off, NetworkManager "
@@ -1215,7 +1225,7 @@ GtkWidget *dns_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(gtk_widget_get_parent(service)), p->nm_note);
 
 	GtkWidget *all = ui_group(content, "Servers for all networks",
-		"Networks with servers of their own (Network page) keep those.");
+		"Networks with servers of their own (below) keep those.");
 	p->mode_dd = dropdown(p, mode_labels);
 	ui_row(all, "Ask", NULL, p->mode_dd);
 	p->fastest_dd = dropdown(p, fastest_labels);
@@ -1231,6 +1241,7 @@ GtkWidget *dns_page_new(struct settings *s) {
 		"No servers yet: add some below", "An address, e.g. 192.168.1.1 or 2606:4700::1111",
 		"Remove this server", valid_address, describe_server);
 	p->servers_box = gtk_widget_get_parent(p->servers->list);
+	network_dns_section_attach(s, content);
 
 	GtkWidget *cache = ui_group(content, "Cache",
 		"Answers are kept for a while, so the same name is answered at once the next time.");

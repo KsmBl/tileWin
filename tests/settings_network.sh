@@ -2,8 +2,9 @@
 # Works the Network and DNS pages of the settings app against a NetworkManager
 # and a DNS helper made up for the test, and looks at what they were told:
 # showing the Wi-Fi password asks NetworkManager for the secret, a fixed
-# address is saved with its subnet and gateway, and choosing how the servers
-# for all networks are asked writes the config of the DNS service.
+# address is saved with its subnet and gateway, choosing how the servers for
+# all networks are asked writes the config of the DNS service, and a server
+# of a single network, picked on the DNS page, goes to NetworkManager.
 #
 # usage: settings_network.sh <build dir>
 set -u
@@ -122,7 +123,7 @@ fail() {
 }
 
 start network 1500
-click 1116 463 # Show, beside the password
+click 1116 360 # Show, beside the password
 grep -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||
 	fail "showing the password did not ask NetworkManager for it"
 click 1135 255 # Get the address: ...
@@ -144,6 +145,25 @@ grep -q '^config' "$work/dns.log" || fail "the DNS page never handed its config 
 grep -q '^fastest 0$' "$work/dns.conf" || fail "\"these servers, in order\" did not write fastest 0"
 grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8$' "$work/dns.conf" || fail "the servers were lost"
 grep -q '^prefetch_skip ads.test$' "$work/dns.conf" || fail "a name never to prefetch was lost"
+# the servers of the network itself, in the section of single networks
+click 1133 779 # This network asks: ...
+click 1120 862 # ... Servers of its own
+click 1160 898 # Add a server...
+click 1000 1083 # ... 9.9.9.9 (Quad9)
+sleep 1
+[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/dns-section.png"
+grep -q 'connection modify uuid aaaa-1111 ipv4.ignore-auto-dns yes ipv4.dns 9.9.9.9 ' "$work/nm.log" ||
+	fail "the DNS page did not give the network its own server"
+grep -q 'device reapply wlan0' "$work/nm.log" ||
+	fail "the connected network did not take its new DNS server at once"
+
+# a server for all networks from the list of known ones (its list is made
+# anew by the pick: the app used to crash on that)
+click 1160 571 # Add a server...
+click 1000 654 # ... 1.0.0.1 (Cloudflare), the first not in the list yet
+sleep 1
+grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
+	fail "a server picked from the list was not added to the servers for all networks"
 
 if [ $failed -ne 0 ]; then
 	echo "--- nmcli was asked:"

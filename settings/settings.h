@@ -315,8 +315,10 @@ bool dns_service_enabled(void);
 char *dns_networkmanager_global(void);
 GtkWidget *dns_page_new(struct settings *s);
 void dns_page_refresh(struct settings *s);
-/* page_network.c: IP address, DNS servers and Wi-Fi password of each network */
+/* page_network.c: IP address and Wi-Fi password of each network; and the DNS
+ * servers of single networks, a section of the DNS page */
 GtkWidget *network_page_new(struct settings *s);
+void network_dns_section_attach(struct settings *s, GtkWidget *content);
 void network_page_refresh(struct settings *s);
 void appwin_page_refresh(struct settings *s);
 

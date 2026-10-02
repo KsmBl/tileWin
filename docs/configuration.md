@@ -252,7 +252,7 @@ block ads.example.com             # with the names below it
 allow good.example.com            # never blocked, with the names below it
 ```
 
-Which servers are asked: a network with DNS servers of its own (NetworkManager's `ipv4.dns` with `ignore-auto-dns`, set on the Network page) uses them; else the `servers` above; else the servers the network hands out. Block lists may be hosts files (`0.0.0.0 name`), one name per line, `*.name` for a name and those below it, or adblock rules (`||name^`; exceptions and rules with paths are skipped). Only the questions of apps are counted for prefetching, kept per day in `/var/lib/tilewin-dns/stats`; the prefetches are not.
+Which servers are asked: a network with DNS servers of its own (NetworkManager's `ipv4.dns` with `ignore-auto-dns`, set on the DNS page) uses them; else the `servers` above; else the servers the network hands out. Block lists may be hosts files (`0.0.0.0 name`), one name per line, `*.name` for a name and those below it, or adblock rules (`||name^`; exceptions and rules with paths are skipped). Only the questions of apps are counted for prefetching, kept per day in `/var/lib/tilewin-dns/stats`; the prefetches are not.
 
 What the service is doing is in `/run/tilewin-dns/status`, the names it prefetches in `/run/tilewin-dns/prefetch` (readable by the group wheel). `systemctl reload tilewin-dnsd` reads the config again; `tilewin-dns-apply test` times the servers now and `update-lists` downloads the lists now.
 
