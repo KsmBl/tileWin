@@ -448,7 +448,13 @@ void tw_update_content_fill(struct sway_container *con) {
 	wlr_scene_rect_set_size(bg, width, height);
 }
 
-void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
+/*
+ * Snaps the window into a slot; fx and fy, when above 0, are where the lines of
+ * the layout go (Snap Layouts), otherwise it takes the lines of the windows
+ * snapped beside it. All of it is decided before the box is set, so a resize
+ * animation sets out for the place the window ends up in.
+ */
+static void snap_to(struct sway_container *con, enum tw_snap snap, double fx, double fy) {
 	if (!con || !con->view || !container_is_floating(con) || !con->pending.workspace) {
 		return;
 	}
@@ -468,11 +474,21 @@ void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
 		tw_view_notify_maximized(con->view, false);
 	}
 	take_splits(con, snap);
+	if (fx > 0) {
+		con->tw.split_x = fx;
+	}
+	if (fy > 0) {
+		con->tw.split_y = fy;
+	}
 	con->tw.snap = snap;
 	struct wlr_box box = tw_container_snap_box(con, tw_workarea(con->pending.workspace));
 	tw_set_box(con, &box);
 	ipc_event_window(con, "snap");
 	tw_animate_resize(con);
+}
+
+void tw_snap_to(struct sway_container *con, enum tw_snap snap) {
+	snap_to(con, snap, 0, 0);
 }
 
 void tw_restore(struct sway_container *con) {
@@ -639,25 +655,26 @@ static void move_neighbours(struct sway_container *con, struct wlr_box area) {
 			continue;
 		}
 		enum tw_snap o = other->tw.snap;
-		bool moved = false;
 		if (o == TW_SNAP_NONE && (snap_left(snap) || snap_right(snap)) &&
 				fills_side(other, area, snap_left(snap) ? WLR_EDGE_RIGHT : WLR_EDGE_LEFT)) {
 			// put side by side by hand or by "arrange": it takes the rest as well
-			tw_snap_to(other, snap_left(snap) ? TW_SNAP_RIGHT : TW_SNAP_LEFT);
-			o = other->tw.snap;
+			o = snap_left(snap) ? TW_SNAP_RIGHT : TW_SNAP_LEFT;
+		} else if (o == TW_SNAP_NONE) {
+			continue;
 		}
+		double fx = other->tw.split_x, fy = other->tw.split_y;
+		bool moved = false;
 		if ((snap_left(snap) && snap_right(o)) || (snap_right(snap) && snap_left(o))) {
-			other->tw.split_x = con->tw.split_x;
+			fx = con->tw.split_x;
 			moved = true;
 		}
 		if (snap_quarter(snap) && snap_quarter(o) && snap_left(snap) == snap_left(o) &&
 				snap != o) {
-			other->tw.split_y = con->tw.split_y;
+			fy = con->tw.split_y;
 			moved = true;
 		}
 		if (moved) {
-			struct wlr_box box = tw_container_snap_box(other, area);
-			tw_set_box(other, &box);
+			snap_to(other, o, fx, fy);
 		}
 	}
 }
@@ -678,13 +695,8 @@ bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double 
 	}
 	for (size_t i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
 		if (strcasecmp(slot, slots[i].name) == 0) {
-			tw_snap_to(con, slots[i].snap);
-			con->tw.split_x = fx;
-			con->tw.split_y = fy;
-			struct wlr_box area = tw_workarea(con->pending.workspace);
-			struct wlr_box box = tw_container_snap_box(con, area);
-			tw_set_box(con, &box);
-			move_neighbours(con, area);
+			snap_to(con, slots[i].snap, fx, fy);
+			move_neighbours(con, tw_workarea(con->pending.workspace));
 			return true;
 		}
 	}

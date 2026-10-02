@@ -532,6 +532,17 @@ test(
 )
 
 test(
+	'snap-animated',
+	find_program('snap_animated.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'edge-buttons',
 	find_program('edge_buttons.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
