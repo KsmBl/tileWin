@@ -608,8 +608,8 @@ test(
 )
 
 test(
-	'pager-widget',
-	find_program('pager_widget.sh'),
+	'workspaces-widget',
+	find_program('workspaces_widget.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	depends: [pointer_tool],

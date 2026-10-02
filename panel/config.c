@@ -554,7 +554,6 @@ void panel_config_free(struct panel_config *config) {
 
 static const struct widget_impl *impls[] = {
 	&widget_start, &widget_taskbar, &widget_quicklaunch, &widget_workspaces,
-	&widget_pager,
 	&widget_title, &widget_tray, &widget_clock, &widget_volume, &widget_battery,
 	&widget_network, &widget_cpu, &widget_memory, &widget_disk, &widget_gpu,
 	&widget_net, &widget_storage, &widget_power, &widget_brightness,

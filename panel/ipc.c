@@ -128,6 +128,7 @@ static void walk_tree(json_object *node, struct walk_ctx *ctx) {
 		w->y = y - dh - ctx->output_y;
 		w->width = width;
 		w->height = height + dh;
+		w->title_height = dh;
 		list_add(ctx->windows, w);
 	}
 	const char *children[] = { "nodes", "floating_nodes" };

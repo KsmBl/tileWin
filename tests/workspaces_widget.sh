@@ -1,9 +1,10 @@
 #!/bin/sh
-# The pager on the taskbar, in a nested tileWin: every desktop as a small
-# screen with its windows where they are, following a window that moves, and
-# a click on a desktop going there.
+# The workspaces widget on the taskbar, in a nested tileWin: every desktop as
+# a small screen with its windows where they are, following a window that
+# moves; resting on a desktop shows a preview of it with its windows as they
+# look, a click on the preview goes there, and so does a click on a desktop.
 #
-# usage: pager_widget.sh <build dir> <source dir>
+# usage: workspaces_widget.sh <build dir> <source dir>
 set -u
 
 build=$1
@@ -31,14 +32,14 @@ if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 fi
 
 work=$(mktemp -d)
-sock=$XDG_RUNTIME_DIR/tw-pager-$$.sock
+sock=$XDG_RUNTIME_DIR/tw-workspaces-$$.sock
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
 export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-sed 's/^\tleft start search taskbar$/\tleft start search pager taskbar/' \
+sed 's/^\tleft start search taskbar$/\tleft start search workspaces taskbar/' \
 	"$source_dir/config/taskbar.conf" > "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
-printf 'theme_layout no\nwidget pager { labels no }\n' >> "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
+printf 'theme_layout no\nwidget workspaces { labels no }\n' >> "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
 
 failures=0
 fail() {
@@ -108,12 +109,17 @@ ipc exec "xfce4-terminal --disable-server -T One" >/dev/null
 sleep 2.5
 ipc '[title=^One$] snap left' >/dev/null
 ipc workspace 2 >/dev/null
+ipc exec "python3 $source_dir/tests/color_window.py Red '#d02020'" >/dev/null
+sleep 3
+ipc '[title=^Red$] snap left' >/dev/null
 ipc exec "xfce4-terminal --disable-server -T Two" >/dev/null
 sleep 2.5
+ipc '[title=^Two$] snap right' >/dev/null
+sleep 0.5
 ipc workspace 1 >/dev/null
 sleep 2
 
-# the pager follows the search box of Windows 10: the first desktop's small
+# the widget follows the search box of Windows 10: the first desktop's small
 # screen at x 352 to 409, the second's at 413 to 470, y 684 to 716
 left=$(mean 356 690 20 20)
 right=$(mean 384 690 20 20)
@@ -124,11 +130,26 @@ ipc '[title=^One$] snap right' >/dev/null
 sleep 2.5
 left=$(mean 356 690 20 20)
 right=$(mean 384 690 20 20)
-[ "$right" -gt "$left" ] || fail "the pager did not follow the window to the right ($left, $right)"
+[ "$right" -gt "$left" ] || fail "the widget did not follow the window to the right ($left, $right)"
 
-"$pointer" 1280 720 click 441 700 >/dev/null 2>&1
+# resting on the second desktop: its preview over the taskbar, 400 wide and
+# centered on it, the red window filling its left half
+"$pointer" 1280 720 move 441 700 wait 2500 >/dev/null 2>&1 &
+held=$!
+sleep 2
+rgb=$(grim -g "300,520 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tu1 | tr -s ' ' | sed 's/^ //')
+set -- $rgb
+[ "${1:-0}" -gt 150 ] && [ "${3:-255}" -lt 90 ] ||
+	fail "the preview of the second desktop does not show its red window ($rgb)"
+wait "$held"
+"$pointer" 1280 720 move 441 700 wait 1500 move 441 600 wait 300 click 441 600 >/dev/null 2>&1
 sleep 1
-[ "$(windows_of)" = 2 ] || fail "a click on the second desktop did not go there ($(windows_of))"
+[ "$(windows_of)" = 2 ] || fail "a click on the preview did not go to its desktop ($(windows_of))"
+
+# and a click on the first desktop in the bar
+"$pointer" 1280 720 click 380 700 >/dev/null 2>&1
+sleep 1
+[ "$(windows_of)" = 1 ] || fail "a click on the first desktop did not go there ($(windows_of))"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

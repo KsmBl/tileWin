@@ -29,7 +29,9 @@
 #define TITLE_H 30
 #define PAD 8
 #define GAP 8
-#define MAX_THUMBS 6
+#define MAX_THUMBS 16 // the windows of a desktop; a group of buttons shows up to MAX_GROUP
+#define MAX_GROUP 6
+#define DESK_W 400    // the preview of a whole desktop
 #define MEDIA_H 34 // the row of media buttons under the pictures
 #define MEDIA_W 34
 #define REFRESH_MS 1000
@@ -71,6 +73,7 @@ enum op {
 	OP_NONE,
 	OP_ACTIVATE,
 	OP_CLOSE,
+	OP_DESKTOP, // go to the desktop of the preview
 };
 
 
@@ -89,6 +92,11 @@ static struct {
 	int64_t op_id;
 	bool peek; // resting on a preview peeks at its window
 	bool media; // the previews have a row for media buttons
+	// the preview of a desktop from the workspaces widget, instead of windows
+	bool desk;
+	char desk_name[128];
+	int desk_w, desk_h;
+	double desk_scale; // screen pixels to preview pixels
 } tn;
 
 /* ---------- peek ---------- */
@@ -299,7 +307,9 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *fram
 		alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
 		t->width, t->height, t->width * 4);
 	double scale = (double)THUMB_W / t->width;
-	if (t->height * scale > THUMB_H - 8) {
+	if (tn.desk) {
+		scale = tn.desk_scale; // as big as the window is in the preview
+	} else if (t->height * scale > THUMB_H - 8) {
 		scale = (double)(THUMB_H - 8) / t->height;
 	}
 	int w = t->width * scale < 1 ? 1 : (int)(t->width * scale);
@@ -454,6 +464,7 @@ static void hide_now(void) {
 	tn.count = 0;
 	tn.hover = false;
 	tn.shown_id = 0;
+	tn.desk = false;
 	if (tn.surface) {
 		struct psurface *s = tn.surface;
 		tn.surface = NULL;
@@ -547,7 +558,79 @@ void thumbnails_media_changed(void) {
 	}
 }
 
+static void render_desk(struct psurface *s, cairo_t *cr) {
+	struct panel *panel = s->panel;
+	struct fly_style st;
+	fly_style_init(&st, panel);
+	popup_draw_frame(panel, cr, s->width, s->height, 0, fly_frame_prefix(panel));
+	const char *colon = strchr(tn.desk_name, ':');
+	char title[160];
+	if (colon && colon[1]) {
+		snprintf(title, sizeof(title), "%s", colon + 1);
+	} else {
+		snprintf(title, sizeof(title), "Desktop %s", tn.desk_name);
+	}
+	pd_text(cr, st.font, title, PAD + 4, PAD, tn.desk_w - 8, TITLE_H, st.fg, PD_LEFT);
+	double dx = PAD, dy = PAD + TITLE_H;
+	// the desktop: the color of the wallpaper, the windows over it as they look
+	pd_rect(cr, dx, dy, tn.desk_w, tn.desk_h,
+		tw_theme_color(panel->theme, "wallpaper.color", 0x204070ff));
+	cairo_save(cr);
+	cairo_rectangle(cr, dx, dy, tn.desk_w, tn.desk_h);
+	cairo_clip(cr);
+	for (int i = 0; i < tn.count; i++) {
+		struct thumb *t = &tn.thumbs[i];
+		struct pwindow *win = panel_find_window(panel, t->con_id);
+		if (!win) {
+			continue;
+		}
+		double wx = dx + win->x * tn.desk_scale, wy = dy + win->y * tn.desk_scale;
+		double ww = win->width * tn.desk_scale, wh = win->height * tn.desk_scale;
+		// the title bar, then the window's own picture under it
+		double th = win->title_height * tn.desk_scale;
+		if (th > 0) {
+			pd_rect(cr, wx, wy, ww, th, tw_theme_color(panel->theme,
+				win->focused ? "decoration.active.title_bg" : "decoration.inactive.title_bg",
+				win->focused ? 0xffffffff : 0xf0f0f0ff));
+			wy += th;
+			wh -= th;
+		}
+		if (t->image && wh > 1) {
+			int iw = cairo_image_surface_get_width(t->image);
+			int ih = cairo_image_surface_get_height(t->image);
+			cairo_save(cr);
+			cairo_translate(cr, wx, wy);
+			cairo_scale(cr, ww / iw, wh / ih);
+			cairo_set_source_surface(cr, t->image, 0, 0);
+			cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+			cairo_paint(cr);
+			cairo_restore(cr);
+		} else {
+			pd_rect(cr, wx, wy, ww, wh, 0x00000060);
+			double is = ww < wh ? ww / 2 : wh / 2;
+			is = is > 48 ? 48 : is;
+			pd_icon(cr, apps_icon_for_window(panel, win, (int)(is * s->scale)),
+				wx + (ww - is) / 2, wy + (wh - is) / 2, is);
+		}
+		cairo_rectangle(cr, wx + 0.5, wy - th + 0.5, ww - 1, wh + th - 1);
+		pd_color(cr, 0x00000060);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	}
+	cairo_restore(cr);
+	if (tn.hover) {
+		cairo_rectangle(cr, dx + 1, dy + 1, tn.desk_w - 2, tn.desk_h - 2);
+		pd_color(cr, st.accent);
+		cairo_set_line_width(cr, 2);
+		cairo_stroke(cr);
+	}
+}
+
 static void render(struct psurface *s, cairo_t *cr) {
+	if (tn.desk) {
+		render_desk(s, cr);
+		return;
+	}
 	struct panel *panel = s->panel;
 	struct fly_style st;
 	fly_style_init(&st, panel);
@@ -608,6 +691,8 @@ static void run_op(void *data) {
 	peek_end(panel); // the window picked shows as it is
 	if (win && tn.op == OP_CLOSE) {
 		ipc_panel_commandf(panel, "[con_id=%lld] kill", (long long)win->id);
+	} else if (tn.op == OP_DESKTOP) {
+		ipc_panel_commandf(panel, "workspace \"%s\"", tn.desk_name);
 	} else if (win && tn.op == OP_ACTIVATE) {
 		ipc_panel_commandf(panel, win->minimized ? "[con_id=%lld] minimize disable, focus" :
 			"[con_id=%lld] focus", (long long)win->id);
@@ -625,7 +710,7 @@ static void pointer_motion(struct psurface *s, double x, double y) {
 		tn.hide_timer = NULL;
 	}
 	psurface_set_dirty(s);
-	if (!tn.peek || tn.op_timer) {
+	if (!tn.peek || tn.op_timer || tn.desk) {
 		return;
 	}
 	int64_t over = 0;
@@ -653,6 +738,13 @@ static void pointer_leave(struct psurface *s) {
 static void pointer_button(struct psurface *s, double x, double y, uint32_t button,
 		bool pressed) {
 	if (!pressed || tn.op_timer) {
+		return;
+	}
+	if (tn.desk) {
+		if (button == BTN_LEFT) {
+			tn.op = OP_DESKTOP;
+			tn.op_timer = loop_add_timer(s->panel->loop, 0, run_op, NULL);
+		}
 		return;
 	}
 	for (int i = 0; i < tn.count; i++) {
@@ -699,7 +791,68 @@ static const struct psurface_impl impl = {
 	.closed = closed,
 };
 
+/* The preview of a desktop, for a desktop of the workspaces widget. */
+static bool show_desktop(struct panel *panel, struct psurface *bar, struct hotspot *hs) {
+	struct panel_output *output = bar->output;
+	if (!hs->str || !output || output->width <= 0 || !panel->toplevel_capture ||
+			!panel->copy_capture) {
+		return false;
+	}
+	if (tn.surface && tn.desk && strcmp(tn.desk_name, hs->str) == 0) {
+		if (tn.hide_timer) {
+			loop_remove_timer(panel->loop, tn.hide_timer);
+			tn.hide_timer = NULL;
+		}
+		return true;
+	}
+	hide_now();
+	tn.panel = panel;
+	tn.desk = true;
+	tn.peek = false;
+	tn.media = false;
+	snprintf(tn.desk_name, sizeof(tn.desk_name), "%s", hs->str);
+	tn.desk_w = DESK_W;
+	tn.desk_scale = (double)DESK_W / output->width;
+	tn.desk_h = (int)(output->height * tn.desk_scale + 0.5);
+	// its windows, the ones stacked last on top
+	struct pwindow *windows[MAX_THUMBS];
+	int count = 0;
+	for (int i = 0; panel->state.windows && i < panel->state.windows->length &&
+			count < MAX_THUMBS; i++) {
+		struct pwindow *w = panel->state.windows->items[i];
+		if (!w->minimized && w->workspace && strcmp(w->workspace, hs->str) == 0 &&
+				w->width > 0 && w->height > 0) {
+			windows[count++] = w;
+		}
+	}
+	int width = 2 * PAD + tn.desk_w, height = 2 * PAD + TITLE_H + tn.desk_h;
+	int x = hs->box.x + hs->box.width / 2 - width / 2;
+	x = x + width > output->width - 4 ? output->width - width - 4 : x;
+	x = x < 4 ? 4 : x;
+	bool bottom = panel->config->layouts[panel->layout].bottom;
+	int y = bottom ? output->height - bar->height - height - 4 : bar->height + 4;
+	struct psurface *s = psurface_create(panel, output, &impl, NULL,
+		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tilewin-desktop-preview");
+	zwlr_layer_surface_v1_set_anchor(s->layer_surface,
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+	zwlr_layer_surface_v1_set_margin(s->layer_surface, y, 0, 0, x);
+	zwlr_layer_surface_v1_set_exclusive_zone(s->layer_surface, -1);
+	psurface_set_size(s, width, height);
+	wl_surface_commit(s->surface);
+	tn.surface = s;
+	tn.count = count;
+	tn.shown_id = hs->id;
+	tn.shown_kind = 3;
+	for (int i = 0; i < count; i++) {
+		thumb_start(&tn.thumbs[i], windows[i]);
+	}
+	return true;
+}
+
 bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *hs) {
+	if (hs->widget && hs->widget->impl == &widget_workspaces) {
+		return show_desktop(panel, bar, hs);
+	}
 	// taskbar buttons: kind 1 is a window, kind 2 a group of windows of one app
 	if (!hs->widget || hs->widget->impl != &widget_taskbar || (hs->kind != 1 && hs->kind != 2)) {
 		return false;
@@ -725,11 +878,12 @@ bool thumbnails_show(struct panel *panel, struct psurface *bar, struct hotspot *
 		return true;
 	}
 	hide_now();
+	tn.desk = false;
 
 	struct pwindow *windows[MAX_THUMBS];
 	int count = 0;
 	if (hs->kind == 2) {
-		for (int i = 0; i < panel->state.windows->length && count < MAX_THUMBS; i++) {
+		for (int i = 0; i < panel->state.windows->length && count < MAX_GROUP; i++) {
 			struct pwindow *o = panel->state.windows->items[i];
 			if (strcmp(o->app_id, win->app_id) == 0 && strcmp(o->output, win->output) == 0) {
 				windows[count++] = o;

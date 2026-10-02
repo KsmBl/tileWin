@@ -137,7 +137,7 @@ menu taskbar {
 | `start` | `label`, `width` |
 | `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`), `peek yes\|no` (resting on a preview shows only its window; theme key `taskbar.peek`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]`; on the Taskbar page, Quick launch has **Add app…** and **Add command…** (a command of your own, then its icon), and the button beside an entry changes its icon |
-| `workspaces` | (none) |
+| `workspaces` | `labels yes\|no` (the number or name of each desktop behind its windows), `icons yes\|no` (the app icons of the windows) |
 | `title` | `max_width`; click for the window: its desktop, screen and process, and Minimize, Maximize and Close |
 | `tray` | (none) |
 | `clock` | `format`, `tooltip_format` (strftime), `settings` (command of the flyout's "Change date and time" link); click opens the clock flyout: an analog and a digital clock, the calendar (the wheel and ←/→ change the month) and that link |
@@ -260,11 +260,10 @@ Keys for the pointer:
 Keys for a bar like waybar (see `themes/sway/theme.conf`):
 - `panel { margin 20; margin_side 20 }` keeps the bar away from the screen edges.
 - `panel { groups yes; group_bg <color>; group_border <color>; group_radius 14; group_inset 3; group_padding 6 }` draws a rounded background behind the left, center and right widgets instead of one full bar.
-- `workspaces { style pill; active_bg; active_fg; hover_bg; urgent_bg; urgent_fg; radius; inset }` draws rounded workspace buttons.
+- `workspaces { fg; active_bg; urgent_bg; radius; margin }` colors the small screens of the workspaces widget, fills the one shown, rounds them and keeps space around them.
 - `<widget> { fg <color>; format "..." }` sets the text color and default format of a widget type, e.g. `cpu { fg #7eb8f7; format "󰍛 {usage}%" }`. A `format` in `taskbar.conf` wins unless the theme sets `panel { theme_formats yes }`.
 - Like waybar's `format-icons`, volume, battery, brightness and network take `format "{icon} {volume}%"` with `icons "<low> ... <high>"` (text icons replace the drawn glyph), plus `format_muted`, `format_charging`, `format_full`, `format_plugged`, `format_disconnected` and `format_ethernet`.
 - `cpu`, `memory` and `battery` take `warning`/`critical` levels and `warning_fg`/`critical_fg` colors (for the battery the levels count down).
-- `workspaces { padding 9; margin 12; icon { 1 <icon>; 2 <icon>; urgent ! } }` replaces workspace names with icons; `padding` is the space inside a button, `margin` around all buttons.
 - `start { icon "<text>"; icon_font "<font>" }` shows a text icon such as a Nerd Font logo on the start button (flat and fluent styles).
 - `shutdown { style classic|luna|security|tiles }` picks the shut down dialog (default: from the theme style). `tint`, `bg`, `fg`, `accent`, `button_bg`, `hover_bg`, `border`, `radius` and `font` color the security and tiles looks, `scale` enlarges the XP dialog, `title_bg`, `header_bg` and `footer_bg` color the 95 and XP dialogs. `startmenu { power_dialog yes|no }` decides whether the start menu's power button opens it or a menu (default: yes for Windows 95 and XP).
 - `panel { item_padding 12; item_inset 5; item_radius 12 }` sets the space around widgets and their hover shape; `tooltip { radius 12 }` rounds tooltips.
