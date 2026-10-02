@@ -113,6 +113,7 @@ sway_cmd cmd_launcher;
 sway_cmd cmd_launcher_command;
 sway_cmd cmd_session_restore;
 sway_cmd cmd_color_scheme;
+sway_cmd cmd_accent;
 sway_cmd cmd_maximize;
 sway_cmd cmd_minimize;
 sway_cmd cmd_panel;

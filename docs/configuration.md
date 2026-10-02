@@ -28,6 +28,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `wm_mode tile\|window\|toggle` | Switch mode (`tilewinmsg mode ...` is a shortcut) |
 | `theme <name>` | Switch theme |
 | `color_scheme light\|dark\|toggle` | Light or dark variant of the theme; also runs `tilewin-color-scheme` for GTK, GNOME and KDE apps |
+| `accent wallpaper\|theme` | The accent color of the themes (Windows 10 and 11) from the most striking color of the wallpaper, or the theme's own |
 | `session_restore yes\|no` | Reopen the apps of the last session at login (default yes, set in `common.conf`) |
 | `maximize [enable\|disable\|toggle]` | Maximize a floating window |
 | `minimize [enable\|disable\|toggle]` | Minimize to the taskbar (tile mode: scratchpad) |
@@ -203,6 +204,10 @@ All styles and their sizes are listed with the widgets in `common/tw_widgets.c`;
 - `menu desktop` adds entries to the right-click menu of the empty desktop.
 
 The `startmenu { }` block sets the style of the menu (`layout theme|classic|twocolumn|list|tiles|centered`, `theme` being the one the current theme asks for), pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
+
+### Accent color
+
+A theme writes `$accent` where Windows uses its accent color, `$accent_light` and `$accent_dark` for lighter and darker shades, each with an optional alpha (`$accent/d0`). It is the theme's `accent { color #0078d7 }`, or with `accent wallpaper` (the switch on the Theme page of the settings) the most striking color of the wallpaper of the first screen, worked out whenever the wallpaper changes and kept in `~/.cache/tileWin/accent`.
 
 ### Snap layouts
 

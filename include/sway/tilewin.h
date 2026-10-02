@@ -165,6 +165,8 @@ bool tw_request_theme(const char *name, char **error);
 bool tw_set_mode_theme(enum tw_mode mode, const char *name, char **error);
 /* Switches between the light and dark variant of the theme and tells apps. */
 bool tw_set_color_scheme(bool dark, char **error);
+/* The accent color of the themes from the wallpaper (true) or the theme. */
+bool tw_set_accent_from_wallpaper(bool enable, char **error);
 void tw_load_theme_tile_config(struct sway_config *config);
 /* Binds the volume, brightness and media keys the config leaves unbound. */
 void tw_add_default_bindings(struct sway_config *config);

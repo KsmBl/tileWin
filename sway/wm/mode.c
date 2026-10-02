@@ -21,6 +21,7 @@
 #include "sway/tree/arrange.h"
 #include "sway/tree/root.h"
 #include "log.h"
+#include "tw_accent.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 #include "tw_paths.h"
@@ -822,6 +823,58 @@ static void set_rect_color(struct wlr_scene_rect *rect, uint32_t c) {
 	wlr_scene_rect_set_color(rect, color);
 }
 
+/*
+ * The accent color of the wallpaper of the first screen. When it changes and
+ * the accent follows the wallpaper, the theme is applied again (once things
+ * are quiet), so the taskbar and the window frames take the new color.
+ */
+static void reapply_theme(void *data) {
+	char *error = NULL;
+	if (tw_theme && !tw_request_theme(tw_theme->name, &error)) {
+		sway_log(SWAY_ERROR, "Accent color: %s", error ? error : "theme not applied");
+	}
+	free(error);
+}
+
+static void accent_seen(struct sway_output *output, uint32_t color) {
+	if (!root || root->outputs->length == 0 || root->outputs->items[0] != output) {
+		return;
+	}
+	if (tw_accent_store(color) && tw_accent_from_wallpaper()) {
+		wl_event_loop_add_idle(server.wl_event_loop, reapply_theme, NULL);
+	}
+}
+
+static void accent_of_surface(struct sway_output *output, cairo_surface_t *surface) {
+	uint32_t color;
+	if (surface && cairo_image_surface_get_format(surface) == CAIRO_FORMAT_ARGB32) {
+		cairo_surface_flush(surface);
+		if (tw_accent_pick(cairo_image_surface_get_data(surface),
+				cairo_image_surface_get_width(surface), cairo_image_surface_get_height(surface),
+				cairo_image_surface_get_stride(surface), &color)) {
+			accent_seen(output, color);
+		}
+	}
+}
+
+static void accent_of_colors(struct sway_output *output, uint32_t a, uint32_t b) {
+	// premultiplied ARGB, as tw_accent_pick reads a picture
+	uint32_t pixels[2] = { 0xff000000 | (a >> 8), 0xff000000 | (b >> 8) };
+	uint32_t color;
+	if (tw_accent_pick((const unsigned char *)pixels, 2, 1, 8, &color)) {
+		accent_seen(output, color);
+	}
+}
+
+bool tw_set_accent_from_wallpaper(bool enable, char **error) {
+	if (!tw_accent_set_from_wallpaper(enable)) {
+		*error = strdup("Cannot save the accent color setting");
+		return false;
+	}
+	wallpaper_generation++; // the wallpaper is looked at again for its color
+	return tw_request_theme(tw_theme ? tw_theme->name : TW_DEFAULT_THEME, error);
+}
+
 void tw_wallpaper_update(struct sway_output *output) {
 	if (!output || !output->wlr_output || !output->layers.shell_background) {
 		return;
@@ -866,6 +919,10 @@ void tw_wallpaper_update(struct sway_output *output) {
 	if (base) {
 		set_rect_color(base, spec.color1);
 	}
+	if (spec.type != WALLPAPER_IMAGE || !spec.image) {
+		accent_of_colors(output, spec.color1, spec.type == WALLPAPER_GRADIENT ?
+			spec.color2 : spec.color1);
+	}
 
 	if (spec.type == WALLPAPER_GRADIENT) {
 		// a tiny gradient strip scaled up by the renderer
@@ -896,6 +953,7 @@ void tw_wallpaper_update(struct sway_output *output) {
 			(!spec.mode || strcasecmp(spec.mode, "fill") == 0)) {
 		cairo_surface_t *image = wallpaper_render_cached(spec.image,
 			(int)ceil(w * scale), (int)ceil(h * scale));
+		accent_of_surface(output, image);
 		struct wlr_scene_buffer *buffer = image ? wlr_scene_buffer_create(tree, NULL) : NULL;
 		if (buffer) {
 			tw_scene_buffer_set_surface(buffer, image, w, h);
@@ -911,6 +969,7 @@ void tw_wallpaper_update(struct sway_output *output) {
 		} else {
 			int iw = cairo_image_surface_get_width(image);
 			int ih = cairo_image_surface_get_height(image);
+			accent_of_surface(output, image);
 			struct wlr_scene_buffer *buffer = wlr_scene_buffer_create(tree, NULL);
 			if (!buffer || iw <= 0 || ih <= 0) {
 				cairo_surface_destroy(image);

@@ -400,6 +400,22 @@ struct cmd_results *cmd_color_scheme(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_accent(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "accent", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	bool wallpaper = strcasecmp(argv[0], "wallpaper") == 0;
+	if (!wallpaper && strcasecmp(argv[0], "theme") != 0) {
+		return cmd_results_new(CMD_INVALID, "Expected 'accent wallpaper|theme'");
+	}
+	char *err = NULL;
+	if (!tw_set_accent_from_wallpaper(wallpaper, &err)) {
+		return result_from_error(err);
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_session_restore(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "session_restore", EXPECTED_EQUAL_TO, 1))) {

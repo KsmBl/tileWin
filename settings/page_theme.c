@@ -2,6 +2,7 @@
 #include <string.h>
 #include "list.h"
 #include "settings.h"
+#include "tw_accent.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
 
@@ -14,6 +15,7 @@ struct theme_page {
 	GtkWidget *summary;
 	GtkWidget *dark_switch;
 	GtkWidget *icons_switch;
+	GtkWidget *accent_switch;
 };
 
 static const char *target_mode(struct theme_page *p) {
@@ -111,6 +113,19 @@ static bool app_icons_enabled(void) {
 	free(value);
 	g_free(path);
 	return enabled;
+}
+
+static gboolean on_accent_switch(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct theme_page *p = data;
+	if (p->updating) {
+		return FALSE;
+	}
+	if (tw_ipc_available()) {
+		settings_command(p->s, "accent %s", active ? "wallpaper" : "theme");
+	} else {
+		tw_accent_set_from_wallpaper(active);
+	}
+	return FALSE;
 }
 
 static gboolean on_icons_switch(GtkSwitch *widget, gboolean active, gpointer data) {
@@ -214,6 +229,8 @@ void theme_page_refresh(struct settings *s) {
 		scheme ? strcmp(scheme, "dark") == 0 : tw_color_scheme_is_dark());
 	g_free(scheme);
 	gtk_switch_set_active(GTK_SWITCH(p->icons_switch), app_icons_enabled());
+	tw_accent_reload();
+	gtk_switch_set_active(GTK_SWITCH(p->accent_switch), tw_accent_from_wallpaper());
 
 	gtk_flow_box_remove_all(GTK_FLOW_BOX(p->flow));
 	list_t *names = tw_theme_list();
@@ -284,6 +301,13 @@ GtkWidget *theme_page_new(struct settings *s) {
 		"File managers like Thunar and Dolphin, file dialogs and other apps use the icons of "
 		"the theme, e.g. Windows XP folders. Turned off, they use your own icon theme again.",
 		p->icons_switch);
+
+	p->accent_switch = gtk_switch_new();
+	g_signal_connect(p->accent_switch, "state-set", G_CALLBACK(on_accent_switch), p);
+	ui_row(group, "Accent color from the wallpaper",
+		"The Windows 10 and 11 themes take the most striking color of the wallpaper for the "
+		"taskbar, the window frames and the highlights, as Windows does",
+		p->accent_switch);
 
 	p->target_dd = gtk_drop_down_new_from_strings((const char *const[]){
 		"Window mode", "Tile mode", NULL });

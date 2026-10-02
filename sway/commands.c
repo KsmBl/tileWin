@@ -158,6 +158,7 @@ static const struct cmd_handler config_handlers[] = {
 
 /* Runtime-only commands. Keep alphabetized */
 static const struct cmd_handler command_handlers[] = {
+	{ "accent", cmd_accent },
 	{ "allow_tearing", cmd_allow_tearing },
 	{ "alttab", cmd_alttab },
 	{ "always_on_top", cmd_always_on_top },

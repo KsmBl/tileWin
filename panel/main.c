@@ -11,6 +11,7 @@
 #include "log.h"
 #include "draw.h"
 #include "panel.h"
+#include "tw_accent.h"
 #include "tw_desktop.h"
 #include "stringop.h"
 #include "tw_paths.h"
@@ -115,6 +116,7 @@ struct panel_seat *panel_first_seat(struct panel *p) {
 }
 
 static void load_theme(struct panel *p) {
+	tw_accent_reload(); // the compositor may have found another one in the wallpaper
 	char *name = tw_theme_current_name();
 	char *error = NULL;
 	struct tw_theme *theme = tw_theme_load(name, &error);

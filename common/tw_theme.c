@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include "stringop.h"
 #include "tw_paths.h"
+#include "tw_accent.h"
 #include "tw_theme.h"
 #include "twconf.h"
 
@@ -251,10 +252,51 @@ bool tw_parse_color(const char *str, uint32_t *color) {
 	}
 }
 
+static uint32_t mix_color(uint32_t a, uint32_t b, double t) {
+	uint32_t out = 0;
+	for (int shift = 24; shift >= 8; shift -= 8) {
+		double ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
+		out |= (uint32_t)(ca + (cb - ca) * t + 0.5) << shift;
+	}
+	return out | (a & 0xff);
+}
+
+/* "$accent", "$accent_light" or "$accent_dark", with an optional "/alpha". */
+static bool accent_color(const struct tw_theme *theme, const char *value, uint32_t *color) {
+	if (strncmp(value, "$accent", 7) != 0) {
+		return false;
+	}
+	uint32_t c;
+	if (!(tw_accent_from_wallpaper() && tw_accent_wallpaper_color(&c))) {
+		const char *own = tw_theme_str(theme, "accent.color", NULL);
+		if (!own || own[0] == '$' || !tw_parse_color(own, &c)) {
+			c = 0x0078d7ff;
+		}
+	}
+	const char *rest = value + 7;
+	if (strncmp(rest, "_light", 6) == 0) {
+		c = mix_color(c, 0xffffffff, 0.45);
+		rest += 6;
+	} else if (strncmp(rest, "_dark", 5) == 0) {
+		c = mix_color(c, 0x000000ff, 0.35);
+		rest += 5;
+	}
+	unsigned int alpha;
+	if (rest[0] == '/' && sscanf(rest + 1, "%2x", &alpha) == 1) {
+		c = (c & 0xffffff00) | alpha;
+	}
+	*color = c;
+	return true;
+}
+
 uint32_t tw_theme_color(const struct tw_theme *theme, const char *key,
 		uint32_t fallback) {
 	uint32_t color;
-	if (tw_parse_color(tw_theme_str(theme, key, NULL), &color)) {
+	const char *value = tw_theme_str(theme, key, NULL);
+	if (value && accent_color(theme, value, &color)) {
+		return color;
+	}
+	if (tw_parse_color(value, &color)) {
 		return color;
 	}
 	return fallback;

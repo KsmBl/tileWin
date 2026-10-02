@@ -13,6 +13,19 @@ test(
 )
 
 test(
+	'accent',
+	executable(
+		'test-accent',
+		'test_accent.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	env: { 'TILEWIN_DATADIR': meson.project_source_root() },
+	suite: 'unit',
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
