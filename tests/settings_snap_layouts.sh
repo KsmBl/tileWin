@@ -1,7 +1,8 @@
 #!/bin/sh
-# The Snap layouts of the Window behavior page: adding one, removing one and
-# going back to the defaults each write taskbar.conf, which the taskbar reads
-# its layouts from.
+# The Snap layouts of the Window behavior page and their editor, where the
+# lines of a layout are dragged into place: changing a layout of the list,
+# making a new one, removing one and going back to the defaults each write
+# taskbar.conf, which the taskbar reads its layouts from.
 #
 # usage: settings_snap_layouts.sh <build dir>
 set -u
@@ -45,7 +46,7 @@ mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DA
 cat > "$work/tilewin.conf" <<EOF
 wallpaper solid #008080
 session_restore no
-output * mode --custom 1280x1400
+output * mode --custom 1280x1700
 for_window [app_id="org.tilewin.Settings"] fullscreen enable
 exec "$settings" --page=windows
 EOF
@@ -84,7 +85,7 @@ first() { sed -n '/^snap_layouts {/,/^}/p' "$written" 2>/dev/null | grep -m1 '^\
 # the page is ready once its blue "Add layout" button is drawn
 attempt=0
 while [ $attempt -lt 60 ]; do
-	rgb=$(WAYLAND_DISPLAY=$display grim -g "1178,1200 1x1" -t ppm - 2>/dev/null | tail -c 3 |
+	rgb=$(WAYLAND_DISPLAY=$display grim -g "1178,1368 1x1" -t ppm - 2>/dev/null | tail -c 3 |
 		od -An -tu1 | tr -s ' ' | sed 's/^ //')
 	set -- $rgb
 	[ "${3:-0}" -gt 150 ] && [ "${1:-255}" -lt 120 ] && break
@@ -92,22 +93,38 @@ while [ $attempt -lt 60 ]; do
 	attempt=$((attempt + 1))
 done
 command -v grim >/dev/null 2>&1 || { echo "grim is not installed: skipping"; exit 77; }
+click() { WAYLAND_DISPLAY=$display "$tool" 1280 1700 click "$1" "$2" >/dev/null 2>&1; sleep 0.8; }
+drag() { WAYLAND_DISPLAY=$display "$tool" 1280 1700 drag "$1" "$2" "$3" "$4" >/dev/null 2>&1; sleep 0.6; }
+# the editor's picture of the screen: x 563 to 947, y 1092 to 1308
 
-# "Add layout" with what the dropdowns start at: two side by side, two thirds
-WAYLAND_DISPLAY=$display "$tool" 1280 1400 click 1178 1200 >/dev/null 2>&1
-sleep 1.5
-[ "$(layouts)" = 6 ] || fail "adding a layout did not write six layouts ($(layouts))"
-sed -n '/^snap_layouts {/,/^}/p' "$written" | grep -q 'layout columns 0.66$' ||
-	fail "the new layout is not two side by side at two thirds"
+# the pencil of the first layout (the halves) puts it in the editor; its line
+# dragged from the middle to two thirds and saved
+click 1070 708
+drag 755 1150 816 1150
+click 1049 1368
+sleep 1
+[ "$(first)" = "layout columns 0.66" ] || fail "changing the first layout saved $(first)"
+[ "$(layouts)" = 5 ] || fail "changing a layout did not keep five ($(layouts))"
 
-# the remove button of the first one, the halves
-WAYLAND_DISPLAY=$display "$tool" 1280 1400 click 1215 708 >/dev/null 2>&1
-sleep 1.5
+# a new one: four quarters, the line down at three quarters, the line across
+# at a third
+click 1010 1043
+drag 816 1130 851 1130
+drag 650 1200 650 1165
+click 1178 1368
+sleep 1
+sed -n '/^snap_layouts {/,/^}/p' "$written" | grep -q 'layout quarters 0.75 0.34$' ||
+	fail "the dragged layout was not added as quarters 0.75 0.34"
+[ "$(layouts)" = 6 ] || fail "adding a layout did not make six ($(layouts))"
+
+# the remove button of the first one
+click 1215 708
+sleep 1
 [ "$(layouts)" = 5 ] || fail "removing a layout did not leave five ($(layouts))"
-[ "$(first)" = "layout columns 0.66" ] || fail "the halves are still first: $(first)"
 
-# back to the defaults: no list of its own
-WAYLAND_DISPLAY=$display "$tool" 1280 1400 click 1005 1200 >/dev/null 2>&1
+# back to the defaults (with "Save changes" hidden, the button sits further
+# right): no list of its own
+click 997 1368
 sleep 1.5
 grep -q '^snap_layouts' "$written" && fail "the default layouts still left a list in taskbar.conf"
 
