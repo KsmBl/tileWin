@@ -203,8 +203,10 @@ int domainset_add_list_line(struct domainset *set, char *line) {
 				strcmp(word, "0.0.0.0") == 0 || strcmp(word, "broadcasthost") == 0) {
 			continue;
 		}
-		char *name = clean_name(word);
-		if (name && domainset_add_rule(set, name, false)) {
+		// "*.ads.example.com" of wildcard lists: the name and all below it
+		bool below = !hosts && word[0] == '*' && word[1] == '.';
+		char *name = clean_name(below ? word + 2 : word);
+		if (name && domainset_add_rule(set, name, below)) {
 			added++;
 		}
 	}

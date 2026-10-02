@@ -35,11 +35,20 @@ def check(ok, what):
 
 
 def free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    """A port free for UDP and TCP both, as the service takes both."""
+    while True:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        u.bind(("127.0.0.1", 0))
+        port = u.getsockname()[1]
+        t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            t.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            pass
+        finally:
+            u.close()
+            t.close()
 
 
 def encode_name(name):
@@ -92,12 +101,19 @@ class FakeServer:
         self.big = set()     # names whose answer does not fit in UDP
         self.asked = {}      # name -> times asked
         self.lock = threading.Lock()
-        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.bind(("127.0.0.1", 0))
-        self.port = self.udp.getsockname()[1]
-        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp.bind(("127.0.0.1", self.port))
+        # the same port for UDP and TCP: another test may hold it for TCP
+        for _ in range(50):
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp.bind(("127.0.0.1", 0))
+            self.port = self.udp.getsockname()[1]
+            self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                self.tcp.bind(("127.0.0.1", self.port))
+                break
+            except OSError:
+                self.udp.close()
+                self.tcp.close()
         self.tcp.listen(8)
         threading.Thread(target=self.serve_udp, daemon=True).start()
         threading.Thread(target=self.serve_tcp, daemon=True).start()
@@ -371,7 +387,7 @@ def block_lists():
         f.write("! adblock\n[Adblock Plus 2.0]\n||doubleclick.test^\n||path.test^/x\n@@||good.test^\n")
     plain = os.path.join(work, "plain.txt")
     with open(plain, "w") as f:
-        f.write("plain.example.org\n")
+        f.write("plain.example.org\n*.wild.test\n")
     config = ("servers %s\nprefetch no\nblocklist file:%s\nblocklist file:%s\nblocklist %s\n"
               "allow ok.doubleclick.test\nblock manual.test\n" % (up.text, hosts, adblock, plain))
     d = Daemon(config)
@@ -384,13 +400,14 @@ def block_lists():
         check(blocked("tracker.example.net"), "a hosts line with a comment counts")
         check(blocked("plain.example.org"), "a name of a plain list is blocked")
         check(blocked("x.doubleclick.test"), "an adblock rule blocks the names below it")
+        check(blocked("a.wild.test") and blocked("wild.test"), "a *. line blocks the name and those below")
         check(blocked("deep.manual.test"), "a name blocked by hand blocks the names below it")
         check(not blocked("sub.ads.example.com"), "a hosts line blocks only that name")
         check(not blocked("ok.doubleclick.test"), "an allowed name is not blocked")
         check(not blocked("path.test"), "adblock rules with a path are not taken")
         check(up.count("ads.example.com") == 0, "a blocked name never reaches the server")
         status = d.status()
-        check("blocked_names 5" in status, "the status counts 5 names: %s" %
+        check("blocked_names 6" in status, "the status counts 6 names: %s" %
               [l for l in status.splitlines() if l.startswith("blocked_names")])
         check(any(l.startswith("list 2 ") for l in status.splitlines()),
               "the status has the count of each list")
