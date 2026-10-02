@@ -5,7 +5,7 @@
 #  - no menu offers the other windows for the rest of the layout afterwards:
 #    a click where it used to be leaves the other window where it is;
 #  - "snap left 0.66" gives a window two thirds of the screen, and the window
-#    snapped beside it takes the third left;
+#    snapped beside it, or put beside it by "arrange", takes the third left;
 #  - the layouts of a snap_layouts block in taskbar.conf replace the default
 #    ones;
 #  - "snap_layouts disable" turns the layouts off.
@@ -187,6 +187,25 @@ ipc '[title=two] snap right 0.34' >/dev/null
 sleep 0.5
 set -- $(window one)
 [ "$3" = 435 ] || fail "the window beside a two thirds one on the right kept its width: $*"
+
+# put side by side by "arrange" rather than snapped, the other one still
+# takes the rest
+ipc '[title=one] snap restore' >/dev/null
+ipc '[title=two] snap restore' >/dev/null
+sleep 0.5
+ipc arrange horizontal >/dev/null
+sleep 0.5
+set -- $(window one)
+if [ "$1" = 0 ]; then
+	ipc '[title=one] snap left 0.34' >/dev/null
+	sleep 0.5
+	set -- $(window two)
+else
+	ipc '[title=two] snap left 0.34' >/dev/null
+	sleep 0.5
+	set -- $(window one)
+fi
+[ "$1 $3" = "435 845" ] || fail "the window arranged beside did not take the two thirds left: $*"
 
 # a layout of the user's own from taskbar.conf: the only one, three quarters
 # on the left; the popup is centered under the button, so its single picture

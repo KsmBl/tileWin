@@ -613,17 +613,39 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error) {
  * width, the quarter above or below it the rest of the height, so nothing is
  * left covering the part just chosen.
  */
+/* A window that is not snapped but fills one side of the area from top to bottom. */
+static bool fills_side(struct sway_container *con, struct wlr_box area, enum wlr_edges side) {
+	const int slack = 24; // "arrange" leaves a little room, a hand a little more
+	struct wlr_box b = current_box(con);
+	bool top = abs(b.y - area.y) <= slack;
+	bool bottom = abs(b.y + b.height - (area.y + area.height)) <= slack;
+	if (!top || !bottom) {
+		return false;
+	}
+	if (side == WLR_EDGE_RIGHT) {
+		return abs(b.x + b.width - (area.x + area.width)) <= slack &&
+			b.x >= area.x + area.width / 5;
+	}
+	return abs(b.x - area.x) <= slack && b.x + b.width <= area.x + area.width * 4 / 5;
+}
+
 static void move_neighbours(struct sway_container *con, struct wlr_box area) {
 	struct sway_workspace *ws = con->pending.workspace;
 	enum tw_snap snap = con->tw.snap;
 	for (int i = 0; ws && i < ws->floating->length; i++) {
 		struct sway_container *other = ws->floating->items[i];
 		if (other == con || !other->view || other->pending.tw_minimized ||
-				other->pending.tw_maximized || other->tw.snap == TW_SNAP_NONE) {
+				other->pending.tw_maximized) {
 			continue;
 		}
 		enum tw_snap o = other->tw.snap;
 		bool moved = false;
+		if (o == TW_SNAP_NONE && (snap_left(snap) || snap_right(snap)) &&
+				fills_side(other, area, snap_left(snap) ? WLR_EDGE_RIGHT : WLR_EDGE_LEFT)) {
+			// put side by side by hand or by "arrange": it takes the rest as well
+			tw_snap_to(other, snap_left(snap) ? TW_SNAP_RIGHT : TW_SNAP_LEFT);
+			o = other->tw.snap;
+		}
 		if ((snap_left(snap) && snap_right(o)) || (snap_right(snap) && snap_left(o))) {
 			other->tw.split_x = con->tw.split_x;
 			moved = true;
