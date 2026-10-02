@@ -769,6 +769,13 @@ void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
 void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t con_id,
 	int x, int y, int button_width);
 void snaplayouts_leave(struct panel *panel, int64_t con_id);
+/* notes.c: Sticky Notes on the desktop */
+void notes_init(struct panel *panel);
+void notes_command(struct panel *panel, int argc, char **argv);
+void notes_outputs_changed(struct panel *panel);
+void notes_output_removed(struct panel_output *output);
+void notes_theme_changed(void);
+void notes_fini(void);
 /* A button of that window was pressed: the layouts close at once. */
 void snaplayouts_close(struct panel *panel, int64_t con_id);
 

@@ -225,6 +225,7 @@ static void do_reload(void *data) {
 	}
 	panel_outputs_update_bars(p);
 	notify_theme_changed(p);
+	notes_theme_changed();
 	watch_files(p);
 }
 
@@ -394,6 +395,7 @@ int main(int argc, char **argv) {
 
 	clipboard_fini(&panel);
 	thumbnails_fini(&panel);
+	notes_fini(); // what was typed last is written before the taskbar goes
 	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);

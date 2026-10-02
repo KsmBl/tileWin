@@ -45,6 +45,7 @@ executable(
 		'launcher.c',
 		'main.c',
 		'minicons.c',
+		'notes.c',
 		'notify.c',
 		'osd.c',
 		'popup.c',

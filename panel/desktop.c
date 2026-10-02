@@ -697,6 +697,7 @@ static list_t *background_menu(struct panel *panel) {
 	new_menu->children = create_list();
 	add_item(new_menu->children, "Folder", "folder-new", "panel desktop new folder");
 	add_item(new_menu->children, "Text document", "accessories-text-editor", "panel desktop new text");
+	add_item(new_menu->children, "Sticky note", "accessories-text-editor", "panel note new");
 	list_add(new_menu->children, menu_item_separator());
 	add_item(new_menu->children, "Shortcut...", "emblem-symbolic-link", "panel desktop new shortcut");
 	list_add(items, menu_item_separator());
