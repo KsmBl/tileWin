@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include "draw.h"
+#include "log.h"
 #include "flyout.h"
 #include "popup.h"
 
@@ -54,7 +55,7 @@ struct thumb {
 	struct ext_image_copy_capture_session_v1 *session;
 	struct ext_image_copy_capture_frame_v1 *frame;
 	uint32_t width, height;
-	bool argb, xrgb;
+	bool argb, xrgb, abgr, xbgr; // the formats the compositor offers
 	uint32_t format;
 	struct wl_buffer *buffer;
 	void *data;
@@ -284,8 +285,18 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *fram
 	struct thumb *t = data;
 	ext_image_copy_capture_frame_v1_destroy(t->frame);
 	t->frame = NULL;
+	bool bgr = t->format == WL_SHM_FORMAT_ABGR8888 || t->format == WL_SHM_FORMAT_XBGR8888;
+	if (bgr) {
+		// red and blue change places: cairo wants the order of ARGB
+		uint32_t *px = t->data;
+		for (size_t i = 0; i < (size_t)t->width * t->height; i++) {
+			uint32_t p = px[i];
+			px[i] = (p & 0xff00ff00) | ((p >> 16) & 0xff) | ((p & 0xff) << 16);
+		}
+	}
+	bool alpha = t->format == WL_SHM_FORMAT_ARGB8888 || t->format == WL_SHM_FORMAT_ABGR8888;
 	cairo_surface_t *src = cairo_image_surface_create_for_data(t->data,
-		t->format == WL_SHM_FORMAT_ARGB8888 ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
+		alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
 		t->width, t->height, t->width * 4);
 	double scale = (double)THUMB_W / t->width;
 	if (t->height * scale > THUMB_H - 8) {
@@ -353,6 +364,9 @@ static void session_shm_format(void *data, struct ext_image_copy_capture_session
 	struct thumb *t = data;
 	t->argb |= format == WL_SHM_FORMAT_ARGB8888;
 	t->xrgb |= format == WL_SHM_FORMAT_XRGB8888;
+	// a compositor drawing with the GPU hands the pixels over in its order
+	t->abgr |= format == WL_SHM_FORMAT_ABGR8888;
+	t->xbgr |= format == WL_SHM_FORMAT_XBGR8888;
 }
 
 static void session_dmabuf_device(void *data, struct ext_image_copy_capture_session_v1 *session,
@@ -365,7 +379,8 @@ static void session_dmabuf_format(void *data, struct ext_image_copy_capture_sess
 
 static void session_done(void *data, struct ext_image_copy_capture_session_v1 *session) {
 	struct thumb *t = data;
-	t->format = t->argb ? WL_SHM_FORMAT_ARGB8888 : t->xrgb ? WL_SHM_FORMAT_XRGB8888 : 0;
+	t->format = t->argb ? WL_SHM_FORMAT_ARGB8888 : t->xrgb ? WL_SHM_FORMAT_XRGB8888 :
+		t->abgr ? WL_SHM_FORMAT_ABGR8888 : t->xbgr ? WL_SHM_FORMAT_XBGR8888 : 0;
 	capture(t);
 }
 
