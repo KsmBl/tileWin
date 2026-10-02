@@ -30,7 +30,7 @@ fi
 
 work=$(mktemp -d)
 cleanup() {
-	pkill -f "tilewin -c $work/" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -93,7 +93,7 @@ EOC
 	before=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
 	env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 		WLR_RENDERER=pixman SWAYSOCK="$work/$page.sock" TILEWINSOCK="$work/$page.sock" \
-		dbus-run-session -- "$compositor" -c "$work/tw-$page.conf" > "$work/tw-$page.log" 2>&1 &
+		"$(dirname "$0")/session.sh" "$compositor" -c "$work/tw-$page.conf" > "$work/tw-$page.log" 2>&1 &
 	display=
 	attempt=0
 	while [ -z "$display" ] && [ $attempt -lt 40 ]; do
@@ -133,7 +133,7 @@ grep -q 'connection modify uuid aaaa-1111 ipv4.method manual ipv4.addresses 192.
 	"$work/nm.log" || fail "the fixed address was not saved with its subnet and gateway"
 grep -q 'connection up uuid aaaa-1111' "$work/nm.log" ||
 	fail "the connected network did not connect again with the new address"
-pkill -f "tilewin -c $work/tw-network.conf" 2>/dev/null
+pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
 sleep 2 # its socket name is free again before the next one starts
 
 start dns 2600

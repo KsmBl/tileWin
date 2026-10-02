@@ -30,7 +30,7 @@ fi
 
 work=$(mktemp -d)
 cleanup() {
-	pkill -f "tilewin -c $work/" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -55,7 +55,7 @@ EOF
 before=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 	SWAYSOCK="$work/tilewin.sock" TILEWINSOCK="$work/tilewin.sock" \
-	dbus-run-session -- "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
+	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 starter=$!
 
 display=
@@ -81,7 +81,7 @@ sleep 1
 WAYLAND_DISPLAY=$display "$tool" 1280 1500 click 1139 1015 >/dev/null 2>&1
 sleep 3
 kill "$starter" 2>/dev/null
-pkill -f "tilewin -c $work/" 2>/dev/null
+pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 
 written=$XDG_CONFIG_HOME/tileWin/common.conf
 if grep -q '^set \$screenshot tilewin-snip area$' "$written" 2>/dev/null; then

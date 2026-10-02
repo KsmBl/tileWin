@@ -34,7 +34,7 @@ work=$(mktemp -d)
 # killing the shell that starts the compositor does not kill the compositor, and
 # a left over one holds on to an output; the config path is unique to this run
 cleanup() {
-	pkill -f "tilewin -c $work/" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -79,7 +79,7 @@ for page in $pages; do
 	env -u WAYLAND_DISPLAY -u DISPLAY \
 		WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 		SWAYSOCK="$XDG_RUNTIME_DIR/tilewin-render-$page.sock" \
-		dbus-run-session -- "$compositor" -c "$work/$page.conf" > "$log" 2>&1 &
+		"$(dirname "$0")/session.sh" "$compositor" -c "$work/$page.conf" > "$log" 2>&1 &
 	starter=$!
 
 	attempt=0
@@ -93,7 +93,7 @@ for page in $pages; do
 		tail -n 2 "$log"
 		failures=$((failures + 1))
 		kill "$starter" 2>/dev/null
-		pkill -f "tilewin -c $work/$page.conf" 2>/dev/null
+		pkill -f "^[^ ]*/tilewin -c $work/$page.conf" 2>/dev/null
 		continue
 	fi
 
@@ -106,7 +106,7 @@ for page in $pages; do
 		content=$("$count_content" "$shot" $area_x $area_y $area_width $area_height)
 	fi
 	kill "$starter" 2>/dev/null
-	pkill -f "tilewin -c $work/$page.conf" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/$page.conf" 2>/dev/null
 	wait "$starter" 2>/dev/null
 	sleep 1 # let the socket go before the next page asks for a new one
 

@@ -29,7 +29,7 @@ fi
 
 work=$(mktemp -d)
 cleanup() {
-	pkill -f "tilewin -c $work/" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -60,7 +60,7 @@ fail() {
 before=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 	SWAYSOCK="$work/tilewin.sock" TILEWINSOCK="$work/tilewin.sock" \
-	dbus-run-session -- "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
+	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 starter=$!
 
 display=
@@ -129,7 +129,7 @@ sleep 1.5
 grep -q '^snap_layouts' "$written" && fail "the default layouts still left a list in taskbar.conf"
 
 kill "$starter" 2>/dev/null
-pkill -f "tilewin -c $work/" 2>/dev/null
+pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"
 	exit 1

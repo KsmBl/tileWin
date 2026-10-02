@@ -52,7 +52,7 @@ cleanup() {
 	[ -n "${comp_pid:-}" ] && kill "$comp_pid" 2>/dev/null
 	# killing the shell that started it does not kill the compositor, and one
 	# left behind holds on to an output; the config path is unique to this run
-	pkill -f "tilewin -c $work/" 2>/dev/null
+	pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 	sleep 0.3
 	rm -rf "$work"
 }
@@ -69,7 +69,7 @@ EOF
 env -u WAYLAND_DISPLAY -u DISPLAY \
 	WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman \
 	SWAYSOCK="$work/ipc.sock" \
-	dbus-run-session -- "$compositor" -c "$work/tilewin.conf" > "$work/compositor.log" 2>&1 &
+	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/compositor.log" 2>&1 &
 comp_pid=$!
 
 attempt=0

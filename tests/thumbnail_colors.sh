@@ -78,7 +78,7 @@ EOC
 	env -u WAYLAND_DISPLAY -u DISPLAY \
 		WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER="$renderer" \
 		WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$sock" TILEWINSOCK="$sock" \
-		dbus-run-session -- "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
+		"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 	attempt=0
 	while [ ! -s "$work/display" ] && [ $attempt -lt 60 ]; do
 		sleep 0.2
