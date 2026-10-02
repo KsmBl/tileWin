@@ -588,7 +588,7 @@ double gadget_draw_caption(struct gadget_ctx *ctx, const struct gadget_palette *
 
 /* flyouts.c */
 #define TW_DATETIME_SETTINGS "exec tilewin-settings --page datetime"
-#define TW_NETWORK_SETTINGS "exec sh -c 'command -v nm-connection-editor >/dev/null && exec nm-connection-editor || exec xfce4-terminal -e nmtui'"
+#define TW_NETWORK_SETTINGS "exec tilewin-settings --page network"
 /* Anchor at the tray end of the taskbar on an output. */
 struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *output);
 void flyout_network_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);

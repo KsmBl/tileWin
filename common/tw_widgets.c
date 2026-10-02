@@ -153,7 +153,7 @@ static const struct tw_widget_option opts_network[] = {
 	{ "icons", "Icons", "Characters for {icon}, weakest signal first", NULL },
 	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the network flyout",
 		choice_yes_no },
-	{ "settings", "Settings link", "Opened by the link in the flyout, default exec nm-connection-editor",
+	{ "settings", "Settings link", "Opened by the link in the flyout, default the Network page of the settings",
 		NULL },
 	{ 0 },
 };
