@@ -84,14 +84,29 @@ struct walk_ctx {
 	const char *output;
 	const char *workspace;
 	int order;
+	int output_x, output_y; // where the output is in the layout
 };
+
+static void rect_of(json_object *node, const char *key, int *x, int *y, int *w, int *h) {
+	json_object *r;
+	*x = *y = *w = *h = 0;
+	if (json_object_object_get_ex(node, key, &r)) {
+		*x = (int)jint(r, "x");
+		*y = (int)jint(r, "y");
+		*w = (int)jint(r, "width");
+		*h = (int)jint(r, "height");
+	}
+}
 
 static void walk_tree(json_object *node, struct walk_ctx *ctx) {
 	const char *type = jstr(node, "type");
 	const char *name = jstr(node, "name");
 	const char *saved_output = ctx->output, *saved_ws = ctx->workspace;
+	int saved_ox = ctx->output_x, saved_oy = ctx->output_y;
 	if (type && strcmp(type, "output") == 0) {
 		ctx->output = name;
+		int w, h;
+		rect_of(node, "rect", &ctx->output_x, &ctx->output_y, &w, &h);
 	} else if (type && strcmp(type, "workspace") == 0) {
 		ctx->workspace = name;
 	}
@@ -105,6 +120,14 @@ static void walk_tree(json_object *node, struct walk_ctx *ctx) {
 		w->workspace = strdup(ctx->workspace);
 		w->output = strdup(ctx->output ? ctx->output : "");
 		w->order = ctx->order++;
+		// the frame: the content and the title bar above it
+		int x, y, width, height, dx, dy, dw, dh;
+		rect_of(node, "rect", &x, &y, &width, &height);
+		rect_of(node, "deco_rect", &dx, &dy, &dw, &dh);
+		w->x = x - ctx->output_x;
+		w->y = y - dh - ctx->output_y;
+		w->width = width;
+		w->height = height + dh;
 		list_add(ctx->windows, w);
 	}
 	const char *children[] = { "nodes", "floating_nodes" };
@@ -119,6 +142,8 @@ static void walk_tree(json_object *node, struct walk_ctx *ctx) {
 	}
 	ctx->output = saved_output;
 	ctx->workspace = saved_ws;
+	ctx->output_x = saved_ox;
+	ctx->output_y = saved_oy;
 }
 
 static json_object *request(struct panel *panel, uint32_t type, const char *payload) {

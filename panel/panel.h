@@ -153,6 +153,7 @@ struct pwindow {
 	int pid;
 	bool focused, urgent, minimized, maximized, floating, above;
 	int order; // creation order
+	int x, y, width, height; // its frame, title bar included, on its output
 };
 
 struct pworkspace {
@@ -320,6 +321,7 @@ extern const struct widget_impl widget_start;
 extern const struct widget_impl widget_taskbar;
 extern const struct widget_impl widget_quicklaunch;
 extern const struct widget_impl widget_workspaces;
+extern const struct widget_impl widget_pager;
 extern const struct widget_impl widget_title;
 extern const struct widget_impl widget_tray;
 extern const struct widget_impl widget_clock;

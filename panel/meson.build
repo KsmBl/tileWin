@@ -64,6 +64,7 @@ executable(
 		'trayicons.c',
 		'wayland.c',
 		'widgets/basic.c',
+		'widgets/pager.c',
 		'widgets/custom.c',
 		'widgets/git.c',
 		'widgets/system.c',

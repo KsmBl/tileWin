@@ -210,6 +210,12 @@ static const struct tw_widget_option opts_start[] = {
 	{ "width", "Width", "Pixels", NULL },
 	{ 0 },
 };
+static const struct tw_widget_option opts_pager[] = {
+	{ "labels", "Show the names", "The number or name of each desktop behind its windows",
+		choice_yes_no },
+	{ "icons", "Show the app icons", "The icon of each window on it", choice_yes_no },
+	{ 0 },
+};
 static const struct tw_widget_option opts_title[] = {
 	{ "max_width", "Maximum width", "Pixels, default 480", NULL },
 	{ 0 },
@@ -282,6 +288,8 @@ const struct tw_widget_info tw_widgets[] = {
 	{ "quicklaunch", "Quick launch", "Icons of pinned apps", BOTH, opts_none, styles_plain },
 	{ "workspaces", "Workspaces", "Buttons for the virtual desktops",
 		BOTH, opts_none, styles_plain },
+	{ "pager", "Pager", "All virtual desktops as small screens with their windows, as on KDE",
+		TW_WIDGET_TASKBAR, opts_pager, styles_plain },
 	{ "title", "Window title", "Title of the focused window, click for the window", BOTH,
 		opts_title, styles_plain },
 	{ "tray", "System tray", "Icons of background apps", STATUS, opts_none, styles_plain },

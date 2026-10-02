@@ -597,6 +597,17 @@ test(
 )
 
 test(
+	'pager-widget',
+	find_program('pager_widget.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'panel-config-appears',
 	find_program('panel_config_appears.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
