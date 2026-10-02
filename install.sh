@@ -76,6 +76,13 @@ if [ "$UNINSTALL" -eq 1 ]; then
 		msg "Giving apps your own icon theme back"
 		tilewin-app-icons restore
 	fi
+	# with the DNS service gone, DNS has to go back to NetworkManager first
+	dns_apply="$PREFIX/libexec/tilewin-dns-apply"
+	if [ -z "$DESTDIR" ] && [ -x "$dns_apply" ] &&
+			systemctl is-enabled --quiet tilewin-dnsd.service 2>/dev/null; then
+		msg "Handing DNS back to NetworkManager"
+		$SUDO "$dns_apply" disable || warn "could not stop the DNS service"
+	fi
 	msg "Removing installed files"
 	grep -v '^#' "$log" | while read -r file; do
 		[ -n "$file" ] && [ -e "$DESTDIR$file" ] && $SUDO rm -f "$DESTDIR$file" && echo "  removed $file"
@@ -169,6 +176,15 @@ else
 	$SUDO "$MESON" install -C "$BUILD_DIR" --no-rebuild >/dev/null
 	if [ -n "$SUDO" ] && [ -e "$BUILD_DIR/meson-logs/install-log.txt" ]; then
 		$SUDO chown "$(id -u):$(id -g)" "$BUILD_DIR/meson-logs/install-log.txt"
+	fi
+fi
+
+# systemd learns of the DNS service; if it runs, the new one takes over.
+if [ -z "$DESTDIR" ] && command -v systemctl >/dev/null 2>&1; then
+	$SUDO systemctl daemon-reload || true
+	if systemctl is-active --quiet tilewin-dnsd.service 2>/dev/null; then
+		msg "Restarting the DNS service"
+		$SUDO systemctl restart tilewin-dnsd.service || warn "could not restart the DNS service"
 	fi
 fi
 

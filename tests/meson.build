@@ -458,6 +458,15 @@ test(
 
 python = find_program('python3', required: false)
 if python.found()
+	# fake DNS servers, block lists and NetworkManager files of its own
+	test(
+		'dns-service',
+		python,
+		args: [files('dns_service.py'), tilewin_dnsd],
+		suite: 'unit',
+		timeout: 300,
+	)
+
 	test(
 		'settings-coverage',
 		python,

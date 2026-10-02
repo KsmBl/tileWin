@@ -1,0 +1,32 @@
+[Unit]
+Description=tileWin DNS service (fastest servers, cache, prefetch, block lists)
+Documentation=file:///usr/share/doc/tileWin/configuration.md
+Wants=nss-lookup.target
+Before=nss-lookup.target
+After=network-pre.target
+
+[Service]
+ExecStart=@libexecdir@/tilewin-dnsd
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+StateDirectory=tilewin-dns
+StateDirectoryMode=0700
+RuntimeDirectory=tilewin-dns
+RuntimeDirectoryMode=0755
+# it binds port 53, reads NetworkManager's connection files for the servers
+# of single networks and hands the prefetch list to the group wheel
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_CHOWN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+// The DNS page of the tileWin settings changes the DNS service without asking
+// for a password, for administrators at the computer itself, as
+// NetworkManager does for its connections.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.tilewin.dns.apply" &&
+        subject.isInGroup("wheel") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

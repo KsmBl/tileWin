@@ -1,0 +1,89 @@
+#!/bin/bash
+# Changes the DNS service of tileWin for the DNS page of the settings app,
+# which runs it with pkexec. It is the only part that runs as root:
+#
+#   tilewin-dns-apply config        the new /etc/tileWin/dns.conf on stdin
+#   tilewin-dns-apply enable        start the service and send all DNS through it
+#   tilewin-dns-apply disable       stop it; DNS goes back to NetworkManager
+#   tilewin-dns-apply test          time the servers now
+#   tilewin-dns-apply update-lists  download the block lists now
+#   tilewin-dns-apply import NAME   a block list file on stdin, kept as NAME
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+conf=/etc/tileWin/dns.conf
+nm_conf=/etc/NetworkManager/conf.d/zz-tilewin-dns.conf
+resolved_conf=/etc/systemd/resolved.conf.d/tilewin-dns.conf
+imported=/var/lib/tilewin-dns/imported
+service=tilewin-dnsd.service
+address=127.0.0.153
+
+die() { echo "$*" >&2; exit 1; }
+
+running() { systemctl is-active --quiet "$service"; }
+
+# NetworkManager and resolved pick the change up without dropping the connection
+reload_network() {
+	systemctl try-reload-or-restart systemd-resolved.service || true
+	if command -v nmcli >/dev/null; then
+		nmcli general reload conf dns-full >/dev/null 2>&1 ||
+			systemctl try-reload-or-restart NetworkManager.service || true
+	fi
+}
+
+case "${1:-}" in
+config)
+	mkdir -p "$(dirname "$conf")"
+	tmp=$(mktemp "$conf.XXXXXX")
+	head -c 1048576 > "$tmp"
+	chmod 0644 "$tmp"
+	mv "$tmp" "$conf"
+	if running; then
+		systemctl reload "$service"
+	fi
+	;;
+enable)
+	[ -f "$conf" ] || { mkdir -p "$(dirname "$conf")"; : > "$conf"; }
+	systemctl enable --now "$service"
+	# the service has to answer before everything is sent to it
+	for _ in $(seq 20); do
+		if ss -lun 2>/dev/null | grep -q "$address:53 "; then
+			break
+		fi
+		sleep 0.2
+	done
+	mkdir -p "$(dirname "$nm_conf")" "$(dirname "$resolved_conf")"
+	# zz-: read after the files of the user, so it wins over their servers
+	printf '# written by the DNS page of the tileWin settings\n[global-dns-domain-*]\nservers=%s\n' \
+		"$address" > "$nm_conf"
+	# the cache of the service is the one that counts, with its own times
+	printf '# written by the DNS page of the tileWin settings\n[Resolve]\nCache=no\n' \
+		> "$resolved_conf"
+	reload_network
+	;;
+disable)
+	rm -f "$nm_conf" "$resolved_conf"
+	reload_network
+	systemctl disable --now "$service" || true
+	;;
+test)
+	running && systemctl kill -s SIGUSR1 "$service"
+	;;
+update-lists)
+	running && systemctl kill -s SIGUSR2 "$service"
+	;;
+import)
+	name=${2:-}
+	[[ "$name" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || die "a list name has letters, digits, . _ - only"
+	mkdir -p "$imported"
+	chmod 0755 "$imported"
+	tmp=$(mktemp "$imported/.$name.XXXXXX")
+	head -c 209715200 > "$tmp"
+	chmod 0644 "$tmp"
+	mv "$tmp" "$imported/$name.list"
+	echo "$imported/$name.list"
+	;;
+*)
+	die "usage: $0 config|enable|disable|test|update-lists|import NAME"
+	;;
+esac
