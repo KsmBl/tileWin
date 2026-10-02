@@ -46,7 +46,7 @@ static struct tw_theme *load(const char *name) {
 int main(void) {
 	// every theme there is loads, with a name and a style
 	list_t *names = tw_theme_list();
-	if (!names || names->length < 9) {
+	if (!names || names->length < 11) {
 		fail("themes", "fewer built-in themes than there are", NULL);
 	}
 	for (int i = 0; names && i < names->length; i++) {
@@ -86,6 +86,25 @@ int main(void) {
 		check_color(t, "wallpaper.color", 0xc0c0c0ff);
 		check_color(t, "decoration.active.title_bg", 0x000080ff);
 		tw_theme_free(t);
+	}
+
+	// Windows 2000: the warmer grey, the navy to light blue titles, the blue desktop
+	struct tw_theme *w2k = load("win2000");
+	if (w2k) {
+		check_color(w2k, "decoration.face", 0xd4d0c8ff);
+		check_color(w2k, "wallpaper.color", 0x3a6ea5ff);
+		check_str(w2k, "decoration.active.title_gradient", "0:#0a246a 1:#a6caf0");
+		tw_theme_free(w2k);
+	}
+	// Vista: Windows 7's glass with a taskbar of black glass and window titles on it
+	struct tw_theme *vista = load("vista");
+	if (vista) {
+		check_str(vista, "taskbar.icons_only", "no");
+		check_str(vista, "start.style", "orb");
+		if (!vista->style || strcmp(vista->style, "win7") != 0) {
+			fail("vista", "is not drawn with the glass of Windows 7", vista->style);
+		}
+		tw_theme_free(vista);
 	}
 
 	if (failures) {

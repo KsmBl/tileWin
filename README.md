@@ -30,10 +30,12 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | Windows 1 | Windows 3 |
 |---|---|
 | ![Windows 1](docs/screenshots/theme-win1.png) | ![Windows 3](docs/screenshots/theme-win3.png) |
-| **Windows 95** | **Windows XP** |
-| ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows XP](docs/screenshots/theme-winxp.png) |
-| **Windows XP (dark)** | **Windows 7** |
-| ![Windows XP (dark)](docs/screenshots/theme-winxp-dark.png) | ![Windows 7](docs/screenshots/theme-win7.png) |
+| **Windows 95** | **Windows 2000** |
+| ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows 2000](docs/screenshots/theme-win2000.png) |
+| **Windows XP** | **Windows XP (dark)** |
+| ![Windows XP](docs/screenshots/theme-winxp.png) | ![Windows XP (dark)](docs/screenshots/theme-winxp-dark.png) |
+| **Windows Vista** | **Windows 7** |
+| ![Windows Vista](docs/screenshots/theme-vista.png) | ![Windows 7](docs/screenshots/theme-win7.png) |
 | **Windows 8**, its start screen of colored tiles over the whole screen | **Windows 11** |
 | ![Windows 8 start screen](docs/screenshots/theme-win8.png) | ![Windows 11](docs/screenshots/theme-win11.png) |
 
@@ -438,8 +440,10 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | `win1` | Windows 1.0 as it looked on EGA: bright blue title bars with the title white on black in the middle, the system box with its three bars on the left (a click opens the window menu, a double click closes the window) and the zoom box on the right, thin black borders, inactive title bars dithered with white, yellow menus, and the cyan of the icon area as the desktop and the taskbar, where minimized windows lie as icons; its windows did not overlap, so it suits tile mode |
 | `win3` | Windows 3.x: navy title bars with the title in the middle, the control-menu box (a click opens the window menu, a double click closes the window) and arrow buttons, thick grey borders notched at the corners, flat white menus, the plain light grey desktop Windows 3.1 came with, the **Program Manager** as the Start menu (program groups made from the apps' categories, the pinned apps as Main; a group opens as a window of icons) and minimized windows as **icons along the bottom of the desktop** (a double click restores one) |
 | `win95` | Classic gray bevels, navy title gradient, teal desktop, cascading start menu |
+| `win2000` | Windows 2000: the classic look of 95 in the warmer grey of its 3D face, title bars fading from navy to light blue, the plain blue desktop and Tahoma |
 | `winxp` | Luna blue title bars, green start button, two-column start menu |
 | `winxp-dark` | Windows XP in black: the same glossy Luna title bars, taskbar, Start menu and dialogs in black and greys, under a night sky; apps go dark while it is on |
+| `vista` | Windows Vista: the glass of 7 a shade smokier, a taskbar of black glass with the window titles on its buttons, the dark Start orb, a Start menu framed in dark glass, and an aurora of green and blue light |
 | `win7` | Aero glass title bars, orb start button, icons-only superbar |
 | `win8` | Colored window frames with centered titles, translucent blue taskbar, a start screen of colored tiles over the whole screen |
 | `win10` | Flat white title bars, dark taskbar with search box, list start menu |
