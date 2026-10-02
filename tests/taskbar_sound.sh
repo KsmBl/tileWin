@@ -209,6 +209,22 @@ shot "$work/paused.png"
 	$((sx + 10)) $((sy + 10)))" ] ||
 	fail "the speaker stays while the sound is paused"
 
+# The sound server goes away and comes back (restarted, or swapped for
+# another): every "pactl subscribe" ends, and each one that listened has to
+# listen again, or its icon stays as it was until the taskbar restarts.
+listening() { pgrep -f "$work/bin/pactl subscribe" | wc -l; }
+before=$(listening)
+pkill -f "$work/bin/pactl subscribe"
+sleep 0.5
+[ "$(listening)" -lt "$before" ] || fail "the subscriptions could not be ended for the test"
+attempt=0
+while [ "$(listening)" -lt "$before" ] && [ $attempt -lt 40 ]; do
+	sleep 0.25
+	attempt=$((attempt + 1))
+done
+[ "$(listening)" -ge "$before" ] ||
+	fail "after the sound server went away only $(listening) of $before listen again"
+
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

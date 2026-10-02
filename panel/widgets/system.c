@@ -1803,7 +1803,8 @@ struct volume_data {
 	bool available;
 	bool muted;
 	int volume;
-	struct loop_timer *debounce;
+	bool active;
+	struct loop_timer *debounce, *retry;
 };
 
 static void volume_query_done(void *data, const char *output) {
@@ -1848,10 +1849,33 @@ static void volume_event_line(void *data, const char *line) {
 	}
 }
 
+static void volume_subscribe(void *data);
+
+/*
+ * pactl subscribe ended: the sound server went away, was restarted or was
+ * swapped for another. Listen again in a while, or the icon would stay as it
+ * was until the taskbar is restarted; the query shows meanwhile that there
+ * is no sound.
+ */
 static void volume_subscribe_done(void *data, const char *output) {
 	struct widget *w = data;
 	struct volume_data *d = w->data;
 	d->subscribe = NULL;
+	if (d->active && !d->retry) {
+		d->retry = loop_add_timer(w->panel->loop, 2000, volume_subscribe, w);
+		volume_query(w);
+	}
+}
+
+static void volume_subscribe(void *data) {
+	struct widget *w = data;
+	struct volume_data *d = w->data;
+	d->retry = NULL;
+	if (d->active && !d->subscribe) {
+		d->subscribe = proc_run(w->panel, "exec pactl subscribe", true,
+			volume_event_line, volume_subscribe_done, w);
+		volume_query(w);
+	}
 }
 
 static void volume_init(struct widget *w) {
@@ -1860,11 +1884,14 @@ static void volume_init(struct widget *w) {
 
 static void volume_set_active(struct widget *w, bool active) {
 	struct volume_data *d = w->data;
-	if (active && !d->subscribe) {
-		d->subscribe = proc_run(w->panel, "exec pactl subscribe", true,
-			volume_event_line, volume_subscribe_done, w);
-		volume_query(w);
-	} else if (!active) {
+	d->active = active;
+	if (active) {
+		volume_subscribe(w);
+	} else {
+		if (d->retry) {
+			loop_remove_timer(w->panel->loop, d->retry);
+			d->retry = NULL;
+		}
 		proc_cancel(d->subscribe);
 		d->subscribe = NULL;
 		proc_cancel(d->query);
