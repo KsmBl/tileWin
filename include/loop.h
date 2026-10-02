@@ -42,6 +42,14 @@ struct loop_timer *loop_add_timer(struct loop *loop, int ms,
 		void (*callback)(void *data), void *data);
 
 /**
+ * A timer of at least a second that may fire up to half a second early or
+ * late: it is due on a whole second, like all such timers, so the readers
+ * that poll in the background wake the process once instead of each on its own.
+ */
+struct loop_timer *loop_add_timer_lazy(struct loop *loop, int ms,
+		void (*callback)(void *data), void *data);
+
+/**
  * Remove a file descriptor from the loop.
  */
 bool loop_remove_fd(struct loop *loop, int fd);

@@ -108,7 +108,7 @@ static void schedule(struct widget *w) {
 	}
 	int interval = widget_conf_int(w, "interval", 0);
 	if (interval > 0) {
-		d->timer = loop_add_timer(w->panel->loop, interval * 1000, run, w);
+		d->timer = loop_add_timer_lazy(w->panel->loop, interval * 1000, run, w);
 	}
 }
 

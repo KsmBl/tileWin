@@ -422,6 +422,15 @@ bool ipc_panel_commandf(struct panel *panel, const char *fmt, ...) {
 	return ok;
 }
 
+#define TITLE_MS 250
+
+static struct loop_timer *title_timer;
+
+static void title_fired(void *data) {
+	title_timer = NULL;
+	notify_widgets(data);
+}
+
 static void handle_window_event(struct panel *panel, json_object *event) {
 	const char *change = jstr(event, "change");
 	json_object *con;
@@ -439,6 +448,14 @@ static void handle_window_event(struct panel *panel, json_object *event) {
 		return;
 	}
 	update_window_from_json(w, con);
+	if (strcmp(change, "title") == 0) {
+		// terminals running a spinner change their title ten times a second:
+		// the taskbar shows the newest at most four times a second
+		if (!title_timer) {
+			title_timer = loop_add_timer(panel->loop, TITLE_MS, title_fired, panel);
+		}
+		return;
+	}
 	if (strcmp(change, "focus") == 0) {
 		for (int i = 0; i < panel->state.windows->length; i++) {
 			struct pwindow *o = panel->state.windows->items[i];

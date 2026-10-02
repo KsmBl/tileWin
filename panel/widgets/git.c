@@ -22,10 +22,10 @@
  * so a diff can be read on one screen while the outstanding work stays legible
  * on the other.
  *
- * git is asked in the background: one shell that runs three git commands and
- * writes their answers to a pipe the panel reads when it is ready. The taskbar
- * never waits for it, and nothing runs at all while the widget is off screen or
- * while the repository has not changed.
+ * git is asked in the background: one shell that runs two git commands (three
+ * once a minute, for the tag) and writes their answers to a pipe the panel
+ * reads when it is ready. The taskbar never waits for it, and nothing runs at
+ * all while the widget is off screen or while the repository has not changed.
  */
 #define _GNU_SOURCE
 #include <ctype.h>
@@ -42,6 +42,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include "draw.h"
 #include "panel.h"
@@ -61,6 +62,8 @@ struct git_state {
 
 	// what is drawn
 	char *branch, *tag;
+	time_t tag_checked; // when the tag was last asked for
+	bool asked_tag;     // the running git asks for it
 	long added, removed;
 	int staged, unstaged, untracked, conflicts, ahead, behind;
 	bool detached;
@@ -351,13 +354,16 @@ static void git_readable(int fd, short mask, void *data) {
 }
 
 /*
- * One shell, three git commands, each answer behind a marker. Asking in one go
- * keeps it to a single process per refresh however much is being shown.
+ * One shell, its git commands' answers each behind a marker: asking in one go
+ * keeps it to a single shell per refresh however much is being shown. The
+ * branch comes with the status; the newest tag hardly ever changes, so it is
+ * asked only now and then ($2 = "tag"): two git commands a refresh, not four.
  */
+#define TAG_EVERY_S 60
+
 static const char *const GIT_SCRIPT =
 	"cd \"$1\" 2>/dev/null || exit 1\n"
-	"printf '@head\\n'; git rev-parse --abbrev-ref HEAD 2>/dev/null\n"
-	"printf '@tag\\n'; git describe --tags --abbrev=0 2>/dev/null\n"
+	"if [ \"$2\" = tag ]; then printf '@tag\\n'; git describe --tags --abbrev=0 2>/dev/null; fi\n"
 	"printf '@numstat\\n'; git diff HEAD --numstat 2>/dev/null\n"
 	"printf '@status\\n'; git status --porcelain=v1 -b 2>/dev/null\n";
 
@@ -379,6 +385,8 @@ static void git_start(struct widget *w, const char *repo) {
 	if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) {
 		return;
 	}
+	g->asked_tag = !g->repo || strcmp(g->repo, repo) != 0 ||
+		time(NULL) - g->tag_checked >= TAG_EVERY_S;
 	pid_t pid = fork();
 	if (pid == 0) {
 		signal(SIGPIPE, SIG_DFL);
@@ -390,7 +398,8 @@ static void git_start(struct widget *w, const char *repo) {
 			dup2(null, STDERR_FILENO);
 			close(null);
 		}
-		execlp("sh", "sh", "-c", GIT_SCRIPT, "sh", repo, (char *)NULL);
+		execlp("sh", "sh", "-c", GIT_SCRIPT, "sh", repo, g->asked_tag ? "tag" : "",
+			(char *)NULL);
 		_exit(127);
 	}
 	close(fds[1]);
@@ -410,27 +419,21 @@ static void git_start(struct widget *w, const char *repo) {
 
 static void parse_output(struct git_state *g) {
 	g->branch = NULL;
-	g->tag = NULL;
 	g->added = g->removed = 0;
 	g->staged = g->unstaged = g->untracked = g->conflicts = 0;
 	g->ahead = g->behind = 0;
 	g->detached = false;
 
-	enum { NONE, HEAD, TAG, NUMSTAT, STATUS } section = NONE;
+	enum { NONE, TAG, NUMSTAT, STATUS } section = NONE;
 	char *save = NULL;
 	for (char *line = strtok_r(g->buf, "\n", &save); line;
 			line = strtok_r(NULL, "\n", &save)) {
-		if (strcmp(line, "@head") == 0) {
-			section = HEAD;
-		} else if (strcmp(line, "@tag") == 0) {
+		if (strcmp(line, "@tag") == 0) {
 			section = TAG;
 		} else if (strcmp(line, "@numstat") == 0) {
 			section = NUMSTAT;
 		} else if (strcmp(line, "@status") == 0) {
 			section = STATUS;
-		} else if (section == HEAD && !g->branch && *line) {
-			g->detached = strcmp(line, "HEAD") == 0;
-			g->branch = strdup(line);
 		} else if (section == TAG && !g->tag && *line) {
 			g->tag = strdup(line);
 		} else if (section == NUMSTAT && *line) {
@@ -451,9 +454,24 @@ static void parse_output(struct git_state *g) {
 				}
 				g->ahead = ahead ? atoi(ahead + 7) : 0;
 				g->behind = behind ? atoi(strchr(behind, ' ') + 1) : 0;
-				if (g->detached && strstr(line, "no branch")) {
-					free(g->branch);
+				// "## main...origin/main [ahead 1]", "## No commits yet on main",
+				// "## HEAD (no branch)"
+				const char *b = line + 3;
+				if (strncmp(b, "No commits yet on ", 18) == 0 ||
+						strncmp(b, "Initial commit on ", 18) == 0) {
+					b += 18;
+				}
+				free(g->branch);
+				if (strncmp(b, "HEAD (no branch)", 16) == 0) {
+					g->detached = true;
 					g->branch = strdup("detached");
+				} else {
+					size_t n = strcspn(b, " ");
+					const char *dots = strstr(b, "...");
+					if (dots && (size_t)(dots - b) < n) {
+						n = dots - b;
+					}
+					g->branch = strndup(b, n);
 				}
 				continue;
 			}
@@ -487,8 +505,15 @@ static void git_finished(struct git_state *g, bool ok) {
 	if (ok && g->buf) {
 		g->buf[g->len] = '\0';
 		free(g->branch);
-		free(g->tag);
+		char *old_tag = g->tag;
+		g->tag = NULL;
 		parse_output(g);
+		if (g->asked_tag) {
+			free(old_tag);
+			g->tag_checked = time(NULL);
+		} else {
+			g->tag = old_tag; // not asked this time: the one known
+		}
 		free(g->repo);
 		g->repo = g->pending;
 		g->pending = NULL;
@@ -549,7 +574,7 @@ static void git_tick(void *data) {
 			widget_set_dirty(w);
 		}
 	}
-	g->timer = loop_add_timer(w->panel->loop, g->interval_ms, git_tick, w);
+	g->timer = loop_add_timer_lazy(w->panel->loop, g->interval_ms, git_tick, w);
 }
 
 static void git_state_changed(struct widget *w) {

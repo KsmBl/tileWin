@@ -461,6 +461,16 @@ test(
 )
 
 test(
+	'panel-idle',
+	find_program('panel_idle.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'settings-backup',
 	find_program('settings_backup.sh'),
 	args: [meson.project_build_root()],

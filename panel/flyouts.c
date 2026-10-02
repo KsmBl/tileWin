@@ -3114,7 +3114,7 @@ static void rec_tick(void *data) {
 			rec_push(rec.mem, &rec.mem_len, (int)((total - available) * 100 / total));
 		}
 	}
-	rec.timer = loop_add_timer(rec.panel->loop, 1000, rec_tick, NULL);
+	rec.timer = loop_add_timer_lazy(rec.panel->loop, 1000, rec_tick, NULL);
 }
 
 void flyout_history_hold(struct panel *panel) {

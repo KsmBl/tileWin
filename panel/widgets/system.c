@@ -25,6 +25,10 @@ struct poll_data {
 	int interval_ms;
 	void (*update)(struct widget *w);
 	void *state;
+	// the figures of the flyout's chart: the CPU and memory history, or a
+	// recorder of infoflyouts.c; kept while the widget is shown
+	enum { KEEP_NOTHING, KEEP_HISTORY, KEEP_RECORD } keep;
+	bool keeping;
 };
 
 /* Opens the flyout of a widget that has no flyout of its own elsewhere. */
@@ -48,7 +52,7 @@ static void poll_tick(void *data) {
 	}
 	p->update(w);
 	widget_set_dirty(w);
-	p->timer = loop_add_timer(w->panel->loop, p->interval_ms, poll_tick, w);
+	p->timer = loop_add_timer_lazy(w->panel->loop, p->interval_ms, poll_tick, w);
 }
 
 static struct poll_data *poll_init(struct widget *w, int default_seconds,
@@ -65,6 +69,30 @@ static struct poll_data *poll_init(struct widget *w, int default_seconds,
 	return p;
 }
 
+/*
+ * What the flyout of a widget shows as a chart is kept while the flyout is
+ * closed, but only while the widget is on a taskbar in use: one of the other
+ * mode's layout records nothing.
+ */
+static void poll_keep(struct widget *w, bool keep) {
+	struct poll_data *p = w->data;
+	if (keep == p->keeping || p->keep == KEEP_NOTHING) {
+		return;
+	}
+	p->keeping = keep;
+	if (p->keep == KEEP_HISTORY) {
+		if (keep) {
+			flyout_history_hold(w->panel);
+		} else {
+			flyout_history_release();
+		}
+	} else if (keep) {
+		info_flyout_record(w);
+	} else {
+		info_flyout_forget(w);
+	}
+}
+
 static void poll_set_active(struct widget *w, bool active) {
 	struct poll_data *p = w->data;
 	if (active && !p->timer) {
@@ -73,9 +101,11 @@ static void poll_set_active(struct widget *w, bool active) {
 		loop_remove_timer(w->panel->loop, p->timer);
 		p->timer = NULL;
 	}
+	poll_keep(w, active);
 }
 
 static void poll_destroy(struct widget *w) {
+	poll_keep(w, false);
 	struct poll_data *p = w->data;
 	if (p->timer) {
 		loop_remove_timer(w->panel->loop, p->timer);
@@ -84,16 +114,6 @@ static void poll_destroy(struct widget *w) {
 	free(p);
 }
 
-/* A widget whose flyout has a chart: its figures are kept while it is closed. */
-static void charted_destroy(struct widget *w) {
-	info_flyout_forget(w);
-	poll_destroy(w);
-}
-
-static void history_destroy(struct widget *w) {
-	flyout_history_release();
-	poll_destroy(w);
-}
 
 static bool read_file(const char *path, char *buf, size_t size) {
 	FILE *f = fopen(path, "r");
@@ -487,8 +507,7 @@ static void cpu_update(struct widget *w) {
 }
 
 static void cpu_init(struct widget *w) {
-	poll_init(w, 2, cpu_update, sizeof(struct cpu_state));
-	flyout_history_hold(w->panel); // the chart of its flyout
+	poll_init(w, 2, cpu_update, sizeof(struct cpu_state))->keep = KEEP_HISTORY;
 }
 
 static char *cpu_text(struct widget *w) {
@@ -557,7 +576,7 @@ static char *cpu_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_cpu = {
 	.type = "cpu",
 	.init = cpu_init,
-	.destroy = history_destroy,
+	.destroy = poll_destroy,
 	.measure = cpu_measure,
 	.render = cpu_render,
 	.click = cpu_click,
@@ -590,8 +609,7 @@ static void memory_update(struct widget *w) {
 }
 
 static void memory_init(struct widget *w) {
-	poll_init(w, 5, memory_update, sizeof(struct mem_state));
-	flyout_history_hold(w->panel);
+	poll_init(w, 5, memory_update, sizeof(struct mem_state))->keep = KEEP_HISTORY;
 }
 
 static char *memory_text(struct widget *w) {
@@ -651,7 +669,7 @@ static char *memory_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_memory = {
 	.type = "memory",
 	.init = memory_init,
-	.destroy = history_destroy,
+	.destroy = poll_destroy,
 	.measure = memory_measure,
 	.render = memory_render,
 	.click = memory_click,
@@ -762,8 +780,7 @@ static void disk_update(struct widget *w) {
 }
 
 static void disk_init(struct widget *w) {
-	poll_init(w, 1, disk_update, sizeof(struct disk_state));
-	info_flyout_record(w);
+	poll_init(w, 1, disk_update, sizeof(struct disk_state))->keep = KEEP_RECORD;
 }
 
 static void disk_rate_text(double kbps, char *buffer, size_t size) {
@@ -854,7 +871,7 @@ static char *disk_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_disk = {
 	.type = "disk",
 	.init = disk_init,
-	.destroy = charted_destroy,
+	.destroy = poll_destroy,
 	.measure = disk_measure,
 	.render = disk_render,
 	.tooltip = disk_tooltip,
@@ -936,8 +953,7 @@ static void gpu_update(struct widget *w) {
 }
 
 static void gpu_init(struct widget *w) {
-	poll_init(w, 2, gpu_update, sizeof(struct gpu_state));
-	info_flyout_record(w);
+	poll_init(w, 2, gpu_update, sizeof(struct gpu_state))->keep = KEEP_RECORD;
 }
 
 static char *gpu_text(struct widget *w) {
@@ -978,7 +994,7 @@ static char *gpu_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_gpu = {
 	.type = "gpu",
 	.init = gpu_init,
-	.destroy = charted_destroy,
+	.destroy = poll_destroy,
 	.measure = gpu_measure,
 	.render = gpu_render,
 	.tooltip = gpu_tooltip,
@@ -1072,8 +1088,7 @@ static void nm_update(struct widget *w) {
 }
 
 static void nm_init(struct widget *w) {
-	poll_init(w, 2, nm_update, sizeof(struct nm_state));
-	info_flyout_record(w);
+	poll_init(w, 2, nm_update, sizeof(struct nm_state))->keep = KEEP_RECORD;
 }
 
 static void nm_rate_text(double kbps, char *buffer, size_t size) {
@@ -1136,7 +1151,7 @@ static char *nm_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_net = {
 	.type = "net",
 	.init = nm_init,
-	.destroy = charted_destroy,
+	.destroy = poll_destroy,
 	.measure = nm_measure,
 	.render = nm_render,
 	.tooltip = nm_tooltip,
@@ -1286,8 +1301,7 @@ static void power_update(struct widget *w) {
 }
 
 static void power_init(struct widget *w) {
-	poll_init(w, 5, power_update, sizeof(struct power_state));
-	info_flyout_record(w);
+	poll_init(w, 5, power_update, sizeof(struct power_state))->keep = KEEP_RECORD;
 }
 
 static char *power_text(struct widget *w) {
@@ -1335,7 +1349,7 @@ static char *power_tooltip(struct widget *w, struct hotspot *hs) {
 const struct widget_impl widget_power = {
 	.type = "power",
 	.init = power_init,
-	.destroy = charted_destroy,
+	.destroy = poll_destroy,
 	.measure = power_measure,
 	.render = power_render,
 	.tooltip = power_tooltip,
@@ -1798,13 +1812,12 @@ const struct widget_impl widget_brightness = {
 /* ================= volume (PulseAudio / PipeWire via pactl) ================= */
 
 struct volume_data {
-	struct proc *subscribe;
 	struct proc *query;
 	bool available;
 	bool muted;
 	int volume;
 	bool active;
-	struct loop_timer *debounce, *retry;
+	struct loop_timer *debounce;
 };
 
 static void volume_query_done(void *data, const char *output) {
@@ -1849,33 +1862,14 @@ static void volume_event_line(void *data, const char *line) {
 	}
 }
 
-static void volume_subscribe(void *data);
-
-/*
- * pactl subscribe ended: the sound server went away, was restarted or was
- * swapped for another. Listen again in a while, or the icon would stay as it
- * was until the taskbar is restarted; the query shows meanwhile that there
- * is no sound.
- */
-static void volume_subscribe_done(void *data, const char *output) {
-	struct widget *w = data;
-	struct volume_data *d = w->data;
-	d->subscribe = NULL;
-	if (d->active && !d->retry) {
-		d->retry = loop_add_timer(w->panel->loop, 2000, volume_subscribe, w);
-		volume_query(w);
-	}
+/* The sound server came (back): what it has now. */
+static void volume_started(void *data) {
+	volume_query(data);
 }
 
-static void volume_subscribe(void *data) {
-	struct widget *w = data;
-	struct volume_data *d = w->data;
-	d->retry = NULL;
-	if (d->active && !d->subscribe) {
-		d->subscribe = proc_run(w->panel, "exec pactl subscribe", true,
-			volume_event_line, volume_subscribe_done, w);
-		volume_query(w);
-	}
+/* It went away: the query shows meanwhile that there is no sound. */
+static void volume_lost(void *data) {
+	volume_query(data);
 }
 
 static void volume_init(struct widget *w) {
@@ -1884,16 +1878,12 @@ static void volume_init(struct widget *w) {
 
 static void volume_set_active(struct widget *w, bool active) {
 	struct volume_data *d = w->data;
-	d->active = active;
-	if (active) {
-		volume_subscribe(w);
-	} else {
-		if (d->retry) {
-			loop_remove_timer(w->panel->loop, d->retry);
-			d->retry = NULL;
-		}
-		proc_cancel(d->subscribe);
-		d->subscribe = NULL;
+	if (active && !d->active) {
+		d->active = true;
+		pulse_listen(w->panel, volume_event_line, volume_started, volume_lost, w);
+	} else if (!active && d->active) {
+		d->active = false;
+		pulse_unlisten(w);
 		proc_cancel(d->query);
 		d->query = NULL;
 		if (d->debounce) {

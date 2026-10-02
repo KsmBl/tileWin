@@ -46,6 +46,7 @@ executable(
 		'main.c',
 		'emoji_data.c',
 		'emojipicker.c',
+		'pulse.c',
 		'symbols.c',
 		'minicons.c',
 		'notes.c',

@@ -168,6 +168,54 @@ static void render_catcher(struct psurface *s) {
 	s->dirty = false;
 }
 
+/*
+ * The pixels that differ from the frame shown, as a box in buffer pixels;
+ * false when none do. Most redraws of the taskbar change a clock digit or a
+ * number, or nothing at all (a window list read again unchanged), and the
+ * compositor then only has to draw that much again, or nothing.
+ */
+static bool changed_box(struct psurface *s, struct pool_buffer *buffer, struct pbox *box) {
+	struct pool_buffer *old = s->shown;
+	*box = (struct pbox){ 0, 0, INT32_MAX, INT32_MAX };
+	if (!old || old == buffer || !old->buffer || old->width != buffer->width ||
+			old->height != buffer->height) {
+		return true;
+	}
+	int stride = cairo_image_surface_get_stride(buffer->surface);
+	const unsigned char *a = cairo_image_surface_get_data(old->surface);
+	const unsigned char *b = cairo_image_surface_get_data(buffer->surface);
+	if (!a || !b || stride != cairo_image_surface_get_stride(old->surface)) {
+		return true;
+	}
+	int w = (int)buffer->width, h = (int)buffer->height;
+	int top = -1, bottom = -1, left = w, right = -1;
+	for (int y = 0; y < h; y++) {
+		const uint32_t *ra = (const uint32_t *)(a + (size_t)y * stride);
+		const uint32_t *rb = (const uint32_t *)(b + (size_t)y * stride);
+		if (memcmp(ra, rb, (size_t)w * 4) == 0) {
+			continue;
+		}
+		if (top < 0) {
+			top = y;
+		}
+		bottom = y;
+		int x0 = 0, x1 = w - 1;
+		while (x0 < left && ra[x0] == rb[x0]) {
+			x0++;
+		}
+		while (x1 > right && ra[x1] == rb[x1]) {
+			x1--;
+		}
+		left = x0 < left ? x0 : left;
+		right = x1 > right ? x1 : right;
+	}
+	if (top < 0) {
+		return false;
+	}
+	*box = (struct pbox){ left, top, right - left + 1, bottom - top + 1 };
+	return true;
+}
+
 void psurface_render(struct psurface *s) {
 	if (!s->configured || s->width <= 0 || s->height <= 0) {
 		return;
@@ -181,8 +229,17 @@ void psurface_render(struct psurface *s) {
 		return;
 	}
 	s->scale = s->output ? s->output->scale : 1;
+	// into the other buffer, so the one shown still holds the last frame
+	struct pool_buffer *other = s->shown == &s->buffers[0] ? &s->buffers[1] : &s->buffers[0];
+	bool keep = s->shown && !other->busy && !s->shown->busy;
+	if (keep) {
+		s->shown->busy = true;
+	}
 	struct pool_buffer *buffer = get_next_buffer(s->panel->shm, s->buffers,
 		s->width * s->scale, s->height * s->scale);
+	if (keep) {
+		s->shown->busy = false;
+	}
 	if (!buffer) {
 		return;
 	}
@@ -207,9 +264,18 @@ void psurface_render(struct psurface *s) {
 	cairo_restore(cr);
 	cairo_surface_flush(buffer->surface);
 
+	struct pbox damage;
+	if (!changed_box(s, buffer, &damage)) {
+		// nothing to show that is not shown already: no commit, so the
+		// compositor draws nothing either
+		buffer->busy = false;
+		s->dirty = false;
+		return;
+	}
 	wl_surface_set_buffer_scale(s->surface, s->scale);
 	wl_surface_attach(s->surface, buffer->buffer, 0, 0);
-	wl_surface_damage_buffer(s->surface, 0, 0, INT32_MAX, INT32_MAX);
+	wl_surface_damage_buffer(s->surface, damage.x, damage.y, damage.width, damage.height);
+	s->shown = buffer;
 	struct wl_callback *cb = wl_surface_frame(s->surface);
 	wl_callback_add_listener(cb, &frame_listener, s);
 	s->frame_pending = true;

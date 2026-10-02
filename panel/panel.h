@@ -73,6 +73,7 @@ struct psurface {
 	int req_width, req_height;
 	int scale;
 	struct pool_buffer buffers[2];
+	struct pool_buffer *shown; // the one last committed, to compare the next with
 	bool configured, dirty, frame_pending, catcher;
 	list_t *hotspots; // struct hotspot *
 	struct hotspot *hover;
@@ -607,6 +608,11 @@ void info_flyout_toggle(struct widget *w, struct popup_anchor anchor);
 void info_flyout_record(struct widget *w);
 void info_flyout_forget(struct widget *w);
 /* The last minute of CPU and memory use, kept while their widgets are on the taskbar. */
+/* pulse.c: one "pactl subscribe" for all that listen. started: the sound
+ * server is there (again), read what it has; lost: it went away. */
+void pulse_listen(struct panel *panel, void (*event)(void *data, const char *line),
+	void (*started)(void *data), void (*lost)(void *data), void *data);
+void pulse_unlisten(void *data);
 void flyout_history_hold(struct panel *panel);
 void flyout_history_release(void);
 /* custom.c and git.c, for their flyouts */

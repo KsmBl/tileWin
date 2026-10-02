@@ -19,7 +19,7 @@
  * The theme's "workspaces" block colors them: fg, active_bg (the desktop
  * shown), urgent_bg, radius (rounded screens) and margin (around them all).
  * Windows only tell where they are when the window tree is read, so while the
- * widget is on the taskbar the tree is read again every second.
+ * widget is on the taskbar in use the tree is read again every second.
  */
 
 #define REFRESH_MS 1000
@@ -37,22 +37,30 @@ static void refresh_fired(void *data) {
 	if (!panel->state.battery_saver) {
 		ipc_panel_refresh_tree(panel);
 	}
-	refresh_timer = loop_add_timer(panel->loop, REFRESH_MS, refresh_fired, panel);
+	refresh_timer = loop_add_timer_lazy(panel->loop, REFRESH_MS, refresh_fired, panel);
 }
 
-static void workspaces_init(struct widget *w) {
-	if (pagers++ == 0 && !refresh_timer) {
-		refresh_timer = loop_add_timer(w->panel->loop, REFRESH_MS, refresh_fired, w->panel);
+/* The tree is read only while a workspaces widget is on a taskbar in use. */
+static void workspaces_set_active(struct widget *w, bool active) {
+	if (active) {
+		if (pagers++ == 0 && !refresh_timer) {
+			refresh_timer = loop_add_timer_lazy(w->panel->loop, REFRESH_MS, refresh_fired,
+				w->panel);
+		}
+		return;
 	}
-}
-
-static void workspaces_destroy(struct widget *w) {
 	if (--pagers <= 0) {
 		pagers = 0;
 		if (refresh_timer) {
 			loop_remove_timer(w->panel->loop, refresh_timer);
 			refresh_timer = NULL;
 		}
+	}
+}
+
+static void workspaces_destroy(struct widget *w) {
+	if (w->active) {
+		workspaces_set_active(w, false);
 	}
 }
 
@@ -230,7 +238,7 @@ static char *workspaces_tooltip(struct widget *w, struct hotspot *hs) {
 
 const struct widget_impl widget_workspaces = {
 	.type = "workspaces",
-	.init = workspaces_init,
+	.set_active = workspaces_set_active,
 	.destroy = workspaces_destroy,
 	.measure = workspaces_measure,
 	.render = workspaces_render,

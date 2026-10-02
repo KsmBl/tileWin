@@ -1270,7 +1270,7 @@ static void tick(void *data) {
 	if (!f->panel->state.battery_saver || (f->popup && f->panel->popup == f->popup)) {
 		refill(f);
 	}
-	f->tick = loop_add_timer(f->panel->loop, f->source->interval_ms, tick, f);
+	f->tick = loop_add_timer_lazy(f->panel->loop, f->source->interval_ms, tick, f);
 }
 
 static void info_motion(struct popup *p, double x, double y) {
@@ -1422,7 +1422,7 @@ void info_flyout_record(struct widget *w) {
 	}
 	list_add(recorders, f);
 	refill(f);
-	f->tick = loop_add_timer(w->panel->loop, source->interval_ms, tick, f);
+	f->tick = loop_add_timer_lazy(w->panel->loop, source->interval_ms, tick, f);
 }
 
 void info_flyout_forget(struct widget *w) {

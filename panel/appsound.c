@@ -10,12 +10,11 @@
  * Which windows are playing sound, for the speaker on their taskbar buttons:
  * the sink inputs of PulseAudio (or PipeWire's pulse server) belong to the
  * window whose process started the process playing (a browser plays from a
- * child of the one owning the window). "pactl subscribe" says when they
- * change, and only then are they read again.
+ * child of the one owning the window). "pactl subscribe" (pulse.c) says when
+ * they change, and only then are they read again.
  */
 
 #define MAX_ANCESTORS 32
-#define RETRY_MS 10000 // pactl gone (no sound server yet): try again this late
 
 struct stream {
 	int64_t index;
@@ -28,7 +27,7 @@ struct stream {
 static struct {
 	struct panel *panel;
 	list_t *streams; // struct stream *
-	struct proc *watch, *query;
+	struct proc *query;
 	bool query_again;
 } as;
 
@@ -135,22 +134,16 @@ static void watch_line(void *data, const char *line) {
 	}
 }
 
-static void start_watch(void *data);
+static void watch_started(void *data) {
+	query();
+}
 
-static void watch_done(void *data, const char *output) {
-	// the sound server went away (or there is none): look again later
-	as.watch = NULL;
+static void watch_lost(void *data) {
+	// the sound server went away (or there is none): no app plays now
 	if (as.streams->length > 0) {
 		clear_streams();
 		panel_set_dirty(as.panel);
 	}
-	loop_add_timer(as.panel->loop, RETRY_MS, start_watch, NULL);
-}
-
-static void start_watch(void *data) {
-	as.watch = proc_run(as.panel, "exec pactl subscribe 2>/dev/null", true, watch_line,
-		watch_done, NULL);
-	query();
 }
 
 void appsound_init(struct panel *panel) {
@@ -159,7 +152,7 @@ void appsound_init(struct panel *panel) {
 		return;
 	}
 	as.streams = create_list();
-	start_watch(NULL);
+	pulse_listen(panel, watch_line, watch_started, watch_lost, &as);
 }
 
 static bool belongs(const struct stream *s, int pid) {

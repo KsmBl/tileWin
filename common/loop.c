@@ -58,8 +58,12 @@ void loop_poll(struct loop *loop) {
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		for (int i = 0; i < loop->timers->length; ++i) {
 			struct loop_timer *timer = loop->timers->items[i];
-			int timer_ms = (timer->expiry.tv_sec - now.tv_sec) * 1000;
-			timer_ms += (timer->expiry.tv_nsec - now.tv_nsec) / 1000000;
+			// rounded up: a timer due in half a millisecond must not make
+			// poll return at once, again and again, until it is due
+			long long ns = (long long)(timer->expiry.tv_sec - now.tv_sec) * 1000000000LL +
+				(timer->expiry.tv_nsec - now.tv_nsec);
+			long long due = ns > 0 ? (ns + 999999) / 1000000 : 0;
+			int timer_ms = due > INT_MAX ? INT_MAX : (int)due;
 			if (timer_ms < ms) {
 				ms = timer_ms;
 			}
@@ -152,6 +156,19 @@ struct loop_timer *loop_add_timer(struct loop *loop, int ms,
 
 	list_add(loop->timers, timer);
 
+	return timer;
+}
+
+struct loop_timer *loop_add_timer_lazy(struct loop *loop, int ms,
+		void (*callback)(void *data), void *data) {
+	struct loop_timer *timer = loop_add_timer(loop, ms, callback, data);
+	if (timer && ms >= 1000) {
+		// on the nearest whole second, where the other lazy timers are due too
+		if (timer->expiry.tv_nsec >= 500000000) {
+			timer->expiry.tv_sec++;
+		}
+		timer->expiry.tv_nsec = 0;
+	}
 	return timer;
 }
 
