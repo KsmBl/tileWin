@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <netdb.h>
 #include <limits.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -168,6 +169,15 @@ struct list_meta {
 
 static struct {
 	char *conf_path, *state_dir, *run_dir, *nm_run, *nm_keyfiles, *listen_text;
+	char *resolved_resolv;
+	// whether the DNS of the computer comes here: a name of its own looked up
+	// the way every program does, now and then
+	bool probing;
+	char *probe_via; // for the tests: a server to ask instead of the system
+	char probe_name[96];
+	bool probe_seen;
+	int wired; // 1 yes, 0 no, -1 not known yet
+	int64_t probe_sent, next_probe;
 	struct sockaddr_storage listen_addr;
 	struct config conf;
 	int udp_fd, tcp_fd, sig_fd, job_pipe[2];
@@ -677,6 +687,24 @@ static void read_network(void) {
 		}
 		add_servers(d.net_auto, &d.nauto, devices[i].servers);
 	}
+	// without NetworkManager: what resolved has from systemd-networkd, or the
+	// resolv.conf the service replaced (tilewin-dns-apply keeps it)
+	char kept[PATH_MAX];
+	snprintf(kept, sizeof(kept), "%s/network-resolv.conf", d.state_dir);
+	const char *files[] = { d.resolved_resolv, kept };
+	for (size_t f = 0; d.nauto == 0 && f < sizeof(files) / sizeof(files[0]); f++) {
+		FILE *fh = fopen(files[f], "r");
+		char line[256];
+		while (fh && fgets(line, sizeof(line), fh)) {
+			char server[128];
+			if (sscanf(line, " nameserver %127s", server) == 1) {
+				add_servers(d.net_auto, &d.nauto, server); // never the service itself
+			}
+		}
+		if (fh) {
+			fclose(fh);
+		}
+	}
 }
 
 /* Changes when a network comes, goes or is changed, so it is read only then. */
@@ -685,6 +713,16 @@ static void network_signature(char *out, size_t size) {
 	out[0] = '\0';
 	char paths[PATH_MAX * 2];
 	snprintf(paths, sizeof(paths), "%s/devices:%s", d.nm_run, d.nm_keyfiles);
+	char kept[PATH_MAX];
+	snprintf(kept, sizeof(kept), "%s/network-resolv.conf", d.state_dir);
+	const char *files[] = { d.resolved_resolv, kept };
+	for (size_t f = 0; f < sizeof(files) / sizeof(files[0]); f++) {
+		struct stat st;
+		if (stat(files[f], &st) == 0) {
+			used += snprintf(out + used, size - used, "%ld.%ld/%ld;", (long)st.st_mtim.tv_sec,
+				st.st_mtim.tv_nsec, (long)st.st_size);
+		}
+	}
 	char *save = NULL;
 	for (char *dir = strtok_r(paths, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
 		struct stat st;
@@ -1557,6 +1595,75 @@ static void on_upstream(int fd) {
 
 /* ---------- the questions of the apps ---------- */
 
+/* ---------- whether the computer asks the service ---------- */
+
+#define PROBE_EVERY_MS 30000      // while it does not, or it is not known
+#define PROBE_SETTLED_MS 300000   // while it does
+#define PROBE_WAIT_MS 8000
+
+static void *probe_worker(void *data) {
+	char *name = data;
+	const char *via = d.probe_via;
+	if (via) {
+		struct server s;
+		uint8_t query[512];
+		size_t len = parse_address(via, 53, &s.addr, &s.len) ? dns_build_query(query,
+			sizeof(query), random16(), name, DNS_TYPE_A) : 0;
+		int fd = len ? socket(s.addr.ss_family, SOCK_DGRAM | SOCK_CLOEXEC, 0) : -1;
+		if (fd >= 0) {
+			struct timeval tv = { 3, 0 };
+			setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+			sendto(fd, query, len, 0, (struct sockaddr *)&s.addr, s.len);
+			recv(fd, query, sizeof(query), 0);
+			close(fd);
+		}
+	} else {
+		// through the C library: nss-resolve, or the servers of resolv.conf
+		struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_DGRAM };
+		struct addrinfo *res = NULL;
+		if (getaddrinfo(name, NULL, &hints, &res) == 0) {
+			freeaddrinfo(res);
+		}
+	}
+	free(name);
+	return NULL;
+}
+
+static void probe(int64_t now) {
+	snprintf(d.probe_name, sizeof(d.probe_name), "%04x%04x%04x.check.tilewin-dns.example",
+		random16(), random16(), random16());
+	d.probe_seen = false;
+	d.probe_sent = now;
+	pthread_t thread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	char *name = strdup(d.probe_name);
+	if (pthread_create(&thread, &attr, probe_worker, name) != 0) {
+		free(name);
+		d.probe_sent = 0;
+	}
+	pthread_attr_destroy(&attr);
+}
+
+static void probe_check(int64_t now) {
+	if (!d.probing) {
+		return;
+	}
+	if (d.probe_sent && !d.probe_seen && now - d.probe_sent > PROBE_WAIT_MS) {
+		d.probe_sent = 0;
+		if (d.wired != 0) {
+			logmsg("the DNS of this computer does not come to the service");
+			d.status_dirty = true;
+		}
+		d.wired = 0;
+	}
+	if (now >= d.next_probe) {
+		d.next_probe = now + (d.wired == 1 ? PROBE_SETTLED_MS : PROBE_EVERY_MS);
+		probe(now);
+	}
+}
+
 static void answer_query(uint8_t *msg, size_t len, enum pkind kind,
 		const struct sockaddr_storage *from, socklen_t fromlen, uint32_t conn_serial) {
 	struct dns_question q;
@@ -1573,6 +1680,17 @@ static void answer_query(uint8_t *msg, size_t len, enum pkind kind,
 	uint8_t out[65536];
 	if ((msg[2] >> 3 & 0x0f) != 0) {
 		size_t n = dns_build_reply(out, sizeof(out), msg, &q, 4, false); // not implemented
+		deliver(&tmp, out, n);
+		return;
+	}
+	if (d.probe_name[0] && strcmp(q.name, d.probe_name) == 0) {
+		// the look-up of the service itself came the way of every program
+		if (!d.probe_seen || d.wired != 1) {
+			d.status_dirty = true;
+		}
+		d.probe_seen = true;
+		d.wired = 1;
+		size_t n = dns_build_reply(out, sizeof(out), msg, &q, DNS_RCODE_NXDOMAIN, false);
 		deliver(&tmp, out, n);
 		return;
 	}
@@ -1781,6 +1899,7 @@ static void write_status(void) {
 	text_add(&t, "downloading %d\n", d.download_pid > 0 ? 1 : 0);
 	text_add(&t, "prefetch_names %d\n", d.npf);
 	text_add(&t, "counted_names %d\n", d.nstats);
+	text_add(&t, "wired %d\n", d.wired);
 	char path[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/status", d.run_dir);
 	write_file(path, t.s, 0644, (gid_t)-1);
@@ -1888,6 +2007,7 @@ static void housekeeping(int64_t now) {
 		d.next_list_check = now + 3600 * 1000;
 		check_lists(false);
 	}
+	probe_check(now);
 	if (now >= d.next_status) {
 		d.next_status = now + (d.status_dirty || d.log_dirty ? 1000 : 10000);
 		write_status();
@@ -1929,7 +2049,9 @@ static void on_signal(void) {
 static void usage(const char *name) {
 	fprintf(stderr,
 		"usage: %s [-c config] [-s state dir] [-r run dir] [-l address:port]\n"
-		"          [-n NetworkManager run dir] [-k keyfile dirs, : separated]\n", name);
+		"          [-n NetworkManager run dir] [-k keyfile dirs, : separated]\n"
+		"          [-R resolved's resolv.conf] [-q: do not check that DNS comes here]\n"
+		"          [-p address:port: check by asking it, not the system]\n", name);
 }
 
 int main(int argc, char **argv) {
@@ -1939,8 +2061,11 @@ int main(int argc, char **argv) {
 	d.listen_text = "127.0.0.153:53";
 	d.nm_run = "/run/NetworkManager";
 	d.nm_keyfiles = "/etc/NetworkManager/system-connections:/run/NetworkManager/system-connections";
+	d.resolved_resolv = "/run/systemd/resolve/resolv.conf";
+	d.probing = true;
+	d.wired = -1;
 	int opt;
-	while ((opt = getopt(argc, argv, "c:s:r:l:n:k:h")) != -1) {
+	while ((opt = getopt(argc, argv, "c:s:r:l:n:k:R:qp:h")) != -1) {
 		switch (opt) {
 		case 'c': d.conf_path = optarg; break;
 		case 's': d.state_dir = optarg; break;
@@ -1948,6 +2073,9 @@ int main(int argc, char **argv) {
 		case 'l': d.listen_text = optarg; break;
 		case 'n': d.nm_run = optarg; break;
 		case 'k': d.nm_keyfiles = optarg; break;
+		case 'R': d.resolved_resolv = optarg; break;
+		case 'q': d.probing = false; break;
+		case 'p': d.probe_via = optarg; break;
 		default: usage(argv[0]); return opt == 'h' ? 0 : 2;
 		}
 	}

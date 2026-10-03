@@ -226,7 +226,12 @@ The numbers are where the line down and the line across go, 0.1 to 0.9 of the sc
 
 ## The DNS service: /etc/tileWin/dns.conf
 
-`tilewin-dnsd` (the systemd service `tilewin-dnsd.service`) answers on `127.0.0.153`. While it is on (the switch on the DNS page, or `pkexec /usr/local/libexec/tilewin-dns-apply enable`), `/etc/NetworkManager/conf.d/zz-tilewin-dns.conf` makes it the DNS server for all networks and `/etc/systemd/resolved.conf.d/tilewin-dns.conf` turns resolved's own cache off; `disable` removes both. The config, readable by all, written as root:
+`tilewin-dnsd` (the systemd service `tilewin-dnsd.service`) answers on `127.0.0.153`. Turning it on (the switch on the DNS page, or `pkexec /usr/local/libexec/tilewin-dns-apply enable`) sends the DNS of the computer there, the way the computer does DNS:
+
+- with systemd-resolved, `/etc/systemd/resolved.conf.d/tilewin-dns.conf` makes the service resolved's server for all names (`DNS=`, `Domains=~.`, and `Cache=no`, as the service has the cache). NetworkManager then hands resolved no servers of its own (`dns=none` in `/etc/NetworkManager/conf.d/zz-tilewin-dns.conf`; its DNS for all networks would not do, as it leaves out loopback servers), and the networks of systemd-networkd get `DNSDefaultRoute=no` in drop-ins of their own;
+- without resolved, `/etc/resolv.conf` is put aside in `/var/lib/tilewin-dns/` and replaced by one naming the service, and NetworkManager no longer writes it.
+
+`disable` undoes all of it and puts the old `resolv.conf` back. The servers of the networks stay known to the service, from NetworkManager, resolved, or the `resolv.conf` it replaced. Every half minute until it works, then every five, the service looks up a name of its own the way every program does; the DNS page says when that look-up does not arrive, with a button to send the DNS through it again. The config, readable by all, written as root:
 
 ```
 servers 1.1.1.1 9.9.9.9 8.8.8.8   # for all networks; none: those of each network

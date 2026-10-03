@@ -185,6 +185,9 @@ if [ -z "$DESTDIR" ] && command -v systemctl >/dev/null 2>&1; then
 	if systemctl is-active --quiet tilewin-dnsd.service 2>/dev/null; then
 		msg "Restarting the DNS service"
 		$SUDO systemctl restart tilewin-dnsd.service || warn "could not restart the DNS service"
+		# sent through it again the way this version does it
+		$SUDO "$PREFIX/libexec/tilewin-dns-apply" enable ||
+			warn "could not send the DNS of this computer through the service"
 	fi
 fi
 

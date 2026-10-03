@@ -24,7 +24,7 @@ configure_file(
 	install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),
 )
 
-configure_file(
+tilewin_dns_apply = configure_file(
 	input: 'tilewin-dns-apply.in',
 	output: 'tilewin-dns-apply',
 	configuration: dns_conf,

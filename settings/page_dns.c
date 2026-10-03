@@ -407,7 +407,7 @@ struct dns_page {
 	bool updating, busy;
 	struct dnsconf c;
 	guint save_timer, status_timer;
-	GtkWidget *service_switch, *service_sub, *today_label, *message, *nm_note;
+	GtkWidget *service_switch, *service_sub, *today_label, *message, *nm_note, *rewire_row;
 	GtkWidget *mode_dd, *fastest_dd, *fastest_row, *interval_dd, *interval_row, *test_row;
 	GtkWidget *servers_box;
 	GtkWidget *cache_switch, *min_dd, *max_dd, *size_dd, *min_row, *max_row, *size_row;
@@ -897,6 +897,15 @@ static gboolean on_service_switch(GtkSwitch *sw, gboolean on, gpointer data) {
 	return TRUE;
 }
 
+/* The DNS of the computer goes elsewhere (its network setup changed, or
+ * something else rewrote resolv.conf): the helper sends it through again. */
+static void on_rewire(GtkButton *button, gpointer data) {
+	struct dns_page *p = data;
+	p->busy = true;
+	gtk_widget_set_visible(p->rewire_row, false);
+	run_helper(p, "send the DNS through the service", NULL, service_done, "enable", NULL);
+}
+
 static void on_test(GtkButton *button, gpointer data) {
 	struct dns_page *p = data;
 	run_helper(p, "time the servers", NULL, NULL, "test", NULL);
@@ -1198,6 +1207,7 @@ static void refresh_status(struct dns_page *p) {
 	g_hash_table_remove_all(p->in_use);
 	g_hash_table_remove_all(p->list_info);
 	unsigned long queries = 0, cached = 0, blocked = 0, prefetched = 0;
+	int wired = -1;
 	GString *asking = g_string_new(NULL);
 	char source[32] = "";
 	char **lines = g_strsplit(status ? status : "", "\n", -1);
@@ -1213,6 +1223,8 @@ static void refresh_status(struct dns_page *p) {
 			g_hash_table_insert(p->in_use, g_strdup(a), g_strdup("backup"));
 		} else if (sscanf(lines[i], "today %lu %lu %lu %lu", &queries, &cached, &blocked,
 				&prefetched) == 4) {
+			// read
+		} else if (sscanf(lines[i], "wired %d", &wired) == 1) {
 			// read
 		} else if (sscanf(lines[i], "source %31s", source) == 1) {
 			// read
@@ -1236,7 +1248,9 @@ static void refresh_status(struct dns_page *p) {
 		const char *from = strcmp(source, "network-own") == 0 ? " (this network's own servers)" :
 			strcmp(source, "network") == 0 ? " (the servers of the network)" :
 			strcmp(source, "fallback") == 0 ? " (the network has none)" : "";
-		sub = g_strdup_printf("On: asking %s%s", asking->len ? asking->str : "nobody yet", from);
+		sub = wired == 0 ?
+			g_strdup("On, but this computer does not ask it: its DNS goes elsewhere") :
+			g_strdup_printf("On: asking %s%s", asking->len ? asking->str : "nobody yet", from);
 	} else if (enabled) {
 		sub = g_strdup("On, but not running: see journalctl -u tilewin-dnsd");
 	} else {
@@ -1244,6 +1258,7 @@ static void refresh_status(struct dns_page *p) {
 	}
 	gtk_label_set_text(GTK_LABEL(p->service_sub), sub);
 	g_free(sub);
+	gtk_widget_set_visible(p->rewire_row, enabled && p->running && wired == 0 && !p->busy);
 	g_string_free(asking, TRUE);
 	if (!p->busy) {
 		p->updating = true;
@@ -1358,6 +1373,10 @@ GtkWidget *dns_page_new(struct settings *s) {
 	g_signal_connect(p->service_switch, "state-set", G_CALLBACK(on_service_switch), p);
 	GtkWidget *row = ui_row(service, "Use the tileWin DNS service", " ", p->service_switch);
 	p->service_sub = subtitle_of(row);
+	p->rewire_row = button_row(service, "Send the DNS of this computer through it again",
+		"The service checks every half minute that it is asked; it is not", "Connect",
+		G_CALLBACK(on_rewire), p);
+	gtk_widget_set_visible(p->rewire_row, false);
 	p->today_label = gtk_label_new(NULL);
 	gtk_label_set_xalign(GTK_LABEL(p->today_label), 0);
 	gtk_widget_add_css_class(p->today_label, "dim-label");

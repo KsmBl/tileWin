@@ -491,6 +491,13 @@ python = find_program('python3', required: false)
 if python.found()
 	# fake DNS servers, block lists and NetworkManager files of its own
 	test(
+		'dns-apply',
+		find_program('dns_apply.sh'),
+		args: [tilewin_dns_apply],
+		suite: 'unit',
+	)
+
+	test(
 		'dns-service',
 		python,
 		args: [files('dns_service.py'), tilewin_dnsd],

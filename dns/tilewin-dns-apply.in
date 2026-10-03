@@ -4,30 +4,152 @@
 #
 #   tilewin-dns-apply config        the new /etc/tileWin/dns.conf on stdin
 #   tilewin-dns-apply enable        start the service and send all DNS through it
-#   tilewin-dns-apply disable       stop it; DNS goes back to NetworkManager
+#   tilewin-dns-apply disable       stop it; DNS goes back to how it was
 #   tilewin-dns-apply test          time the servers now
 #   tilewin-dns-apply update-lists  download the block lists now
 #   tilewin-dns-apply import NAME   a block list file on stdin, kept as NAME
+#
+# How the DNS of a computer is sent to the service depends on what runs it:
+#
+#  - systemd-resolved: resolved gets the service as its DNS server for all
+#    names (DNS= and Domains=~. in resolved.conf.d). The servers of the
+#    networks would still be asked beside it, so NetworkManager hands resolved
+#    none (dns=none: it drops a loopback server like 127.0.0.153 from its own
+#    DNS for all networks) and systemd-networkd makes them no default route.
+#  - a plain /etc/resolv.conf: it is put aside and replaced by one that names
+#    the service; NetworkManager no longer writes it (dns=none). Turning the
+#    service off puts the old one back.
+#
+# The servers of the networks are still known to the service: NetworkManager
+# keeps them in /run/NetworkManager/devices, resolved in
+# /run/systemd/resolve/resolv.conf, and the resolv.conf put aside is kept in
+# /var/lib/tilewin-dns/network-resolv.conf.
+#
+# For the tests, TILEWIN_DNS_ROOT puts every file below a directory of its own
+# (pkexec passes no such variable on).
 set -euo pipefail
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+export PATH=${TILEWIN_DNS_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin}
 
-conf=/etc/tileWin/dns.conf
-nm_conf=/etc/NetworkManager/conf.d/zz-tilewin-dns.conf
-resolved_conf=/etc/systemd/resolved.conf.d/tilewin-dns.conf
-imported=/var/lib/tilewin-dns/imported
+root=${TILEWIN_DNS_ROOT:-}
+conf=$root/etc/tileWin/dns.conf
+nm_conf=$root/etc/NetworkManager/conf.d/zz-tilewin-dns.conf
+resolved_conf=$root/etc/systemd/resolved.conf.d/tilewin-dns.conf
+networkd_dirs="$root/etc/systemd/network $root/run/systemd/network $root/usr/lib/systemd/network"
+networkd_dropin=zz-tilewin-dns.conf
+resolv_conf=$root/etc/resolv.conf
+state=$root/var/lib/tilewin-dns
+backup=$state/resolv.conf.before
+network_servers=$state/network-resolv.conf
+wired=$state/wired
+imported=$state/imported
 service=tilewin-dnsd.service
 address=127.0.0.153
+header='# written by the DNS page of the tileWin settings'
 
 die() { echo "$*" >&2; exit 1; }
 
 running() { systemctl is-active --quiet "$service"; }
 
-# NetworkManager and resolved pick the change up without dropping the connection
-reload_network() {
-	systemctl try-reload-or-restart systemd-resolved.service || true
-	if command -v nmcli >/dev/null; then
+active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+
+# The computer asks resolved: resolv.conf is its stub, or glibc asks it
+# directly (nss-resolve).
+uses_resolved() {
+	active systemd-resolved.service || return 1
+	case "$(readlink -f "$resolv_conf" 2>/dev/null)" in
+	*/run/systemd/resolve/*|*/usr/lib/systemd/resolv.conf|*/lib/systemd/resolv.conf)
+		return 0 ;;
+	esac
+	grep -qE '^nameserver[[:space:]]+127\.0\.0\.5[34]' "$resolv_conf" 2>/dev/null && return 0
+	grep -qE '^hosts:.*[[:space:]]resolve' "$root/etc/nsswitch.conf" 2>/dev/null
+}
+
+# The networks' servers as they are now, for the service to fall back on.
+keep_network_servers() {
+	local from=$resolv_conf
+	[ -f "$root/run/systemd/resolve/resolv.conf" ] && uses_resolved &&
+		from=$root/run/systemd/resolve/resolv.conf
+	grep -E '^nameserver' "$from" 2>/dev/null |
+		grep -vE "nameserver[[:space:]]+($address|127\.0\.0\.5[34])\$" > "$network_servers.new" || true
+	mv "$network_servers.new" "$network_servers"
+	chmod 0644 "$network_servers"
+}
+
+networkd_files() {
+	local dir file
+	for dir in $networkd_dirs; do
+		for file in "$dir"/*.network; do
+			[ -f "$file" ] && basename "$file"
+		done
+	done | sort -u
+}
+
+reload_nm() {
+	if active NetworkManager.service && command -v nmcli >/dev/null; then
 		nmcli general reload conf dns-full >/dev/null 2>&1 ||
 			systemctl try-reload-or-restart NetworkManager.service || true
+	fi
+}
+
+reload_networkd() {
+	if active systemd-networkd.service && command -v networkctl >/dev/null; then
+		networkctl reload >/dev/null 2>&1 || true
+	fi
+}
+
+# Whatever an earlier enable did, undone: also what older versions wrote.
+unwire() {
+	rm -f "$nm_conf" "$resolved_conf"
+	local name
+	for name in $(networkd_files); do
+		rm -f "$root/etc/systemd/network/$name.d/$networkd_dropin"
+		rmdir "$root/etc/systemd/network/$name.d" 2>/dev/null || true
+	done
+	if [ -e "$backup" ] || [ -L "$backup" ]; then
+		rm -f "$resolv_conf"
+		mv "$backup" "$resolv_conf"
+	fi
+	rm -f "$wired"
+}
+
+wire() {
+	mkdir -p "$state"
+	keep_network_servers
+	if uses_resolved; then
+		mkdir -p "$(dirname "$resolved_conf")"
+		# all names to the service; its cache is the one that counts
+		printf '%s\n[Resolve]\nDNS=%s\nDomains=~.\nCache=no\n' "$header" "$address" \
+			> "$resolved_conf"
+		if active NetworkManager.service; then
+			mkdir -p "$(dirname "$nm_conf")"
+			printf '%s\n[main]\ndns=none\n' "$header" > "$nm_conf"
+		fi
+		if active systemd-networkd.service; then
+			local name
+			for name in $(networkd_files); do
+				mkdir -p "$root/etc/systemd/network/$name.d"
+				printf '%s\n[Network]\nDNSDefaultRoute=no\n' "$header" \
+					> "$root/etc/systemd/network/$name.d/$networkd_dropin"
+			done
+		fi
+		reload_nm
+		reload_networkd
+		# last: it forgets the servers the others gave it before
+		systemctl try-restart systemd-resolved.service || true
+		echo resolved > "$wired"
+	else
+		if active NetworkManager.service; then
+			mkdir -p "$(dirname "$nm_conf")"
+			printf '%s\n[main]\ndns=none\nrc-manager=unmanaged\n' "$header" > "$nm_conf"
+			reload_nm
+		fi
+		if [ -e "$resolv_conf" ] || [ -L "$resolv_conf" ]; then
+			mv "$resolv_conf" "$backup"
+		fi
+		printf '%s\nnameserver %s\noptions edns0 trust-ad\n' "$header" "$address" \
+			> "$resolv_conf"
+		chmod 0644 "$resolv_conf"
+		echo resolv.conf > "$wired"
 	fi
 }
 
@@ -52,18 +174,17 @@ enable)
 		fi
 		sleep 0.2
 	done
-	mkdir -p "$(dirname "$nm_conf")" "$(dirname "$resolved_conf")"
-	# zz-: read after the files of the user, so it wins over their servers
-	printf '# written by the DNS page of the tileWin settings\n[global-dns-domain-*]\nservers=%s\n' \
-		"$address" > "$nm_conf"
-	# the cache of the service is the one that counts, with its own times
-	printf '# written by the DNS page of the tileWin settings\n[Resolve]\nCache=no\n' \
-		> "$resolved_conf"
-	reload_network
+	# again from the start: also a computer wired by an older version, or one
+	# whose network setup changed since
+	unwire
+	wire
+	systemctl kill -s SIGHUP "$service" 2>/dev/null || true # the network's servers again
 	;;
 disable)
-	rm -f "$nm_conf" "$resolved_conf"
-	reload_network
+	unwire
+	reload_nm
+	reload_networkd
+	systemctl try-restart systemd-resolved.service || true
 	systemctl disable --now "$service" || true
 	;;
 test)

@@ -169,7 +169,8 @@ class FakeServer:
 
 
 class Daemon:
-    def __init__(self, config, stats=None, nm_devices=None, keyfiles=None):
+    def __init__(self, config, stats=None, nm_devices=None, keyfiles=None, resolved=None,
+                 kept=None, probe_via=None):
         self.work = tempfile.mkdtemp(prefix="tilewin-dns-")
         self.port = free_port()
         self.conf = os.path.join(self.work, "dns.conf")
@@ -189,10 +190,22 @@ class Daemon:
                 f.write(text)
         for name, text in (keyfiles or {}).items():
             self.keyfile(name, text)
+        self.resolved = os.path.join(self.work, "resolved-resolv.conf")
+        me = "127.0.0.1:%d" % self.port
+        if resolved is not None:
+            with open(self.resolved, "w") as f:
+                f.write(resolved.replace("{self}", me))
+        if kept is not None:
+            with open(os.path.join(self.state, "network-resolv.conf"), "w") as f:
+                f.write(kept)
+        # the check that DNS comes here asks the given server, or is left out:
+        # the system resolver of the computer running the tests is not asked
+        probe = ["-p", me if probe_via == "self" else probe_via] if probe_via else ["-q"]
         self.log = open(os.path.join(self.work, "log"), "w")
         self.proc = subprocess.Popen(
             [DAEMON, "-c", self.conf, "-s", self.state, "-r", self.run,
-             "-l", "127.0.0.1:%d" % self.port, "-n", self.nm, "-k", self.keyfiles],
+             "-l", "127.0.0.1:%d" % self.port, "-n", self.nm, "-k", self.keyfiles,
+             "-R", self.resolved] + probe,
             stdout=self.log, stderr=subprocess.STDOUT)
         for _ in range(50):
             if os.path.exists(os.path.join(self.run, "status")):
@@ -514,6 +527,55 @@ def single_networks():
         d.cleanup()
 
 
+def networks_without_networkmanager():
+    networkd = FakeServer(address=b"\x0a\x00\x00\x0b")
+    before = FakeServer(address=b"\x0a\x00\x00\x0c")
+    # resolved, with the service as its server for all names and the one of
+    # systemd-networkd's link: the service is not asked by itself
+    d = Daemon("cache no\nprefetch no\n",
+               resolved="nameserver {self}\nnameserver %s\n" % networkd.text)
+    try:
+        r = d.ask("w1.test")
+        check(r and r[1] and r[1][0][2] == b"\x0a\x00\x00\x0b",
+              "without NetworkManager the servers resolved has from networkd are asked")
+    finally:
+        d.stop()
+        d.cleanup()
+    # no resolved: the resolv.conf the service replaced, kept by its helper
+    d = Daemon("cache no\nprefetch no\n", kept="nameserver %s\n" % before.text)
+    try:
+        r = d.ask("w2.test")
+        check(r and r[1] and r[1][0][2] == b"\x0a\x00\x00\x0c",
+              "without resolved the servers of the resolv.conf it replaced are asked")
+    finally:
+        d.stop()
+        d.cleanup()
+
+
+def wired_check():
+    up = FakeServer()
+    # the "system" asks the service itself: DNS comes here
+    d = Daemon("servers %s\nprefetch no\n" % up.text, probe_via="self")
+    try:
+        ok = wait_until(lambda: "wired 1" in d.status(), 6)
+        check(ok, "the service sees its own look-up come to it (wired 1)")
+        check(not any(n.endswith("tilewin-dns.example") for n in up.asked),
+              "its look-up is answered by the service, never sent on")
+        check("today 0 " in d.status(), "and is not counted as a query of an app")
+    finally:
+        d.stop()
+        d.cleanup()
+    # the "system" asks another server: DNS goes elsewhere
+    other = FakeServer()
+    d = Daemon("servers %s\nprefetch no\n" % up.text, probe_via=other.text)
+    try:
+        ok = wait_until(lambda: "wired 0" in d.status(), 15)
+        check(ok, "a look-up that never comes says DNS goes elsewhere (wired 0)")
+    finally:
+        d.stop()
+        d.cleanup()
+
+
 def prefetching():
     up = FakeServer(ttl=3)
     day = today()
@@ -562,6 +624,8 @@ checks = [
     ("block lists", block_lists),
     ("downloaded lists", downloaded_lists),
     ("single networks", single_networks),
+    ("networks without NetworkManager", networks_without_networkmanager),
+    ("wired check", wired_check),
     ("prefetching", prefetching),
 ]
 only = os.environ.get("DNS_TEST_ONLY")

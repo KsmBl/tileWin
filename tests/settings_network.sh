@@ -4,8 +4,9 @@
 # showing the Wi-Fi password asks NetworkManager for the secret, a fixed
 # address is saved with its subnet and gateway, choosing how the servers for
 # all networks are asked writes the config of the DNS service, a name blocked
-# lately can be allowed from its log, and a server of a single network,
-# picked on the DNS page, goes to NetworkManager.
+# lately can be allowed from its log, a server of a single network, picked on
+# the DNS page, goes to NetworkManager, and when the service says the DNS of
+# the computer does not come to it, the page offers to send it through again.
 #
 # usage: settings_network.sh <build dir>
 set -u
@@ -175,6 +176,22 @@ sleep 1
 pgrep -f "^$settings" >/dev/null || fail "the settings app crashed while a server was picked"
 grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
 	fail "a server picked from the list was not added to the servers for all networks"
+
+# The service runs, but the DNS of the computer does not come to it: the page
+# says so and offers to send it through again
+pkill -f "^[^ ]*/tilewin -c $work/tw-dns.conf" 2>/dev/null
+sleep 2
+printf '%s\n' "pid $$" "source all-networks" "use 1.1.1.1" "today 0 0 0 0" "wired 0" \
+	> "$work/run/status"
+printf '[main]\ndns=none\n' > "$work/nmconf/zz-tilewin-dns.conf" # it is on
+: > "$work/dns.log"
+height=900
+start dns 900
+[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/rewire.png"
+click 1186 256 # Connect, beside "Send the DNS of this computer through it again"
+sleep 1
+grep -q '^enable' "$work/dns.log" ||
+	fail "\"Connect\" did not send the DNS of the computer through the service again"
 
 if [ $failed -ne 0 ]; then
 	echo "--- nmcli was asked:"
