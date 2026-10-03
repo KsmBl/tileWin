@@ -1,12 +1,12 @@
 #!/bin/sh
-# "tilewinmsg restart" should keep the windows open. Wayland gives a client no
-# way to survive the compositor it talks to, so the only restart that can keep
-# them is one where the process stays: tileWin therefore only ends the session
-# when the compositor binary itself has been replaced.
+# "tilewinmsg restart" keeps the windows open. Wayland gives a client no way
+# to survive the compositor it talks to, so the restart happens in the running
+# process, also after an update: the new compositor then starts with the next
+# login, or now with "restart session".
 #
 # The test opens a window, restarts, and checks that the same window with the
-# same process is still there; then it replaces the binary on disk and checks
-# that a restart does end the session, which is what picks up an update.
+# same process is still there; it replaces the binary on disk and checks the
+# same again; then "restart session" ends the session.
 #
 # usage: restart_keeps_windows.sh <build dir> <source dir>
 set -u
@@ -48,6 +48,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# the notification that an update waits for the next login, written down
+mkdir -p "$work/bin"
+printf '#!/bin/sh\necho "$*" >> "%s/notified"\n' "$work" > "$work/bin/notify-send"
+chmod +x "$work/bin/notify-send"
+
 # a copy of its own, so that replacing it cannot disturb the build directory
 cp "$build/sway/tilewin" "$work/tilewin"
 sock=$work/ipc.sock
@@ -60,6 +65,7 @@ EOF
 env -u WAYLAND_DISPLAY -u DISPLAY \
 	WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman \
 	SWAYSOCK="$sock" \
+	PATH="$work/bin:$PATH" \
 	"$(dirname "$0")/session.sh" "$work/tilewin" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 
 attempt=0
@@ -113,6 +119,7 @@ if [ -z "$before_window" ]; then
 fi
 
 # ---------- a restart with nothing replaced keeps the window ----------
+# (and says nothing about an update)
 ipc restart >/dev/null 2>&1
 sleep 4
 after_window=$(window_pid)
@@ -127,27 +134,47 @@ else
 	echo "restart kept window $after_window open, compositor $after_compositor stayed"
 fi
 
+[ -s "$work/notified" ] && fail "a restart with nothing replaced spoke of an update"
+
 # the taskbar is still started afresh, so an updated one is picked up
 if [ -n "$before_panel" ] && [ "$(panel_pid)" = "$before_panel" ]; then
 	fail "the taskbar was not started again, so an updated one would not be picked up"
 fi
 
-# ---------- a restart after the binary changed does end the session ----------
-# tilewin-session is what starts it again; here it only has to stop with the
-# code that asks for that.
+# ---------- after an update the windows stay as well ----------
+# the binary replaced on disk: a restart still keeps the windows, and the new
+# compositor waits for the next login
 touch "$work/tilewin"
 sleep 1
+before_window=$(window_pid)
+before_compositor=$(compositor_pid)
 ipc restart >/dev/null 2>&1
 sleep 4
-if [ -n "$(compositor_pid)" ]; then
-	fail "restart kept running although the binary on disk had changed"
+if [ "$(compositor_pid)" != "$before_compositor" ]; then
+	fail "restart after an update ended the session and closed the windows"
+elif [ "$(window_pid)" != "$before_window" ]; then
+	fail "the window is gone after a restart that followed an update"
 else
-	echo "restart after a new binary ended the session, as it must"
+	echo "restart after an update kept window $before_window open"
+fi
+sleep 3 # the notification waits for the taskbar
+grep -q "starts with your next login" "$work/notified" 2>/dev/null ||
+	fail "no notification says that the update starts with the next login"
+
+# ---------- "restart session" starts the new one now ----------
+# tilewin-session is what starts it again; here it only has to stop with the
+# code that asks for that.
+ipc restart session >/dev/null 2>&1
+sleep 4
+if [ -n "$(compositor_pid)" ]; then
+	fail "restart session kept running"
+else
+	echo "restart session ended the session, to start the new tileWin"
 fi
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"
 	exit 1
 fi
-echo "restart keeps the windows whenever it can"
+echo "restart keeps the windows"
 exit 0

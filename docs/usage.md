@@ -8,7 +8,7 @@ The parts of the desktop in more detail: keys, flyouts, the settings app, the th
 git pull && ./install.sh --no-deps && tilewinmsg restart
 ```
 
-`restart` picks the cheapest way to apply what was installed. When the compositor binary is the same one that is running, it keeps the session: the config, the theme and the taskbar are all started afresh while the windows stay open and untouched. When the compositor itself has been replaced it has to be executed, and that ends the session — a Wayland app has no way to survive the compositor it is talking to, because the display socket goes with it and no toolkit knows how to reconnect. For that case `tilewinmsg restart relaunch-apps` starts your apps again and puts them back where they were, and `tilewinmsg restart session` forces the same thing when nothing was replaced. If only the taskbar changed, `tilewinmsg restart panel` is enough.
+`restart` keeps your windows open, always: the config, the theme, the taskbar and the other programs of tileWin start afresh while the windows stay where they are. A Wayland app has no way to survive the compositor it is talking to (the display socket goes with it and no toolkit knows how to reconnect), so when an update replaced the compositor itself, the new one starts with your next login, and a notification says so. To start it at once: `tilewinmsg restart relaunch-apps` starts your apps again and puts them back where they were, `tilewinmsg restart session` only ends the session. If only the taskbar changed, `tilewinmsg restart panel` is enough.
 
 ## Volume, brightness and media keys
 

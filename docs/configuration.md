@@ -42,7 +42,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `alttab next\|prev\|commit\|cancel` | Window switcher |
 | `taskview [toggle\|open\|close]` | Task view (Win+Tab) |
 | `desktop new\|close\|rename [name]\|move left\|move right` | Create a desktop, close the current one (its windows move to the desktop before it), give it a name (`rename` with nothing after it takes the name away again), or move it one place in the desktop order |
-| `restart [panel\|session\|relaunch-apps]` | Restart the taskbar, or tileWin. Plain `restart` keeps the session and the windows open unless the compositor binary has been replaced; `session` ends the session either way and `relaunch-apps` starts the apps again afterwards |
+| `restart [panel\|session\|relaunch-apps]` | Restart the taskbar, or tileWin. Plain `restart` keeps the session and the windows open, also after an update (a new compositor binary then starts with the next login); `session` ends the session to start it now and `relaunch-apps` also starts the apps again afterwards |
 | `panel <action>` | Taskbar actions: `startmenu [toggle\|search\|close]`, `run`, `calendar`, `network`, `volume`, `power`, `shutdown [logoff]`, `memory`, `desktop refresh\|new folder\|new text\|new shortcut\|folder\|terminal`, `activate <n>`, `window_menu`, `menu <name>`, `reload` |
 | `launcher` | Open the application launcher |
 | `launcher_command builtin\|<command>` | Launcher to use: the built-in one, or e.g. `rofi -show drun` |

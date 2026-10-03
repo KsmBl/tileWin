@@ -828,8 +828,29 @@ static void restart_in_place(void) {
 	wl_event_loop_add_idle(server.wl_event_loop, do_restart_in_place, NULL);
 }
 
+static void spawn_shell(const char *script);
+
+/*
+ * "restart" keeps the windows open, always: Wayland gives an app no way to
+ * outlive the compositor it talks to, so it is done in the running process
+ * (config, theme, taskbar and the other programs of tileWin anew). A tileWin
+ * replaced on disk by an update then starts with the next login; "restart
+ * session" or "restart relaunch-apps" start it now, at the price of the apps.
+ */
 bool tw_restart(bool relaunch_apps, bool force_exec, char **error) {
-	if (!relaunch_apps && !force_exec && !binary_changed()) {
+	if (!relaunch_apps && !force_exec) {
+		if (binary_changed()) {
+			sway_log(SWAY_INFO, "tileWin was replaced on disk: the windows stay open, and "
+				"the new tileWin starts with the next login (\"restart session\" now)");
+			if (!getenv("TILEWIN_NO_NOTIFY")) {
+				// after the taskbar, which shows it, is up again
+				spawn_shell("sleep 3; command -v notify-send >/dev/null || exit 0; "
+					"notify-send -a tileWin 'tileWin restarted, your windows stayed open' "
+					"'The updated tileWin itself starts with your next login. To start it now: "
+					"tilewinmsg restart relaunch-apps (opens your apps again) or restart "
+					"session (closes them).'");
+			}
+		}
 		restart_in_place();
 		return true;
 	}

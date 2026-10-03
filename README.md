@@ -96,6 +96,8 @@ To update:
 git pull && ./install.sh --no-deps && tilewinmsg restart
 ```
 
+The restart keeps your windows open; an updated compositor itself starts with your next login (or now, with `tilewinmsg restart relaunch-apps`).
+
 ## Shortcuts of window mode
 
 | Keys | Action |
@@ -162,7 +164,7 @@ Window mode and tile mode each remember their own theme.
 - There is no background blur, so the Windows 7 glass is translucent only.
 - Windows 11 rounds only the frame and title bar; window contents keep square corners.
 - Apps that draw their own title bars (GTK4/libadwaita) keep them in window mode.
-- A compositor restart closes running Wayland apps (`restart relaunch-apps` starts them again).
+- Starting a new compositor binary closes running Wayland apps, so `restart` leaves that to the next login (`restart relaunch-apps` does it now and starts the apps again).
 
 ## License
 
