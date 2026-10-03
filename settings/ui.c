@@ -224,6 +224,32 @@ GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 	return row;
 }
 
+bool ui_drop_down_set_strings(GtkDropDown *dd, GtkStringList *strings) {
+	GListModel *model = gtk_drop_down_get_model(dd);
+	if (!GTK_IS_STRING_LIST(model)) {
+		gtk_drop_down_set_model(dd, G_LIST_MODEL(strings));
+		return true;
+	}
+	guint old_n = g_list_model_get_n_items(model);
+	guint new_n = g_list_model_get_n_items(G_LIST_MODEL(strings));
+	bool same = old_n == new_n;
+	for (guint i = 0; same && i < new_n; i++) {
+		same = g_strcmp0(gtk_string_list_get_string(GTK_STRING_LIST(model), i),
+			gtk_string_list_get_string(strings, i)) == 0;
+	}
+	if (same) {
+		return false;
+	}
+	const char **items = g_new0(const char *, new_n + 1);
+	for (guint i = 0; i < new_n; i++) {
+		items[i] = gtk_string_list_get_string(strings, i);
+	}
+	// the same model, its rows replaced: a popup that is open keeps working
+	gtk_string_list_splice(GTK_STRING_LIST(model), 0, old_n, items);
+	g_free(items);
+	return true;
+}
+
 GtkWidget *ui_row_box(GtkWidget *row) {
 	return gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
 }

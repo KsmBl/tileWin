@@ -401,7 +401,7 @@ static void conns_loaded(struct network_page *p, bool ok, char *out, char *err, 
 		}
 	}
 	p->updating = true;
-	gtk_drop_down_set_model(GTK_DROP_DOWN(p->conn_dd), G_LIST_MODEL(names));
+	ui_drop_down_set_strings(GTK_DROP_DOWN(p->conn_dd), names);
 	g_object_unref(names);
 	p->updating = false;
 	if (p->conns->len == 0) {
@@ -650,8 +650,9 @@ static void dns_sync(struct network_page *p) {
 	gtk_string_list_append(items, "Other address…");
 	g_ptr_array_add(p->dns_picks, g_strdup(""));
 	p->dns_syncing = true;
-	gtk_drop_down_set_model(GTK_DROP_DOWN(p->dns_pick), G_LIST_MODEL(items));
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dns_pick), 0);
+	if (ui_drop_down_set_strings(GTK_DROP_DOWN(p->dns_pick), items)) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->dns_pick), 0);
+	}
 	p->dns_syncing = false;
 	g_object_unref(items);
 }

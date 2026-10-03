@@ -122,6 +122,12 @@ GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 		GtkWidget *control);
 GtkWidget *ui_row_box(GtkWidget *row);
 /*
+ * Gives a dropdown these strings, in its own string list where it has one:
+ * replacing the model of a dropdown whose list is open (or just closing)
+ * crashes GTK. Returns whether anything changed.
+ */
+bool ui_drop_down_set_strings(GtkDropDown *dd, GtkStringList *strings);
+/*
  * A switch or a number at the top level of taskbar.conf, added to keys; the
  * default is written as nothing at all. ui_taskbar_keys_refresh reads them in.
  */

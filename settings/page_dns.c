@@ -398,6 +398,7 @@ struct word_list {
 	void (*describe)(struct word_list *w, const char *value, char **title, char **subtitle);
 	const char *remove_tooltip;
 	GPtrArray *rows;
+	char *signature; // what the rows show, to leave them be when it is the same
 	bool syncing;
 };
 
@@ -540,6 +541,23 @@ static void on_add_typed(GtkWidget *widget, gpointer data) {
 }
 
 static void word_list_sync(struct word_list *w) {
+	// the status is read every three seconds: rows that would come out the
+	// same stay, so nothing moves under the pointer
+	GString *sig = g_string_new(NULL);
+	for (guint i = 0; i < (*w->values)->len; i++) {
+		char *title = NULL, *subtitle = NULL;
+		w->describe(w, (*w->values)->pdata[i], &title, &subtitle);
+		g_string_append_printf(sig, "%s\n%s\n%s\n", (char *)(*w->values)->pdata[i], title,
+			subtitle ? subtitle : "");
+		g_free(title);
+		g_free(subtitle);
+	}
+	if (w->signature && strcmp(w->signature, sig->str) == 0) {
+		g_string_free(sig, TRUE);
+		return;
+	}
+	g_free(w->signature);
+	w->signature = g_string_free(sig, FALSE);
 	for (guint i = 0; i < w->rows->len; i++) {
 		gtk_list_box_remove(GTK_LIST_BOX(w->list), w->rows->pdata[i]);
 	}
@@ -583,8 +601,9 @@ static void word_list_sync(struct word_list *w) {
 		gtk_string_list_append(items, "Other address…");
 		g_ptr_array_add(w->picks, g_strdup(""));
 		w->syncing = true;
-		gtk_drop_down_set_model(GTK_DROP_DOWN(w->pick), G_LIST_MODEL(items));
-		gtk_drop_down_set_selected(GTK_DROP_DOWN(w->pick), 0);
+		if (ui_drop_down_set_strings(GTK_DROP_DOWN(w->pick), items)) {
+			gtk_drop_down_set_selected(GTK_DROP_DOWN(w->pick), 0);
+		}
 		w->syncing = false;
 		g_object_unref(items);
 	}

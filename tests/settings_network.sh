@@ -160,8 +160,12 @@ grep -q 'device reapply wlan0' "$work/nm.log" ||
 # a server for all networks from the list of known ones (its list is made
 # anew by the pick: the app used to crash on that)
 click 1160 571 # Add a server...
+# the page reads the status of the service every three seconds: the list has
+# to survive that while it is open (it was made anew under the open popup)
+sleep 4
 click 1000 654 # ... 1.0.0.1 (Cloudflare), the first not in the list yet
 sleep 1
+pgrep -f "^$settings" >/dev/null || fail "the settings app crashed while a server was picked"
 grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
 	fail "a server picked from the list was not added to the servers for all networks"
 
