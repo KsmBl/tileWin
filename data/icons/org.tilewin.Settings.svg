@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- tileWin settings: four window tiles with a gear on them -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4aa3f0"/>
+      <stop offset="1" stop-color="#1f6fc9"/>
+    </linearGradient>
+    <linearGradient id="gear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f6f8"/>
+      <stop offset="1" stop-color="#c3ccd6"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="26" height="26" rx="4" fill="url(#tile)"/>
+  <rect x="34" y="4" width="26" height="26" rx="4" fill="url(#tile)"/>
+  <rect x="4" y="34" width="26" height="26" rx="4" fill="url(#tile)"/>
+  <rect x="34" y="34" width="26" height="26" rx="4" fill="url(#tile)"/>
+  <g transform="translate(32 32)">
+    <path fill="url(#gear)" stroke="#3a4656" stroke-width="1.5" stroke-linejoin="round"
+      d="M-3.5 -19 h7 l1.2 5.2 a14 14 0 0 1 4.1 1.7 l4.5 -2.9 l4.9 4.9 l-2.9 4.5
+         a14 14 0 0 1 1.7 4.1 l5.2 1.2 v7 l-5.2 1.2 a14 14 0 0 1 -1.7 4.1 l2.9 4.5
+         l-4.9 4.9 l-4.5 -2.9 a14 14 0 0 1 -4.1 1.7 l-1.2 5.2 h-7 l-1.2 -5.2
+         a14 14 0 0 1 -4.1 -1.7 l-4.5 2.9 l-4.9 -4.9 l2.9 -4.5 a14 14 0 0 1 -1.7 -4.1
+         l-5.2 -1.2 v-7 l5.2 -1.2 a14 14 0 0 1 1.7 -4.1 l-2.9 -4.5 l4.9 -4.9 l4.5 2.9
+         a14 14 0 0 1 4.1 -1.7 z"/>
+    <circle r="6" fill="#1f6fc9" stroke="#3a4656" stroke-width="1.5"/>
+  </g>
+</svg>

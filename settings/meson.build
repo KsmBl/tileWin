@@ -48,3 +48,10 @@ install_data(
 	'../data/tilewin-settings.desktop',
 	install_dir: join_paths(datadir, 'applications'),
 )
+
+# its own icon, for icon themes that have no settings icon; the tileWin themes
+# show theirs instead (their aliases name org.tilewin.Settings)
+install_data(
+	'../data/icons/org.tilewin.Settings.svg',
+	install_dir: join_paths(datadir, 'icons', 'hicolor', 'scalable', 'apps'),
+)

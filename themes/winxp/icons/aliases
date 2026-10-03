@@ -7,7 +7,7 @@ accessories-text-editor org.xfce.mousepad mousepad gedit org.gnome.gedit org.gno
 accessories-calculator galculator org.gnome.Calculator gnome-calculator kcalc org.kde.kcalc qalculate-gtk io.github.Qalculate xpcalc calculator @Calculator
 image-viewer org.xfce.ristretto ristretto eog org.gnome.eog org.gnome.Loupe gwenview org.kde.gwenview feh imv nomacs sxiv nsxiv viewnior
 utilities-system-monitor htop btop gnome-system-monitor org.gnome.SystemMonitor ksysguard org.kde.plasma-systemmonitor xfce4-taskmanager org.xfce.taskmanager lxtask system-monitor
-preferences-system tilewin-settings xfce4-settings-manager org.xfce.settings.manager gnome-control-center org.gnome.Settings systemsettings preferences-system-windows
+preferences-system tilewin-settings org.tilewin.Settings xfce4-settings-manager org.xfce.settings.manager gnome-control-center org.gnome.Settings systemsettings preferences-system-windows
 internet-mail thunderbird org.mozilla.Thunderbird evolution org.gnome.Evolution geary org.gnome.Geary kmail org.kde.kmail2 claws-mail mail-send-receive @Email
 multimedia-player vlc mpv io.mpv.Mpv celluloid io.github.celluloid_player.Celluloid totem org.gnome.Totem parole org.xfce.parole smplayer haruna org.kde.haruna audacious rhythmbox org.gnome.Rhythmbox3 strawberry elisa org.kde.elisa multimedia-video-player @Player
 user-home folder-home

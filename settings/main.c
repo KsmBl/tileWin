@@ -559,7 +559,7 @@ static void build_window(struct settings *s) {
 	s->window = GTK_WINDOW(window);
 	gtk_window_set_title(s->window, "tileWin Settings");
 	gtk_window_set_default_size(s->window, 1000, 740);
-	gtk_window_set_icon_name(s->window, "preferences-desktop");
+	gtk_window_set_icon_name(s->window, "org.tilewin.Settings");
 
 	GtkWidget *stack = gtk_stack_new();
 	s->stack = GTK_STACK(stack);

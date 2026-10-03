@@ -471,6 +471,16 @@ test(
 )
 
 test(
+	'settings-icon',
+	find_program('settings_icon.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'settings-backup',
 	find_program('settings_backup.sh'),
 	args: [meson.project_build_root()],
