@@ -296,7 +296,7 @@ All configuration lives in `~/.config/tileWin/` as plain text; the settings app 
 | Super+Tab | Task view: windows and desktops; drag windows onto another or a new desktop |
 | Super+Ctrl+D, Super+Ctrl+F4 | New desktop, close the current desktop |
 | Super+Alt+← / → | Move the current desktop left / right in the order |
-| Alt+F4 | Close window |
+| Alt+F4 | Close window; on the desktop (or with no window open) the shut down dialog |
 | Alt+Space | Window menu |
 | Ctrl+Shift+Esc | Task manager |
 | Super+1..9 | Activate the n-th taskbar entry |

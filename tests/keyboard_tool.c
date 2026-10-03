@@ -7,9 +7,10 @@
  * where a step is one of
  *   text <word>            types the word (lowercase letters and digits)
  *   key <mods> <name>      presses one key with those modifiers held, where
- *                          mods is ctrl, shift, ctrl+shift or none, and name
- *                          is a letter, a digit, "return", "tab", "escape" or
- *                          an arrow: "up", "down", "left", "right"
+ *                          mods is ctrl, shift, alt, any of them joined with
+ *                          "+", or none, and name is a letter, a digit,
+ *                          "return", "tab", "escape", "f4" or an arrow: "up",
+ *                          "down", "left", "right"
  *   hold alt <ms>          holds Alt down that long (for a pointer tool that
  *                          scrolls meanwhile), then lets go
  *
@@ -78,6 +79,7 @@ static const struct {
 	{ "9", KEY_9 }, { "return", KEY_ENTER }, { "tab", KEY_TAB }, { "escape", KEY_ESC },
 	{ "up", KEY_UP }, { "down", KEY_DOWN }, { "left", KEY_LEFT }, { "right", KEY_RIGHT },
 	{ "minus", KEY_MINUS }, { "slash", KEY_SLASH }, { "space", KEY_SPACE },
+	{ "f4", KEY_F4 },
 };
 
 static bool code_of(const char *name, uint32_t *code) {
@@ -190,6 +192,9 @@ int main(int argc, char **argv) {
 			}
 			if (strstr(argv[i + 1], "shift")) {
 				mods |= MOD_SHIFT;
+			}
+			if (strstr(argv[i + 1], "alt")) {
+				mods |= MOD_ALT;
 			}
 			uint32_t code;
 			if (!code_of(argv[i + 2], &code)) {

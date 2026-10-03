@@ -504,6 +504,17 @@ test(
 )
 
 test(
+	'desktop-alt-f4',
+	find_program('desktop_alt_f4.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool, keyboard_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 150,
+)
+
+test(
 	'settings-backup',
 	find_program('settings_backup.sh'),
 	args: [meson.project_build_root()],
