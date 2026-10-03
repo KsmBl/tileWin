@@ -83,7 +83,14 @@ static int desks_on(struct render_ctx *ctx) {
 	return n;
 }
 
+static int names_measure(struct widget *w, struct render_ctx *ctx);
+static void names_render(struct widget *w, struct render_ctx *ctx, struct pbox box);
+static bool names_only(struct widget *w);
+
 static int workspaces_measure(struct widget *w, struct render_ctx *ctx) {
+	if (names_only(w)) {
+		return names_measure(w, ctx);
+	}
 	int n = desks_on(ctx);
 	if (n == 0) {
 		return 0;
@@ -100,6 +107,10 @@ static const char *desk_label(struct pworkspace *ws) {
 }
 
 static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct pbox box) {
+	if (names_only(w)) {
+		names_render(w, ctx, box);
+		return;
+	}
 	cairo_t *cr = ctx->cairo;
 	struct panel *panel = ctx->panel;
 	const struct tw_theme *t = panel->theme;
@@ -177,6 +188,103 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 		psurface_add_hotspot(ctx->surface, d.x, d.y, d.width, d.height, w, 0, i, ws->name);
 		x += dw + GAP;
 	}
+}
+
+/* ---------- the names only: a button for each desktop ---------- */
+
+/*
+ * "show names": the buttons of sway's bar, for tile mode. The label is the
+ * desktop's name or what the theme gives it ("workspaces { icon { 1 <icon>;
+ * urgent ! } }"), the look the theme's: a pill ("style pill"), the raised
+ * buttons of Windows 95, or the buttons of the taskbar.
+ */
+static const char *name_label(struct render_ctx *ctx, struct pworkspace *ws) {
+	const struct tw_theme *t = ctx->panel->theme;
+	if (ws->urgent) {
+		const char *urgent = tw_theme_str(t, "workspaces.icon.urgent", NULL);
+		if (urgent) {
+			return urgent;
+		}
+	}
+	char key[256];
+	snprintf(key, sizeof(key), "workspaces.icon.%s", ws->name);
+	return tw_theme_str(t, key, desk_label(ws));
+}
+
+static int name_width(struct render_ctx *ctx, struct pworkspace *ws) {
+	return render_text_width(ctx, bar_bold_font(ctx->panel), name_label(ctx, ws)) +
+		2 * tw_theme_int(ctx->panel->theme, "workspaces.padding", 8);
+}
+
+static int names_measure(struct widget *w, struct render_ctx *ctx) {
+	int total = 0;
+	list_t *wss = ctx->panel->state.workspaces;
+	for (int i = 0; wss && i < wss->length; i++) {
+		struct pworkspace *ws = wss->items[i];
+		if (ctx->output->name && strcmp(ws->output, ctx->output->name) == 0) {
+			total += name_width(ctx, ws) + 2;
+		}
+	}
+	int margin = tw_theme_int(ctx->panel->theme, "workspaces.margin", 0);
+	return total ? total + 2 + 2 * margin : 0;
+}
+
+static void names_render(struct widget *w, struct render_ctx *ctx, struct pbox box) {
+	cairo_t *cr = ctx->cairo;
+	const struct tw_theme *t = ctx->panel->theme;
+	list_t *wss = ctx->panel->state.workspaces;
+	int x = box.x + 2 + tw_theme_int(t, "workspaces.margin", 0);
+	bool pill = strcmp(tw_theme_str(t, "workspaces.style", "default"), "pill") == 0;
+	for (int i = 0; wss && i < wss->length; i++) {
+		struct pworkspace *ws = wss->items[i];
+		if (!ctx->output->name || strcmp(ws->output, ctx->output->name) != 0) {
+			continue;
+		}
+		int bw = name_width(ctx, ws);
+		struct pbox b = { x, box.y, bw, box.height };
+		bool hover = render_hover(ctx, b);
+		uint32_t fg = widget_fg(ctx->panel, "workspaces");
+		if (pill) {
+			// rounded buttons like waybar's sway/workspaces
+			int inset = tw_theme_int(t, "workspaces.inset", 6);
+			uint32_t bg = ws->urgent ? tw_theme_color(t, "workspaces.urgent_bg", 0xe8112338) :
+				ws->focused ? tw_theme_color(t, "workspaces.active_bg", 0xffffff29) :
+				hover ? tw_theme_color(t, "workspaces.hover_bg", 0xffffff14) : 0;
+			if (bg) {
+				cairo_new_path(cr);
+				pd_rounded(cr, b.x, b.y + inset, b.width, b.height - 2 * inset,
+					tw_theme_int(t, "workspaces.pill_radius", 12));
+				pd_color(cr, bg);
+				cairo_fill(cr);
+			}
+			if (ws->urgent) {
+				fg = tw_theme_color(t, "workspaces.urgent_fg", fg);
+			} else if (ws->focused) {
+				fg = tw_theme_color(t, "workspaces.active_fg", fg);
+			}
+		} else if (ctx->style == PSV_CLASSIC) {
+			struct pbox bb = { b.x, b.y + 3, b.width, b.height - 5 };
+			pd_rect(cr, bb.x, bb.y, bb.width, bb.height, ws->visible ? 0xe0e0e0ff : 0xc0c0c0ff);
+			pd_bevel(cr, bb.x, bb.y, bb.width, bb.height, ws->visible);
+		} else {
+			render_item_bg(ctx, b, ws->visible, hover, render_pressed(ctx, b));
+			if (ws->focused) {
+				pd_rect(cr, b.x, ctx->bottom ? b.y + b.height - 2 : b.y, b.width, 2,
+					tw_theme_color(t, "taskbar.indicator", 0x76b9edff));
+			}
+		}
+		if (ws->urgent && !pill) {
+			pd_rect(cr, b.x + 2, b.y + 2, b.width - 4, 2, 0xe81123ff);
+		}
+		pd_text(cr, ws->focused ? bar_bold_font(ctx->panel) : bar_font(ctx->panel),
+			name_label(ctx, ws), b.x, b.y, b.width, b.height, fg, PD_CENTER);
+		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, i, ws->name);
+		x += bw + 2;
+	}
+}
+
+static bool names_only(struct widget *w) {
+	return strcmp(widget_conf(w, "show", "screens"), "names") == 0;
 }
 
 static bool workspaces_click(struct widget *w, struct psurface *s, struct hotspot *hs,

@@ -137,7 +137,7 @@ menu taskbar {
 | `start` | `label`, `width` |
 | `taskbar` | `icons_only theme\|yes\|no`, `group`, `workspaces current\|all`, `outputs current\|all\|main` (the windows of the bar's own screen, of every screen, or of every screen on the main display's bar and the own ones elsewhere, as on Windows), `middle_click close\|new`, `max_width`, `thumbnails yes\|no` (live window previews when hovering a button, instead of the title tooltip; theme key `taskbar.thumbnails`), `peek yes\|no` (resting on a preview shows only its window; theme key `taskbar.peek`) |
 | `quicklaunch` | `item <desktop-id or command> [icon]`; on the Taskbar page, Quick launch has **Add app…** and **Add command…** (a command of your own, then its icon), and the button beside an entry changes its icon |
-| `workspaces` | `labels yes\|no` (the number or name of each desktop behind its windows), `icons yes\|no` (the app icons of the windows) |
+| `workspaces` | `show screens\|names` (`names`: only a button with the name of each desktop, as sway's bar; the theme's `workspaces` block styles them: `style pill`, `pill_radius`, `padding`, `inset`, `active_fg`, `hover_bg`, `urgent_fg`, `icon { 1 <label>; urgent <label> }`), `labels yes\|no` (the number or name of each desktop behind its windows), `icons yes\|no` (the app icons of the windows) |
 | `title` | `max_width`; click for the window: its desktop, screen and process, and Minimize, Maximize and Close |
 | `tray` | (none) |
 | `clock` | `format`, `tooltip_format` (strftime), `settings` (command of the flyout's "Change date and time" link); click opens the clock flyout: an analog and a digital clock, the calendar (the wheel and ←/→ change the month) and that link |

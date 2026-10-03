@@ -210,7 +210,11 @@ static const struct tw_widget_option opts_start[] = {
 	{ "width", "Width", "Pixels", NULL },
 	{ 0 },
 };
+static const char *const choice_workspaces_show[] = { "screens", "names", NULL };
 static const struct tw_widget_option opts_workspaces[] = {
+	{ "show", "Show", "screens: each desktop as a small screen with its windows; names: "
+		"only the name of each desktop, as the bar of sway shows them (for tile mode)",
+		choice_workspaces_show },
 	{ "labels", "Show the names", "The number or name of each desktop behind its windows",
 		choice_yes_no },
 	{ "icons", "Show the app icons", "The icon of each window on it", choice_yes_no },

@@ -3,6 +3,7 @@
 # a small screen with its windows where they are, following a window that
 # moves; resting on a desktop shows a preview of it with its windows as they
 # look, a click on the preview goes there, and so does a click on a desktop.
+# With "show names" it shows only a button with the name of each desktop.
 #
 # usage: workspaces_widget.sh <build dir> <source dir>
 set -u
@@ -150,6 +151,22 @@ sleep 1
 "$pointer" 1280 720 click 380 700 >/dev/null 2>&1
 sleep 1
 [ "$(windows_of)" = 1 ] || fail "a click on the first desktop did not go there ($(windows_of))"
+
+# "show names": only a button with the name of each desktop, as sway's bar
+# had them, much narrower; the second button is where the first desktop's
+# small screen was, and goes to the second desktop
+sed -i 's/^widget workspaces { labels no }$/widget workspaces { show names }/' \
+	"$XDG_CONFIG_HOME/tileWin/taskbar.conf"
+sleep 2.5
+[ -n "${SHOT_DIR:-}" ] && grim -g "300,680 300x40" "$SHOT_DIR/names.png"
+"$pointer" 1280 720 click 392 700 >/dev/null 2>&1
+sleep 1
+[ "$(windows_of)" = 2 ] ||
+	fail "with show names, a click on the second name did not go there ($(windows_of))"
+"$pointer" 1280 720 click 366 700 >/dev/null 2>&1
+sleep 1
+[ "$(windows_of)" = 1 ] ||
+	fail "with show names, a click on the first name did not go there ($(windows_of))"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then
