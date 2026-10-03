@@ -105,6 +105,17 @@ struct sentry {
 	uint32_t count[STATS_DAYS];
 };
 
+#define BLOCKED_LOG_MAX 500
+
+struct logged {
+	char *name;
+	uint16_t type;
+	unsigned count;
+	time_t last;
+	unsigned long seq; // the order they were blocked in, finer than seconds
+	bool by_hand;      // a name blocked by hand, not by a list
+};
+
 struct pfitem {
 	char *name;
 	uint16_t type;
@@ -178,6 +189,10 @@ static struct {
 	bool stats_dirty;
 	struct pfitem *pf;
 	int npf;
+	struct logged log[BLOCKED_LOG_MAX];
+	int nlog;
+	unsigned long log_seq;
+	bool log_dirty;
 	struct domainset blocked, allowed;
 	struct list_meta *lists;
 	int nlists;
@@ -1162,19 +1177,85 @@ static void pf_add(const char *name, uint16_t type, uint32_t count) {
 	d.pf[d.npf++] = (struct pfitem){ strdup(name), type, count, 0 };
 }
 
+/* A file of /run/tilewin-dns with names asked for in it: they say what the
+ * computer looks at, so only those who may administer it may read it. */
+static void write_private(const char *name, const char *text) {
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/%s", d.run_dir, name);
+	struct group *wheel = getgrnam("wheel");
+	write_file(path, text, geteuid() == 0 ? 0640 : 0644, geteuid() == 0 && wheel ?
+		wheel->gr_gid : (gid_t)-1);
+}
+
 static void write_prefetch_file(void) {
 	struct text t = { 0 };
 	text_add(&t, "");
 	for (int i = 0; i < d.npf; i++) {
 		text_add(&t, "%u %s %u\n", d.pf[i].count, d.pf[i].name, d.pf[i].type);
 	}
-	char path[PATH_MAX];
-	snprintf(path, sizeof(path), "%s/prefetch", d.run_dir);
-	struct group *wheel = getgrnam("wheel");
-	// the names say what the computer looks at: only for those who may administer it
-	write_file(path, t.s, geteuid() == 0 ? 0640 : 0644, geteuid() == 0 && wheel ?
-		wheel->gr_gid : (gid_t)-1);
+	write_private("prefetch", t.s);
 	free(t.s);
+}
+
+/* ---------- the names blocked lately ---------- */
+
+/*
+ * The last names blocked, newest first in the file, each once with how often
+ * and when it was last: the DNS page lists them, to allow one that a list
+ * blocks but that is needed.
+ */
+static void blocked_log(const char *name, uint16_t type) {
+	time_t now = time(NULL);
+	int oldest = 0;
+	for (int i = 0; i < d.nlog; i++) {
+		struct logged *l = &d.log[i];
+		if (l->type == type && strcmp(l->name, name) == 0) {
+			l->count++;
+			l->last = now;
+			l->seq = ++d.log_seq;
+			d.log_dirty = true;
+			return;
+		}
+		if (l->seq < d.log[oldest].seq) {
+			oldest = i;
+		}
+	}
+	struct logged *l;
+	if (d.nlog < BLOCKED_LOG_MAX) {
+		l = &d.log[d.nlog++];
+	} else {
+		l = &d.log[oldest];
+		free(l->name);
+	}
+	bool by_hand = false;
+	for (int i = 0; i < d.conf.block.n && !by_hand; i++) {
+		by_hand = dns_name_within(name, d.conf.block.v[i]);
+	}
+	*l = (struct logged){ strdup(name), type, 1, now, ++d.log_seq, by_hand };
+	d.log_dirty = true;
+}
+
+static int newest_first(const void *a, const void *b) {
+	const struct logged *x = *(const struct logged *const *)a;
+	const struct logged *y = *(const struct logged *const *)b;
+	return x->seq < y->seq ? 1 : x->seq > y->seq ? -1 : 0;
+}
+
+static void write_blocked_file(void) {
+	const struct logged *sorted[BLOCKED_LOG_MAX];
+	for (int i = 0; i < d.nlog; i++) {
+		sorted[i] = &d.log[i];
+	}
+	qsort(sorted, d.nlog, sizeof(sorted[0]), newest_first);
+	struct text t = { 0 };
+	text_add(&t, "");
+	for (int i = 0; i < d.nlog; i++) {
+		text_add(&t, "%ld %u %u %s %s\n", (long)sorted[i]->last, sorted[i]->count,
+			sorted[i]->type, sorted[i]->by_hand ? "hand" : "list", sorted[i]->name);
+	}
+	write_private("blocked", t.s);
+	free(t.s);
+	d.log_dirty = false;
 }
 
 /*
@@ -1499,6 +1580,7 @@ static void answer_query(uint8_t *msg, size_t len, enum pkind kind,
 	stats_count(&q);
 	if (is_blocked(q.name)) {
 		d.blocked_count++;
+		blocked_log(q.name, q.type);
 		size_t n = dns_build_reply(out, sizeof(out), msg, &q,
 			d.conf.block_nxdomain ? DNS_RCODE_NXDOMAIN : DNS_RCODE_NOERROR, !d.conf.block_nxdomain);
 		deliver(&tmp, out, n);
@@ -1704,6 +1786,9 @@ static void write_status(void) {
 	write_file(path, t.s, 0644, (gid_t)-1);
 	free(t.s);
 	d.status_dirty = false;
+	if (d.log_dirty) {
+		write_blocked_file();
+	}
 }
 
 /* ---------- setting up ---------- */
@@ -1804,7 +1889,7 @@ static void housekeeping(int64_t now) {
 		check_lists(false);
 	}
 	if (now >= d.next_status) {
-		d.next_status = now + (d.status_dirty ? 1000 : 10000);
+		d.next_status = now + (d.status_dirty || d.log_dirty ? 1000 : 10000);
 		write_status();
 	}
 }

@@ -414,6 +414,9 @@ struct dns_page {
 	GtkWidget *prefetch_switch, *percent_dd, *days_dd, *percent_row, *days_row;
 	GtkWidget *prefetched_list;
 	GPtrArray *prefetched_rows;
+	GtkWidget *blocked_list;
+	GPtrArray *blocked_rows;
+	char *blocked_sig;
 	GtkWidget *blocking_switch, *answer_dd, *answer_row, *update_row;
 	struct word_list *servers, *lists, *always, *never, *allow, *block;
 	GHashTable *server_ms;  // server -> ms (-1 untested)
@@ -971,6 +974,137 @@ static void on_import(GtkButton *button, gpointer data) {
 
 /* ---------- what the service is doing ---------- */
 
+/* ---------- the names blocked lately ---------- */
+
+static bool name_within(const char *name, const char *domain) {
+	size_t n = strlen(name), d = strlen(domain);
+	return n == d ? strcmp(name, domain) == 0 :
+		n > d && name[n - d - 1] == '.' && strcmp(name + n - d, domain) == 0;
+}
+
+static bool allowed(struct dns_page *p, const char *name) {
+	for (guint i = 0; i < p->c.allow->len; i++) {
+		if (name_within(name, p->c.allow->pdata[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void refresh_blocked(struct dns_page *p);
+
+static void on_allow_blocked(GtkButton *button, gpointer data) {
+	struct dns_page *p = data;
+	add_word(p->allow, g_object_get_data(G_OBJECT(button), "name"));
+	refresh_blocked(p);
+}
+
+struct blocked_name {
+	char *name;
+	unsigned count;
+	long last;
+	bool by_hand;
+};
+
+/*
+ * The names the service blocked lately, newest first, each with a button to
+ * allow it: for the one a list blocks that a site or an app needs. The list
+ * is built again only when it would show something else.
+ */
+static void refresh_blocked(struct dns_page *p) {
+	char *path = g_build_filename(run_dir(), "blocked", NULL);
+	char *text = NULL;
+	GError *error = NULL;
+	bool ok = g_file_get_contents(path, &text, NULL, &error);
+	g_free(path);
+	GPtrArray *names = g_ptr_array_new();
+	char **lines = ok ? g_strsplit(text, "\n", -1) : NULL;
+	for (int i = 0; lines && lines[i]; i++) {
+		long last;
+		unsigned count, type;
+		char source[8], name[1100];
+		if (sscanf(lines[i], "%ld %u %u %7s %1099s", &last, &count, &type, source, name) != 5) {
+			continue;
+		}
+		struct blocked_name *b = NULL;
+		for (guint k = 0; k < names->len && !b; k++) {
+			struct blocked_name *o = names->pdata[k];
+			b = strcmp(o->name, name) == 0 ? o : NULL;
+		}
+		if (b) {
+			b->count += count; // the same name for IPv4 and IPv6: one row
+			continue;
+		}
+		if (names->len >= 40) {
+			continue;
+		}
+		b = g_new0(struct blocked_name, 1);
+		b->name = g_strdup(name);
+		b->count = count;
+		b->last = last;
+		b->by_hand = strcmp(source, "hand") == 0;
+		g_ptr_array_add(names, b);
+	}
+	g_strfreev(lines);
+	g_free(text);
+
+	GString *sig = g_string_new(ok ? "" : error->message);
+	g_string_append_printf(sig, "|%d", p->running);
+	for (guint i = 0; i < names->len; i++) {
+		struct blocked_name *b = names->pdata[i];
+		g_string_append_printf(sig, "|%s %u %ld %d", b->name, b->count, b->last,
+			allowed(p, b->name));
+	}
+	if (g_strcmp0(sig->str, p->blocked_sig) != 0) {
+		g_free(p->blocked_sig);
+		p->blocked_sig = g_string_free(sig, FALSE);
+		for (guint i = 0; i < p->blocked_rows->len; i++) {
+			gtk_list_box_remove(GTK_LIST_BOX(p->blocked_list), p->blocked_rows->pdata[i]);
+		}
+		g_ptr_array_set_size(p->blocked_rows, 0);
+		if (!ok) {
+			const char *why = !p->running ? "Shown while the DNS service is on" :
+				g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_ACCES) ?
+				"Only administrators (the group wheel) may see which names are asked for" :
+				"Nothing blocked yet";
+			g_ptr_array_add(p->blocked_rows, ui_row(p->blocked_list, why, NULL, NULL));
+		} else if (names->len == 0) {
+			g_ptr_array_add(p->blocked_rows, ui_row(p->blocked_list, "Nothing blocked yet",
+				NULL, NULL));
+		}
+		for (guint i = 0; i < names->len; i++) {
+			struct blocked_name *b = names->pdata[i];
+			GDateTime *when = g_date_time_new_from_unix_local(b->last);
+			char *at = when ? g_date_time_format(when, "%H:%M:%S") : g_strdup("?");
+			bool is_allowed = allowed(p, b->name);
+			char *sub = g_strdup_printf("%s %u %s, last at %s · %s", "Blocked", b->count,
+				b->count == 1 ? "time" : "times", at, is_allowed ?
+				"allowed now" : b->by_hand ? "blocked by hand" : "by a block list");
+			GtkWidget *button = gtk_button_new_with_label(is_allowed ? "Allowed" : "Allow");
+			gtk_widget_set_sensitive(button, !is_allowed);
+			gtk_widget_set_tooltip_text(button,
+				"Never block this name and the names below it");
+			g_object_set_data_full(G_OBJECT(button), "name", g_strdup(b->name), g_free);
+			g_signal_connect(button, "clicked", G_CALLBACK(on_allow_blocked), p);
+			g_ptr_array_add(p->blocked_rows, ui_row(p->blocked_list, b->name, sub, button));
+			g_free(sub);
+			g_free(at);
+			if (when) {
+				g_date_time_unref(when);
+			}
+		}
+	} else {
+		g_string_free(sig, TRUE);
+	}
+	for (guint i = 0; i < names->len; i++) {
+		struct blocked_name *b = names->pdata[i];
+		g_free(b->name);
+		g_free(b);
+	}
+	g_ptr_array_free(names, TRUE);
+	g_clear_error(&error);
+}
+
 static void on_never_prefetch(GtkButton *button, gpointer data) {
 	struct dns_page *p = data;
 	add_word(p->never, g_object_get_data(G_OBJECT(button), "name"));
@@ -1140,6 +1274,7 @@ static void refresh_status(struct dns_page *p) {
 	word_list_sync(p->servers);
 	word_list_sync(p->lists);
 	refresh_prefetched(p);
+	refresh_blocked(p);
 	sync_widgets(p);
 }
 
@@ -1209,6 +1344,7 @@ GtkWidget *dns_page_new(struct settings *s) {
 	p->in_use = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	p->list_info = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	p->prefetched_rows = g_ptr_array_new();
+	p->blocked_rows = g_ptr_array_new();
 	conf_read(&p->c);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("DNS",
@@ -1314,6 +1450,9 @@ GtkWidget *dns_page_new(struct settings *s) {
 	p->block = word_list_new(p, content, "Blocked by hand",
 		"With the names below them.", &p->c.block, NULL, "No names",
 		"A name, e.g. ads.example.com", "Unblock", dns_valid_name, describe_name);
+	p->blocked_list = ui_group(content, "Blocked lately",
+		"The newest first. Allow a name a site or an app needs: it and the names below it "
+		"are never blocked again.");
 	p->allow = word_list_new(p, content, "Never blocked",
 		"Names a list blocks that you need, with the names below them.", &p->c.allow, NULL,
 		"No names", "A name, e.g. example.com", "Remove", dns_valid_name, describe_name);

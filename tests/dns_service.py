@@ -406,6 +406,25 @@ def block_lists():
         check(not blocked("ok.doubleclick.test"), "an allowed name is not blocked")
         check(not blocked("path.test"), "adblock rules with a path are not taken")
         check(up.count("ads.example.com") == 0, "a blocked name never reaches the server")
+        blocked("ads.example.com")  # a second time: counted, not listed twice
+
+        def log():
+            try:
+                with open(os.path.join(d.run, "blocked")) as f:
+                    return [l.split() for l in f if l.strip()]
+            except OSError:
+                return []
+        wait_until(lambda: any(e[4] == "deep.manual.test" for e in log()), 4)
+        entries = {(e[4], int(e[2])): e for e in log()}
+        ads = entries.get(("ads.example.com", 1))
+        check(ads is not None and int(ads[1]) == 2,
+              "the log of blocked names counts ads.example.com twice: %s" % (ads,))
+        check(ads is not None and ads[3] == "list", "it says a list blocked it")
+        manual = entries.get(("deep.manual.test", 1))
+        check(manual is not None and manual[3] == "hand", "a name blocked by hand says so")
+        check(("ok.doubleclick.test", 1) not in entries, "an allowed name is not in the log")
+        newest = log()[0][4] if log() else None
+        check(newest == "ads.example.com", "the newest is first: %s" % newest)
         status = d.status()
         check("blocked_names 6" in status, "the status counts 6 names: %s" %
               [l for l in status.splitlines() if l.startswith("blocked_names")])

@@ -3,8 +3,9 @@
 # and a DNS helper made up for the test, and looks at what they were told:
 # showing the Wi-Fi password asks NetworkManager for the secret, a fixed
 # address is saved with its subnet and gateway, choosing how the servers for
-# all networks are asked writes the config of the DNS service, and a server
-# of a single network, picked on the DNS page, goes to NetworkManager.
+# all networks are asked writes the config of the DNS service, a name blocked
+# lately can be allowed from its log, and a server of a single network,
+# picked on the DNS page, goes to NetworkManager.
 #
 # usage: settings_network.sh <build dir>
 set -u
@@ -137,7 +138,11 @@ grep -q 'connection up uuid aaaa-1111' "$work/nm.log" ||
 pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
 sleep 2 # its socket name is free again before the next one starts
 
+# names the service blocked lately, as it writes them (newest first)
+printf '%s\n' "$(date +%s) 3 1 list tracker.example.com" "$(date +%s) 1 28 list tracker.example.com" \
+	"$(date +%s) 2 1 hand ads.example.org" > "$work/run/blocked"
 start dns 2600
+click 1196 2503 # Allow, beside tracker.example.com in the names blocked lately
 click 1110 326 # Ask: ...
 click 1100 409 # ... These servers, in this order
 sleep 1
@@ -145,6 +150,8 @@ grep -q '^config' "$work/dns.log" || fail "the DNS page never handed its config 
 grep -q '^fastest 0$' "$work/dns.conf" || fail "\"these servers, in order\" did not write fastest 0"
 grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8$' "$work/dns.conf" || fail "the servers were lost"
 grep -q '^prefetch_skip ads.test$' "$work/dns.conf" || fail "a name never to prefetch was lost"
+grep -q '^allow tracker.example.com$' "$work/dns.conf" ||
+	fail "allowing a name blocked lately did not put it among the names never blocked"
 # the servers of the network itself, in the section of single networks
 click 1133 779 # This network asks: ...
 click 1120 862 # ... Servers of its own
