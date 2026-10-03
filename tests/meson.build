@@ -49,6 +49,17 @@ test(
 )
 
 test(
+	'keyboards',
+	executable(
+		'test-keyboards',
+		['test_keyboards.c', '../panel/keyboards.c'],
+		include_directories: include_directories('../panel'),
+		dependencies: [jsonc],
+	),
+	suite: 'unit',
+)
+
+test(
 	'themes',
 	executable(
 		'test-themes',

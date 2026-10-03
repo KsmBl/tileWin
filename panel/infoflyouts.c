@@ -16,6 +16,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+#include "keyboards.h"
 #include "draw.h"
 #include "flyout.h"
 #include "ipc.h"
@@ -861,17 +862,11 @@ static void power_sample(struct info_flyout *f) {
 
 static void keyboard_sample(struct info_flyout *f) {
 	json_object *inputs = ipc_panel_request(f->panel, IPC_GET_INPUTS);
-	size_t count = inputs && json_object_is_type(inputs, json_type_array) ?
-		json_object_array_length(inputs) : 0;
 	snprintf(f->title, sizeof(f->title), "Keyboard layout");
 	snprintf(f->rows_title, sizeof(f->rows_title), "Pick a layout");
-	for (size_t i = 0; i < count; i++) {
-		json_object *input = json_object_array_get_idx(inputs, i), *type, *names, *active;
-		if (!json_object_object_get_ex(input, "type", &type) ||
-				strcmp(json_object_get_string(type), "keyboard") != 0 ||
-				!json_object_object_get_ex(input, "xkb_layout_names", &names)) {
-			continue;
-		}
+	// the main keyboard: a virtual one types for a tool, always in English
+	json_object *input = keyboards_main(inputs), *names, *active;
+	if (input && json_object_object_get_ex(input, "xkb_layout_names", &names)) {
 		int active_index = json_object_object_get_ex(input, "xkb_active_layout_index", &active) ?
 			json_object_get_int(active) : 0;
 		for (size_t n = 0; n < json_object_array_length(names); n++) {
@@ -886,7 +881,6 @@ static void keyboard_sample(struct info_flyout *f) {
 				snprintf(f->subtitle, sizeof(f->subtitle), "%s", name);
 			}
 		}
-		break;
 	}
 	json_object_put(inputs);
 	if (f->row_count == 0) {

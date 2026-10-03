@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include "ipc-client.h"
 #include "log.h"
+#include "keyboards.h"
 #include "panel.h"
 #include "stringop.h"
 
@@ -285,16 +286,11 @@ void ipc_panel_refresh_inputs(struct panel *panel) {
 		json_object_put(arr);
 		return;
 	}
-	size_t len = json_object_array_length(arr);
-	for (size_t i = 0; i < len; i++) {
-		json_object *obj = json_object_array_get_idx(arr, i);
-		const char *type = jstr(obj, "type");
-		const char *layout = jstr(obj, "xkb_active_layout_name");
-		if (type && strcmp(type, "keyboard") == 0 && layout) {
-			free(panel->state.keyboard_layout);
-			panel->state.keyboard_layout = strdup(layout);
-			break;
-		}
+	// the main keyboard, not a virtual one that types for a tool in English
+	const char *layout = jstr(keyboards_main(arr), "xkb_active_layout_name");
+	if (layout) {
+		free(panel->state.keyboard_layout);
+		panel->state.keyboard_layout = strdup(layout);
 	}
 	json_object_put(arr);
 	notify_widgets(panel);
