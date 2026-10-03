@@ -333,16 +333,44 @@ static void axis_plain(char *out, size_t size, double v) {
 	snprintf(out, size, "%g", v);
 }
 
+/* The colors of two lines in the look of the chart: the first is the one of
+ * every chart of that look, the second one that goes with it. */
+static void series_colors(const struct gadget_palette *pal, uint32_t first, uint32_t out[2]) {
+	out[0] = first;
+	switch (pal->look) {
+	case GADGET_CLASSIC:
+		out[1] = 0xffff00ff; // the task manager: green and yellow on black
+		break;
+	case GADGET_LUNA:
+		out[1] = pal->accent;
+		break;
+	case GADGET_METRO:
+		out[1] = alpha(pal->fg, 0x98);
+		break;
+	case GADGET_FLAT:
+		out[1] = pal->dark ? 0xf0a060ff : 0xc0602aff;
+		break;
+	case GADGET_AERO:
+	case GADGET_FLUENT:
+		out[1] = pal->accent2;
+		break;
+	}
+}
+
 /*
- * Real values instead of percentages (the network: down and up): a scale up
- * to the highest of them, rounded to 1, 2 or 5 of its power of ten and
- * labelled, a line for each series and a key for the lines.
+ * Real values instead of percentages (the network: down and up), on the face
+ * and grid every chart of the look has: a scale up to the highest of them,
+ * rounded to 1, 2 or 5 of its power of ten, labelled at the bottom, the
+ * middle and the top; a line for each series, filled the way the look fills
+ * its chart; and a key for the lines.
  */
 static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		const struct widget_sample *s, double cx, double cy, double cw, double ch,
 		uint32_t first) {
 	cairo_t *cr = ctx->cairo;
 	double sc = ctx->scale;
+	bool classic = pal->look == GADGET_CLASSIC || pal->look == GADGET_LUNA;
+	double inset = classic ? 1 : 0;
 	double highest = 0;
 	for (int k = 0; k < s->series_count; k++) {
 		for (int i = 0; i < WIDGET_HISTORY; i++) {
@@ -350,19 +378,15 @@ static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal
 		}
 	}
 	double top = pd_nice_ceiling(fmax(highest, s->series_rate ? 1000 : 1));
-	char font[224];
-	snprintf(font, sizeof(font), "%s %dpx", pal->family, (int)lround(fmax(9 * sc, 7)));
-	pd_chart_axis(cr, font, cx, cy, cw, ch, top, s->series_rate ? pd_format_axis_rate :
-		axis_plain, pal->look == GADGET_AERO ? 0xffffff24 : alpha(pal->grid, 0x90), pal->dim);
-	bool classic = pal->look == GADGET_CLASSIC || pal->look == GADGET_LUNA;
-	uint32_t colors[2] = { first, classic ? 0xffd800ff : pal->dark ? 0xf0a060ff : 0xc0602aff };
+	uint32_t colors[2];
+	series_colors(pal, first, colors);
 	double step = cw / (WIDGET_HISTORY - 1);
-	// the second (up) below the first (down), each with a light fill
+	// the second (up) behind the first (down)
 	for (int k = s->series_count - 1; k >= 0; k--) {
 		cairo_new_path(cr);
 		for (int i = 0; i < WIDGET_HISTORY; i++) {
 			double x = cx + i * step;
-			double y = cy + ch - ch * clamp01(s->series[k][i] / top);
+			double y = cy + ch - inset - (ch - 2 * inset) * clamp01(s->series[k][i] / top);
 			if (i == 0) {
 				cairo_move_to(cr, x, y);
 			} else {
@@ -374,7 +398,14 @@ static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal
 			cairo_line_to(cr, cx + cw, cy + ch);
 			cairo_line_to(cr, cx, cy + ch);
 			cairo_close_path(cr);
-			pd_color(cr, alpha(colors[k], 0x30));
+			uint32_t fill = k == 0 ? colors[0] : colors[1];
+			if (pal->look == GADGET_AERO) {
+				vertical_gradient(cr, cy, ch, alpha(fill, k == 0 ? 0x90 : 0x60),
+					alpha(fill, 0x10));
+			} else {
+				pd_color(cr, alpha(fill, pal->look == GADGET_METRO ? 0x50 :
+					k == 0 ? 0x40 : 0x28));
+			}
 			cairo_fill(cr);
 		}
 		cairo_new_path(cr);
@@ -383,17 +414,31 @@ static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal
 		pd_color(cr, colors[k]);
 		cairo_set_line_width(cr, fmax(1.5 * sc, 1));
 		cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+		if (pal->look == GADGET_METRO && k == 1) {
+			double dash[] = { 4 * sc, 3 * sc };
+			cairo_set_dash(cr, dash, 2, 0);
+		}
 		cairo_stroke(cr);
+		cairo_set_dash(cr, NULL, 0, 0);
+	}
+	// the labels of the scale, in the text of the card; on the black face of
+	// the task manager (95, XP) in its light grey
+	double px = fmax(9 * sc, 7), lh = px * 1.3;
+	uint32_t label = classic ? 0xc0c0c0ff : pal->dim;
+	for (int i = 0; i <= 2; i++) {
+		char value[32];
+		(s->series_rate ? pd_format_axis_rate : axis_plain)(value, sizeof(value), top * i / 2.0);
+		double ly = i == 2 ? cy + 1 : cy + ch - (ch - 2 * inset) * i / 2.0 - lh - 1;
+		text(cr, pal, false, px, value, cx + 3 * sc, ly, cw / 2, lh, label, PD_LEFT);
 	}
 	// the key, at the top right inside the chart
 	double kx = cx + cw - 4 * sc;
 	for (int k = s->series_count - 1; k >= 0; k--) {
-		int tw = 0, th = 0;
-		pd_text_size(cr, font, s->series_name[k], &tw, &th);
+		double tw = text_width(cr, pal, false, px, s->series_name[k]);
 		kx -= tw;
-		pd_text(cr, font, s->series_name[k], kx, cy + 2 * sc, tw + 1, th, pal->dim, PD_LEFT);
+		text(cr, pal, false, px, s->series_name[k], kx, cy + 1, tw + 2, lh, label, PD_LEFT);
 		kx -= 4 * sc + 10 * sc;
-		pd_rect(cr, kx, cy + 2 * sc + th / 2.0 - 1.5 * sc, 10 * sc, fmax(3 * sc, 2), colors[k]);
+		pd_rect(cr, kx, cy + 1 + lh / 2 - 1, 10 * sc, fmax(2.5 * sc, 2), colors[k]);
 		kx -= 8 * sc;
 	}
 }
@@ -453,11 +498,6 @@ static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 	cairo_save(cr);
 	cairo_rectangle(cr, cx, cy, cw, ch);
 	cairo_clip(cr);
-	if (s->series_count > 0) {
-		draw_series(ctx, pal, s, cx, cy, cw, ch, line);
-		cairo_restore(cr);
-		return;
-	}
 	// the grid: squares like the task manager, or a few quiet lines
 	cairo_set_line_width(cr, 1);
 	if (classic || pal->look == GADGET_AERO) {
@@ -481,6 +521,11 @@ static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		}
 		pd_color(cr, pal->grid);
 		cairo_stroke(cr);
+	}
+	if (s->series_count > 0) {
+		draw_series(ctx, pal, s, cx, cy, cw, ch, line);
+		cairo_restore(cr);
+		return;
 	}
 	// the measurements, oldest at the left
 	double inset = classic ? 1 : 0;

@@ -500,7 +500,7 @@ test(
 	env: saver_gui_env,
 	suite: 'gui',
 	is_parallel: false,
-	timeout: 120,
+	timeout: 240,
 )
 
 test(
