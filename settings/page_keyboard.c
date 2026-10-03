@@ -1090,7 +1090,7 @@ static void open_shortcut_dialog(struct keyboard_page *p, int index) {
 	}
 	gtk_box_append(GTK_BOX(d->custom_row), d->custom_entry);
 	GtkWidget *custom_hint = gtk_label_new("A tileWin command: \"exec <program>\" starts a "
-		"program, other commands are listed in the README.");
+		"program, other commands are listed in docs/configuration.md.");
 	gtk_label_set_wrap(GTK_LABEL(custom_hint), TRUE);
 	gtk_label_set_xalign(GTK_LABEL(custom_hint), 0);
 	gtk_widget_add_css_class(custom_hint, "dim-label");

@@ -1,7 +1,7 @@
 # Configuring tileWin
 
 Everything the settings app sets is plain text in `~/.config/tileWin/`, and can be written by hand too. This is the reference of those files; the
-[README](../README.md) describes what tileWin does.
+[README](../README.md) is the short tour, [features.md](features.md) describes what tileWin does.
 
 ## The files
 
