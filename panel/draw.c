@@ -557,3 +557,54 @@ void pd_glyph_generic_app(cairo_t *cr, double x, double y, double size) {
 	pd_rect(cr, x + 2 * s, y + 3 * s, 12 * s, 2 * s, 0x2f8fe0ff);
 	pd_rect(cr, x + 2 * s, y + 6 * s, 12 * s, 7 * s, 0xf0f0f0ff);
 }
+
+double pd_nice_ceiling(double v) {
+	if (!(v > 0)) {
+		return 1;
+	}
+	double power = pow(10, floor(log10(v)));
+	double m = v / power;
+	return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * power;
+}
+
+void pd_format_axis_rate(char *out, size_t size, double bytes_per_second) {
+	static const char *const units[] = { "B/s", "kB/s", "MB/s", "GB/s", "TB/s" };
+	if (bytes_per_second <= 0) {
+		snprintf(out, size, "0");
+		return;
+	}
+	int unit = 0;
+	while (bytes_per_second >= 1000 && unit < 4) {
+		bytes_per_second /= 1000;
+		unit++;
+	}
+	double whole = round(bytes_per_second);
+	snprintf(out, size, fabs(bytes_per_second - whole) < 0.05 ? "%.0f %s" : "%.1f %s",
+		bytes_per_second, units[unit]);
+}
+
+void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, double h,
+		double top, void (*format)(char *out, size_t size, double value), uint32_t line,
+		uint32_t label) {
+	cairo_save(cr);
+	cairo_set_line_width(cr, 1);
+	for (int i = 0; i <= 2; i++) {
+		double gy = floor(y + h - h * i / 2.0) + 0.5;
+		if (i > 0) {
+			cairo_move_to(cr, x, gy);
+			cairo_line_to(cr, x + w, gy);
+		}
+	}
+	pd_color(cr, line);
+	cairo_stroke(cr);
+	for (int i = 0; i <= 2; i++) {
+		char text[32];
+		format(text, sizeof(text), top * i / 2.0);
+		int tw = 0, th = 0;
+		pd_text_size(cr, font, text, &tw, &th);
+		// above its line, the top one below it, the 0 above the bottom edge
+		double ty = i == 2 ? y + 1 : y + h - h * i / 2.0 - th - 1;
+		pd_text(cr, font, text, x + 3, ty, tw + 2, th, label, PD_LEFT);
+	}
+	cairo_restore(cr);
+}

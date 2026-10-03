@@ -329,6 +329,75 @@ double gadget_draw_caption(struct gadget_ctx *ctx, const struct gadget_palette *
 
 /* ---------- chart ---------- */
 
+static void axis_plain(char *out, size_t size, double v) {
+	snprintf(out, size, "%g", v);
+}
+
+/*
+ * Real values instead of percentages (the network: down and up): a scale up
+ * to the highest of them, rounded to 1, 2 or 5 of its power of ten and
+ * labelled, a line for each series and a key for the lines.
+ */
+static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct widget_sample *s, double cx, double cy, double cw, double ch,
+		uint32_t first) {
+	cairo_t *cr = ctx->cairo;
+	double sc = ctx->scale;
+	double highest = 0;
+	for (int k = 0; k < s->series_count; k++) {
+		for (int i = 0; i < WIDGET_HISTORY; i++) {
+			highest = fmax(highest, s->series[k][i]);
+		}
+	}
+	double top = pd_nice_ceiling(fmax(highest, s->series_rate ? 1000 : 1));
+	char font[224];
+	snprintf(font, sizeof(font), "%s %dpx", pal->family, (int)lround(fmax(9 * sc, 7)));
+	pd_chart_axis(cr, font, cx, cy, cw, ch, top, s->series_rate ? pd_format_axis_rate :
+		axis_plain, pal->look == GADGET_AERO ? 0xffffff24 : alpha(pal->grid, 0x90), pal->dim);
+	bool classic = pal->look == GADGET_CLASSIC || pal->look == GADGET_LUNA;
+	uint32_t colors[2] = { first, classic ? 0xffd800ff : pal->dark ? 0xf0a060ff : 0xc0602aff };
+	double step = cw / (WIDGET_HISTORY - 1);
+	// the second (up) below the first (down), each with a light fill
+	for (int k = s->series_count - 1; k >= 0; k--) {
+		cairo_new_path(cr);
+		for (int i = 0; i < WIDGET_HISTORY; i++) {
+			double x = cx + i * step;
+			double y = cy + ch - ch * clamp01(s->series[k][i] / top);
+			if (i == 0) {
+				cairo_move_to(cr, x, y);
+			} else {
+				cairo_line_to(cr, x, y);
+			}
+		}
+		cairo_path_t *path = cairo_copy_path(cr);
+		if (!classic) {
+			cairo_line_to(cr, cx + cw, cy + ch);
+			cairo_line_to(cr, cx, cy + ch);
+			cairo_close_path(cr);
+			pd_color(cr, alpha(colors[k], 0x30));
+			cairo_fill(cr);
+		}
+		cairo_new_path(cr);
+		cairo_append_path(cr, path);
+		cairo_path_destroy(path);
+		pd_color(cr, colors[k]);
+		cairo_set_line_width(cr, fmax(1.5 * sc, 1));
+		cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+		cairo_stroke(cr);
+	}
+	// the key, at the top right inside the chart
+	double kx = cx + cw - 4 * sc;
+	for (int k = s->series_count - 1; k >= 0; k--) {
+		int tw = 0, th = 0;
+		pd_text_size(cr, font, s->series_name[k], &tw, &th);
+		kx -= tw;
+		pd_text(cr, font, s->series_name[k], kx, cy + 2 * sc, tw + 1, th, pal->dim, PD_LEFT);
+		kx -= 4 * sc + 10 * sc;
+		pd_rect(cr, kx, cy + 2 * sc + th / 2.0 - 1.5 * sc, 10 * sc, fmax(3 * sc, 2), colors[k]);
+		kx -= 8 * sc;
+	}
+}
+
 static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		const struct widget_sample *s, const char *title) {
 	cairo_t *cr = ctx->cairo;
@@ -384,6 +453,11 @@ static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 	cairo_save(cr);
 	cairo_rectangle(cr, cx, cy, cw, ch);
 	cairo_clip(cr);
+	if (s->series_count > 0) {
+		draw_series(ctx, pal, s, cx, cy, cw, ch, line);
+		cairo_restore(cr);
+		return;
+	}
 	// the grid: squares like the task manager, or a few quiet lines
 	cairo_set_line_width(cr, 1);
 	if (classic || pal->look == GADGET_AERO) {

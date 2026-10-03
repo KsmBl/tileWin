@@ -42,6 +42,19 @@ int pd_text_wrapped(cairo_t *cr, const char *font, const char *text, double x, d
 	double w, int max_lines, uint32_t color, bool draw);
 void pd_icon(cairo_t *cr, cairo_surface_t *icon, double x, double y, double size);
 
+/* The top of the scale of a chart: v rounded up to 1, 2 or 5 times a power of ten. */
+double pd_nice_ceiling(double v);
+/* A label of the scale of a chart of rates: "0", "500 B/s", "2 MB/s", "1.5 GB/s". */
+void pd_format_axis_rate(char *out, size_t size, double bytes_per_second);
+/*
+ * The scale of a chart: lines at 0, half and the top, labelled at the left
+ * inside the chart (format writes a label for a value), drawn below the lines
+ * of the values. Returns nothing; the chart keeps its whole width.
+ */
+void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, double h,
+	double top, void (*format)(char *out, size_t size, double value), uint32_t line,
+	uint32_t label);
+
 /* glyphs, drawn inside a size x size square */
 /* The flag of Windows XP: four glossy panels waving, with a shadow. */
 void pd_glyph_xp_flag(cairo_t *cr, double x, double y, double size);

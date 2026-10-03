@@ -264,6 +264,13 @@ struct widget_sample {
 	char value[48];              // the reading, e.g. "37%" or "12.4 W"
 	char detail[96];             // more of it, e.g. "5.9 of 16 GiB"; may be empty
 	bool warning, critical;      // over the levels the widget warns at
+	// instead of the percentages: up to two series of real values, oldest
+	// first (the network: bytes per second down and up), which the chart
+	// draws as lines of their own on a scale it labels
+	int series_count;
+	double series[2][WIDGET_HISTORY];
+	char series_name[2][16];
+	bool series_rate; // bytes per second, labelled B/s, kB/s, MB/s
 };
 
 struct widget_impl {

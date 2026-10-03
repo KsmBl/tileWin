@@ -94,6 +94,8 @@ struct info_flyout {
 	double history[2][HISTORY];
 	int history_len;
 	double graph_max; // 0 scales to the highest reading
+	// what the values of the chart are, for the labels of its scale
+	enum { AXIS_PLAIN, AXIS_PERCENT, AXIS_RATE, AXIS_WATTS } axis;
 	char graph_note[64], series_names[2][24];
 
 	char rows_title[64];
@@ -302,6 +304,7 @@ static void disk_sample(struct info_flyout *f) {
 	snprintf(f->subtitle, sizeof(f->subtitle), "Reading %s, writing %s", read_text, write_text);
 	f->graph = f->two_series = true;
 	snprintf(f->graph_note, sizeof(f->graph_note), "60 seconds");
+	f->axis = AXIS_RATE;
 	snprintf(f->series_names[0], sizeof(f->series_names[0]), "Read");
 	snprintf(f->series_names[1], sizeof(f->series_names[1]), "Written");
 	snprintf(f->rows_title, sizeof(f->rows_title), "Disks");
@@ -398,6 +401,7 @@ static void gpu_sample(struct info_flyout *f) {
 	snprintf(f->title, sizeof(f->title), "Graphics card");
 	f->graph = true;
 	f->graph_max = 100;
+	f->axis = AXIS_PERCENT;
 	snprintf(f->graph_note, sizeof(f->graph_note), "60 seconds");
 	if (s->card[0]) {
 		snprintf(path, sizeof(path), "%s/gpu_busy_percent", s->card);
@@ -612,6 +616,7 @@ static void net_sample(struct info_flyout *f) {
 	snprintf(f->subtitle, sizeof(f->subtitle), "↑ %s going out", up_text);
 	f->graph = f->two_series = true;
 	snprintf(f->graph_note, sizeof(f->graph_note), "60 seconds");
+	f->axis = AXIS_RATE;
 	snprintf(f->series_names[0], sizeof(f->series_names[0]), "Down");
 	snprintf(f->series_names[1], sizeof(f->series_names[1]), "Up");
 	snprintf(f->rows_title, sizeof(f->rows_title), "Connections");
@@ -843,6 +848,7 @@ static void power_sample(struct info_flyout *f) {
 		snprintf(f->big, sizeof(f->big), "%.1f W", watts);
 		push_history(f, watts, 0);
 		f->graph = true;
+		f->axis = AXIS_WATTS;
 		snprintf(f->graph_note, sizeof(f->graph_note), "60 seconds");
 	} else {
 		snprintf(f->big, sizeof(f->big), "–");
@@ -1075,23 +1081,37 @@ static int content_height(struct info_flyout *f) {
 	return h;
 }
 
+static void axis_percent(char *out, size_t size, double v) {
+	snprintf(out, size, "%.0f%%", v);
+}
+
+static void axis_watts(char *out, size_t size, double v) {
+	snprintf(out, size, v > 0 && v < 10 && fabs(v - round(v)) > 0.05 ? "%.1f W" : "%.0f W", v);
+}
+
+static void axis_plain(char *out, size_t size, double v) {
+	snprintf(out, size, "%g", v);
+}
+
 static void draw_graph(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
 		struct pbox g) {
 	fly_draw_chart_bg(cr, st, g);
+	// the scale: a fixed top (percentages), or the highest reading rounded up
+	// to 1, 2 or 5 of its power of ten, so the labels are round numbers
 	double max = f->graph_max;
-	for (int s = 0; max <= 0 && s < (f->two_series ? 2 : 1); s++) {
-		for (int i = 0; i < f->history_len; i++) {
-			max = fmax(max, f->history[s][i]);
-		}
-	}
-	for (int s = 0; !f->graph_max && s < (f->two_series ? 2 : 1); s++) {
-		for (int i = 0; i < f->history_len; i++) {
-			max = fmax(max, f->history[s][i] * 1.1);
-		}
-	}
 	if (max <= 0) {
-		max = 1;
+		double highest = 0;
+		for (int k = 0; k < (f->two_series ? 2 : 1); k++) {
+			for (int i = 0; i < f->history_len; i++) {
+				highest = fmax(highest, f->history[k][i]);
+			}
+		}
+		max = pd_nice_ceiling(fmax(highest, f->axis == AXIS_RATE ? 1000 : 1));
 	}
+	void (*format)(char *, size_t, double) = f->axis == AXIS_RATE ? pd_format_axis_rate :
+		f->axis == AXIS_PERCENT ? axis_percent : f->axis == AXIS_WATTS ? axis_watts : axis_plain;
+	pd_chart_axis(cr, st->font, g.x, g.y, g.width, g.height, max, format,
+		(st->fg & 0xffffff00) | 0x30, st->dim);
 	double step = (double)g.width / (HISTORY - 1);
 	double first_x = g.x + g.width - (f->history_len - 1) * step;
 	uint32_t colors[2] = { st->chart_line, st->dark ? 0xf0a060ff : 0xc0602aff };

@@ -1018,6 +1018,8 @@ struct nm_state {
 	struct timespec sampled;
 	bool sampled_once;
 	struct meter_history history;
+	double down[METER_HISTORY], up[METER_HISTORY]; // bytes per second, for the chart
+	int rate_pos;
 };
 
 static bool nm_counters(const char *device, unsigned long long *rx, unsigned long long *tx) {
@@ -1085,6 +1087,9 @@ static void nm_update(struct widget *w) {
 	int max = widget_conf_int(w, "max_rate", 12500);
 	double total = s->rx_rate + s->tx_rate;
 	meter_push(&s->history, max > 0 ? (int)(total * 100 / max) : 0);
+	s->down[s->rate_pos] = s->rx_rate * 1024;
+	s->up[s->rate_pos] = s->tx_rate * 1024;
+	s->rate_pos = (s->rate_pos + 1) % METER_HISTORY;
 }
 
 static void nm_init(struct widget *w) {
@@ -1134,6 +1139,14 @@ static bool nm_sample(struct widget *w, struct widget_sample *out) {
 	char down[32], up[32];
 	nm_rate_text(s->rx_rate, down, sizeof(down));
 	nm_rate_text(s->tx_rate, up, sizeof(up));
+	out->series_count = 2;
+	out->series_rate = true;
+	for (int i = 0; i < METER_HISTORY; i++) {
+		out->series[0][i] = s->down[(s->rate_pos + i) % METER_HISTORY];
+		out->series[1][i] = s->up[(s->rate_pos + i) % METER_HISTORY];
+	}
+	snprintf(out->series_name[0], sizeof(out->series_name[0]), "Down");
+	snprintf(out->series_name[1], sizeof(out->series_name[1]), "Up");
 	snprintf(out->value, sizeof(out->value), "↓ %s", down);
 	snprintf(out->detail, sizeof(out->detail), "↑ %s%s%s", up, s->device[0] ? " · " : "",
 		s->device);

@@ -37,6 +37,18 @@ test(
 )
 
 test(
+	'chart-scale',
+	executable(
+		'test-chart-scale',
+		['test_chart_scale.c', '../panel/draw.c'],
+		include_directories: [sway_inc, include_directories('../panel')],
+		link_with: lib_sway_common,
+		dependencies: [cairo, pango, pangocairo, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'themes',
 	executable(
 		'test-themes',
@@ -474,6 +486,17 @@ test(
 	'settings-icon',
 	find_program('settings_icon.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
+	'network-chart',
+	find_program('network_chart.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
 	is_parallel: false,
