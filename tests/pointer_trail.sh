@@ -1,7 +1,8 @@
 #!/bin/sh
 # The pointer trail and the pointer grown by shaking, in a nested tileWin:
 # copies left while the pointer is grown are grown as well, and those left
-# after it shrank back are of the normal size again.
+# after it shrank back are of the normal size again. The trail is not dimmed
+# by Task view and its darkened backdrop: it stays as bright over it.
 #
 # usage: pointer_trail.sh <build dir> <source dir>
 set -u
@@ -101,6 +102,41 @@ grown=$("$count" "$work/grown.png" 0 250 1280 250)
 echo "trail pixels at the normal size: $normal, while grown: $grown"
 [ "$normal" -gt 100 ] || fail "the trail leaves no copies"
 [ "$grown" -gt $((normal * 8)) ] || fail "copies left while the pointer is grown are not grown"
+
+# pixels of the trail's white outline along the line it was drawn on
+bright() {
+	python3 -I -c '
+import sys, gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1])
+n, stride, data = p.get_n_channels(), p.get_rowstride(), p.get_pixels()
+count = 0
+for y in range(340, 400):
+    for x in range(80, 900):
+        i = y * stride + x * n
+        if data[i] > 225 and data[i + 1] > 225 and data[i + 2] > 225:
+            count += 1
+print(count)' "$1"
+}
+sleep 3 # the grown ones fade
+"$msg" -s "$sock" taskview >/dev/null 2>&1
+sleep 1
+"$pointer" 1280 720 move 100 360 >/dev/null 2>&1
+sleep 2 # nothing left of the trail
+grim "$work/taskview.png"
+"$pointer" 1280 720 move 100 360 move 250 360 move 400 360 move 550 360 move 700 360 \
+	move 850 360 >/dev/null 2>&1 &
+line=$!
+sleep 1.4
+grim "$work/taskview-trail.png"
+wait "$line"
+plain=$(bright "$work/normal.png")
+backdrop=$(bright "$work/taskview.png")
+over=$(bright "$work/taskview-trail.png")
+echo "white trail pixels on the desktop: $plain, over Task view: $((over - backdrop))"
+[ "$plain" -gt 20 ] || fail "the trail has no white outline to measure"
+[ $((over - backdrop)) -gt $((plain / 2)) ] || fail "Task view dims the trail"
 
 "$msg" -s "$sock" -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

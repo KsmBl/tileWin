@@ -586,6 +586,9 @@ void tw_pointer_moved(struct sway_cursor *cursor) {
 			return;
 		}
 	}
+	// above what opened since in the same layer (Task view and its dimmed
+	// backdrop, the Alt+Tab switcher), as the pointer it follows is
+	wlr_scene_node_raise_to_top(&state.trail_tree->node);
 	if (image_changed) {
 		for (int i = 0; i < TRAIL_MAX; i++) {
 			if (state.trail[i].node && !state.trail[i].big) {
