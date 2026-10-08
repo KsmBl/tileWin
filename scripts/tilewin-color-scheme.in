@@ -4,7 +4,9 @@
 #
 #  - GNOME settings: GTK 4 / libadwaita apps, Firefox, Chromium and Qt 6 read
 #    color-scheme directly or through the desktop portal; GTK 3 apps such as
-#    Thunar need a dark GTK theme.
+#    Thunar do not, and need a dark GTK theme: the theme's dark variant, or
+#    for Adwaita one made here from the dark Adwaita built into GTK, switched
+#    to through the gtk-theme setting, which running apps follow at once.
 #  - GTK settings.ini files, used by GTK apps without a settings daemon.
 #  - KDE apps such as Dolphin read their colors from kdeglobals.
 
@@ -20,9 +22,29 @@ esac
 config="${XDG_CONFIG_HOME:-$HOME/.config}"
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 
-# GTK 3 only has "Adwaita" built in; its dark look comes from the dark
-# preference, not from a theme called "Adwaita-dark" (that name falls back to
-# the light Adwaita unless gnome-themes-extra installed such a folder).
+# GTK 3 only has "Adwaita" built in, not a theme called "Adwaita-dark": that
+# name falls back to the light Adwaita unless gnome-themes-extra installed
+# such a folder. The dark Adwaita is in GTK all the same; a theme folder
+# loading it gives the name, unless a real one is installed.
+make_adwaita_dark() {
+	dir="$data/themes/Adwaita-dark"
+	for other in "$HOME/.themes" /usr/local/share/themes /usr/share/themes; do
+		[ -d "$other/Adwaita-dark/gtk-3.0" ] && return 0
+	done
+	if [ -d "$dir" ] && [ ! -f "$dir/.tilewin-generated" ]; then
+		return 0 # the user's own
+	fi
+	mkdir -p "$dir/gtk-3.0" "$dir/gtk-4.0" || return 1
+	: >"$dir/.tilewin-generated"
+	printf '%s\n' '[Desktop Entry]' 'Type=X-GNOME-Metatheme' 'Name=Adwaita-dark' \
+		'Comment=The dark Adwaita built into GTK (made by tileWin)' '' \
+		'[X-GNOME-Metatheme]' 'GtkTheme=Adwaita-dark' >"$dir/index.theme"
+	echo '@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");' \
+		>"$dir/gtk-3.0/gtk.css"
+	echo '@import url("resource:///org/gtk/libgtk/theme/Default/Default-dark.css");' \
+		>"$dir/gtk-4.0/gtk.css"
+}
+
 theme_exists() {
 	case "$1" in
 	Adwaita|HighContrast|HighContrastInverse) return 0 ;;
@@ -38,6 +60,9 @@ if command -v gsettings >/dev/null 2>&1 &&
 	current=$(gsettings get org.gnome.desktop.interface gtk-theme | tr -d "'")
 	base=${current%-dark}
 	base=${base%-Dark}
+	if [ "$scheme" = dark ] && [ "$base" = Adwaita ]; then
+		make_adwaita_dark
+	fi
 	if [ "$scheme" = dark ]; then
 		gsettings set org.gnome.desktop.interface color-scheme prefer-dark
 		if theme_exists "$base-dark"; then
@@ -45,7 +70,9 @@ if command -v gsettings >/dev/null 2>&1 &&
 		elif theme_exists "$base-Dark"; then
 			gtk="$base-Dark"
 		elif theme_exists "$base"; then
-			gtk="$base" # e.g. Adwaita: dark through the dark preference
+			gtk="$base" # dark only through the dark preference, if at all
+		elif make_adwaita_dark && theme_exists Adwaita-dark; then
+			gtk=Adwaita-dark
 		else
 			gtk=Adwaita
 		fi
@@ -62,6 +89,12 @@ fi
 
 prefer=false
 [ "$scheme" = dark ] && prefer=true
+# GTK 3 apps without the GNOME settings (under X11 without a settings daemon)
+# read the dark preference from settings.ini only: it is made when missing.
+# GTK 4's is only changed when there is one, as libadwaita warns about it.
+if [ ! -f "$config/gtk-3.0/settings.ini" ]; then
+	mkdir -p "$config/gtk-3.0" && printf '[Settings]\n' >"$config/gtk-3.0/settings.ini"
+fi
 for ini in "$config/gtk-3.0/settings.ini" "$config/gtk-4.0/settings.ini"; do
 	[ -f "$ini" ] || continue
 	if grep -q '^gtk-application-prefer-dark-theme' "$ini"; then

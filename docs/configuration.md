@@ -27,7 +27,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 |---|---|
 | `wm_mode tile\|window\|toggle` | Switch mode (`tilewinmsg mode ...` is a shortcut) |
 | `theme <name>` | Switch theme |
-| `color_scheme light\|dark\|toggle` | Light or dark variant of the theme; also runs `tilewin-color-scheme` for GTK, GNOME and KDE apps |
+| `color_scheme light\|dark\|toggle` | Light or dark variant of the theme; also runs `tilewin-color-scheme` for GTK, GNOME and KDE apps. GTK 3 apps such as Thunar get a dark GTK theme: the dark variant of yours, or for Adwaita one made in `~/.local/share/themes/Adwaita-dark` from the dark Adwaita built into GTK |
 | `accent wallpaper\|theme` | The accent color of the themes (Windows 10 and 11) from the most striking color of the wallpaper, or the theme's own |
 | `session_restore yes\|no` | Reopen the apps of the last session at login (default yes, set in `common.conf`) |
 | `maximize [enable\|disable\|toggle]` | Maximize a floating window |

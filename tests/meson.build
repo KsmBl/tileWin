@@ -277,6 +277,13 @@ test(
 )
 
 test(
+	'color-scheme',
+	find_program('color_scheme.sh'),
+	args: [meson.project_build_root()],
+	suite: 'unit',
+)
+
+test(
 	'screen-choice',
 	find_program('screen_choice.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
