@@ -107,6 +107,7 @@ static const struct cmd_handler handlers[] = {
 	{ "pointer_shake_rate", cmd_pointer_shake_rate },
 	{ "pointer_shake_shakes", cmd_pointer_shake_shakes },
 	{ "pointer_trail", cmd_pointer_trail },
+	{ "polkit_agent", cmd_polkit_agent },
 	{ "popup_during_fullscreen", cmd_popup_during_fullscreen },
 	{ "power_key_action", cmd_power_key_action },
 	{ "remember_windows", cmd_remember_windows },

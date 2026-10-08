@@ -431,6 +431,7 @@ double tw_magnify_level(void);
 void tw_panel_start(void);
 /* Starts tilewin-nightlight, which keeps the night light colors. */
 void tw_nightlight_start(void);
+void tw_polkit_start(void);
 /* animate.c: window and desktop animations ("animations", "animation_speed") */
 void tw_animate_open(struct sway_container *con);
 void tw_animate_close(struct sway_container *con);

@@ -6,15 +6,24 @@
 /*
  * Account page: the account picture and name. The picture is ~/.face, which
  * the tileWin lock screen and most login screens show (~/.face.icon is linked
- * to it for the ones that look there).
+ * to it for the ones that look there). And whether tileWin's own polkit agent
+ * asks for the password when an app needs an administrator.
  */
 
 #define FACE_SIZE 256
 
 struct account_page {
 	struct settings *s;
-	GtkWidget *picture, *remove;
+	GtkWidget *picture, *remove, *polkit;
 };
+
+static void on_polkit(GObject *sw, GParamSpec *pspec, gpointer data) {
+	struct account_page *p = data;
+	const char *value = gtk_switch_get_active(GTK_SWITCH(sw)) ? "enable" : "disable";
+	confdoc_set(p->s->common, p->s->common->root, "polkit_agent", NULL, value);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "polkit_agent %s", value);
+}
 
 static char *home_file(const char *name) {
 	return g_build_filename(g_get_home_dir(), name, NULL);
@@ -168,6 +177,18 @@ GtkWidget *account_page_new(struct settings *s) {
 	g_signal_connect(p->remove, "clicked", G_CALLBACK(on_remove), p);
 	gtk_box_append(GTK_BOX(buttons), p->remove);
 	ui_row(group, "Account picture", "Shown on the lock screen and the login screen", buttons);
+
+	GtkWidget *admin = ui_group(content, "Administrator", NULL);
+	const char *agent = cstmt_arg(confdoc_child(s->common->root, "polkit_agent", NULL), 0);
+	p->polkit = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(p->polkit), !agent ||
+		!(g_ascii_strcasecmp(agent, "disable") == 0 || g_ascii_strcasecmp(agent, "no") == 0 ||
+		g_ascii_strcasecmp(agent, "off") == 0 || g_ascii_strcasecmp(agent, "false") == 0));
+	g_signal_connect(p->polkit, "notify::active", G_CALLBACK(on_polkit), p);
+	ui_row(admin, "Ask for the password when an app needs an administrator",
+		"The screen darkens and a dialog asks, as User Account Control does on Windows. "
+		"Turn it off to use another polkit agent. Takes effect the next time you sign in",
+		p->polkit);
 
 	load_picture(p);
 	return page;

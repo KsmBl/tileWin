@@ -677,6 +677,15 @@ struct cmd_results *cmd_snap_layouts(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_polkit_agent(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "polkit_agent", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->tw_polkit_agent = parse_boolean(argv[0], config->tw_polkit_agent);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_touch_edge_swipe(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "touch_edge_swipe", EXPECTED_EQUAL_TO, 1))) {

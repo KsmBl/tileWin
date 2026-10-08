@@ -137,6 +137,29 @@ void tw_nightlight_start(void) {
 	}
 }
 
+/*
+ * The password prompt of polkit (tilewin-polkit), unless the config turns it
+ * off for another agent. Like the night light it is a client of ours: it
+ * goes when the compositor does. Only one agent can have the session, so a
+ * second one started meanwhile simply gives up.
+ */
+void tw_polkit_start(void) {
+	if (!config->tw_polkit_agent || !tw_in_path("tilewin-polkit")) {
+		return;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execlp("tilewin-polkit", "tilewin-polkit", (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
+}
+
 void tw_panel_start(void) {
 	if (panel.pid < 0 && !panel.timer) {
 		panel_spawn();

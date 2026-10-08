@@ -197,6 +197,7 @@ endif
 subdir('panel')
 subdir('lock')
 subdir('nightlight')
+subdir('polkit')
 subdir('clipboard')
 subdir('screensaver')
 subdir('dns')
