@@ -104,6 +104,9 @@ void psurface_destroy(struct psurface *s) {
 		if (seat->keyboard_focus == s) {
 			seat->keyboard_focus = NULL;
 		}
+		if (seat->touch_focus == s) {
+			seat->touch_focus = NULL;
+		}
 	}
 	psurface_clear_hotspots(s);
 	list_free(s->hotspots);

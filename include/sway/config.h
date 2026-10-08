@@ -581,6 +581,7 @@ struct sway_config {
 	bool tw_snap_layouts; // resting on the maximize button offers layouts to snap to
 	int tw_battery_saver; // battery level (percent) at which the battery saver starts, 0 never
 	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
+	bool tw_touch_edge_swipe; // swiping in from a screen edge: Task view, notifications
 	/*
 	 * Gravity mode: a window let go of while it is still moving carries on
 	 * sliding, the way a flat thing pushed across a table does. There is no pull

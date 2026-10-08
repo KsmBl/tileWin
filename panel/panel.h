@@ -75,6 +75,7 @@ struct psurface {
 	struct pool_buffer buffers[2];
 	struct pool_buffer *shown; // the one last committed, to compare the next with
 	bool configured, dirty, frame_pending, catcher;
+	bool touch_scroll; // a finger dragged up or down scrolls it (popups)
 	list_t *hotspots; // struct hotspot *
 	struct hotspot *hover;
 	struct wl_list link; // panel::surfaces
@@ -124,6 +125,17 @@ struct panel_seat {
 	struct wl_surface *cursor_surface;
 	struct wl_cursor_theme *cursor_theme;
 	double axis_accum;
+
+	// one finger on the touchscreen, turned into the clicks of a mouse
+	struct wl_touch *touch;
+	struct psurface *touch_focus;
+	int32_t touch_id;
+	bool touch_down;
+	int touch_state;         // enum touch_state in wayland.c
+	double touch_x0, touch_y0; // where the finger came down
+	double touch_x, touch_y;
+	double touch_scroll;     // finger travel not yet turned into scroll steps
+	struct loop_timer *hold_timer;
 
 	struct wl_keyboard *keyboard;
 	struct psurface *keyboard_focus;

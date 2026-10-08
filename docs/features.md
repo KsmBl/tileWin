@@ -24,6 +24,12 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - Task view (Win+Tab) like on Windows 10: thumbnails of the windows, a strip with all desktops (workspaces) to switch to, drag windows onto a desktop or "New desktop", close windows and desktops. Drag a desktop along the strip to put it in another place, and click its name to rename it (Return keeps the name, Escape the old one). Hovering a desktop shows its windows; arrow keys and Enter pick a window. Desktops created there stay when they are empty.
   - Arrange windows: cascade, stacked, side by side, or the optimal grid, whose windows come closest to 1.3:1 (four windows make 2x2).
   - **Gravity mode** (off by default): let go of a window while it is still moving and it carries on sliding, bouncing off the edges of the screen until it comes to rest. There is no pull downwards — a window behaves like a flat thing pushed across a table. The **drag** says how quickly it stops and the **bounce** how much speed an edge gives back; both are on the Window behavior page. A window put down without moving stays where it is put.
+- **Touchscreens**, worked the way Windows works them:
+  - A tap clicks, holding a finger still for half a second clicks with the right button (the window menu on a title bar, the context menus of the taskbar and the desktop), and a finger that moves drags: a window by its title bar or a side, a taskbar button, a desktop icon, a slider.
+  - In the start menu, the flyouts and the other menus and lists of the taskbar, a finger moved up or down scrolls them.
+  - Swiping in from the left edge of the screen opens Task view, from the right edge the notifications (`touch_edge_swipe disable` turns it off, or the switch on the Mouse & touchpad page). A tap at the edge still reaches what is there.
+  - No pointer is left behind where the finger was: hover highlights and tooltips go when it lifts.
+  - Apps that take touch themselves get the fingers as they are, several at once.
 - **Several screens** (window mode), handled the way Windows handles them:
   - A window taken to another screen (`Super+Shift+←/→` or dragging it over) stays maximized or snapped there, keeps the focus, and the size it goes back to comes along to the same place on the new screen. A window too big for the new screen is made to fit.
   - `Super+←` on a window snapped to the left half carries it on to the right half of the screen to the left, and `Super+→` the other way round.

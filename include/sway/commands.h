@@ -166,6 +166,7 @@ sway_cmd cmd_window_group_modifier;
 sway_cmd cmd_window_snap;
 sway_cmd cmd_window_stick;
 sway_cmd cmd_window_stick_distance;
+sway_cmd cmd_touch_edge_swipe;
 sway_cmd cmd_window_stretch;
 sway_cmd cmd_snap_layouts;
 sway_cmd cmd_battery_saver;

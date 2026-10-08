@@ -710,8 +710,8 @@ static void handle_touch_down(struct sway_seat *seat,
 		dy = seat->touch_y - cursor->cursor->y;
 		pointer_motion(cursor, event->time_msec, &event->touch->base, dx, dy,
 				dx, dy);
-		dispatch_cursor_button(cursor, &event->touch->base, event->time_msec,
-				BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED);
+		// the click waits: a tap, a drag or a held finger (right click)
+		cursor_touch_click_begin(cursor);
 	}
 }
 

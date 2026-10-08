@@ -174,6 +174,7 @@ struct popup *popup_create(struct panel *panel, enum popup_kind kind,
 
 	struct psurface *s = psurface_create(panel, output, &popup_surface_impl, p,
 		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tilewin-popup");
+	s->touch_scroll = true;
 	zwlr_layer_surface_v1_set_anchor(s->layer_surface,
 		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
 	zwlr_layer_surface_v1_set_margin(s->layer_surface, y, 0, 0, x);

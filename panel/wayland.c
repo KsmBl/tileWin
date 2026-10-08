@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -140,6 +141,192 @@ static const struct wl_pointer_listener pointer_listener = {
 	.axis_source = pointer_axis_source,
 	.axis_stop = pointer_axis_stop,
 	.axis_discrete = pointer_axis_discrete,
+};
+
+/* ---------- touch ---------- */
+
+/*
+ * One finger works the panel as a mouse would, the way Windows does it: a tap
+ * clicks, holding the finger still clicks with the right button, a finger that
+ * moves drags (a taskbar button, a desktop icon, a slider), and in a popup a
+ * finger moved up or down scrolls it. The click waits for the finger to move
+ * or lift, as until then it can still be any of these. Further fingers are
+ * not followed.
+ */
+enum touch_state {
+	TOUCH_PENDING, // down, not yet moved or held
+	TOUCH_DRAG,    // the left button is held
+	TOUCH_SCROLL,
+	TOUCH_DONE,    // held for a right click; the rest is ignored
+};
+
+#define TOUCH_SLOP 10        // pixels a tap may wobble
+#define TOUCH_HOLD_MS 500    // holding this long is a right click
+#define TOUCH_SCROLL_STEP 40 // finger travel of one notch of the wheel
+
+static void touch_stop_hold(struct panel_seat *seat) {
+	if (seat->hold_timer) {
+		loop_remove_timer(seat->panel->loop, seat->hold_timer);
+		seat->hold_timer = NULL;
+	}
+}
+
+static void touch_motion_to(struct psurface *s, double x, double y) {
+	if (s && s->impl && s->impl->pointer_motion) {
+		s->impl->pointer_motion(s, x, y);
+	}
+}
+
+static void touch_button(struct psurface *s, double x, double y, uint32_t button,
+		bool pressed) {
+	if (s && s->impl && s->impl->pointer_button) {
+		s->impl->pointer_button(s, x, y, button, pressed);
+	}
+}
+
+/* No pointer stays behind on what was touched: its hover and tooltip go. */
+static void touch_leave(struct panel_seat *seat) {
+	struct psurface *s = seat->touch_focus;
+	seat->touch_focus = NULL;
+	if (s && s != seat->pointer_focus && s->impl && s->impl->pointer_leave) {
+		s->impl->pointer_leave(s);
+	}
+}
+
+static void touch_hold_fired(void *data) {
+	struct panel_seat *seat = data;
+	seat->hold_timer = NULL;
+	if (!seat->touch_down || seat->touch_state != TOUCH_PENDING) {
+		return;
+	}
+	seat->touch_state = TOUCH_DONE;
+	struct psurface *s = seat->touch_focus;
+	touch_button(s, seat->touch_x0, seat->touch_y0, BTN_RIGHT, true);
+	// the press may have opened a menu that replaced the surface
+	touch_button(seat->touch_focus, seat->touch_x0, seat->touch_y0, BTN_RIGHT, false);
+}
+
+static void touch_handle_down(void *data, struct wl_touch *touch, uint32_t serial,
+		uint32_t time, struct wl_surface *surface, int32_t id, wl_fixed_t x,
+		wl_fixed_t y) {
+	struct panel_seat *seat = data;
+	if (seat->touch_down) {
+		return;
+	}
+	seat->touch_down = true;
+	seat->touch_id = id;
+	seat->touch_focus = surface_from_wl(surface);
+	seat->touch_state = TOUCH_PENDING;
+	seat->touch_x0 = seat->touch_x = wl_fixed_to_double(x);
+	seat->touch_y0 = seat->touch_y = wl_fixed_to_double(y);
+	seat->touch_scroll = 0;
+	touch_motion_to(seat->touch_focus, seat->touch_x, seat->touch_y);
+	touch_stop_hold(seat);
+	seat->hold_timer = loop_add_timer(seat->panel->loop, TOUCH_HOLD_MS,
+		touch_hold_fired, seat);
+}
+
+static void touch_handle_motion(void *data, struct wl_touch *touch, uint32_t time,
+		int32_t id, wl_fixed_t x, wl_fixed_t y) {
+	struct panel_seat *seat = data;
+	if (!seat->touch_down || id != seat->touch_id) {
+		return;
+	}
+	double last_y = seat->touch_y;
+	seat->touch_x = wl_fixed_to_double(x);
+	seat->touch_y = wl_fixed_to_double(y);
+	struct psurface *s = seat->touch_focus;
+	double dx = seat->touch_x - seat->touch_x0;
+	double dy = seat->touch_y - seat->touch_y0;
+	if (seat->touch_state == TOUCH_PENDING) {
+		if (dx * dx + dy * dy < TOUCH_SLOP * TOUCH_SLOP) {
+			return;
+		}
+		touch_stop_hold(seat);
+		if (s && s->touch_scroll && s->impl && s->impl->pointer_axis &&
+				fabs(dy) > fabs(dx)) {
+			seat->touch_state = TOUCH_SCROLL;
+			last_y = seat->touch_y0;
+		} else {
+			seat->touch_state = TOUCH_DRAG;
+			touch_button(s, seat->touch_x0, seat->touch_y0, BTN_LEFT, true);
+			s = seat->touch_focus;
+		}
+	}
+	switch (seat->touch_state) {
+	case TOUCH_DRAG:
+		touch_motion_to(s, seat->touch_x, seat->touch_y);
+		break;
+	case TOUCH_SCROLL:
+		// the content follows the finger: moving it up scrolls down
+		seat->touch_scroll += last_y - seat->touch_y;
+		while (fabs(seat->touch_scroll) >= TOUCH_SCROLL_STEP) {
+			int dir = seat->touch_scroll > 0 ? 1 : -1;
+			seat->touch_scroll -= dir * TOUCH_SCROLL_STEP;
+			s = seat->touch_focus;
+			if (s && s->impl && s->impl->pointer_axis) {
+				s->impl->pointer_axis(s, seat->touch_x0, seat->touch_y0, dir);
+			}
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void touch_end(struct panel_seat *seat, bool cancelled) {
+	touch_stop_hold(seat);
+	seat->touch_down = false;
+	switch (seat->touch_state) {
+	case TOUCH_PENDING:
+		if (!cancelled) {
+			touch_button(seat->touch_focus, seat->touch_x0, seat->touch_y0, BTN_LEFT, true);
+			touch_button(seat->touch_focus, seat->touch_x0, seat->touch_y0, BTN_LEFT, false);
+		}
+		break;
+	case TOUCH_DRAG:
+		touch_button(seat->touch_focus, seat->touch_x, seat->touch_y, BTN_LEFT, false);
+		break;
+	default:
+		break;
+	}
+	touch_leave(seat);
+}
+
+static void touch_handle_up(void *data, struct wl_touch *touch, uint32_t serial,
+		uint32_t time, int32_t id) {
+	struct panel_seat *seat = data;
+	if (seat->touch_down && id == seat->touch_id) {
+		touch_end(seat, false);
+	}
+}
+
+static void touch_handle_cancel(void *data, struct wl_touch *touch) {
+	struct panel_seat *seat = data;
+	if (seat->touch_down) {
+		touch_end(seat, true);
+	}
+}
+
+static void touch_handle_frame(void *data, struct wl_touch *touch) {
+}
+
+static void touch_handle_shape(void *data, struct wl_touch *touch, int32_t id,
+		wl_fixed_t major, wl_fixed_t minor) {
+}
+
+static void touch_handle_orientation(void *data, struct wl_touch *touch, int32_t id,
+		wl_fixed_t orientation) {
+}
+
+static const struct wl_touch_listener touch_listener = {
+	.down = touch_handle_down,
+	.up = touch_handle_up,
+	.motion = touch_handle_motion,
+	.frame = touch_handle_frame,
+	.cancel = touch_handle_cancel,
+	.shape = touch_handle_shape,
+	.orientation = touch_handle_orientation,
 };
 
 /* ---------- keyboard ---------- */
@@ -305,6 +492,7 @@ static void seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t caps
 	struct panel_seat *seat = data;
 	bool pointer = caps & WL_SEAT_CAPABILITY_POINTER;
 	bool keyboard = caps & WL_SEAT_CAPABILITY_KEYBOARD;
+	bool touch = caps & WL_SEAT_CAPABILITY_TOUCH;
 	if (pointer && !seat->pointer) {
 		seat->pointer = wl_seat_get_pointer(wl_seat);
 		wl_pointer_add_listener(seat->pointer, &pointer_listener, seat);
@@ -312,6 +500,16 @@ static void seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t caps
 		wl_pointer_release(seat->pointer);
 		seat->pointer = NULL;
 		seat->pointer_focus = NULL;
+	}
+	if (touch && !seat->touch) {
+		seat->touch = wl_seat_get_touch(wl_seat);
+		wl_touch_add_listener(seat->touch, &touch_listener, seat);
+	} else if (!touch && seat->touch) {
+		touch_stop_hold(seat);
+		wl_touch_release(seat->touch);
+		seat->touch = NULL;
+		seat->touch_focus = NULL;
+		seat->touch_down = false;
 	}
 	if (keyboard && !seat->keyboard) {
 		seat->keyboard = wl_seat_get_keyboard(wl_seat);
@@ -336,6 +534,10 @@ void panel_seat_destroy(struct panel_seat *seat) {
 	stop_repeat(seat);
 	if (seat->pointer) {
 		wl_pointer_release(seat->pointer);
+	}
+	touch_stop_hold(seat);
+	if (seat->touch) {
+		wl_touch_release(seat->touch);
 	}
 	if (seat->keyboard) {
 		wl_keyboard_release(seat->keyboard);

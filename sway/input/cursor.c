@@ -26,6 +26,8 @@
 #include "sway/output.h"
 #include "sway/scene_descriptor.h"
 #include "sway/server.h"
+#include "sway/tilewin.h"
+#include "sway/desktop/transaction.h"
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
 #include "sway/tree/view.h"
@@ -400,23 +402,180 @@ static void handle_pointer_frame(struct wl_listener *listener, void *data) {
 	wlr_seat_pointer_notify_frame(cursor->seat->wlr_seat);
 }
 
+/*
+ * Touch on what does not take touch itself (title bars, frames, apps that only
+ * know a mouse) works it as a mouse, the way Windows does: a tap clicks,
+ * holding the finger still clicks with the right button, and a finger that
+ * moves drags with the left one. Until the finger moves, lifts or has been
+ * held long enough it can be any of these, so the click waits.
+ */
+enum touch_click {
+	TOUCH_CLICK_NONE,
+	TOUCH_CLICK_PENDING,
+	TOUCH_CLICK_DRAG, // the left button is held
+	TOUCH_CLICK_HELD, // right-clicked; the rest of the touch is ignored
+};
+
+#define TOUCH_SLOP 10     // pixels a tap may wobble
+#define TOUCH_HOLD_MS 500 // holding this long is a right click
+
+static int touch_hold_notify(void *data) {
+	struct sway_cursor *cursor = data;
+	if (cursor->simulating_pointer_from_touch &&
+			cursor->touch_click == TOUCH_CLICK_PENDING) {
+		cursor->touch_click = TOUCH_CLICK_HELD;
+		uint32_t now = get_current_time_in_msec();
+		dispatch_cursor_button(cursor, NULL, now, BTN_RIGHT,
+			WL_POINTER_BUTTON_STATE_PRESSED);
+		dispatch_cursor_button(cursor, NULL, now, BTN_RIGHT,
+			WL_POINTER_BUTTON_STATE_RELEASED);
+		wlr_seat_pointer_notify_frame(cursor->seat->wlr_seat);
+		transaction_commit_dirty();
+	}
+	return 0;
+}
+
+static void touch_hold_stop(struct sway_cursor *cursor) {
+	if (cursor->touch_hold_source) {
+		wl_event_source_timer_update(cursor->touch_hold_source, 0);
+	}
+}
+
+void cursor_touch_click_begin(struct sway_cursor *cursor) {
+	cursor->touch_click = TOUCH_CLICK_PENDING;
+	if (!cursor->touch_hold_source) {
+		cursor->touch_hold_source = wl_event_loop_add_timer(server.wl_event_loop,
+			touch_hold_notify, cursor);
+	}
+	if (cursor->touch_hold_source) {
+		wl_event_source_timer_update(cursor->touch_hold_source, TOUCH_HOLD_MS);
+	}
+}
+
+/* The finger lifted: the click it was, if it was not one yet. */
+static void touch_click_end(struct sway_cursor *cursor,
+		struct wlr_input_device *device, uint32_t time_msec, bool cancelled) {
+	touch_hold_stop(cursor);
+	switch (cursor->touch_click) {
+	case TOUCH_CLICK_PENDING:
+		if (!cancelled) {
+			dispatch_cursor_button(cursor, device, time_msec, BTN_LEFT,
+				WL_POINTER_BUTTON_STATE_PRESSED);
+			dispatch_cursor_button(cursor, device, time_msec, BTN_LEFT,
+				WL_POINTER_BUTTON_STATE_RELEASED);
+		}
+		break;
+	case TOUCH_CLICK_DRAG:
+		dispatch_cursor_button(cursor, device, time_msec, BTN_LEFT,
+			WL_POINTER_BUTTON_STATE_RELEASED);
+		break;
+	default:
+		break;
+	}
+	cursor->touch_click = TOUCH_CLICK_NONE;
+}
+
+/*
+ * Swiping in from the left edge of the screen opens Task view, from the right
+ * edge the notifications, as on Windows 10. A finger that comes down at one
+ * of these edges is held back from what is under it until it is clear
+ * whether it swipes in; if it does not, it is given on as it came.
+ */
+#define TOUCH_EDGE_ZONE 16  // how close to the edge the finger must come down
+#define TOUCH_EDGE_SWIPE 60 // how far in it must then go
+
+static uint32_t touch_edge_at(struct sway_cursor *cursor, double lx, double ly) {
+	if (!config->tw_touch_edge_swipe || server.session_lock.lock ||
+			cursor->simulating_pointer_from_touch ||
+			!wl_list_empty(&cursor->seat->wlr_seat->touch_state.touch_points)) {
+		return WLR_EDGE_NONE;
+	}
+	struct wlr_output *output = wlr_output_layout_output_at(root->output_layout, lx, ly);
+	if (!output) {
+		return WLR_EDGE_NONE;
+	}
+	struct wlr_box box;
+	wlr_output_layout_get_box(root->output_layout, output, &box);
+	if (lx < box.x + TOUCH_EDGE_ZONE) {
+		return WLR_EDGE_LEFT;
+	}
+	if (lx >= box.x + box.width - TOUCH_EDGE_ZONE) {
+		return WLR_EDGE_RIGHT;
+	}
+	return WLR_EDGE_NONE;
+}
+
+static void touch_down_now(struct sway_cursor *cursor,
+		struct wlr_touch_down_event *event, double lx, double ly) {
+	struct sway_seat *seat = cursor->seat;
+	seat->touch_id = event->touch_id;
+	seat->touch_x = lx;
+	seat->touch_y = ly;
+	seatop_touch_down(seat, event, lx, ly);
+}
+
+/* The finger at the edge did not swipe in: it touches what is there after all. */
+static void touch_edge_release(struct sway_cursor *cursor) {
+	cursor->touch_edge_pending = false;
+	touch_down_now(cursor, &cursor->touch_edge_event,
+		cursor->touch_edge_lx, cursor->touch_edge_ly);
+}
+
+static void touch_edge_swipe(struct sway_cursor *cursor) {
+	cursor->touch_edge_pending = false;
+	cursor->touch_edge_swiped = true;
+	char *command = strdup(cursor->touch_edge == WLR_EDGE_LEFT ?
+		"taskview" : "panel notifications");
+	list_t *results = execute_command(command, cursor->seat, NULL);
+	for (int i = 0; i < results->length; i++) {
+		free_cmd_results(results->items[i]);
+	}
+	list_free(results);
+	free(command);
+	transaction_commit_dirty();
+}
+
 static void handle_touch_down(struct wl_listener *listener, void *data) {
 	struct sway_cursor *cursor = wl_container_of(listener, cursor, touch_down);
 	struct wlr_touch_down_event *event = data;
 	cursor_handle_activity_from_device(cursor, &event->touch->base);
 	cursor_hide(cursor);
 
-	struct sway_seat *seat = cursor->seat;
-
 	double lx, ly;
 	wlr_cursor_absolute_to_layout_coords(cursor->cursor, &event->touch->base,
 			event->x, event->y, &lx, &ly);
 
-	seat->touch_id = event->touch_id;
-	seat->touch_x = lx;
-	seat->touch_y = ly;
+	if (cursor->touch_edge_pending || cursor->touch_edge_swiped) {
+		return; // a second finger while one swipes in from an edge
+	}
+	uint32_t edge = touch_edge_at(cursor, lx, ly);
+	if (edge != WLR_EDGE_NONE) {
+		cursor->touch_edge_pending = true;
+		cursor->touch_edge = edge;
+		cursor->touch_edge_event = *event;
+		cursor->touch_edge_lx = lx;
+		cursor->touch_edge_ly = ly;
+		return;
+	}
 
-	seatop_touch_down(seat, event, lx, ly);
+	touch_down_now(cursor, event, lx, ly);
+}
+
+/* The finger at the edge lifted or was taken away: true if that was all of it. */
+static bool touch_edge_end(struct sway_cursor *cursor, int32_t touch_id) {
+	if (cursor->touch_edge_swiped) {
+		if (touch_id == cursor->touch_edge_event.touch_id) {
+			cursor->touch_edge_swiped = false;
+		}
+		return true;
+	}
+	if (cursor->touch_edge_pending) {
+		if (touch_id != cursor->touch_edge_event.touch_id) {
+			return true;
+		}
+		touch_edge_release(cursor); // a tap at the edge
+	}
+	return false;
 }
 
 static void handle_touch_up(struct wl_listener *listener, void *data) {
@@ -425,12 +584,14 @@ static void handle_touch_up(struct wl_listener *listener, void *data) {
 	cursor_handle_activity_from_device(cursor, &event->touch->base);
 
 	struct sway_seat *seat = cursor->seat;
+	if (touch_edge_end(cursor, event->touch_id)) {
+		return;
+	}
 
 	if (cursor->simulating_pointer_from_touch) {
-		if (cursor->pointer_touch_id == cursor->seat->touch_id) {
+		if (cursor->pointer_touch_id == event->touch_id) {
 			cursor->pointer_touch_up = true;
-			dispatch_cursor_button(cursor, &event->touch->base,
-				event->time_msec, BTN_LEFT, WL_POINTER_BUTTON_STATE_RELEASED);
+			touch_click_end(cursor, &event->touch->base, event->time_msec, false);
 		}
 	} else {
 		seatop_touch_up(seat, event);
@@ -443,12 +604,18 @@ static void handle_touch_cancel(struct wl_listener *listener, void *data) {
 	cursor_handle_activity_from_device(cursor, &event->touch->base);
 
 	struct sway_seat *seat = cursor->seat;
+	if (cursor->touch_edge_swiped || cursor->touch_edge_pending) {
+		bool edge_finger = event->touch_id == cursor->touch_edge_event.touch_id;
+		if (edge_finger) {
+			cursor->touch_edge_swiped = cursor->touch_edge_pending = false;
+		}
+		return;
+	}
 
 	if (cursor->simulating_pointer_from_touch) {
-		if (cursor->pointer_touch_id == cursor->seat->touch_id) {
+		if (cursor->pointer_touch_id == event->touch_id) {
 			cursor->pointer_touch_up = true;
-			dispatch_cursor_button(cursor, &event->touch->base,
-				event->time_msec, BTN_LEFT, WL_POINTER_BUTTON_STATE_RELEASED);
+			touch_click_end(cursor, &event->touch->base, event->time_msec, true);
 		}
 	} else {
 		seatop_touch_cancel(seat, event);
@@ -467,6 +634,26 @@ static void handle_touch_motion(struct wl_listener *listener, void *data) {
 	wlr_cursor_absolute_to_layout_coords(cursor->cursor, &event->touch->base,
 			event->x, event->y, &lx, &ly);
 
+	if (cursor->touch_edge_swiped) {
+		return;
+	}
+	if (cursor->touch_edge_pending) {
+		if (event->touch_id != cursor->touch_edge_event.touch_id) {
+			return;
+		}
+		double in = cursor->touch_edge == WLR_EDGE_LEFT ?
+			lx - cursor->touch_edge_lx : cursor->touch_edge_lx - lx;
+		double along = fabs(ly - cursor->touch_edge_ly);
+		if (in >= TOUCH_EDGE_SWIPE && in > 2 * along) {
+			touch_edge_swipe(cursor);
+			return;
+		}
+		if (in > -TOUCH_SLOP && along < TOUCH_SLOP) {
+			return; // not decided yet
+		}
+		touch_edge_release(cursor); // it went along the edge or back out
+	}
+
 	if (seat->touch_id == event->touch_id) {
 		seat->touch_x = lx;
 		seat->touch_y = ly;
@@ -475,7 +662,21 @@ static void handle_touch_motion(struct wl_listener *listener, void *data) {
 	}
 
 	if (cursor->simulating_pointer_from_touch) {
-		if (seat->touch_id == cursor->pointer_touch_id) {
+		if (event->touch_id == cursor->pointer_touch_id) {
+			if (cursor->touch_click == TOUCH_CLICK_HELD) {
+				return;
+			}
+			if (cursor->touch_click == TOUCH_CLICK_PENDING) {
+				double mx = lx - cursor->cursor->x, my = ly - cursor->cursor->y;
+				if (mx * mx + my * my < TOUCH_SLOP * TOUCH_SLOP) {
+					return;
+				}
+				// a drag: the button goes down where the finger did
+				touch_hold_stop(cursor);
+				cursor->touch_click = TOUCH_CLICK_DRAG;
+				dispatch_cursor_button(cursor, &event->touch->base,
+					event->time_msec, BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED);
+			}
 			double dx, dy;
 			dx = lx - cursor->cursor->x;
 			dy = ly - cursor->cursor->y;
@@ -499,8 +700,14 @@ static void handle_touch_frame(struct wl_listener *listener, void *data) {
 		if (cursor->pointer_touch_up) {
 			cursor->pointer_touch_up = false;
 			cursor->simulating_pointer_from_touch = false;
+			// no pointer stays behind where the finger was: what it
+			// hovered (a title bar button, a link) is let go of
+			if (cursor->hidden) {
+				tw_handle_motion(cursor->seat, NULL, NULL);
+				wlr_seat_pointer_notify_clear_focus(wlr_seat);
+			}
 		}
-	} else {
+	} else if (!cursor->touch_edge_pending) {
 		wlr_seat_touch_notify_frame(wlr_seat);
 	}
 }
@@ -1030,6 +1237,9 @@ void sway_cursor_destroy(struct sway_cursor *cursor) {
 	}
 
 	wl_event_source_remove(cursor->hide_source);
+	if (cursor->touch_hold_source) {
+		wl_event_source_remove(cursor->touch_hold_source);
+	}
 
 	wl_list_remove(&cursor->image_surface_destroy.link);
 	wl_list_remove(&cursor->hold_begin.link);

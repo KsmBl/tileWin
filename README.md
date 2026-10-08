@@ -136,8 +136,10 @@ The restart keeps your windows open; an updated compositor itself starts with yo
 | Win+. or Win+; | Emoji picker |
 | Three fingers up / down on the touchpad | Task view / show the desktop |
 | Three fingers left / right on the touchpad | Next / previous desktop |
+| Swipe in from the left / right edge of a touchscreen | Task view / notifications |
+| Tap / hold a finger still on a touchscreen | Click / right-click (in menus and lists, a finger moved up or down scrolls) |
 
-Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode, `Super+Shift+Ctrl+R` to restart and the three finger swipes (up: task view, left / right: workspaces).
+Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode, `Super+Shift+Ctrl+R` to restart, the three finger swipes (up: task view, left / right: workspaces) and the touchscreen edge swipes.
 
 ## Themes
 

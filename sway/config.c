@@ -357,6 +357,7 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_snap_layouts = true;
 	config->tw_battery_saver = 20;
 	config->tw_stretch_both = true;
+	config->tw_touch_edge_swipe = true;
 
 	if (!(config->config_chain = create_list())) goto cleanup;
 	config->current_config_path = NULL;

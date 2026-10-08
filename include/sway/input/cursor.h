@@ -58,6 +58,16 @@ struct sway_cursor {
 	bool simulating_pointer_from_touch;
 	bool pointer_touch_up;
 	int32_t pointer_touch_id;
+	// the click of a simulated pointer waits for the finger to move, lift or
+	// be held (enum touch_click in cursor.c)
+	int touch_click;
+	struct wl_event_source *touch_hold_source;
+	// a finger that came down at a screen edge, held back until it is known
+	// whether it swipes in from there
+	bool touch_edge_pending, touch_edge_swiped;
+	uint32_t touch_edge; // enum wlr_edges
+	struct wlr_touch_down_event touch_edge_event;
+	double touch_edge_lx, touch_edge_ly;
 
 	struct wl_listener tool_axis;
 	struct wl_listener tool_tip;
@@ -111,6 +121,9 @@ void cursor_notify_key_press(struct sway_cursor *cursor);
 void pointer_motion(struct sway_cursor *cursor, uint32_t time_msec,
 		struct wlr_input_device *device, double dx, double dy,
 		double dx_unaccel, double dy_unaccel);
+
+/* A finger works the pointer: its click waits until it is a tap, a drag or held. */
+void cursor_touch_click_begin(struct sway_cursor *cursor);
 
 void dispatch_cursor_button(struct sway_cursor *cursor,
 	struct wlr_input_device *device, uint32_t time_msec, uint32_t button,

@@ -663,6 +663,13 @@ GtkWidget *mouse_page_new(struct settings *s) {
 		"Milliseconds a copy of the pointer stays behind it before it fades away; "
 		"0 turns the trail off", p->trail);
 
+	GtkWidget *touch = ui_group(content, "Touchscreen",
+		"A tap clicks, holding a finger still clicks with the right button, and in menus "
+		"and lists a finger moved up or down scrolls");
+	root_setting_new(p, touch, "touch_edge_swipe", "Swipe in from the screen edges",
+		"From the left edge for Task view, from the right edge for the notifications",
+		ROOT_SWITCH, 0, 0, 0, 1);
+
 	s->mouse_page = p;
 	mouse_page_refresh(s);
 	return page;
