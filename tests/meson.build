@@ -284,6 +284,16 @@ test(
 )
 
 test(
+	'restart-helpers',
+	find_program('restart_helpers.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 90,
+)
+
+test(
 	'screen-choice',
 	find_program('screen_choice.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

@@ -837,9 +837,140 @@ static bool binary_changed(void) {
 		now.st_mtime != started_from.st.st_mtime;
 }
 
+/*
+ * The programs of tileWin that run for the whole session besides the taskbar
+ * keep running the file they were started from, old as it is once an update
+ * put a new one in its place. A restart starts those again, and only those:
+ * the clipboard history forgets what was not pinned when it goes.
+ */
+enum helper {
+	HELPER_NIGHTLIGHT = 1 << 0,
+	HELPER_POLKIT = 1 << 1,
+	HELPER_CLIPBOARD = 1 << 2, // the taskbar starts it again when it needs it
+};
+
+static const struct {
+	const char *name;
+	enum helper helper;
+} helpers[] = {
+	{ "tilewin-nightlight", HELPER_NIGHTLIGHT },
+	{ "tilewin-polkit", HELPER_POLKIT },
+	{ "tilewin-clipboard", HELPER_CLIPBOARD },
+};
+
+/* Whether that process runs for this session (its Wayland display is ours). */
+static bool of_this_session(pid_t pid) {
+	const char *ours = getenv("WAYLAND_DISPLAY");
+	if (!ours) {
+		return false;
+	}
+	char path[64];
+	snprintf(path, sizeof(path), "/proc/%d/environ", (int)pid);
+	FILE *file = fopen(path, "r");
+	if (!file) {
+		return false;
+	}
+	char *entry = NULL;
+	size_t size = 0;
+	bool same = false;
+	while (getdelim(&entry, &size, '\0', file) > 0) {
+		if (strncmp(entry, "WAYLAND_DISPLAY=", 16) == 0) {
+			same = strcmp(entry + 16, ours) == 0;
+			break;
+		}
+	}
+	free(entry);
+	fclose(file);
+	return same;
+}
+
+/* Which helper that process is, if its file was replaced since it started. */
+static enum helper replaced_helper(pid_t pid) {
+	char link[64], exe[PATH_MAX];
+	snprintf(link, sizeof(link), "/proc/%d/exe", (int)pid);
+	ssize_t n = readlink(link, exe, sizeof(exe) - 1);
+	if (n <= 0) {
+		return 0;
+	}
+	exe[n] = '\0';
+	char *deleted = strstr(exe, " (deleted)");
+	if (deleted) {
+		*deleted = '\0';
+	}
+	const char *base = strrchr(exe, '/');
+	base = base ? base + 1 : exe;
+	enum helper helper = 0;
+	for (size_t i = 0; i < sizeof(helpers) / sizeof(helpers[0]); i++) {
+		if (strcmp(base, helpers[i].name) == 0) {
+			helper = helpers[i].helper;
+		}
+	}
+	struct stat running, on_disk;
+	if (!helper || stat(link, &running) != 0 || stat(exe, &on_disk) != 0) {
+		return 0; // not ours, or gone from the disk with nothing to start instead
+	}
+	bool replaced = running.st_ino != on_disk.st_ino || running.st_dev != on_disk.st_dev;
+	return replaced && of_this_session(pid) ? helper : 0;
+}
+
+/* Stops the helpers an update replaced; returns which they were. */
+static enum helper stop_replaced_helpers(void) {
+	enum helper stopped = 0;
+	DIR *proc = opendir("/proc");
+	struct dirent *de;
+	while (proc && (de = readdir(proc))) {
+		char *end;
+		long pid = strtol(de->d_name, &end, 10);
+		if (*end || pid <= 1 || pid == getpid()) {
+			continue;
+		}
+		enum helper helper = replaced_helper((pid_t)pid);
+		if (helper && kill((pid_t)pid, SIGTERM) == 0) {
+			sway_log(SWAY_INFO, "Restarting %s, which an update replaced",
+				helper == HELPER_NIGHTLIGHT ? "tilewin-nightlight" :
+				helper == HELPER_POLKIT ? "tilewin-polkit" : "tilewin-clipboard");
+			stopped |= helper;
+		}
+	}
+	if (proc) {
+		closedir(proc);
+	}
+	return stopped;
+}
+
+static enum helper helpers_to_start;
+static struct wl_event_source *helpers_timer;
+
+static int start_replaced_helpers(void *data) {
+	if (helpers_to_start & HELPER_NIGHTLIGHT) {
+		tw_nightlight_start();
+	}
+	if (helpers_to_start & HELPER_POLKIT) {
+		tw_polkit_start();
+	}
+	helpers_to_start = 0;
+	return 0;
+}
+
 /* Everything a restart does except leaving the windows behind. */
 static void do_restart_in_place(void *data) {
 	sway_log(SWAY_INFO, "Restarting tileWin without ending the session: the windows stay open");
+	helpers_to_start |= stop_replaced_helpers();
+	if (helpers_to_start & (HELPER_NIGHTLIGHT | HELPER_POLKIT)) {
+		// the new ones once the old ones are gone: a second polkit agent
+		// cannot have the session while the first still holds it
+		if (!helpers_timer) {
+			helpers_timer = wl_event_loop_add_timer(server.wl_event_loop,
+				start_replaced_helpers, NULL);
+		}
+		if (helpers_timer) {
+			wl_event_source_timer_update(helpers_timer, 1000);
+		}
+	} else {
+		// one that was not running yet (just installed, or turned on) starts
+		// now; with one already holding the session the new one just leaves
+		tw_polkit_start();
+	}
 	tw_panel_restart();   // a taskbar that was replaced on disk is replaced here
 	reload_config_now();  // config, theme, decorations, wallpaper, bindings
 	tw_session_export_environment();

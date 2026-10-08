@@ -245,3 +245,27 @@ tileWin is installed.
   Configuration:   ~/.config/tileWin/{common,tilemode,windowmode,taskbar}.conf
   Update later:    git pull && ./install.sh --no-deps && tilewinmsg restart
 EOF
+
+# In a running session: what a restart brings in, and what only a new login does.
+# The taskbar, the settings, the helpers and the config come in with
+# "tilewinmsg restart", the windows staying open; the compositor itself cannot
+# be swapped under open windows (a Wayland app dies with its compositor).
+if [ -z "$DESTDIR" ] && command -v tilewinmsg >/dev/null 2>&1 &&
+		running=$(tilewinmsg -t get_version 2>/dev/null); then
+	running=$(printf '%s' "$running" | sed -n 's/.*"human_readable": *"\([^"]*\)".*/\1/p')
+	installed=$("$PREFIX/bin/tilewin" --version 2>/dev/null | sed 's/^[^0-9]*//')
+	if [ -n "$running" ] && [ -n "$installed" ] && [ "${running%% *}" != "${installed%% *}" ]; then
+		cat <<EOF
+
+  tileWin is running ${running%% *}; ${installed%% *} is installed now.
+  "tilewinmsg restart" brings in the new taskbar, settings, helpers and
+  config with your windows open. The new compositor itself (window handling,
+  input, screens) starts with your next login, or right away with
+  "tilewinmsg restart relaunch-apps" (opens your apps again, without what
+  was unsaved in them).
+EOF
+	elif [ -n "$running" ]; then
+		echo
+		echo "  Run \"tilewinmsg restart\" to bring the update in; your windows stay open."
+	fi
+fi
