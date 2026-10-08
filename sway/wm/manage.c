@@ -726,6 +726,104 @@ bool tw_view_is_dialog(struct sway_view *view) {
 	return min_w > 0 && min_w == max_w && min_h > 0 && min_h == max_h;
 }
 
+/* ---------- where dialogs open ---------- */
+
+/* The window a dialog belongs to, if it names one that is open. */
+static struct sway_container *dialog_parent(struct sway_view *view) {
+	struct wlr_surface *surface = NULL;
+	switch (view->type) {
+	case SWAY_VIEW_XDG_SHELL:
+		for (struct wlr_xdg_toplevel *t = view->wlr_xdg_toplevel->parent; t && !surface;
+				t = t->parent) {
+			struct sway_view *v = t->base ? view_from_wlr_surface(t->base->surface) : NULL;
+			if (v && v->container) {
+				surface = t->base->surface;
+			}
+		}
+		break;
+#if WLR_HAS_XWAYLAND
+	case SWAY_VIEW_XWAYLAND:
+		for (struct wlr_xwayland_surface *x = view->wlr_xwayland_surface->parent;
+				x && !surface; x = x->parent) {
+			struct sway_view *v = x->surface ? view_from_wlr_surface(x->surface) : NULL;
+			if (v && v->container) {
+				surface = x->surface;
+			}
+		}
+		break;
+#endif
+	}
+	struct sway_view *parent = surface ? view_from_wlr_surface(surface) : NULL;
+	return parent && parent != view ? parent->container : NULL;
+}
+
+/* Two windows of one app: one Wayland connection, or one process under X11,
+ * where every app shares the connection of Xwayland. */
+static bool same_app(struct sway_view *a, struct sway_view *b) {
+	if (a->type == SWAY_VIEW_XDG_SHELL && b->type == SWAY_VIEW_XDG_SHELL &&
+			a->surface && b->surface && a->surface->resource && b->surface->resource) {
+		return wl_resource_get_client(a->surface->resource) ==
+			wl_resource_get_client(b->surface->resource);
+	}
+	return a->pid > 0 && a->pid == b->pid;
+}
+
+struct sway_workspace *tw_dialog_parent_workspace(struct sway_view *view) {
+	if (!tw_view_is_dialog(view)) {
+		return NULL;
+	}
+	struct sway_container *parent = dialog_parent(view);
+	return parent ? parent->pending.workspace : NULL;
+}
+
+/*
+ * A dialog that names no window it belongs to opens where its app's other
+ * windows are, the one used last first; one with no app window open at all
+ * (a password prompt, a message of a program in the background) opens on
+ * the main display.
+ */
+struct sway_workspace *tw_dialog_fallback_workspace(struct sway_view *view) {
+	if (!tw_view_is_dialog(view)) {
+		return NULL;
+	}
+	struct sway_seat *seat = input_manager_current_seat();
+	struct sway_seat_node *current;
+	wl_list_for_each(current, &seat->focus_stack, link) {
+		struct sway_node *node = current->node;
+		if (node->type != N_CONTAINER || !node->sway_container->view) {
+			continue;
+		}
+		struct sway_container *con = node->sway_container;
+		if (con->view != view && con->view->surface && con->pending.workspace &&
+				same_app(con->view, view)) {
+			return con->pending.workspace;
+		}
+	}
+	struct sway_output *main_output = tw_main_output();
+	return main_output ? output_get_active_workspace(main_output) : NULL;
+}
+
+/* A dialog over the middle of the window it belongs to, as far as the screen
+ * lets it. */
+void tw_center_dialog(struct sway_container *con) {
+	if (!con->view || !container_is_floating(con) || !tw_view_is_dialog(con->view) ||
+			con->pending.fullscreen_mode != FULLSCREEN_NONE) {
+		return;
+	}
+	struct sway_container *parent = dialog_parent(con->view);
+	struct sway_workspace *ws = con->pending.workspace;
+	if (!parent || !ws || parent->pending.workspace != ws || parent->pending.tw_minimized) {
+		return;
+	}
+	struct wlr_box box = {
+		parent->pending.x + (parent->pending.width - con->pending.width) / 2,
+		parent->pending.y + (parent->pending.height - con->pending.height) / 2,
+		con->pending.width, con->pending.height,
+	};
+	box = tw_fit_box(box, tw_workarea(ws));
+	container_floating_move_to(con, box.x, box.y);
+}
+
 #define NEARLY_FULL 0.9 // of the work area, in both directions
 
 /*

@@ -677,10 +677,23 @@ static struct sway_workspace *select_workspace(struct sway_view *view) {
 		return ws;
 	}
 
+	// A dialog opens with the window it belongs to, on that screen
+	ws = tw_dialog_parent_workspace(view);
+	if (ws) {
+		view_assign_ctx(view, NULL);
+		return ws;
+	}
+
 	// Check if there's a PID mapping
 	ws = view->ctx ? launcher_ctx_get_workspace(view->ctx) : NULL;
 	if (ws) {
 		view_assign_ctx(view, NULL);
+		return ws;
+	}
+
+	// ... or with its app's other windows, or on the main display
+	ws = tw_dialog_fallback_workspace(view);
+	if (ws) {
 		return ws;
 	}
 
@@ -974,6 +987,9 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	if (!fullscreen && !tw_session_apply_placement(view->container) &&
 			tw_mode == TW_MODE_WINDOW) {
 		tw_remember_apply(view->container);
+	}
+	if (!fullscreen) {
+		tw_center_dialog(view->container);
 	}
 
 	if (config->popup_during_fullscreen == POPUP_LEAVE &&

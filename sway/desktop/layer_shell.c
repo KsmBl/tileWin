@@ -427,10 +427,19 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 		layer_surface->pending.margin.left);
 
 	if (!layer_surface->output) {
-		// Assign last active output
+		// Assign last active output; a popup that takes no keys (the
+		// notifications of a daemon, an on-screen display) belongs to no
+		// window and goes on the main display, as on Windows, while a
+		// launcher or menu one types into comes up where one works
 		struct sway_output *output = NULL;
 		struct sway_seat *seat = input_manager_get_default_seat();
-		if (seat) {
+		bool keyboard = layer_surface->pending.keyboard_interactive !=
+			ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE;
+		bool popup = layer_surface->pending.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+		if (popup && !keyboard) {
+			output = tw_main_output();
+		}
+		if (!output && seat) {
 			struct sway_workspace *ws = seat_get_focused_workspace(seat);
 			if (ws != NULL) {
 				output = ws->output;
