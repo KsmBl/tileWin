@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <math.h>
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
@@ -316,6 +317,134 @@ struct sway_output *output_from_wlr_output(struct wlr_output *output) {
 	return output->data;
 }
 
+/*
+ * A box seen along a direction: where it starts and ends going that way, and
+ * where it lies across it. Left and up are right and down mirrored.
+ */
+struct dir_span {
+	double start, end;      // along the direction
+	double across0, across1; // across it
+};
+
+static struct dir_span dir_span(const struct wlr_box *b, enum wlr_direction direction) {
+	struct dir_span s;
+	bool horizontal = direction == WLR_DIRECTION_LEFT || direction == WLR_DIRECTION_RIGHT;
+	double a0 = horizontal ? b->x : b->y;
+	double a1 = a0 + (horizontal ? b->width : b->height);
+	if (direction == WLR_DIRECTION_LEFT || direction == WLR_DIRECTION_UP) {
+		s.start = -a1;
+		s.end = -a0;
+	} else {
+		s.start = a0;
+		s.end = a1;
+	}
+	s.across0 = horizontal ? b->y : b->x;
+	s.across1 = s.across0 + (horizontal ? b->height : b->width);
+	return s;
+}
+
+static double span_overlap(double a0, double a1, double b0, double b1) {
+	double lo = a0 > b0 ? a0 : b0, hi = a1 < b1 ? a1 : b1;
+	return hi > lo ? hi - lo : 0;
+}
+
+static double span_distance(double v, double s0, double s1) {
+	return v < s0 ? s0 - v : v > s1 ? v - s1 : 0;
+}
+
+struct dir_candidate {
+	struct sway_output *output;
+	int tier;       // 0 faces the box, 1 faces the screen, 2 lies diagonally
+	double gap;     // how far beyond the screen it starts
+	double offset;  // how far the middle of the box is from it, across
+	double overlap; // how much of the box it faces
+};
+
+/* Whether a is the better pick of the two, the nearest going that way. */
+static bool dir_better(const struct dir_candidate *a, const struct dir_candidate *b,
+		bool farthest) {
+	if (a->tier != b->tier) {
+		return a->tier < b->tier;
+	}
+	// screens a few pixels apart count as just as near
+	int ga = (int)(a->gap / 64), gb = (int)(b->gap / 64);
+	if (ga != gb) {
+		return farthest ? ga > gb : ga < gb;
+	}
+	if (a->offset != b->offset) {
+		return a->offset < b->offset;
+	}
+	if (a->overlap != b->overlap) {
+		return a->overlap > b->overlap;
+	}
+	return farthest ? a->gap > b->gap : a->gap < b->gap;
+}
+
+static struct sway_output *pick_in_direction(struct sway_output *reference,
+		enum wlr_direction direction, const struct wlr_box *box, bool farthest) {
+	struct wlr_box here_box;
+	wlr_output_layout_get_box(root->output_layout, reference->wlr_output, &here_box);
+	struct dir_span here = dir_span(&here_box, direction);
+	struct dir_span ref = dir_span(box, direction);
+	// the part of the box on this screen, across the direction
+	double ref0 = ref.across0 > here.across0 ? ref.across0 : here.across0;
+	double ref1 = ref.across1 < here.across1 ? ref.across1 : here.across1;
+	if (ref1 <= ref0) {
+		ref0 = here.across0;
+		ref1 = here.across1;
+	}
+	double ref_mid = (ref0 + ref1) / 2;
+	double here_mid = (here.start + here.end) / 2;
+
+	struct dir_candidate best = { 0 };
+	for (int i = 0; i < root->outputs->length; i++) {
+		struct sway_output *output = root->outputs->items[i];
+		if (output == reference || !output->enabled || !output->wlr_output) {
+			continue;
+		}
+		struct wlr_box box_o;
+		wlr_output_layout_get_box(root->output_layout, output->wlr_output, &box_o);
+		if (wlr_box_empty(&box_o)) {
+			continue;
+		}
+		struct dir_span o = dir_span(&box_o, direction);
+		double len = fmin(here.end - here.start, o.end - o.start);
+		// mostly beyond the screen that way: its middle further, and it does
+		// not reach back over more than half of the smaller one
+		if ((o.start + o.end) / 2 <= here_mid || o.start < here.end - len / 2) {
+			continue;
+		}
+		struct dir_candidate c = {
+			.output = output,
+			.gap = fmax(0, o.start - here.end),
+			.offset = span_distance(ref_mid, o.across0, o.across1),
+			.overlap = span_overlap(o.across0, o.across1, ref0, ref1),
+		};
+		c.tier = c.overlap > 0 ? 0 :
+			span_overlap(o.across0, o.across1, here.across0, here.across1) > 0 ? 1 : 2;
+		if (!best.output || dir_better(&c, &best, farthest)) {
+			best = c;
+		}
+	}
+	return best.output;
+}
+
+struct sway_output *output_in_direction_of_box(struct sway_output *reference,
+		enum wlr_direction direction, const struct wlr_box *box, bool wrap) {
+	if (!reference || !reference->wlr_output || !box) {
+		return NULL;
+	}
+	struct sway_output *next = pick_in_direction(reference, direction, box, false);
+	if (!next && wrap) {
+		// round to the screen furthest the other way, as sway does
+		enum wlr_direction back = direction == WLR_DIRECTION_LEFT ? WLR_DIRECTION_RIGHT :
+			direction == WLR_DIRECTION_RIGHT ? WLR_DIRECTION_LEFT :
+			direction == WLR_DIRECTION_UP ? WLR_DIRECTION_DOWN : WLR_DIRECTION_UP;
+		next = pick_in_direction(reference, back, box, true);
+	}
+	return next;
+}
+
 struct sway_output *output_get_in_direction(struct sway_output *reference,
 		enum wlr_direction direction) {
 	if (!sway_assert(direction, "got invalid direction: %d", direction)) {
@@ -323,14 +452,7 @@ struct sway_output *output_get_in_direction(struct sway_output *reference,
 	}
 	struct wlr_box output_box;
 	wlr_output_layout_get_box(root->output_layout, reference->wlr_output, &output_box);
-	int lx = output_box.x + output_box.width / 2;
-	int ly = output_box.y + output_box.height / 2;
-	struct wlr_output *wlr_adjacent = wlr_output_layout_adjacent_output(
-			root->output_layout, direction, reference->wlr_output, lx, ly);
-	if (!wlr_adjacent) {
-		return NULL;
-	}
-	return output_from_wlr_output(wlr_adjacent);
+	return output_in_direction_of_box(reference, direction, &output_box, false);
 }
 
 void output_add_workspace(struct sway_output *output,

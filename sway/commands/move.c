@@ -28,7 +28,7 @@ static const char expected_syntax[] =
 	"'move <container|window> [to] mark <mark>'";
 
 static struct sway_output *output_in_direction(const char *direction_string,
-		struct sway_output *reference, int ref_lx, int ref_ly) {
+		struct sway_output *reference, const struct wlr_box *box) {
 	if (strcasecmp(direction_string, "current") == 0) {
 		struct sway_workspace *active_ws =
 			seat_get_focused_workspace(config->handler_context.seat);
@@ -58,18 +58,10 @@ static struct sway_output *output_in_direction(const char *direction_string,
 	}
 
 	if (reference && direction) {
-		struct wlr_output *target = wlr_output_layout_adjacent_output(
-				root->output_layout, direction, reference->wlr_output,
-				ref_lx, ref_ly);
-
-		if (!target) {
-			target = wlr_output_layout_farthest_output(
-					root->output_layout, opposite_direction(direction),
-					reference->wlr_output, ref_lx, ref_ly);
-		}
-
+		struct sway_output *target =
+			output_in_direction_of_box(reference, direction, box, true);
 		if (target) {
-			return target->data;
+			return target;
 		}
 	}
 
@@ -277,8 +269,12 @@ static void container_move_to_container(struct sway_container *container,
 
 static bool container_move_to_next_output(struct sway_container *container,
 		struct sway_output *output, enum wlr_direction move_dir) {
+	struct wlr_box box = {
+		container->pending.x, container->pending.y,
+		container->pending.width, container->pending.height,
+	};
 	struct sway_output *next_output =
-		output_get_in_direction(output, move_dir);
+		output_in_direction_of_box(output, move_dir, &box, false);
 	if (next_output) {
 		struct sway_workspace *ws = output_get_active_workspace(next_output);
 		if (!sway_assert(ws, "Expected output to have a workspace")) {
@@ -517,8 +513,11 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 		struct sway_container *dst = seat_get_focus_inactive_tiling(seat, ws);
 		destination = dst ? &dst->node : &ws->node;
 	} else if (strcasecmp(argv[0], "output") == 0) {
-		struct sway_output *new_output = output_in_direction(argv[1],
-				old_output, container->pending.x, container->pending.y);
+		struct wlr_box box = {
+			container->pending.x, container->pending.y,
+			container->pending.width, container->pending.height,
+		};
+		struct sway_output *new_output = output_in_direction(argv[1], old_output, &box);
 		if (!new_output) {
 			return cmd_results_new(CMD_FAILURE,
 				"Can't find output with name/direction '%s'", argv[1]);
@@ -655,10 +654,8 @@ static struct cmd_results *cmd_move_workspace(int argc, char **argv) {
 	}
 
 	struct sway_output *old_output = workspace->output;
-	int center_x = workspace->width / 2 + workspace->x,
-		center_y = workspace->height / 2 + workspace->y;
-	struct sway_output *new_output = output_in_direction(argv[0],
-			old_output, center_x, center_y);
+	struct wlr_box box = { workspace->x, workspace->y, workspace->width, workspace->height };
+	struct sway_output *new_output = output_in_direction(argv[0], old_output, &box);
 	if (!new_output) {
 		return cmd_results_new(CMD_FAILURE,
 			"Can't find output with name/direction '%s'", argv[0]);

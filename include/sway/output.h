@@ -93,6 +93,14 @@ void output_begin_destroy(struct sway_output *output);
 
 struct sway_output *output_from_wlr_output(struct wlr_output *output);
 
+/*
+ * The screen that way from the reference one that makes the most sense for
+ * something in box: the nearest one beyond it, facing the box rather than
+ * only the screen, lined up best with its middle; wrap goes round to the
+ * furthest screen the other way when there is none.
+ */
+struct sway_output *output_in_direction_of_box(struct sway_output *reference,
+		enum wlr_direction direction, const struct wlr_box *box, bool wrap);
 struct sway_output *output_get_in_direction(struct sway_output *reference,
 		enum wlr_direction direction);
 

@@ -153,10 +153,10 @@ bool tw_snap_across(struct sway_container *con, int direction) {
 		return false;
 	}
 	struct sway_output *here = con->pending.workspace->output;
-	struct wlr_output *next = wlr_output_layout_adjacent_output(root->output_layout,
-		direction, here->wlr_output, con->pending.x + con->pending.width / 2,
-		con->pending.y + con->pending.height / 2);
-	struct sway_output *output = next ? output_from_wlr_output(next) : NULL;
+	struct wlr_box box = {
+		con->pending.x, con->pending.y, con->pending.width, con->pending.height,
+	};
+	struct sway_output *output = output_in_direction_of_box(here, direction, &box, false);
 	if (!screen_desktop(output)) {
 		return false;
 	}
