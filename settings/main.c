@@ -582,7 +582,7 @@ static void build_window(struct settings *s) {
 	static const struct {
 		const char *title, *icon;
 	} folder_list[] = {
-		{ "Personalize", "preferences-desktop-theme-symbolic" },
+		{ "Personalize", "preferences-desktop-appearance-symbolic" },
 		{ "Windows", "focus-windows-symbolic" },
 		{ "Taskbar & Start", "view-app-grid-symbolic" },
 		{ "Devices", "computer-symbolic" },
@@ -595,7 +595,7 @@ static void build_window(struct settings *s) {
 		int folder;
 		const char *icon;
 	} pages[] = {
-		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new, 0, "preferences-desktop-theme-symbolic" },
+		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new, 0, "preferences-desktop-appearance-symbolic" },
 		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new, 0, "preferences-desktop-wallpaper-symbolic" },
 		{ "desktop", "Desktop", "icons grid cells widgets gadgets clock analog binary digital "
 			"chart gauge ring bar cpu memory power", desktop_page_new, 0, "user-desktop-symbolic" },

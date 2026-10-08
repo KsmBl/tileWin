@@ -122,6 +122,23 @@ target_put() { # target value (empty: remove the setting)
 	return 0
 }
 
+# Whether an icon theme of that name is installed where apps look for one.
+icon_theme_installed() { # name
+	[ -n "$1" ] || return 1
+	[ -f "$HOME/.icons/$1/index.theme" ] && return 0
+	[ -f "$data/icons/$1/index.theme" ] && return 0
+	IFS_SAVE=$IFS
+	IFS=:
+	for dir in ${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do
+		if [ -f "$dir/icons/$1/index.theme" ]; then
+			IFS=$IFS_SAVE
+			return 0
+		fi
+	done
+	IFS=$IFS_SAVE
+	return 1
+}
+
 # Sets the icon theme of every toolkit that is configured on this system.
 set_icon_theme() { # name
 	for target in $targets; do
@@ -221,15 +238,26 @@ build_theme() { # set-name icon-dir inherit title
 			done
 		done <"$2/aliases"
 	fi
-	inherits=hicolor
-	case "$3" in
-	"" | hicolor | "$prefix"*) ;;
-	*) inherits="$3,hicolor" ;;
-	esac
+	# the fallback, if it is installed here (a theme remembered from another
+	# computer may not be), then Adwaita, which has the icons GTK apps ask for
+	# by name (the symbolic ones of their sidebars and buttons): GTK itself
+	# falls back to hicolor only
+	inherits=
+	for theme in "$3" Adwaita AdwaitaLegacy; do
+		case "$theme" in
+		"" | hicolor | "$prefix"*) continue ;;
+		esac
+		case ",$inherits," in
+		*",$theme,"*) continue ;;
+		esac
+		icon_theme_installed "$theme" && inherits="$inherits$theme,"
+	done
+	inherits="${inherits}hicolor"
+	fallback=${inherits%%,*}
 	cat >"$tmp/index.theme" <<EOF
 [Icon Theme]
 Name=tileWin $4
-Comment=Icons of the tileWin theme $4, other icons come from $3
+Comment=Icons of the tileWin theme $4, other icons come from $fallback
 Inherits=$inherits
 Directories=scalable/apps
 
@@ -294,7 +322,7 @@ apply)
 		remove_generated "$target"
 		set_icon_theme "$target"
 		echo "$target" >"$applied_file"
-	elif [ -n "$4" ] && [ "$4" != - ]; then
+	elif [ -n "$4" ] && [ "$4" != - ] && icon_theme_installed "$4"; then
 		# the theme names an existing icon theme, e.g. breeze
 		set_icon_theme "$4"
 		echo "$4" >"$applied_file"
