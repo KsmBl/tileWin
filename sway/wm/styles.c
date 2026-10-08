@@ -178,6 +178,25 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 	}
 }
 
+/* The buttons of a frame; a dialog has none but the close button. */
+static void frame_buttons(const struct tw_theme *t, const struct tw_frame *f, int W,
+		struct tw_buttons *b) {
+	tw_style_buttons(t, W, f->maximized, b);
+	if (!f->dialog) {
+		return;
+	}
+	// empty boxes where the close button begins (or the right end of the
+	// title bar without one), so the title still knows where it ends
+	struct wlr_box none = b->close;
+	if (none.width <= 0) {
+		struct metrics m;
+		get_metrics(t, f->maximized, &m);
+		none = (struct wlr_box){ W - m.side, m.side, 0, 0 };
+	}
+	none.width = 0;
+	b->minimize = b->maximize = none;
+}
+
 /* ---------- drawing helpers ---------- */
 
 static void fill_rect(cairo_t *cr, double x, double y, double w, double h,
@@ -480,7 +499,7 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 		bx, by, bw, bar_h, false);
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 
 	double x = bx + 2;
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
@@ -505,6 +524,9 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 		{ &b.close, TW_HIT_CLOSE, GLYPH_CLOSE },
 	};
 	for (size_t i = 0; i < 3; i++) {
+		if (buttons[i].box->width <= 0) {
+			continue; // not on a dialog
+		}
 		bool pressed = f->pressed == buttons[i].hit && f->hover == buttons[i].hit;
 		struct wlr_box box = *buttons[i].box;
 		bevel(cr, &box, pressed, face, hi, light, shadow, dark);
@@ -563,14 +585,16 @@ static void draw_win1(cairo_t *cr, const struct tw_theme *t,
 
 	// the zoom box: the corner of a smaller window in it
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
-	bool pressed = f->pressed == TW_HIT_MAXIMIZE && f->hover == TW_HIT_MAXIMIZE;
-	win1_box(cr, &b.maximize, false, pressed ? dark : face, dark);
-	uint32_t glyph = pressed ? face : dark;
-	int gx = b.maximize.x + 2, gy = b.maximize.y + bar_h / 3;
-	int gw = b.maximize.width * 2 / 3 - 2;
-	fill_rect(cr, gx, gy, gw, 2, glyph);
-	fill_rect(cr, gx + gw - 2, gy, 2, b.maximize.y + bar_h - gy, glyph);
+	frame_buttons(t, f, W, &b);
+	if (b.maximize.width > 0) { // a dialog has none
+		bool pressed = f->pressed == TW_HIT_MAXIMIZE && f->hover == TW_HIT_MAXIMIZE;
+		win1_box(cr, &b.maximize, false, pressed ? dark : face, dark);
+		uint32_t glyph = pressed ? face : dark;
+		int gx = b.maximize.x + 2, gy = b.maximize.y + bar_h / 3;
+		int gw = b.maximize.width * 2 / 3 - 2;
+		fill_rect(cr, gx, gy, gw, 2, glyph);
+		fill_rect(cr, gx + gw - 2, gy, 2, b.maximize.y + bar_h - gy, glyph);
+	}
 
 	// the title, white on a black box of its own in the middle
 	const char *font = tw_theme_str(t, "decoration.title_font", "Fixedsys, Terminus, Monospace Bold 9");
@@ -603,6 +627,9 @@ static void win3_triangle(cairo_t *cr, double cx, double tip_y, int half, bool u
 
 static void draw_win3_button(cairo_t *cr, const struct tw_theme *t, const struct wlr_box *b,
 		enum glyph glyph, bool pressed) {
+	if (b->width <= 0) {
+		return; // not on a dialog
+	}
 	uint32_t face = tw_theme_color(t, "decoration.face", 0xc0c0c0ff);
 	uint32_t hi = tw_theme_color(t, "decoration.highlight", 0xffffffff);
 	uint32_t shadow = tw_theme_color(t, "decoration.shadow", 0x808080ff);
@@ -692,7 +719,7 @@ static void draw_win3(cairo_t *cr, const struct tw_theme *t,
 	cairo_stroke(cr);
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 	double tx = ctl.x + ctl.width + 4;
 	draw_text(cr, tw_theme_str(t, "decoration.title_font", "MS Sans Serif, Noto Sans Bold 8"),
@@ -712,6 +739,9 @@ static void draw_win3(cairo_t *cr, const struct tw_theme *t,
 static void draw_xp_button(cairo_t *cr, const struct tw_theme *t,
 		const struct tw_frame *f, const struct wlr_box *b, enum glyph glyph,
 		enum tw_hit hit) {
+	if (b->width <= 0) {
+		return; // not on a dialog
+	}
 	bool close = hit == TW_HIT_CLOSE;
 	bool hover = f->hover == hit;
 	bool pressed = hover && f->pressed == hit;
@@ -805,7 +835,7 @@ static void draw_winxp(cairo_t *cr, const struct tw_theme *t,
 	cairo_restore(cr);
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 
 	double x = m->side + 3;
 	double icon_y = floor((m->top - 16) / 2.0) + (f->maximized ? 0 : 1);
@@ -915,7 +945,7 @@ static void draw_win7(cairo_t *cr, const struct tw_theme *t,
 	}
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 
 	double x = m->side + 2;
 	double text_top = f->maximized ? 0 : m->side / 2.0;
@@ -949,6 +979,9 @@ static void draw_win7(cairo_t *cr, const struct tw_theme *t,
 	};
 	for (size_t i = 0; i < 3; i++) {
 		const struct wlr_box *box = buttons[i].box;
+		if (box->width <= 0) {
+			continue; // not on a dialog
+		}
 		bool close = buttons[i].hit == TW_HIT_CLOSE;
 		bool hover = f->hover == buttons[i].hit;
 		bool pressed = hover && f->pressed == buttons[i].hit;
@@ -1014,7 +1047,7 @@ static void draw_modern(cairo_t *cr, const struct tw_theme *t,
 		win11 ? 0xf3f3f3ff : 0xffffffff, win11 ? 0xfafafaff : 0xffffffff));
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 
 	const struct {
 		const struct wlr_box *box;
@@ -1041,6 +1074,9 @@ static void draw_modern(cairo_t *cr, const struct tw_theme *t,
 			fg = close ? 0xffffffff : 0x000000ff;
 		}
 		const struct wlr_box *box = buttons[i].box;
+		if (box->width <= 0) {
+			continue; // not on a dialog
+		}
 		fill_rect(cr, box->x, box->y, box->width, box->height, bg);
 		cairo_set_antialias(cr, buttons[i].glyph == GLYPH_CLOSE || win11 ?
 			CAIRO_ANTIALIAS_DEFAULT : CAIRO_ANTIALIAS_NONE);
@@ -1099,7 +1135,7 @@ static void draw_win8(cairo_t *cr, const struct tw_theme *t,
 	}
 
 	struct tw_buttons b;
-	tw_style_buttons(t, W, f->maximized, &b);
+	frame_buttons(t, f, W, &b);
 	const struct {
 		const struct wlr_box *box;
 		enum tw_hit hit;
@@ -1115,6 +1151,9 @@ static void draw_win8(cairo_t *cr, const struct tw_theme *t,
 		bool hover = f->hover == buttons[i].hit;
 		bool pressed = hover && f->pressed == buttons[i].hit;
 		const struct wlr_box *box = buttons[i].box;
+		if (box->width <= 0) {
+			continue; // not on a dialog
+		}
 		uint32_t bg = 0, fg = glyph_color;
 		if (close) {
 			bg = tw_theme_color(t, pressed ? "decoration.close.pressed" : hover ?

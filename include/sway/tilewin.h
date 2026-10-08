@@ -138,6 +138,7 @@ struct tw_frame {
 	const char *title;
 	cairo_surface_t *icon;
 	enum tw_hit hover, pressed;
+	bool dialog; // a dialog's frame: a close button only, where the style has one
 };
 
 struct tw_buttons {

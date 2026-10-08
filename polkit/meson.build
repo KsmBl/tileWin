@@ -4,11 +4,14 @@ if polkit_agent.found()
 	executable(
 		'tilewin-polkit', [
 			'main.c',
+			# the window frames of the themes, as the compositor draws them
+			'../sway/wm/styles.c',
 			wl_protos_src,
 		],
 		include_directories: [sway_inc],
 		dependencies: [cairo, gdk_pixbuf, jsonc, math, pango, pangocairo, polkit_agent, rsvg,
-			wayland_client, xkbcommon],
+			wayland_client, xkbcommon,
+			wlroots.partial_dependency(compile_args: true, includes: true)],
 		link_with: [lib_sway_common, lib_sway_client],
 		install: true,
 	)

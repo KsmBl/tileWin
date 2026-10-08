@@ -9,8 +9,12 @@
  * Yes (or Return) signs in, No (or Escape) refuses. A wrong password is said
  * so and asked again. Requests that come while one is shown wait their turn.
  *
- * It looks like the theme in use: the classic look of Windows 95 and before,
- * or the newer one with a band of the accent color, light or dark.
+ * It looks like the dialogs of the theme in use: the window frame of the theme
+ * (from the compositor's own renderer, with a close button only) around the
+ * dialog of that Windows, from the white boxes of Windows 1 and the grey
+ * bevels of Windows 95 over the dithered screen, the beige face of XP and the
+ * glossy buttons of Windows 7, to the User Account Control of Windows 10 and
+ * 11 without a frame. Dark themes have it dark.
  *
  * tileWin starts it with the session (polkit_agent disable turns that off).
  * It registers for the logind session it runs in and leaves when the
@@ -39,23 +43,32 @@
 #include "ipc-client.h"
 #include "ipc.h"
 #include "pool-buffer.h"
+#include "sway/tilewin.h"
 #include "tw_theme.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
-#define DIALOG_WIDTH 460
-#define PAD 20
+#define CONTENT_WIDTH 440 // the inside of the dialog
+#define PAD 18
 #define PASSWORD_MAX 512
 
-enum look {
-	LOOK_CLASSIC, // Windows 3.x and 95: grey, bevels, a title bar
-	LOOK_MODERN,  // a band of the accent color over a plain dialog
+/* Which Windows the theme looks like, as the compositor's frames tell them. */
+enum era {
+	ERA_WIN1,
+	ERA_WIN3,
+	ERA_WIN95, // also Windows 2000
+	ERA_XP,
+	ERA_WIN7,  // also Vista
+	ERA_WIN8,
+	ERA_WIN10,
+	ERA_WIN11,
 };
 
 enum hit {
 	HIT_NONE,
 	HIT_YES,
 	HIT_NO,
-	HIT_USER, // the account to sign in as, when there is a choice
+	HIT_USER,  // the account to sign in as, when there is a choice
+	HIT_CLOSE, // the close button of the frame
 };
 
 struct agent_output {
@@ -101,11 +114,21 @@ static struct {
 	xkb_keysym_t repeat_sym;
 	char repeat_utf8[8];
 
+	bool preview;     // --preview: a sample request, polkit left alone
+	bool preview_yes; // what the preview was answered
+	GMainLoop *loop;
+
 	struct tw_theme *theme;
-	enum look look;
+	enum era era;
 	bool dark;
-	uint32_t bg, fg, dim, accent, field_bg, field_fg, error;
+	bool framed; // in the theme's window frame (not Windows 10 and 11)
+	bool dither; // the screens dithered, as Windows 95 and before did, not darkened
+	uint32_t body, fg, instruction, dim, accent, error;
+	uint32_t strip, strip_line; // the band with the buttons at the bottom (0: none)
+	uint32_t field_bg, field_fg, field_line, field_focus;
 	const char *font, *bold;
+	const char *question, *yes_label, *no_label;
+	cairo_surface_t *shield; // the shield of User Account Control, for the frame
 
 	GQueue queue; // struct request *, waiting
 	struct request *current;
@@ -124,7 +147,7 @@ static struct {
 	double px, py;
 	struct wl_surface *pointer_surface;
 	enum hit hover, pressed;
-	struct { double x, y, w, h; } yes, no, user; // where they were drawn
+	struct { double x, y, w, h; } yes, no, user, close; // where they were drawn
 } agent;
 
 static void render_all(void);
@@ -241,179 +264,236 @@ static char *identity_label(PolkitIdentity *identity) {
 	return polkit_identity_to_string(identity);
 }
 
-static void button(cairo_t *cr, double x, double y, double w, double h, const char *label,
-		bool primary, bool hover, bool pressed) {
-	if (agent.look == LOOK_CLASSIC) {
-		box(cr, x, y, w, h, 0, 0xc0c0c0ff);
-		if (primary) { // the default button has a dark frame round its edge
-			box(cr, x - 1, y - 1, w + 2, 1, 0, 0x000000ff);
-			box(cr, x - 1, y + h, w + 2, 1, 0, 0x000000ff);
-			box(cr, x - 1, y - 1, 1, h + 2, 0, 0x000000ff);
-			box(cr, x + w, y - 1, 1, h + 2, 0, 0x000000ff);
-		}
-		bevel(cr, x, y, w, h, pressed);
-		int th = text(cr, agent.font, label, 0, 0, w, 0, PANGO_ALIGN_CENTER, false);
-		text(cr, agent.font, label, x + (pressed ? 1 : 0), y + (h - th) / 2 + (pressed ? 1 : 0),
-			w, 0x000000ff, PANGO_ALIGN_CENTER, true);
-		return;
-	}
-	uint32_t overlay = agent.dark ? 0xffffff00 : 0x00000000;
-	uint32_t bg = primary ? agent.accent : (overlay | (agent.dark ? 0x22 : 0x12));
-	if (hover || pressed) {
-		bg = primary ? mix(agent.accent, agent.dark ? 0xffffffff : 0x000000ff,
-			pressed ? 0.25 : 0.12) : (overlay | (pressed ? 0x40 : 0x2a));
-	}
-	box(cr, x, y, w, h, 4, bg);
-	if (!primary) {
-		cairo_new_path(cr);
-		rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, 4);
-		set_color(cr, overlay | (agent.dark ? 0x40 : 0x30));
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-	}
-	int th = text(cr, agent.font, label, 0, 0, w, 0, PANGO_ALIGN_CENTER, false);
-	text(cr, agent.font, label, x, y + (h - th) / 2.0, w,
-		primary ? 0xffffffff : agent.fg, PANGO_ALIGN_CENTER, true);
+/* The shield of User Account Control: blue and gold quarters. */
+static void draw_shield(cairo_t *cr, double x, double y, double size) {
+	double w = size * 0.82, h = size;
+	double l = x + (size - w) / 2, r = l + w, cx = x + size / 2;
+	cairo_save(cr);
+	cairo_new_path(cr);
+	cairo_move_to(cr, cx, y);
+	cairo_curve_to(cr, cx + w * 0.25, y + h * 0.08, r - w * 0.1, y + h * 0.1, r, y + h * 0.12);
+	cairo_line_to(cr, r, y + h * 0.5);
+	cairo_curve_to(cr, r, y + h * 0.78, cx + w * 0.2, y + h * 0.92, cx, y + h);
+	cairo_curve_to(cr, cx - w * 0.2, y + h * 0.92, l, y + h * 0.78, l, y + h * 0.5);
+	cairo_line_to(cr, l, y + h * 0.12);
+	cairo_curve_to(cr, l + w * 0.1, y + h * 0.1, cx - w * 0.25, y + h * 0.08, cx, y);
+	cairo_close_path(cr);
+	cairo_path_t *outline = cairo_copy_path(cr);
+	cairo_clip(cr);
+	double my = y + h * 0.46;
+	uint32_t blue = 0x2a64c8ff, gold = 0xf0c419ff;
+	box(cr, l, y, cx - l, my - y, 0, blue);
+	box(cr, cx, y, r - cx, my - y, 0, gold);
+	box(cr, l, my, cx - l, y + h - my, 0, gold);
+	box(cr, cx, my, r - cx, y + h - my, 0, blue);
+	cairo_pattern_t *gloss = cairo_pattern_create_linear(0, y, 0, y + h);
+	cairo_pattern_add_color_stop_rgba(gloss, 0, 1, 1, 1, 0.45);
+	cairo_pattern_add_color_stop_rgba(gloss, 0.5, 1, 1, 1, 0.05);
+	cairo_pattern_add_color_stop_rgba(gloss, 1, 0, 0, 0, 0.15);
+	cairo_set_source(cr, gloss);
+	cairo_paint(cr);
+	cairo_pattern_destroy(gloss);
+	cairo_reset_clip(cr);
+	cairo_new_path(cr);
+	cairo_append_path(cr, outline);
+	cairo_path_destroy(outline);
+	cairo_set_line_width(cr, size / 16);
+	set_color(cr, 0x1a3a70ff);
+	cairo_stroke(cr);
+	cairo_restore(cr);
 }
 
-/* The dialog with its top left corner at x, y; returns its height. Measured
- * only when draw is false. */
-static int dialog(cairo_t *cr, double x, double y, bool draw) {
-	struct request *r = agent.current;
-	const int W = DIALOG_WIDTH;
-	bool classic = agent.look == LOOK_CLASSIC;
-	int header = classic ? 22 : 44;
-	char big[160];
-	bigger(agent.bold, big, sizeof(big), classic ? 1 : 4);
-	const char *question = "Do you want to allow this app to make changes to your device?";
-	int inner = W - 2 * PAD;
-
-	// the height first: the parts below the header
-	int h = header + PAD;
-	h += text(cr, big, question, 0, 0, inner, 0, PANGO_ALIGN_LEFT, false) + 12;
-	if (r->message && r->message[0]) {
-		h += text(cr, agent.font, r->message, 0, 0, inner, 0, PANGO_ALIGN_LEFT, false) + 6;
-	}
-	char detail[512];
-	snprintf(detail, sizeof(detail), "%s%s%s", r->program ? "Program: " : "",
-		r->program ? r->program : "", "");
-	if (r->program) {
-		h += text(cr, agent.font, detail, 0, 0, inner, 0, PANGO_ALIGN_LEFT, false) + 2;
-	}
-	char action[300];
-	snprintf(action, sizeof(action), "Action: %s", r->action_id);
-	h += text(cr, agent.font, action, 0, 0, inner, 0, PANGO_ALIGN_LEFT, false) + 14;
-	h += 22 + 6;  // signing in as
-	h += 18 + 30; // the prompt and the field
-	h += 22;      // the note
-	h += 14 + 30 + PAD; // the buttons
-	if (!draw) {
-		return h;
-	}
-
-	// the dialog and its header
-	if (classic) {
-		box(cr, x, y, W, h, 0, agent.bg);
-		bevel(cr, x, y, W, h, false);
-		cairo_pattern_t *grad = cairo_pattern_create_linear(x, 0, x + W, 0);
-		cairo_pattern_add_color_stop_rgb(grad, 0, 0, 0, 0.5);
-		cairo_pattern_add_color_stop_rgb(grad, 1, 0.06, 0.52, 0.82);
-		cairo_rectangle(cr, x + 3, y + 3, W - 6, header - 4);
-		cairo_set_source(cr, grad);
-		cairo_fill(cr);
-		cairo_pattern_destroy(grad);
-		text(cr, agent.bold, "User Account Control", x + 8, y + 5, W - 16, 0xffffffff,
-			PANGO_ALIGN_LEFT, true);
+static void outline(cairo_t *cr, double x, double y, double w, double h, double r, double lw,
+		uint32_t c) {
+	cairo_new_path(cr);
+	if (r > 0) {
+		rounded(cr, x + lw / 2, y + lw / 2, w - lw, h - lw, r);
 	} else {
-		double radius = agent.theme && agent.theme->style &&
-			strcmp(agent.theme->style, "win11") == 0 ? 8 : 0;
-		// a soft shadow under it
-		for (int i = 6; i > 0; i--) {
-			box(cr, x - i, y - i + 4, W + 2 * i, h + 2 * i, radius + i, 0x0000000c);
-		}
-		cairo_save(cr);
-		cairo_new_path(cr);
-		if (radius > 0) {
-			rounded(cr, x, y, W, h, radius);
+		cairo_rectangle(cr, x + lw / 2, y + lw / 2, w - lw, h - lw);
+	}
+	set_color(cr, c);
+	cairo_set_line_width(cr, lw);
+	cairo_stroke(cr);
+}
+
+/* A vertical gradient of "offset:#color" stops, in a rounded box. */
+static void gradient_box(cairo_t *cr, double x, double y, double w, double h, double r,
+		const uint32_t *colors, const double *stops, int n) {
+	cairo_pattern_t *pattern = cairo_pattern_create_linear(0, y, 0, y + h);
+	for (int i = 0; i < n; i++) {
+		uint32_t c = colors[i];
+		cairo_pattern_add_color_stop_rgba(pattern, stops[i], (c >> 24 & 0xff) / 255.0,
+			(c >> 16 & 0xff) / 255.0, (c >> 8 & 0xff) / 255.0, (c & 0xff) / 255.0);
+	}
+	cairo_new_path(cr);
+	if (r > 0) {
+		rounded(cr, x, y, w, h, r);
+	} else {
+		cairo_rectangle(cr, x, y, w, h);
+	}
+	cairo_set_source(cr, pattern);
+	cairo_fill(cr);
+	cairo_pattern_destroy(pattern);
+}
+
+static void button_label(cairo_t *cr, const char *label, double x, double y, double w,
+		double h, uint32_t color, double shift) {
+	int th = text(cr, agent.font, label, 0, 0, w, 0, PANGO_ALIGN_CENTER, false);
+	text(cr, agent.font, label, x + shift, y + (h - th) / 2.0 + shift, w, color,
+		PANGO_ALIGN_CENTER, true);
+}
+
+/* A push button of the theme's Windows; the default one is marked as it was. */
+static void button(cairo_t *cr, double x, double y, double w, double h, const char *label,
+		bool primary, bool hover, bool pressed) {
+	bool dark = agent.dark;
+	switch (agent.era) {
+	case ERA_WIN1:
+		box(cr, x, y, w, h, 5, pressed ? 0x000000ff : 0xffffffff);
+		outline(cr, x, y, w, h, 5, primary ? 2 : 1, 0x000000ff);
+		button_label(cr, label, x, y, w, h, pressed ? 0xffffffff : 0x000000ff, 0);
+		return;
+	case ERA_WIN3:
+		box(cr, x, y, w, h, 0, 0xc0c0c0ff);
+		if (pressed) {
+			box(cr, x + 1, y + 1, w - 2, 1, 0, 0x808080ff);
+			box(cr, x + 1, y + 1, 1, h - 2, 0, 0x808080ff);
 		} else {
-			cairo_rectangle(cr, x, y, W, h);
+			for (int i = 1; i <= 2; i++) { // the thick raised edge of 3.1
+				box(cr, x + i, y + i, w - 2 * i, 1, 0, 0xffffffff);
+				box(cr, x + i, y + i, 1, h - 2 * i, 0, 0xffffffff);
+				box(cr, x + i, y + h - 1 - i, w - 2 * i, 1, 0, 0x808080ff);
+				box(cr, x + w - 1 - i, y + i, 1, h - 2 * i, 0, 0x808080ff);
+			}
 		}
-		cairo_clip(cr);
-		box(cr, x, y, W, h, 0, agent.bg);
-		box(cr, x, y, W, header, 0, agent.accent);
-		cairo_restore(cr);
-		int th = text(cr, agent.font, "User Account Control", 0, 0, W, 0, PANGO_ALIGN_LEFT, false);
-		text(cr, agent.font, "User Account Control", x + PAD, y + (header - th) / 2.0, inner,
-			0xffffffff, PANGO_ALIGN_LEFT, true);
-	}
-
-	double cy = y + header + PAD;
-	double cx = x + PAD;
-	cy += text(cr, big, question, cx, cy, inner, agent.fg, PANGO_ALIGN_LEFT, true) + 12;
-	if (r->message && r->message[0]) {
-		cy += text(cr, agent.font, r->message, cx, cy, inner, agent.fg, PANGO_ALIGN_LEFT,
-			true) + 6;
-	}
-	if (r->program) {
-		cy += text(cr, agent.font, detail, cx, cy, inner, agent.dim, PANGO_ALIGN_LEFT, true) + 2;
-	}
-	cy += text(cr, agent.font, action, cx, cy, inner, agent.dim, PANGO_ALIGN_LEFT, true) + 14;
-
-	// who signs in; a click (or the up and down keys) goes to the next one
-	PolkitIdentity *identity = g_list_nth_data(r->identities, r->identity);
-	char *who = identity ? identity_label(identity) : g_strdup("?");
-	int count = g_list_length(r->identities);
-	char line[300];
-	snprintf(line, sizeof(line), count > 1 ? "Sign in as: %s  ▾" : "Sign in as: %s", who);
-	g_free(who);
-	agent.user.x = cx;
-	agent.user.y = cy;
-	agent.user.w = count > 1 ? inner : 0;
-	agent.user.h = 22;
-	if (count > 1 && (agent.hover == HIT_USER)) {
-		box(cr, cx - 4, cy - 2, inner + 8, 22, classic ? 0 : 4,
-			classic ? 0x00008030 : ((agent.dark ? 0xffffff00 : 0x00000000) | 0x14));
-	}
-	text(cr, agent.bold, line, cx, cy + 1, inner, agent.fg, PANGO_ALIGN_LEFT, true);
-	cy += 22 + 6;
-
-	// the prompt and the field
-	const char *prompt = agent.prompt[0] ? agent.prompt : "Password:";
-	text(cr, agent.font, prompt, cx, cy, inner, agent.fg, PANGO_ALIGN_LEFT, true);
-	cy += 18;
-	double fh = 28;
-	if (classic) {
-		box(cr, cx, cy, inner, fh, 0, 0xffffffff);
-		bevel(cr, cx, cy, inner, fh, true);
-	} else {
-		box(cr, cx, cy, inner, fh, 4, agent.field_bg);
-		cairo_new_path(cr);
-		rounded(cr, cx + 0.5, cy + 0.5, inner - 1, fh - 1, 4);
-		set_color(cr, agent.waiting ? agent.accent :
-			((agent.dark ? 0xffffff00 : 0x00000000) | 0x40));
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-		if (agent.waiting) { // the line under a field that has the keys
-			box(cr, cx + 1, cy + fh - 2, inner - 2, 2, 0, agent.accent);
+		// the black frame with its corners cut off
+		box(cr, x + 1, y, w - 2, 1, 0, 0x000000ff);
+		box(cr, x + 1, y + h - 1, w - 2, 1, 0, 0x000000ff);
+		box(cr, x, y + 1, 1, h - 2, 0, 0x000000ff);
+		box(cr, x + w - 1, y + 1, 1, h - 2, 0, 0x000000ff);
+		if (primary) {
+			outline(cr, x - 1, y - 1, w + 2, h + 2, 0, 1, 0x000000ff);
 		}
+		button_label(cr, label, x, y, w, h, 0x000000ff, pressed ? 1 : 0);
+		return;
+	case ERA_WIN95:
+		box(cr, x, y, w, h, 0, 0xc0c0c0ff);
+		if (primary) { // the default button has a dark frame round its edge
+			outline(cr, x - 1, y - 1, w + 2, h + 2, 0, 1, 0x000000ff);
+		}
+		bevel(cr, x, y, w, h, pressed);
+		button_label(cr, label, x, y, w, h, 0x000000ff, pressed ? 1 : 0);
+		return;
+	case ERA_XP:
+		if (!dark) {
+			static const double stops[] = { 0, 0.85, 1 };
+			uint32_t normal[] = { 0xffffffff, 0xf0f0eaff, 0xd6d0c5ff };
+			uint32_t down[] = { 0xe5e4ddff, 0xe2e2daff, 0xf0f0eaff };
+			gradient_box(cr, x, y, w, h, 3, pressed ? down : normal, stops, 3);
+			if (hover && !pressed) { // the orange glow inside the edge
+				outline(cr, x + 1, y + 1, w - 2, h - 2, 2, 2, 0xf8b330ff);
+			} else if (primary && !pressed) { // and the blue one of the default
+				outline(cr, x + 1, y + 1, w - 2, h - 2, 2, 2, 0xa1bcf9ff);
+			}
+			outline(cr, x, y, w, h, 3, 1, 0x003c74ff);
+			button_label(cr, label, x, y, w, h, 0x000000ff, pressed ? 1 : 0);
+			return;
+		}
+		break;
+	case ERA_WIN7:
+		if (!dark) {
+			static const double stops[] = { 0, 0.5, 0.5, 1 };
+			uint32_t normal[] = { 0xf2f2f2ff, 0xebebebff, 0xddddddff, 0xcfcfcfff };
+			uint32_t hot[] = { 0xeaf6fdff, 0xd9f0fcff, 0xbee6fdff, 0xa7d9f5ff };
+			uint32_t down[] = { 0xe5f4fcff, 0xc4e5f6ff, 0x98d1efff, 0x68b3dbff };
+			gradient_box(cr, x, y, w, h, 3, pressed ? down : hover ? hot : normal, stops, 4);
+			outline(cr, x + 1, y + 1, w - 2, h - 2, 2, 1, 0xffffffb0);
+			outline(cr, x, y, w, h, 3, 1, pressed ? 0x2c628bff : hover || primary ?
+				0x3c7fb1ff : 0x707070ff);
+			button_label(cr, label, x, y, w, h, 0x000000ff, 0);
+			return;
+		}
+		break;
+	case ERA_WIN8:
+		if (!dark) {
+			box(cr, x, y, w, h, 0, pressed ? 0xcce4f7ff : hover ? 0xe5f1fbff : 0xe1e1e1ff);
+			outline(cr, x, y, w, h, 0, primary ? 2 : 1, pressed ? 0x005499ff :
+				hover || primary ? 0x0078d7ff : 0xadadadff);
+			button_label(cr, label, x, y, w, h, 0x000000ff, 0);
+			return;
+		}
+		break;
+	case ERA_WIN10:
+		box(cr, x, y, w, h, 0, pressed ? (dark ? 0x666666ff : 0x999999ff) :
+			dark ? 0x333333ff : 0xccccccff);
+		if (hover || primary) {
+			outline(cr, x, y, w, h, 0, 2, hover ? (dark ? 0x858585ff : 0x7a7a7aff) :
+				agent.accent);
+		}
+		button_label(cr, label, x, y, w, h, agent.fg, 0);
+		return;
+	case ERA_WIN11:
+		break;
 	}
+	// Windows 11, and the dark variants of the others: plain rounded buttons,
+	// the default one in the accent color
+	uint32_t overlay = dark ? 0xffffff00 : 0x00000000;
+	uint32_t bg = primary ? agent.accent : dark ? mix(agent.body, 0xffffffff, 0.08) : 0xfbfbfbff;
+	if (hover || pressed) {
+		bg = primary ? mix(agent.accent, dark ? 0x000000ff : 0xffffffff, pressed ? 0.2 : 0.1) :
+			mix(bg, dark ? 0xffffffff : 0x000000ff, pressed ? 0.12 : 0.05);
+	}
+	double radius = agent.era == ERA_WIN8 ? 0 : agent.era == ERA_XP ? 3 : 4; // 8 is square
+	box(cr, x, y, w, h, radius, bg);
+	if (!primary) {
+		outline(cr, x, y, w, h, radius, 1, overlay | (dark ? 0x30 : 0x1c));
+	}
+	button_label(cr, label, x, y, w, h, primary ? 0xffffffff : agent.fg, 0);
+}
+
+/* The field the password goes into. */
+static void field(cairo_t *cr, double x, double y, double w, double h) {
+	bool focus = agent.waiting;
+	switch (agent.era) {
+	case ERA_WIN95:
+		box(cr, x, y, w, h, 0, agent.field_bg);
+		bevel(cr, x, y, w, h, true);
+		return;
+	case ERA_WIN11:
+		box(cr, x, y, w, h, 4, agent.field_bg);
+		outline(cr, x, y, w, h, 4, 1, agent.field_line);
+		if (focus) { // the line under a field that has the keys
+			box(cr, x + 1, y + h - 2, w - 2, 2, 0, agent.accent);
+		}
+		return;
+	case ERA_WIN10:
+		box(cr, x, y, w, h, 0, agent.field_bg);
+		outline(cr, x, y, w, h, 0, 2, focus ? agent.field_focus : agent.field_line);
+		return;
+	default:
+		box(cr, x, y, w, h, 0, agent.field_bg);
+		outline(cr, x, y, w, h, 0, 1, focus ? agent.field_focus : agent.field_line);
+		return;
+	}
+}
+
+/* The text of the field: dots for a password, or what PAM asked for. */
+static void field_text(cairo_t *cr, double x, double y, double w, double h) {
 	char shown[PASSWORD_MAX * 3 + 4];
-	if (agent.echo) {
+	if (agent.checking) {
+		snprintf(shown, sizeof(shown), "Checking...");
+	} else if (agent.echo) {
 		snprintf(shown, sizeof(shown), "%.*s", (int)agent.password_len, agent.password);
 	} else {
 		size_t chars = g_utf8_strlen(agent.password, agent.password_len);
 		size_t n = 0;
 		for (size_t i = 0; i < chars && i < 64; i++) {
-			n += snprintf(shown + n, sizeof(shown) - n, "●");
+			// the old Windows showed asterisks, the newer ones dots
+			n += snprintf(shown + n, sizeof(shown) - n, "%s",
+				agent.era <= ERA_WIN95 ? "*" : "●");
 		}
 		shown[n] = '\0';
 	}
-	if (agent.checking) {
-		snprintf(shown, sizeof(shown), "Checking...");
-	}
-	uint32_t field_fg = classic ? 0x000000ff : agent.field_fg;
-	int th = text(cr, agent.font, shown[0] ? shown : "M", 0, 0, inner - 16, 0, PANGO_ALIGN_LEFT,
-		false);
 	double tw = 0;
 	if (shown[0]) {
 		PangoLayout *layout = pango_cairo_create_layout(cr);
@@ -425,37 +505,223 @@ static int dialog(cairo_t *cr, double x, double y, bool draw) {
 		pango_layout_get_pixel_size(layout, &lw, &lh);
 		tw = lw;
 		g_object_unref(layout);
-		text(cr, agent.font, shown, cx + 8, cy + (fh - th) / 2, inner - 16,
-			agent.checking ? agent.dim : field_fg, PANGO_ALIGN_LEFT, true);
+		text(cr, agent.font, shown, x + 6, y + (h - lh) / 2.0, w - 12,
+			agent.checking ? agent.dim : agent.field_fg, PANGO_ALIGN_LEFT, true);
 	}
 	if (agent.waiting) { // the caret
-		box(cr, cx + 8 + tw + 1, cy + 6, 1, fh - 12, 0, field_fg);
+		box(cr, x + 6 + tw + 1, y + 5, 1, h - 10, 0, agent.field_fg);
 	}
-	cy += fh + 4;
+}
 
-	// what PAM says, or that it was wrong
+/*
+ * The inside of the dialog (without a frame) with its top left corner at x, y,
+ * CONTENT_WIDTH wide; returns its height. Measured only when draw is false.
+ * The buttons stand in a band at the bottom where the Windows had one.
+ */
+static int content(cairo_t *cr, double x, double y, bool draw) {
+	struct request *r = agent.current;
+	const int W = CONTENT_WIDTH;
+	enum era era = agent.era;
+	bool unframed = !agent.framed;
+	bool band = era == ERA_WIN10; // the accent band with the name on top
+	int head = band ? 44 : era == ERA_WIN11 ? 36 : 0;
+	bool shield = era >= ERA_WIN7;
+	int icon = shield ? 36 : 0;
+	int inner = W - 2 * PAD;
+	int text_x = PAD + (icon ? icon + 12 : 0), text_w = W - text_x - PAD;
+	char big[160];
+	bigger(era == ERA_WIN10 || era == ERA_WIN11 ? agent.bold : agent.font, big, sizeof(big),
+		era >= ERA_WIN10 ? 4 : era >= ERA_WIN7 ? 3 : 0);
+	const char *question_font = era >= ERA_WIN7 ? big : agent.bold;
+	char action[300];
+	snprintf(action, sizeof(action), "Action: %s", r->action_id);
+	char program[512];
+	snprintf(program, sizeof(program), "Program: %s", r->program ? r->program : "");
+	int strip_h = agent.strip ? 52 : 46;
+	double bw = era <= ERA_WIN95 ? 80 : 96, bh = era <= ERA_WIN95 ? 24 : era == ERA_XP ? 24 : 28;
+	if (era >= ERA_WIN10) {
+		bw = 120;
+		bh = 32;
+	}
+
+	// measured from the top: the question, what polkit says, who signs in,
+	// the prompt with its field and what PAM says
+	int h = head + PAD;
+	int q = text(cr, question_font, agent.question, 0, 0, text_w, 0, PANGO_ALIGN_LEFT, false);
+	h += (q > icon ? q : icon) + 10;
+	int msg = r->message && r->message[0] ?
+		text(cr, agent.font, r->message, 0, 0, text_w, 0, PANGO_ALIGN_LEFT, false) : 0;
+	h += msg ? msg + 4 : 0;
+	int prog = r->program ? text(cr, agent.font, program, 0, 0, text_w, 0, PANGO_ALIGN_LEFT,
+		false) : 0;
+	h += prog ? prog + 2 : 0;
+	h += text(cr, agent.font, action, 0, 0, text_w, 0, PANGO_ALIGN_LEFT, false) + 14;
+	h += 22 + 4 + 18 + 28 + 4 + 20; // signing in as, prompt, field, note
+	h += strip_h;
+	if (!draw) {
+		return h;
+	}
+
+	// the dialog itself; Windows 10 and 11 have no frame around it
+	if (unframed) {
+		double radius = era == ERA_WIN11 ? 8 : 0;
+		for (int i = 8; i > 0; i--) { // a soft shadow
+			box(cr, x - i, y - i + 4, W + 2 * i, h + 2 * i, radius + i, 0x0000000a);
+		}
+		cairo_save(cr);
+		cairo_new_path(cr);
+		if (radius > 0) {
+			rounded(cr, x, y, W, h, radius);
+		} else {
+			cairo_rectangle(cr, x, y, W, h);
+		}
+		cairo_clip(cr);
+	}
+	box(cr, x, y, W, h, 0, agent.body);
+	if (band) {
+		box(cr, x, y, W, head, 0, agent.accent);
+		int th = text(cr, agent.font, "User Account Control", 0, 0, inner, 0,
+			PANGO_ALIGN_LEFT, false);
+		text(cr, agent.font, "User Account Control", x + PAD, y + (head - th) / 2.0, inner,
+			0xffffffff, PANGO_ALIGN_LEFT, true);
+	} else if (era == ERA_WIN11) {
+		text(cr, agent.font, "User Account Control", x + PAD, y + PAD, inner, agent.fg,
+			PANGO_ALIGN_LEFT, true);
+	}
+	if (agent.strip) {
+		box(cr, x, y + h - strip_h, W, strip_h, 0, agent.strip);
+		box(cr, x, y + h - strip_h, W, 1, 0, agent.strip_line);
+	}
+	if (unframed) {
+		cairo_restore(cr);
+		if (era == ERA_WIN11) {
+			outline(cr, x, y, W, h, 8, 1, agent.dark ? 0xffffff20 : 0x00000020);
+		} else {
+			outline(cr, x, y, W, h, 0, 1, agent.accent);
+		}
+	}
+
+	double cy = y + head + PAD;
+	if (shield) {
+		draw_shield(cr, x + PAD, cy, icon);
+	}
+	int qh = text(cr, question_font, agent.question, x + text_x, cy, text_w, agent.instruction,
+		PANGO_ALIGN_LEFT, true);
+	cy += (qh > icon ? qh : icon) + 10;
+	if (msg) {
+		cy += text(cr, agent.font, r->message, x + text_x, cy, text_w, agent.fg,
+			PANGO_ALIGN_LEFT, true) + 4;
+	}
+	if (prog) {
+		cy += text(cr, agent.font, program, x + text_x, cy, text_w, agent.dim,
+			PANGO_ALIGN_LEFT, true) + 2;
+	}
+	cy += text(cr, agent.font, action, x + text_x, cy, text_w, agent.dim, PANGO_ALIGN_LEFT,
+		true) + 14;
+
+	// who signs in; a click (or the up and down keys) goes to the next one
+	double cx = x + PAD;
+	PolkitIdentity *identity = g_list_nth_data(r->identities, r->identity);
+	char *who = identity ? identity_label(identity) : g_strdup("?");
+	int count = g_list_length(r->identities);
+	char line[300];
+	snprintf(line, sizeof(line), count > 1 ? "Sign in as: %s  ▾" : "Sign in as: %s", who);
+	g_free(who);
+	agent.user.x = cx;
+	agent.user.y = cy;
+	agent.user.w = count > 1 ? inner : 0;
+	agent.user.h = 22;
+	if (count > 1 && agent.hover == HIT_USER) {
+		box(cr, cx - 4, cy - 2, inner + 8, 22, era >= ERA_WIN11 ? 4 : 0,
+			(agent.dark ? 0xffffff00 : 0x00000000) | 0x14);
+	}
+	text(cr, agent.bold, line, cx, cy + 1, inner, agent.fg, PANGO_ALIGN_LEFT, true);
+	cy += 22 + 4;
+
+	const char *prompt = agent.prompt[0] ? agent.prompt : "Password:";
+	text(cr, agent.font, prompt, cx, cy, inner, agent.fg, PANGO_ALIGN_LEFT, true);
+	cy += 18;
+	field(cr, cx, cy, inner, 28);
+	field_text(cr, cx, cy, inner, 28);
+	cy += 28 + 4;
 	if (agent.note[0]) {
 		text(cr, agent.font, agent.note, cx, cy, inner,
 			agent.note_error ? agent.error : agent.dim, PANGO_ALIGN_LEFT, true);
 	}
-	cy += 22 + 14;
 
-	// Yes and No at the bottom right
-	if (!classic) {
-		box(cr, x, cy - 10, W, y + h - (cy - 10), 0,
-			(agent.dark ? 0xffffff00 : 0x00000000) | 0x08);
-	}
-	double bw = classic ? 88 : 110, bh = classic ? 26 : 32;
+	// the buttons at the bottom right
+	double by = y + h - strip_h + (strip_h - bh) / 2.0;
 	agent.no.x = x + W - PAD - bw;
-	agent.yes.x = agent.no.x - 10 - bw;
-	agent.no.y = agent.yes.y = cy;
+	agent.yes.x = agent.no.x - (era <= ERA_WIN95 ? 8 : 10) - bw;
+	agent.no.y = agent.yes.y = by;
 	agent.no.w = agent.yes.w = bw;
 	agent.no.h = agent.yes.h = bh;
-	button(cr, agent.yes.x, agent.yes.y, bw, bh, "Yes", true, agent.hover == HIT_YES,
+	button(cr, agent.yes.x, by, bw, bh, agent.yes_label, true, agent.hover == HIT_YES,
 		agent.pressed == HIT_YES && agent.hover == HIT_YES);
-	button(cr, agent.no.x, agent.no.y, bw, bh, "No", false, agent.hover == HIT_NO,
+	button(cr, agent.no.x, by, bw, bh, agent.no_label, false, agent.hover == HIT_NO,
 		agent.pressed == HIT_NO && agent.hover == HIT_NO);
 	return h;
+}
+
+/* The whole dialog, its frame included; its size in *w, *h, drawn when draw. */
+static void dialog(cairo_t *cr, double x, double y, bool draw, int *w, int *h) {
+	int ch = content(cr, 0, 0, false);
+	if (!agent.framed) {
+		*w = CONTENT_WIDTH;
+		*h = ch;
+		agent.close.w = 0;
+		if (draw) {
+			content(cr, x, y, true);
+		}
+		return;
+	}
+	struct tw_insets in;
+	tw_style_insets(agent.theme, false, &in, NULL);
+	*w = CONTENT_WIDTH + in.left + in.right;
+	*h = ch + in.top + in.bottom;
+	if (!draw) {
+		return;
+	}
+	struct tw_frame frame = {
+		.width = *w,
+		.height = *h,
+		.focused = true,
+		.title = "User Account Control",
+		.icon = agent.era >= ERA_WIN7 ? agent.shield : NULL,
+		.hover = agent.hover == HIT_CLOSE ? TW_HIT_CLOSE : TW_HIT_NONE,
+		.pressed = agent.pressed == HIT_CLOSE ? TW_HIT_CLOSE : TW_HIT_NONE,
+		.dialog = true,
+	};
+	cairo_save(cr);
+	cairo_translate(cr, x, y);
+	tw_style_draw_frame(cr, agent.theme, &frame);
+	cairo_restore(cr);
+	struct tw_buttons b;
+	tw_style_buttons(agent.theme, *w, false, &b);
+	agent.close.x = x + b.close.x;
+	agent.close.y = y + b.close.y;
+	agent.close.w = b.close.width;
+	agent.close.h = b.close.height;
+	content(cr, x + in.left, y + in.top, true);
+}
+
+/* Every other pixel black, as Windows 95 and before shaded the screen. */
+static void dither(cairo_t *cr) {
+	cairo_surface_t *tile = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 2, 2);
+	unsigned char *data = cairo_image_surface_get_data(tile);
+	int stride = cairo_image_surface_get_stride(tile);
+	cairo_surface_flush(tile);
+	memset(data, 0, stride * 2);
+	((uint32_t *)data)[0] = 0xff000000;
+	((uint32_t *)(data + stride))[1] = 0xff000000;
+	cairo_surface_mark_dirty(tile);
+	cairo_pattern_t *pattern = cairo_pattern_create_for_surface(tile);
+	cairo_pattern_set_extend(pattern, CAIRO_EXTEND_REPEAT);
+	cairo_pattern_set_filter(pattern, CAIRO_FILTER_NEAREST);
+	cairo_set_source(cr, pattern);
+	cairo_paint(cr);
+	cairo_pattern_destroy(pattern);
+	cairo_surface_destroy(tile);
 }
 
 static void render_output(struct agent_output *o) {
@@ -471,16 +737,22 @@ static void render_output(struct agent_output *o) {
 	cairo_t *cr = buffer->cairo;
 	cairo_save(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.55); // every screen darkens, as with Windows
+	cairo_set_source_rgba(cr, 0, 0, 0, 0);
 	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	if (agent.dither) {
+		dither(cr);
+	} else {
+		cairo_set_source_rgba(cr, 0, 0, 0, 0.55); // the secure desktop, darkened
+		cairo_paint(cr);
+	}
 	cairo_restore(cr);
 	cairo_save(cr);
 	cairo_scale(cr, scale, scale);
 	if (o == agent.main) {
-		int h = dialog(cr, 0, 0, false);
-		double x = floor((o->width - DIALOG_WIDTH) / 2.0);
-		double y = floor((o->height - h) / 2.0);
-		dialog(cr, x, y, true);
+		int w, h;
+		dialog(cr, 0, 0, false, &w, &h);
+		dialog(cr, floor((o->width - w) / 2.0), floor((o->height - h) / 2.0), true, &w, &h);
 	}
 	cairo_restore(cr);
 	wl_surface_set_buffer_scale(o->surface, scale);
@@ -612,6 +884,11 @@ static void clear_password(void) {
 }
 
 static void submit(void) {
+	if (agent.preview && agent.waiting) {
+		agent.preview_yes = true;
+		finish_request(TRUE, NULL);
+		return;
+	}
 	if (!agent.session || !agent.waiting) {
 		return;
 	}
@@ -700,6 +977,12 @@ static void session_completed(PolkitAgentSession *session, gboolean gained, gpoi
 
 static void begin_session(void) {
 	struct request *r = agent.current;
+	if (agent.preview) { // nothing to check the password: just the prompt
+		agent.waiting = true;
+		agent.checking = false;
+		snprintf(agent.prompt, sizeof(agent.prompt), "Password:");
+		return;
+	}
 	if (agent.session) {
 		PolkitAgentSession *old = agent.session;
 		agent.session = NULL; // its completion is not ours any more
@@ -734,7 +1017,9 @@ static void free_request(struct request *r) {
 	g_free(r->message);
 	g_free(r->cookie);
 	g_free(r->program);
-	g_object_unref(r->task);
+	if (r->task) { // none in a preview
+		g_object_unref(r->task);
+	}
 	g_free(r);
 }
 
@@ -764,13 +1049,19 @@ static void finish_request(gboolean gained, GError *error) {
 		g_source_remove(agent.repeat_source);
 		agent.repeat_source = 0;
 	}
-	if (error) {
+	if (!r->task) {
+		g_clear_error(&error);
+	} else if (error) {
 		g_task_return_error(r->task, error);
 	} else {
 		g_task_return_boolean(r->task, gained);
 	}
 	free_request(r);
 	hide_surfaces();
+	if (agent.preview) {
+		g_main_loop_quit(agent.loop);
+		return;
+	}
 	start_next();
 }
 
@@ -879,9 +1170,9 @@ static enum hit hit_at(double x, double y) {
 		return HIT_NONE;
 	}
 	struct { double x, y, w, h; } *boxes[] = { (void *)&agent.yes, (void *)&agent.no,
-		(void *)&agent.user };
-	enum hit hits[] = { HIT_YES, HIT_NO, HIT_USER };
-	for (size_t i = 0; i < 3; i++) {
+		(void *)&agent.user, (void *)&agent.close };
+	enum hit hits[] = { HIT_YES, HIT_NO, HIT_USER, HIT_CLOSE };
+	for (size_t i = 0; i < 4; i++) {
 		if (boxes[i]->w > 0 && x >= boxes[i]->x && x < boxes[i]->x + boxes[i]->w &&
 				y >= boxes[i]->y && y < boxes[i]->y + boxes[i]->h) {
 			return hits[i];
@@ -1094,6 +1385,7 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
 			submit();
 			break;
 		case HIT_NO:
+		case HIT_CLOSE:
 			cancel_current();
 			break;
 		case HIT_USER:
@@ -1324,41 +1616,130 @@ static uint32_t dialog_color(const char *name, uint32_t fallback) {
 	return tw_theme_color(agent.theme, key, fallback);
 }
 
+static enum era era_of(const struct tw_theme *t) {
+	const char *s = t && t->style ? t->style : "win10";
+	static const struct {
+		const char *name;
+		enum era era;
+	} eras[] = {
+		{ "win1", ERA_WIN1 }, { "win3", ERA_WIN3 }, { "win31", ERA_WIN3 },
+		{ "win95", ERA_WIN95 }, { "classic", ERA_WIN95 }, { "winxp", ERA_XP },
+		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
+		{ "win8", ERA_WIN8 }, { "metro", ERA_WIN8 }, { "win11", ERA_WIN11 },
+		{ "fluent", ERA_WIN11 },
+	};
+	for (size_t i = 0; i < sizeof(eras) / sizeof(eras[0]); i++) {
+		if (strcasecmp(s, eras[i].name) == 0) {
+			return eras[i].era;
+		}
+	}
+	return ERA_WIN10;
+}
+
 static void load_theme(void) {
 	char *name = tw_theme_current_name();
 	char *error = NULL;
 	agent.theme = tw_theme_load(name, &error);
 	free(error);
 	free(name);
-	const char *style = agent.theme && agent.theme->style ? agent.theme->style : "win10";
-	agent.look = strcmp(style, "win95") == 0 || strcmp(style, "win3") == 0 ||
-		strcmp(style, "win1") == 0 || strcmp(style, "classic") == 0 ?
-		LOOK_CLASSIC : LOOK_MODERN;
-	if (agent.look == LOOK_CLASSIC) {
-		agent.bg = 0xc0c0c0ff;
-		agent.fg = 0x000000ff;
+	const struct tw_theme *t = agent.theme;
+	enum era era = agent.era = era_of(t);
+	agent.framed = era <= ERA_WIN8;
+	agent.dither = era <= ERA_WIN95;
+	agent.accent = tw_theme_color(t, "flyout.accent",
+		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
+	agent.font = tw_theme_str(t, "menu.font", tw_theme_str(t, "panel.font", "Noto Sans 9"));
+	agent.bold = tw_theme_str(t, "panel.bold_font", agent.font);
+	agent.strip = agent.strip_line = 0;
+	agent.error = 0xc42b1cff;
+	bool old = era <= ERA_XP;
+	agent.question = old ? "This program needs an administrator to continue." :
+		era <= ERA_WIN8 ? "Do you want to allow the following program to make changes to "
+		"this computer?" : "Do you want to allow this app to make changes to your device?";
+	agent.yes_label = old ? "OK" : "Yes";
+	agent.no_label = old ? "Cancel" : "No";
+
+	switch (era) {
+	case ERA_WIN1:
+	case ERA_WIN3:
+		agent.body = 0xffffffff;
+		agent.fg = agent.instruction = 0x000000ff;
 		agent.dim = 0x404040ff;
-		agent.accent = 0x000080ff;
 		agent.field_bg = 0xffffffff;
 		agent.field_fg = 0x000000ff;
+		agent.field_line = agent.field_focus = 0x000000ff;
 		agent.dark = false;
-	} else {
-		agent.bg = dialog_color("bg", 0xf2f2f2ff);
-		int luma = (int)((agent.bg >> 24 & 0xff) * 299 + (agent.bg >> 16 & 0xff) * 587 +
-			(agent.bg >> 8 & 0xff) * 114) / 1000;
-		agent.dark = luma < 128;
-		agent.bg |= 0xff; // see-through menus would show the darkened screen
-		agent.fg = dialog_color("fg", agent.dark ? 0xffffffff : 0x000000ff);
-		agent.dim = dialog_color("disabled_fg", agent.dark ? 0xa0a0a0ff : 0x5d5d5dff);
-		agent.accent = tw_theme_color(agent.theme, "flyout.accent",
-			tw_theme_color(agent.theme, "taskbar.indicator", 0x0078d4ff));
-		agent.field_bg = dialog_color("field_bg", agent.dark ? 0x1f1f1fff : 0xffffffff);
-		agent.field_fg = dialog_color("field_fg", agent.dark ? 0xffffffff : 0x000000ff);
+		return;
+	case ERA_WIN95:
+		agent.body = tw_theme_color(t, "decoration.face", 0xc0c0c0ff);
+		agent.fg = agent.instruction = 0x000000ff;
+		agent.dim = 0x404040ff;
+		agent.field_bg = 0xffffffff;
+		agent.field_fg = 0x000000ff;
+		agent.field_line = agent.field_focus = 0x808080ff;
+		agent.dark = false;
+		return;
+	default:
+		break;
 	}
-	agent.error = agent.dark ? 0xff99a4ff : 0xc42b1cff;
-	agent.font = tw_theme_str(agent.theme, "menu.font",
-		tw_theme_str(agent.theme, "panel.font", "Noto Sans 10"));
-	agent.bold = tw_theme_str(agent.theme, "panel.bold_font", agent.font);
+
+	// the newer ones are light or dark as the theme's menus are
+	uint32_t menu = dialog_color("bg", 0xf2f2f2ff) | 0xff;
+	int luma = (int)((menu >> 24 & 0xff) * 299 + (menu >> 16 & 0xff) * 587 +
+		(menu >> 8 & 0xff) * 114) / 1000;
+	bool dark = agent.dark = luma < 128;
+	agent.fg = dark ? dialog_color("fg", 0xffffffff) : 0x000000ff;
+	agent.dim = dark ? 0xa0a0a0ff : 0x5d5d5dff;
+	agent.field_bg = dark ? 0x1f1f1fff : 0xffffffff;
+	agent.field_fg = dark ? 0xffffffff : 0x000000ff;
+	agent.field_focus = agent.accent;
+	agent.error = dark ? 0xff99a4ff : 0xc42b1cff;
+	if (dark) {
+		agent.body = menu;
+		agent.field_bg = mix(menu, 0x000000ff, 0.35); // a deeper shade of the dialog
+		agent.instruction = era <= ERA_WIN8 ? 0x99c6ffff : agent.fg;
+		agent.field_line = 0xffffff40;
+		agent.strip = era == ERA_XP ? 0 : mix(menu, 0xffffffff, 0.06);
+		agent.strip_line = mix(menu, 0xffffffff, 0.14);
+		return;
+	}
+	switch (era) {
+	case ERA_XP:
+		agent.body = 0xece9d8ff; // the dialog face of Luna
+		agent.instruction = 0x000000ff;
+		agent.field_line = agent.field_focus = 0x7f9db9ff;
+		break;
+	case ERA_WIN7:
+	case ERA_WIN8:
+		// white with the main instruction in blue, the buttons in a grey band
+		agent.body = 0xffffffff;
+		agent.instruction = era == ERA_WIN7 ? 0x003399ff : 0x1e395bff;
+		agent.field_line = 0xabadb3ff;
+		agent.field_focus = era == ERA_WIN7 ? 0x3d7badff : 0x0078d7ff;
+		agent.strip = 0xf0f0f0ff;
+		agent.strip_line = 0xdfdfdfff;
+		break;
+	case ERA_WIN10:
+		agent.body = 0xe6e6e6ff;
+		agent.instruction = 0x000000ff;
+		agent.field_line = 0x7a7a7aff;
+		break;
+	default: // Windows 11
+		agent.body = 0xf9f9f9ff;
+		agent.instruction = 0x000000ff;
+		agent.field_line = 0x00000024;
+		agent.strip = 0xf3f3f3ff;
+		agent.strip_line = 0x0000000f;
+		break;
+	}
+}
+
+/* The shield, as an icon for the title bar of the frame. */
+static void make_shield(void) {
+	agent.shield = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
+	cairo_t *cr = cairo_create(agent.shield);
+	draw_shield(cr, 1, 1, 30);
+	cairo_destroy(cr);
 }
 
 /* ---------- main ---------- */
@@ -1370,11 +1751,14 @@ static gboolean quit_on_signal(gpointer loop) {
 
 int main(int argc, char **argv) {
 	if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
-		printf("Usage: tilewin-polkit\n"
+		printf("Usage: tilewin-polkit [--preview]\n"
 			"The polkit authentication agent of the tileWin session: asks for the\n"
-			"password when an app needs an administrator.\n");
+			"password when an app needs an administrator.\n"
+			"--preview shows the dialog with a sample request in the look of the theme,\n"
+			"without polkit; it exits 0 for Yes and 1 for No.\n");
 		return 0;
 	}
+	agent.preview = argc > 1 && strcmp(argv[1], "--preview") == 0;
 	setlocale(LC_ALL, "");
 	mlock(agent.password, sizeof(agent.password));
 	wl_list_init(&agent.outputs);
@@ -1383,6 +1767,7 @@ int main(int argc, char **argv) {
 	agent.repeat_delay = 600;
 	agent.xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	load_theme();
+	make_shield();
 
 	agent.display = wl_display_connect(NULL);
 	if (!agent.display) {
@@ -1396,6 +1781,31 @@ int main(int argc, char **argv) {
 	if (!agent.compositor || !agent.shm || !agent.layer_shell) {
 		fprintf(stderr, "tilewin-polkit: the compositor has no layer shell\n");
 		return 1;
+	}
+
+	if (agent.preview) {
+		struct request *r = g_new0(struct request, 1);
+		r->action_id = g_strdup("org.freedesktop.policykit.exec");
+		r->message = g_strdup("Authentication is required to run a program as another user");
+		r->program = g_strdup("/usr/bin/true");
+		r->cookie = g_strdup("");
+		r->identities = g_list_append(r->identities, polkit_unix_user_new((gint)getuid()));
+		if (getuid() != 0) {
+			r->identities = g_list_append(r->identities, polkit_unix_user_new(0));
+		}
+		agent.loop = g_main_loop_new(NULL, FALSE);
+		GSource *source = g_source_new(&wl_source_funcs, sizeof(struct wl_source));
+		((struct wl_source *)source)->fd_tag = g_source_add_unix_fd(source,
+			wl_display_get_fd(agent.display), G_IO_IN | G_IO_ERR | G_IO_HUP);
+		g_source_set_callback(source, NULL, agent.loop, NULL);
+		g_source_attach(source, NULL);
+		g_unix_signal_add(SIGTERM, quit_on_signal, agent.loop);
+		g_unix_signal_add(SIGINT, quit_on_signal, agent.loop);
+		g_queue_push_tail(&agent.queue, r);
+		start_next();
+		g_main_loop_run(agent.loop);
+		clear_password();
+		return agent.preview_yes ? 0 : 1;
 	}
 
 	GError *error = NULL;
@@ -1417,7 +1827,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+	GMainLoop *loop = agent.loop = g_main_loop_new(NULL, FALSE);
 	GSource *source = g_source_new(&wl_source_funcs, sizeof(struct wl_source));
 	((struct wl_source *)source)->fd_tag = g_source_add_unix_fd(source,
 		wl_display_get_fd(agent.display), G_IO_IN | G_IO_ERR | G_IO_HUP);

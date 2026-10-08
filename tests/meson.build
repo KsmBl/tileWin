@@ -845,6 +845,17 @@ if gdk_pixbuf.found()
 	)
 
 	test(
+		'polkit-themes',
+		find_program('polkit_themes.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [keyboard_tool, count_content],
+		env: saver_gui_env,
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 300,
+	)
+
+	test(
 		'polkit-agent',
 		find_program('polkit_agent.sh'),
 		args: [meson.project_build_root(), meson.project_source_root()],
