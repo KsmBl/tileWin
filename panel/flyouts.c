@@ -2537,10 +2537,35 @@ struct proc_usage {
 	int count;
 };
 
+/*
+ * Hybrid processors have cores of two kinds: performance cores and efficient
+ * ones (Intel P- and E-cores, ARM big.LITTLE, AMD's compact cores). The
+ * flyout shows them as two groups, each physical core with a bar per thread.
+ */
+enum cpu_kind {
+	CPU_KIND_P,
+	CPU_KIND_E,
+};
+
+#define CPU_MAX_THREADS 4 // threads of one physical core shown
+
+struct cpu_core {
+	enum cpu_kind kind;
+	int threads;
+	int slot[CPU_MAX_THREADS]; // indexes into core_usage
+};
+
 struct cpu_flyout {
 	struct flyout base;
 	char model[128];
-	int cores;
+	int cores; // logical CPUs (threads)
+	int cpu_num[CPU_MAX_CORES]; // the number of the CPU of each slot ("cpu12")
+	bool hybrid;
+	int topology_cores; // the cores count the topology was read for
+	struct cpu_core phys[CPU_MAX_CORES];
+	int phys_count;
+	int kind_cores[2], kind_threads[2];
+	double kind_max_mhz[2];
 	struct cpu_ticks total;
 	struct cpu_ticks core_ticks[CPU_MAX_CORES];
 	int usage; // percent of all cores together
@@ -2587,6 +2612,7 @@ static void cpu_read_stat(struct cpu_flyout *f, unsigned long long *total_delta)
 		struct cpu_ticks *prev = all ? &f->total : &f->core_ticks[core];
 		int *usage = all ? &f->usage : &f->core_usage[core];
 		if (!all) {
+			f->cpu_num[core] = atoi(name + 3);
 			core++;
 		}
 		if (prev->total && total > prev->total) {
@@ -2605,6 +2631,143 @@ static void cpu_read_stat(struct cpu_flyout *f, unsigned long long *total_delta)
 }
 
 static void cpu_tidy_model(char *model);
+
+/* A CPU list as the kernel writes it ("0-15,20") into a bitmap of CPU numbers. */
+static bool cpu_parse_list(const char *path, bool *set, int size) {
+	char buf[512];
+	if (!read_sys(path, buf, sizeof(buf)) || !buf[0]) {
+		return false;
+	}
+	bool any = false;
+	for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+		int a, b;
+		int n = sscanf(tok, "%d-%d", &a, &b);
+		if (n < 1) {
+			continue;
+		}
+		if (n == 1) {
+			b = a;
+		}
+		for (int i = a; i <= b && i < size; i++) {
+			if (i >= 0) {
+				set[i] = true;
+				any = true;
+			}
+		}
+	}
+	return any;
+}
+
+static long cpu_sys_long(int cpu, const char *file) {
+	char path[128], buf[64];
+	snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/%s", cpu, file);
+	return read_sys(path, buf, sizeof(buf)) ? atol(buf) : -1;
+}
+
+/*
+ * Which CPU is which kind of core, and which CPUs are threads of the same
+ * core. Intel lists its kinds as two PMUs; elsewhere the kernel's capacity
+ * of each CPU tells them apart, or else a much lower top clock.
+ */
+static void cpu_read_topology(struct cpu_flyout *f) {
+	f->topology_cores = f->cores;
+	f->hybrid = false;
+	f->phys_count = 0;
+	int n = f->cores < CPU_MAX_CORES ? f->cores : CPU_MAX_CORES;
+	enum cpu_kind kind[CPU_MAX_CORES] = { 0 };
+	long max_freq[CPU_MAX_CORES];
+	for (int i = 0; i < n; i++) {
+		max_freq[i] = cpu_sys_long(f->cpu_num[i], "cpufreq/cpuinfo_max_freq");
+	}
+
+	static bool atom[4096], big[4096];
+	memset(atom, 0, sizeof(atom));
+	memset(big, 0, sizeof(big));
+	if (cpu_parse_list("/sys/devices/cpu_atom/cpus", atom, 4096) &&
+			cpu_parse_list("/sys/devices/cpu_core/cpus", big, 4096)) {
+		f->hybrid = true;
+		for (int i = 0; i < n; i++) {
+			int c = f->cpu_num[i];
+			kind[i] = c < 4096 && atom[c] ? CPU_KIND_E : CPU_KIND_P;
+		}
+	} else {
+		long cap[CPU_MAX_CORES], cap_max = 0, cap_min = -1;
+		long freq_max = 0, freq_min = -1;
+		for (int i = 0; i < n; i++) {
+			cap[i] = cpu_sys_long(f->cpu_num[i], "cpu_capacity");
+			if (cap[i] > 0) {
+				cap_max = cap[i] > cap_max ? cap[i] : cap_max;
+				cap_min = cap_min < 0 || cap[i] < cap_min ? cap[i] : cap_min;
+			}
+			if (max_freq[i] > 0) {
+				freq_max = max_freq[i] > freq_max ? max_freq[i] : freq_max;
+				freq_min = freq_min < 0 || max_freq[i] < freq_min ? max_freq[i] : freq_min;
+			}
+		}
+		// a few percent apart are the favored cores of one kind, not two kinds
+		if (cap_max > 0 && cap_min > 0 && cap_min < cap_max * 8 / 10) {
+			f->hybrid = true;
+			for (int i = 0; i < n; i++) {
+				kind[i] = cap[i] >= cap_max * 6 / 10 ? CPU_KIND_P : CPU_KIND_E;
+			}
+		} else if (freq_max > 0 && freq_min > 0 && freq_min < freq_max * 85 / 100) {
+			f->hybrid = true;
+			for (int i = 0; i < n; i++) {
+				kind[i] = max_freq[i] >= freq_max * 85 / 100 ? CPU_KIND_P : CPU_KIND_E;
+			}
+		}
+	}
+	if (!f->hybrid) {
+		return;
+	}
+
+	// the threads of one core share its package, die and core id
+	long long key[CPU_MAX_CORES];
+	for (int i = 0; i < n; i++) {
+		int c = f->cpu_num[i];
+		long pkg = cpu_sys_long(c, "topology/physical_package_id");
+		long die = cpu_sys_long(c, "topology/die_id");
+		long core = cpu_sys_long(c, "topology/core_id");
+		key[i] = core < 0 ? -1 - (long long)c :
+			((long long)(pkg & 0xfffff) << 40) | ((long long)(die & 0xfffff) << 20) |
+			(core & 0xfffff);
+	}
+	memset(f->kind_cores, 0, sizeof(f->kind_cores));
+	memset(f->kind_threads, 0, sizeof(f->kind_threads));
+	memset(f->kind_max_mhz, 0, sizeof(f->kind_max_mhz));
+	for (int k = CPU_KIND_P; k <= CPU_KIND_E; k++) {
+		for (int i = 0; i < n; i++) {
+			if (kind[i] != (enum cpu_kind)k) {
+				continue;
+			}
+			f->kind_threads[k]++;
+			if (max_freq[i] / 1000.0 > f->kind_max_mhz[k]) {
+				f->kind_max_mhz[k] = max_freq[i] / 1000.0;
+			}
+			struct cpu_core *pc = NULL;
+			for (int j = 0; j < f->phys_count; j++) {
+				struct cpu_core *other = &f->phys[j];
+				if (other->kind == (enum cpu_kind)k && key[other->slot[0]] == key[i]) {
+					pc = other;
+					break;
+				}
+			}
+			if (!pc) {
+				pc = &f->phys[f->phys_count++];
+				pc->kind = k;
+				pc->threads = 0;
+				f->kind_cores[k]++;
+			}
+			if (pc->threads < CPU_MAX_THREADS) {
+				pc->slot[pc->threads++] = i;
+			}
+		}
+	}
+	// one kind only after all (an offline group): no groups to show
+	if (f->kind_cores[CPU_KIND_P] == 0 || f->kind_cores[CPU_KIND_E] == 0) {
+		f->hybrid = false;
+	}
+}
 
 static void cpu_read_info(struct cpu_flyout *f) {
 	FILE *file = fopen("/proc/cpuinfo", "r");
@@ -2820,6 +2983,9 @@ static void cpu_read_processes(struct cpu_flyout *f, unsigned long long total_de
 static void cpu_sample(struct cpu_flyout *f) {
 	unsigned long long delta;
 	cpu_read_stat(f, &delta);
+	if (f->cores != f->topology_cores) {
+		cpu_read_topology(f);
+	}
 	cpu_read_info(f);
 	f->temp = cpu_read_temp();
 	FILE *file = fopen("/proc/loadavg", "r");
@@ -2855,10 +3021,34 @@ static int cpu_core_rows(struct cpu_flyout *f, int *columns) {
 	return (n + *columns - 1) / *columns;
 }
 
-static int cpu_height(struct cpu_flyout *f) {
+#define CPU_GROUP_HEADER 40 // badge, name and details of a kind of core
+#define CPU_GROUP_PAD 8
+#define CPU_GROUP_GAP 8
+#define CPU_GROUP_COLUMNS 4
+
+static int cpu_group_rows(struct cpu_flyout *f, enum cpu_kind kind) {
+	return (f->kind_cores[kind] + CPU_GROUP_COLUMNS - 1) / CPU_GROUP_COLUMNS;
+}
+
+static int cpu_group_height(struct cpu_flyout *f, enum cpu_kind kind) {
+	return CPU_GROUP_HEADER + cpu_group_rows(f, kind) * CPU_CORE_ROW + CPU_GROUP_PAD;
+}
+
+static int cpu_cores_height(struct cpu_flyout *f) {
+	if (f->cores <= 1) {
+		return 0;
+	}
+	if (f->hybrid) {
+		return 30 + cpu_group_height(f, CPU_KIND_P) + CPU_GROUP_GAP +
+			cpu_group_height(f, CPU_KIND_E) + 10;
+	}
 	int columns;
 	int rows = cpu_core_rows(f, &columns);
-	return CPU_HEADER + CPU_GRAPH + (f->cores > 1 ? 30 + rows * CPU_CORE_ROW + 6 : 0) +
+	return 30 + rows * CPU_CORE_ROW + 6;
+}
+
+static int cpu_height(struct cpu_flyout *f) {
+	return CPU_HEADER + CPU_GRAPH + cpu_cores_height(f) +
 		CPU_INFO + 30 + CPU_TOP * CPU_PROC_ROW + 8 + FOOTER;
 }
 
@@ -2877,6 +3067,125 @@ static void cpu_bar(cairo_t *cr, const struct fly_style *st, double x, double y,
 	fly_draw_bar(cr, st, x, y, w, h, percent / 100.0, st->bar);
 }
 
+/*
+ * The color of efficient cores: green, the color of saving, as light and as
+ * strong as the theme's bars; amber when the theme's bars are green already.
+ */
+static uint32_t cpu_efficient_color(uint32_t color) {
+	double r = (color >> 24 & 0xff) / 255.0, g = (color >> 16 & 0xff) / 255.0,
+		b = (color >> 8 & 0xff) / 255.0;
+	double max = fmax(r, fmax(g, b)), min = fmin(r, fmin(g, b)), d = max - min;
+	double h = 0, sat = max > 0 ? d / max : 0, v = max;
+	if (d > 0) {
+		if (max == r) {
+			h = fmod((g - b) / d + 6, 6);
+		} else if (max == g) {
+			h = (b - r) / d + 2;
+		} else {
+			h = (r - g) / d + 4;
+		}
+		h *= 60;
+	}
+	bool greenish = sat >= 0.25 && fabs(h - 130) < 50;
+	if (sat < 0.25) { // grey has no strength to keep: give it some
+		sat = 0.6;
+	}
+	v = fmax(v, 0.55); // dark navy would give a green too dark to see on a bar
+	h = greenish ? 38 : 140;
+	double c = v * sat, x = c * (1 - fabs(fmod(h / 60, 2) - 1)), m = v - c;
+	double rgb[3];
+	switch ((int)(h / 60)) {
+	case 0: rgb[0] = c; rgb[1] = x; rgb[2] = 0; break;
+	case 1: rgb[0] = x; rgb[1] = c; rgb[2] = 0; break;
+	default: rgb[0] = 0; rgb[1] = c; rgb[2] = x; break;
+	}
+	uint32_t out = 0;
+	for (int i = 0; i < 3; i++) {
+		int v8 = (int)lround((rgb[i] + m) * 255);
+		out |= (uint32_t)(v8 < 0 ? 0 : v8 > 255 ? 255 : v8) << (24 - 8 * i);
+	}
+	return out | (color & 0xff);
+}
+
+/* The colors of a kind of core: performance cores have the theme's. */
+static uint32_t cpu_kind_color(const struct fly_style *st, enum cpu_kind kind) {
+	return kind == CPU_KIND_P ? st->bar : cpu_efficient_color(st->bar);
+}
+
+/* One kind of core: a tinted box with a badge, the name, how many cores and
+ * threads it has and how fast they go, and a cell per core with a bar per thread. */
+static void cpu_render_group(cairo_t *cr, const struct fly_style *st, struct cpu_flyout *f,
+		enum cpu_kind kind, int x, int y, int w) {
+	uint32_t color = cpu_kind_color(st, kind);
+	int h = cpu_group_height(f, kind);
+	cairo_new_path(cr);
+	pd_rounded(cr, x, y, w, h, st->style == PS_CLASSIC ? 0 : 6);
+	pd_color(cr, (color & 0xffffff00) | (st->dark ? 0x26 : 0x1a));
+	cairo_fill(cr);
+	if (st->style == PS_CLASSIC) {
+		pd_rect(cr, x, y, 3, h, color); // a stripe of the kind's color down the side
+	}
+
+	int ix = x + CPU_GROUP_PAD, iw = w - 2 * CPU_GROUP_PAD;
+	const char *letter = kind == CPU_KIND_P ? "P" : "E";
+	cairo_new_path(cr);
+	pd_rounded(cr, ix, y + 8, 20, 18, st->style == PS_CLASSIC ? 0 : 4);
+	pd_color(cr, color);
+	cairo_fill(cr);
+	double luma = 0.299 * (color >> 24 & 0xff) + 0.587 * (color >> 16 & 0xff) +
+		0.114 * (color >> 8 & 0xff);
+	pd_text(cr, st->bold, letter, ix, y + 8, 20, 18, luma > 150 ? 0x000000ff : 0xffffffff,
+		PD_CENTER);
+
+	// the group's own share of the processor
+	int sum = 0;
+	for (int i = 0; i < f->phys_count; i++) {
+		struct cpu_core *pc = &f->phys[i];
+		for (int t = 0; pc->kind == kind && t < pc->threads; t++) {
+			sum += f->core_usage[pc->slot[t]];
+		}
+	}
+	char text[128];
+	snprintf(text, sizeof(text), "%d%%",
+		f->kind_threads[kind] ? sum / f->kind_threads[kind] : 0);
+	pd_text(cr, st->bold, text, ix, y + 6, iw, 22, st->fg, PD_RIGHT);
+	pd_text(cr, st->bold, kind == CPU_KIND_P ? "Performance cores" : "Efficient cores",
+		ix + 28, y + 6, iw - 28 - 48, 22, st->fg, PD_LEFT);
+	int len = snprintf(text, sizeof(text), "%d %s", f->kind_cores[kind],
+		f->kind_cores[kind] == 1 ? "core" : "cores");
+	if (f->kind_threads[kind] != f->kind_cores[kind] && len < (int)sizeof(text)) {
+		len += snprintf(text + len, sizeof(text) - len, " · %d threads", f->kind_threads[kind]);
+	}
+	if (f->kind_max_mhz[kind] > 0 && len < (int)sizeof(text)) {
+		snprintf(text + len, sizeof(text) - len, " · up to %.1f GHz",
+			f->kind_max_mhz[kind] / 1000.0);
+	}
+	pd_text(cr, st->font, text, ix + 28, y + 22, iw - 28, 18, st->dim, PD_LEFT);
+
+	int cell = (iw - (CPU_GROUP_COLUMNS - 1) * 10) / CPU_GROUP_COLUMNS;
+	int cy0 = y + CPU_GROUP_HEADER;
+	int index = 0;
+	for (int i = 0; i < f->phys_count; i++) {
+		struct cpu_core *pc = &f->phys[i];
+		if (pc->kind != kind) {
+			continue;
+		}
+		int cx = ix + (index % CPU_GROUP_COLUMNS) * (cell + 10);
+		int cy = cy0 + (index / CPU_GROUP_COLUMNS) * CPU_CORE_ROW;
+		snprintf(text, sizeof(text), "%s%d", letter, index);
+		pd_text(cr, st->font, text, cx, cy, 26, CPU_CORE_ROW - 4, st->dim, PD_LEFT);
+		// the threads of the core stacked in the height of one bar row
+		int bar_h = pc->threads > 1 ? 4 : 6, gap = 2;
+		int stack = pc->threads * bar_h + (pc->threads - 1) * gap;
+		double by = cy + (CPU_CORE_ROW - 4) / 2.0 - stack / 2.0;
+		for (int t = 0; t < pc->threads; t++) {
+			fly_draw_bar(cr, st, cx + 28, by + t * (bar_h + gap), cell - 28, bar_h,
+				f->core_usage[pc->slot[t]] / 100.0, color);
+		}
+		index++;
+	}
+}
+
 static void cpu_render(struct popup *p, cairo_t *cr) {
 	struct cpu_flyout *f = p->data;
 	struct fly_style st;
@@ -2893,7 +3202,10 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 	pd_text(cr, st.big, text, x0, y + 12, 86, 36, st.fg, PD_LEFT);
 	pd_text(cr, st.bold, f->model[0] ? f->model : "Processor", x0 + 90, y + 12, cw - 90, 20,
 		st.fg, PD_LEFT);
-	int len = snprintf(text, sizeof(text), "%d %s", f->cores, f->cores == 1 ? "core" : "cores");
+	int len = f->hybrid ?
+		snprintf(text, sizeof(text), "%dP + %dE cores", f->kind_cores[CPU_KIND_P],
+			f->kind_cores[CPU_KIND_E]) :
+		snprintf(text, sizeof(text), "%d %s", f->cores, f->cores == 1 ? "core" : "cores");
 	if (f->mhz > 0 && len < (int)sizeof(text)) {
 		len += snprintf(text + len, sizeof(text) - len, " · %.1f GHz", f->mhz / 1000.0);
 	}
@@ -2936,8 +3248,16 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 	pd_text(cr, st.font, "100%", x0, g.y + g.height + 2, cw, 22, st.dim, PD_RIGHT);
 	y += CPU_GRAPH;
 
-	// cores
-	if (f->cores > 1) {
+	// cores, in their two kinds on a hybrid processor
+	if (f->cores > 1 && f->hybrid) {
+		draw_line(cr, &st, p, y);
+		pd_text(cr, st.font, "Cores", x0, y + 6, cw, 20, st.dim, PD_LEFT);
+		y += 30;
+		cpu_render_group(cr, &st, f, CPU_KIND_P, x0 - 4, y, cw + 8);
+		y += cpu_group_height(f, CPU_KIND_P) + CPU_GROUP_GAP;
+		cpu_render_group(cr, &st, f, CPU_KIND_E, x0 - 4, y, cw + 8);
+		y += cpu_group_height(f, CPU_KIND_E) + 10;
+	} else if (f->cores > 1) {
 		draw_line(cr, &st, p, y);
 		pd_text(cr, st.font, "Cores", x0, y + 6, cw, 20, st.dim, PD_LEFT);
 		y += 30;
