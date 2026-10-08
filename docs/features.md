@@ -31,7 +31,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - No pointer is left behind where the finger was: hover highlights and tooltips go when it lifts.
   - Apps that take touch themselves get the fingers as they are, several at once.
 - **Several screens** (window mode), handled the way Windows handles them:
-  - A window taken to another screen (`Super+Shift+←/→` or dragging it over) stays maximized or snapped there, keeps the focus, and the size it goes back to comes along to the same place on the new screen. A window too big for the new screen is made to fit.
+  - A window taken to another screen (`Super+Shift+←/→`, `Super+Shift+↑/↓` for screens above and below, or dragging it over) stays maximized or snapped there, keeps the focus, and the size it goes back to comes along to the same place on the new screen. A window too big for the new screen is made to fit.
   - `Super+←` on a window snapped to the left half carries it on to the right half of the screen to the left, and `Super+→` the other way round.
   - The edge between two screens does not snap a window carried quickly over it; hold the pointer at it for a moment and it snaps there too (the half of that screen, or a quarter when you slide on to a corner). The outer corners snap along either edge that meets there, and the window snaps on the screen the pointer is on, even when most of it is still on the other one.
   - Unplugging a screen puts its windows on the desktop on view on another screen, still maximized or snapped. Plugging it back in returns them to it, where they were and as they were, unless you moved them in the meantime. Screens are recognized by make, model and serial, so another port does not matter.

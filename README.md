@@ -122,7 +122,7 @@ The restart keeps your windows open; an updated compositor itself starts with yo
 | Super+1..9 | Activate the n-th taskbar entry |
 | Super+Ctrl+← / → | Previous / next virtual desktop |
 | Super+Ctrl+Shift+← / → | Move window to previous / next desktop |
-| Super+Shift+← / → | Move window to another monitor |
+| Super+Shift+← / → / ↑ / ↓ | Move window to the monitor beside, above or below |
 | Print | Screenshot of all screens to the clipboard and ~/Pictures/Screenshots |
 | Win+Shift+S | Snipping tool: rectangle, window or full screen to the clipboard, or **Text**: the text in a rectangle, read with tesseract (in English and the session's language when its data is installed) |
 | Super+Shift+W | Switch to tile mode |

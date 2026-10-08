@@ -703,6 +703,8 @@ static const struct action common_actions[] = {
 	{ "panel window_menu", "Open the window menu", GROUP_WINDOWS },
 	{ "move output left", "Move the window to the screen on the left", GROUP_WINDOWS },
 	{ "move output right", "Move the window to the screen on the right", GROUP_WINDOWS },
+	{ "move output up", "Move the window to the screen above", GROUP_WINDOWS },
+	{ "move output down", "Move the window to the screen below", GROUP_WINDOWS },
 	{ "taskview", "Task view", GROUP_DESKTOPS },
 	{ "showdesktop", "Show the desktop", GROUP_DESKTOPS },
 	{ "desktop new", "New desktop", GROUP_DESKTOPS },
