@@ -284,6 +284,16 @@ test(
 )
 
 test(
+	'qt-platform-theme',
+	find_program('qt_platform_theme.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 60,
+)
+
+test(
 	'restart-helpers',
 	find_program('restart_helpers.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

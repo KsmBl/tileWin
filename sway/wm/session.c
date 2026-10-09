@@ -1037,6 +1037,9 @@ static void spawn_shell(const char *script) {
 }
 
 void tw_session_export_environment(void) {
+	// Qt apps follow the dark color scheme through the portal's platform theme
+	// (tilewin-session sets it; this is for a tileWin started without it)
+	setenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal", 0);
 	if (getenv("TILEWIN_NO_APP_TWEAKS")) {
 		return; // nested or test instances must not take over the user session
 	}
@@ -1045,7 +1048,8 @@ void tw_session_export_environment(void) {
 	// the settings portal cannot tell apps about the color scheme
 	spawn_shell("command -v dbus-update-activation-environment >/dev/null || exit 0; "
 		"dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY "
-		"XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE TILEWINSOCK SWAYSOCK I3SOCK; "
+		"XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORMTHEME "
+		"TILEWINSOCK SWAYSOCK I3SOCK; "
 		"command -v systemctl >/dev/null || exit 0; "
 		"systemctl --user reset-failed xdg-desktop-portal-gtk.service xdg-desktop-portal.service "
 		"thunar.service 2>/dev/null; "

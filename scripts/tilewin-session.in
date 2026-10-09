@@ -18,6 +18,10 @@ export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-tileWin}"
 export XDG_SESSION_TYPE=wayland
 export MOZ_ENABLE_WAYLAND=1
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+# Qt knows no desktop called tileWin and would fall back to a theme that never
+# asks whether the session is dark; the portal's tells it (and follows a switch
+# while the app runs). A theme of the user's own, such as qt6ct, stays.
+export QT_QPA_PLATFORMTHEME="${QT_QPA_PLATFORMTHEME:-xdgdesktopportal}"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland}"
 export _JAVA_AWT_WM_NONREPARENTING=1
 export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"

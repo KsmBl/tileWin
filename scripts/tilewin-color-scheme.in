@@ -3,7 +3,8 @@
 # tileWin runs it when the color scheme changes (color_scheme command).
 #
 #  - GNOME settings: GTK 4 / libadwaita apps, Firefox, Chromium and Qt 6 read
-#    color-scheme directly or through the desktop portal; GTK 3 apps such as
+#    color-scheme directly or through the desktop portal (Qt through the
+#    xdgdesktopportal platform theme, which tilewin-session sets); GTK 3 apps such as
 #    Thunar do not, and need a dark GTK theme: the theme's dark variant, or
 #    for Adwaita one made here from the dark Adwaita built into GTK, switched
 #    to through the gtk-theme setting, which running apps follow at once.
