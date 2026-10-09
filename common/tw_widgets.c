@@ -315,7 +315,7 @@ const struct tw_widget_info tw_widgets[] = {
 		STATUS, opts_git, styles_plain },
 	{ "clock", "Clock", "Time and date with a calendar", STATUS, opts_clock, styles_clock },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history",
-		BOTH, opts_notifications, styles_plain },
+		STATUS, opts_notifications, styles_plain },
 	{ "modeswitch", "Mode switch", "Switches between tile and window mode",
 		BOTH, opts_none, styles_plain },
 	{ "showdesktop", "Show desktop", "Minimizes all windows", BOTH, opts_showdesktop,

@@ -875,4 +875,15 @@ if gdk_pixbuf.found()
 		is_parallel: false,
 		timeout: 120,
 	)
+
+	test(
+		'notification-area',
+		find_program('notification_area.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [count_content],
+		env: saver_gui_env,
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 60,
+	)
 endif

@@ -1793,8 +1793,12 @@ static void bell_render(struct widget *w, struct render_ctx *ctx, struct pbox b)
 		double r = 7, cx = gx + size, cy = gy + 3;
 		cairo_new_path(ctx->cairo);
 		cairo_arc(ctx->cairo, cx, cy, r, 0, 2 * M_PI);
-		pd_color(ctx->cairo, tw_theme_color(ctx->panel->theme, "notifications.badge",
-			tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff)));
+		// on the blue notification area of XP and the grey one of the classic
+		// look the accent would hardly show: red-orange there, as XP's close
+		// button
+		uint32_t badge = ctx->style == PSV_LUNA || ctx->style == PSV_CLASSIC ? 0xd9431fff :
+			tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff);
+		pd_color(ctx->cairo, tw_theme_color(ctx->panel->theme, "notifications.badge", badge));
 		cairo_fill(ctx->cairo);
 		pd_text(ctx->cairo, font, number, cx - r - 2, cy - r, 2 * r + 4, 2 * r, 0xffffffff,
 			PD_CENTER);
