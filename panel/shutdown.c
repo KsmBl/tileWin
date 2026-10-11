@@ -763,35 +763,28 @@ static void luna_button(struct shutdown *sd, cairo_t *cr, int index, double cx, 
 	if (on) {
 		color = mix(color, 0xffffffff, 0.18);
 	}
-	double r = 16;
-	// light edge
-	cairo_new_path(cr);
-	cairo_arc(cr, cx, cy, r + 1.6, 0, 2 * M_PI);
-	pd_color(cr, on ? 0xffffffff : 0xdfe8f8e0);
+	// Windows XP's buttons are squares of 33 pixels with slightly rounded
+	// corners and a white edge, not balls
+	double r = 16.5, x = cx - r, y = cy - r, side = 2 * r;
+	pd_rounded(cr, x - 0.5, y - 0.5, side + 1, side + 1, 4);
+	pd_color(cr, on ? 0xffffffff : 0xffffffe0);
 	cairo_fill(cr);
-	cairo_new_path(cr);
-	cairo_arc(cr, cx, cy, r, 0, 2 * M_PI);
-	cairo_pattern_t *ball = cairo_pattern_create_radial(cx - r * 0.35, cy - r * 0.45, r * 0.1,
-		cx, cy, r * 1.05);
-	set_rgba(ball, 0, mix(color, 0xffffffff, 0.55));
-	set_rgba(ball, 0.55, color);
-	set_rgba(ball, 1, mix(color, 0x000000ff, 0.35));
-	cairo_set_source(cr, ball);
+	pd_rounded(cr, x + 1, y + 1, side - 2, side - 2, 3);
+	cairo_pattern_t *face = cairo_pattern_create_linear(x, y, x + side, y + side);
+	set_rgba(face, 0, mix(color, 0xffffffff, 0.3));
+	set_rgba(face, 0.5, color);
+	set_rgba(face, 1, mix(color, 0x000000ff, 0.3));
+	cairo_set_source(cr, face);
 	cairo_fill(cr);
-	cairo_pattern_destroy(ball);
+	cairo_pattern_destroy(face);
 	// gloss on the upper half
-	cairo_new_path(cr);
-	cairo_save(cr);
-	cairo_translate(cr, cx, cy - r * 0.42);
-	cairo_scale(cr, 1, 0.58);
-	cairo_arc(cr, 0, 0, r * 0.78, 0, 2 * M_PI);
-	cairo_restore(cr);
-	cairo_pattern_t *gloss = pd_gradient("0:#ffffffb0 1:#ffffff10", 0, cy - r, 0, cy);
+	pd_rounded4(cr, x + 2, y + 2, side - 4, r - 3, 2, 2, 0, 0);
+	cairo_pattern_t *gloss = pd_gradient("0:#ffffff70 1:#ffffff10", 0, y + 2, 0, cy);
 	cairo_set_source(cr, gloss);
 	cairo_fill(cr);
 	cairo_pattern_destroy(gloss);
 	pd_color(cr, 0xffffffff);
-	glyph(cr, action, cx, cy + 0.5, r * 1.15);
+	glyph(cr, action, cx, cy + 0.5, r * 1.1);
 	pd_text(cr, "Tahoma, Noto Sans 8.5", action_label(sd, action), cx - 45, cy + r + 4, 90, 16,
 		0xffffffff, PD_CENTER);
 	psurface_add_hotspot(sd->popup->surface, dx + (cx - 40) * k, dy + (cy - r - 4) * k,
