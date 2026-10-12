@@ -8,6 +8,7 @@
 #include "log.h"
 #include "keyboards.h"
 #include "panel.h"
+#include "popup.h"
 #include "stringop.h"
 
 static void free_window(struct pwindow *w) {
@@ -331,6 +332,7 @@ static void refresh_mode(struct panel *panel) {
 	panel->state.double_click_ms = ms > 0 ? (int)ms : 0;
 	set_main_output(panel, jstr(state, "main_output"));
 	panel->state.battery_saver = jbool(state, "battery_saver");
+	panel->state.keep_awake = jbool(state, "keep_awake");
 	json_object_put(state);
 }
 
@@ -506,6 +508,11 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 				"taskbar widgets are off until the computer is plugged in.");
 		}
 		panel->state.battery_saver = active;
+	} else if (strcmp(change, "keep_awake") == 0) {
+		panel->state.keep_awake = jbool(event, "active");
+		if (popup_is_open(panel, POPUP_POWER)) {
+			popup_set_dirty(panel->popup);
+		}
 	} else if (strcmp(change, "snap_layouts") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

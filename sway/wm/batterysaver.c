@@ -18,7 +18,7 @@
  * the graphics busy stop: the animations, the trail of the pointer, and in
  * the taskbar the charts that keep reading in the background (it is told with
  * the tilewin event "battery_saver"). Plugging in, or charging past the level,
- * brings them back.
+ * brings them back. Keep awake (power.c) keeps it off.
  *
  * The batteries are read from /sys/class/power_supply once a minute, which
  * costs next to nothing; TILEWIN_SYS_POWER points elsewhere and
@@ -110,7 +110,8 @@ static void announce(void) {
 void tw_battery_saver_check(void) {
 	read_power(&bs.percent, &bs.on_battery);
 	int level = config ? config->tw_battery_saver : 0;
-	bool want = level > 0 && bs.on_battery && bs.percent >= 0 && bs.percent <= level;
+	bool want = level > 0 && bs.on_battery && bs.percent >= 0 && bs.percent <= level &&
+		!tw_keep_awake();
 	if (want == bs.active) {
 		return;
 	}

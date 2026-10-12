@@ -1507,7 +1507,8 @@ static bool battery_sample(struct widget *w, struct widget_sample *out) {
 
 static char *battery_tooltip(struct widget *w, struct hotspot *hs) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
-	return format_str("Battery: %d%% (%s)", s->capacity, s->status);
+	return format_str("Battery: %d%% (%s)%s", s->capacity, s->status,
+		w->panel->state.keep_awake ? ", kept awake" : "");
 }
 
 const struct widget_impl widget_battery = {

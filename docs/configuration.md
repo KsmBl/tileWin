@@ -36,6 +36,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `snap left\|right\|topleft\|topright\|bottomleft\|bottomright <fraction> [<fraction>]` | Snap a window into that part of a layout whose lines are at those fractions of the screen (`snap left 0.66`: two thirds) |
 | `snap_layouts enable\|disable` | Resting on the maximize button offers layouts to snap into (default enable) |
 | `battery_saver off\|<percent>` | On battery at or below that level (default 20, 100: always on battery) the animations, the pointer trail and the background charts of the taskbar widgets stop until the computer is plugged in; the taskbar says so in a notification |
+| `keep_awake on\|off\|toggle` | Keep awake, for a download or anything else that has to run on: until it is turned off again the idle timers rest (no dimming, no screen saver, the screen stays on and unlocked, the computer does not go to sleep) and the battery saver stays off however low the battery is. The switch "Keep awake" in the power flyout of the battery widget does the same. Not for the config file: it is kept in memory only, so a new session always starts without it. Closing the lid and the power key do what they always do. |
 | `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
 | `showdesktop` | Minimize all windows / restore them |
 | `always_on_top [enable\|disable\|toggle]` | Keeps a floating window over the other ones; also in the right-click menu of a window |

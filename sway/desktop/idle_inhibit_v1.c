@@ -172,7 +172,7 @@ void sway_idle_inhibit_v1_check_active(void) {
 			break;
 		}
 	}
-	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier_v1, inhibited);
+	wlr_idle_notifier_v1_set_inhibited(server.idle_notifier_v1, inhibited || tw_keep_awake());
 	tw_power_set_inhibited(inhibited);
 }
 

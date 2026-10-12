@@ -188,6 +188,7 @@ struct panel_state {
 	int64_t focused_window;
 	int double_click_ms; // "double_click_time" of the compositor
 	bool battery_saver; // on battery and low: the charts stop reading in the background
+	bool keep_awake;    // the switch of the power flyout: nothing saves power for now
 };
 
 /* ---------- config ---------- */

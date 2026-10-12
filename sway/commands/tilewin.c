@@ -668,6 +668,23 @@ struct cmd_results *cmd_battery_saver(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_keep_awake(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "keep_awake", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	// for now, not for good: a new session always starts without it
+	if (config->reading) {
+		return cmd_results_new(CMD_INVALID, "keep_awake cannot be set in the config file");
+	}
+	if (strcasecmp(argv[0], "toggle") != 0 && strcasecmp(argv[0], "on") != 0 &&
+			strcasecmp(argv[0], "off") != 0) {
+		return cmd_results_new(CMD_INVALID, "Expected 'keep_awake on|off|toggle'");
+	}
+	tw_keep_awake_set(parse_boolean(argv[0], tw_keep_awake()));
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_snap_layouts(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "snap_layouts", EXPECTED_EQUAL_TO, 1))) {

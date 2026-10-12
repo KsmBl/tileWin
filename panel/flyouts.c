@@ -2132,10 +2132,12 @@ void flyout_volume_toggle(struct panel *panel, struct popup_anchor anchor, const
 #define POWER_HEADER 84
 #define POWER_BRIGHTNESS 56
 #define POWER_MODES 80
+#define POWER_AWAKE 58
 
 enum {
 	POWER_HS_BRIGHTNESS = 1,
 	POWER_HS_PROFILE,
+	POWER_HS_AWAKE,
 	POWER_HS_SETTINGS,
 };
 
@@ -2246,6 +2248,7 @@ static int power_height(struct power_flyout *f) {
 	if (f->profiles) {
 		h += POWER_MODES;
 	}
+	h += POWER_AWAKE;
 	return h + (f->base.settings ? FOOTER : 8);
 }
 
@@ -2387,6 +2390,17 @@ static void power_render(struct popup *p, cairo_t *cr) {
 		y += POWER_MODES;
 	}
 
+	// keep awake: the whole row is the switch
+	draw_line(cr, &st, p, y);
+	pd_text(cr, st.font, "Keep awake", x0, y + 8, cw - 52, 22, st.fg, PD_LEFT);
+	pd_text(cr, st.font, p->panel->state.keep_awake ?
+		"On until you turn it off or log out" : "No battery saver, screen saver or sleep",
+		x0, y + 28, cw - 52, 22, st.dim, PD_LEFT);
+	draw_switch(cr, &st, x0 + cw - 40, y + 19, p->panel->state.keep_awake);
+	psurface_add_hotspot(p->surface, x0, y + 1, cw, POWER_AWAKE - 2, NULL, POWER_HS_AWAKE, 0,
+		NULL);
+	y += POWER_AWAKE;
+
 	if (f->base.settings) {
 		draw_line(cr, &st, p, y);
 		struct pbox link = { x0, y + 1, cw, FOOTER - 1 };
@@ -2425,6 +2439,9 @@ static void power_button(struct popup *p, double x, double y, uint32_t button, b
 		proc_spawn(cmd);
 		f->profile = (int)hs->id;
 		popup_set_dirty(p);
+	} else if (hs->kind == POWER_HS_AWAKE) {
+		// the compositor answers with the "keep_awake" event, which redraws the switch
+		ipc_panel_command(p->panel, "keep_awake toggle");
 	} else if (hs->kind == POWER_HS_SETTINGS) {
 		run_settings(&f->base);
 	}

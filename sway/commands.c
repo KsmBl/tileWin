@@ -83,6 +83,7 @@ static const struct cmd_handler handlers[] = {
 	{ "hide_edge_borders", cmd_hide_edge_borders },
 	{ "idle_timeout", cmd_idle_timeout },
 	{ "input", cmd_input },
+	{ "keep_awake", cmd_keep_awake },
 	{ "launcher_command", cmd_launcher_command },
 	{ "lid_action", cmd_lid_action },
 	{ "lock_command", cmd_lock_command },

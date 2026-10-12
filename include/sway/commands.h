@@ -171,6 +171,7 @@ sway_cmd cmd_polkit_agent;
 sway_cmd cmd_window_stretch;
 sway_cmd cmd_snap_layouts;
 sway_cmd cmd_battery_saver;
+sway_cmd cmd_keep_awake;
 sway_cmd cmd_window_stretch_mode;
 sway_cmd cmd_assign;
 sway_cmd cmd_bar;

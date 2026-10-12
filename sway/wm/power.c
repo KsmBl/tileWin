@@ -48,6 +48,8 @@
 #endif
 #include "sway/commands.h"
 #include "sway/config.h"
+#include "sway/desktop/idle_inhibit_v1.h"
+#include "sway/ipc-server.h"
 #include "sway/output.h"
 #include "sway/server.h"
 #include "sway/tilewin.h"
@@ -68,7 +70,9 @@ static const char *const action_names[] = { "default", "nothing", "sleep", "hibe
 static struct {
 	struct wl_event_source *timer;
 	struct timespec last_input;
-	bool inhibited;
+	bool inhibited;     // by an app or by keep awake: the timers rest
+	bool app_inhibited; // an app keeps the screen on
+	bool keep_awake;    // the switch of the power flyout, until it is turned off or tileWin ends
 	bool done[TW_IDLE_STAGES]; // the stage ran since the last input
 	struct wlr_scene_tree *dim;
 	bool idle_screen_off;
@@ -318,7 +322,8 @@ void tw_power_activity(void) {
 	// otherwise the timer notices the new input time when it fires
 }
 
-void tw_power_set_inhibited(bool inhibited) {
+static void apply_inhibited(void) {
+	bool inhibited = power.app_inhibited || power.keep_awake;
 	if (inhibited == power.inhibited) {
 		return;
 	}
@@ -328,6 +333,39 @@ void tw_power_set_inhibited(bool inhibited) {
 	}
 	clock_gettime(CLOCK_MONOTONIC, &power.last_input);
 	schedule();
+}
+
+void tw_power_set_inhibited(bool inhibited) {
+	power.app_inhibited = inhibited;
+	apply_inhibited();
+}
+
+/* ---------- keep awake ---------- */
+
+bool tw_keep_awake(void) {
+	return power.keep_awake;
+}
+
+/*
+ * Keep awake ("keep_awake on|off|toggle", the switch of the taskbar's power
+ * flyout), for a download or anything else that has to run on: nothing saves
+ * power until it is turned off again. The idle timers rest as they do for an
+ * app that keeps the screen on (no dimming, no screen saver, the screen stays
+ * on and unlocked, the computer does not go to sleep), idle clients such as
+ * swayidle are told the same, and the battery saver stays off however low the
+ * battery is. It is kept in memory only: a new session starts without it.
+ */
+void tw_keep_awake_set(bool on) {
+	if (on == power.keep_awake) {
+		return;
+	}
+	power.keep_awake = on;
+	sway_log(SWAY_INFO, "Keep awake %s", on ? "on" : "off");
+	sway_idle_inhibit_v1_check_active(); // the timers here and the idle clients
+	tw_battery_saver_check();
+	json_object *data = json_object_new_object();
+	json_object_object_add(data, "active", json_object_new_boolean(on));
+	ipc_event_tilewin("keep_awake", data);
 }
 
 /* ---------- logind ---------- */

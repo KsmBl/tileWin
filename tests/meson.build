@@ -811,6 +811,17 @@ test(
 )
 
 test(
+	'keep-awake',
+	find_program('keep_awake.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'snap-resize',
 	find_program('snap_resize.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

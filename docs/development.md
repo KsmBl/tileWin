@@ -80,6 +80,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
 - runs on a fake battery and checks the battery saver comes on at the level,
   tells so in a notification, goes off when plugged in, and that
   `battery_saver off` keeps it off;
+- turns keep awake on and checks no screen saver starts, the screen stays on
+  and a low battery does not turn the battery saver on, that all three come
+  back when it is turned off, that the switch in the power flyout shows it and
+  a click on it turns it off and on, and that a new session starts without it;
 - puts widgets on the desktop and checks their cards take the cells the config
   gives them (and the upper right corner without one), that the icons make room,
   that a card dragged with a pointer lands on whole cells and keeps them while

@@ -537,6 +537,9 @@ bool tw_power_action_parse(const char *name, enum tw_power_action *action);
 void tw_power_activity(void);
 /* An app keeps the screen on (idle inhibitor) or stopped doing so. */
 void tw_power_set_inhibited(bool inhibited);
+/* Keep awake: no idle timers, no screen saver and no battery saver until it is turned off. */
+bool tw_keep_awake(void);
+void tw_keep_awake_set(bool on);
 void tw_power_lid(bool closed);
 /* The power key went down or up; true when tileWin handles it and the key goes no further. */
 bool tw_power_key(bool pressed);
