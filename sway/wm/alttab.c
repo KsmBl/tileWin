@@ -34,8 +34,12 @@ bool tw_alttab_active(void) {
 	return state.active;
 }
 
+/*
+ * The windows of every screen, the desktop each one shows, most recently used
+ * first: Alt+Tab goes through all of them and a window on another screen gets
+ * the focus there. Desktops not on view stay out, like on Windows.
+ */
 static void collect(struct sway_seat *seat) {
-	struct sway_workspace *ws = seat_get_focused_workspace(seat);
 	struct sway_seat_node *current;
 	wl_list_for_each(current, &seat->focus_stack, link) {
 		struct sway_node *node = current->node;
@@ -46,7 +50,8 @@ static void collect(struct sway_seat *seat) {
 		if (!c->view || !c->view->surface || c->node.destroying) {
 			continue;
 		}
-		if (ws && c->pending.workspace != ws && !container_is_sticky(c)) {
+		struct sway_workspace *ws = c->pending.workspace;
+		if ((!ws || !workspace_is_visible(ws)) && !container_is_sticky(c)) {
 			continue;
 		}
 		list_add(state.items, c);

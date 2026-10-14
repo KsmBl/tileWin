@@ -287,6 +287,17 @@ test(
 )
 
 test(
+	'alttab-screens',
+	find_program('alttab_screens.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 300,
+)
+
+test(
 	'color-scheme',
 	find_program('color_scheme.sh'),
 	args: [meson.project_build_root()],
