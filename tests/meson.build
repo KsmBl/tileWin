@@ -256,6 +256,16 @@ test(
 )
 
 test(
+	'desktop-order',
+	find_program('desktop_order.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'named-desktops',
 	find_program('named_desktops.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

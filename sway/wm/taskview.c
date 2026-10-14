@@ -703,17 +703,28 @@ bool tw_desktop_rename(struct sway_workspace *ws, const char *label) {
 	return true;
 }
 
+/* Sets *data to the number of the workspace when that is higher. */
+static void highest_number(struct sway_workspace *ws, void *data) {
+	int *highest = data;
+	if (ws->name && isdigit((unsigned char)ws->name[0])) {
+		int number = (int)strtol(ws->name, NULL, 10);
+		*highest = number > *highest ? number : *highest;
+	}
+}
+
+/*
+ * A new desktop comes last, to the right of all there are: it gets the number
+ * after the highest one in use, not the first free one, which would put it in
+ * the place of a desktop closed before (the numbers sort the desktops).
+ */
 struct sway_workspace *tw_desktop_new(struct sway_output *output) {
 	if (!output) {
 		return NULL;
 	}
+	int highest = 0;
+	root_for_each_workspace(highest_number, &highest);
 	char name[16];
-	for (int n = 1; n < 10000; n++) {
-		snprintf(name, sizeof(name), "%d", n);
-		if (!workspace_by_name(name) && !workspace_by_number(name)) {
-			break;
-		}
-	}
+	snprintf(name, sizeof(name), "%d", highest + 1);
 	struct sway_workspace *ws = workspace_create(output, name);
 	if (ws) {
 		ws->tw_keep = true;

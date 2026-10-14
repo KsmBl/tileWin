@@ -80,12 +80,13 @@ print(" ".join(n for _, n in sorted((w["num"], w["name"]) for w in json.load(sys
 ipc mode window >/dev/null 2>&1
 sleep 1
 # an empty desktop is thrown away as soon as it is left, so two are made: both
-# are kept, and the second is the one in front
+# are kept, and the second is the one in front. A new desktop comes after
+# the last one, so they are 2 and 3 once the empty first one is gone
 ipc desktop new >/dev/null 2>&1
 sleep 1
 ipc desktop new >/dev/null 2>&1
 sleep 1
-if [ "$(names)" != "1 2" ]; then
+if [ "$(names)" != "2 3" ]; then
 	echo "two desktops were expected before naming one, got '$(names)'"
 	exit 1
 fi
@@ -94,13 +95,13 @@ fi
 focused=$(ipc -t get_workspaces | python3 -c '
 import json, sys
 print(next(w["num"] for w in json.load(sys.stdin) if w["focused"]))')
-if [ "$focused" = "1" ]; then
-	named="1:Work 2"
-	moved="1 2:Work"
+if [ "$focused" = "2" ]; then
+	named="2:Work 3"
+	moved="2 3:Work"
 	direction=right
 else
-	named="1 2:Work"
-	moved="1:Work 2"
+	named="2 3:Work"
+	moved="2:Work 3"
 	direction=left
 fi
 
@@ -129,8 +130,8 @@ fi
 # ---------- and it can be taken away again ----------
 ipc desktop rename >/dev/null 2>&1
 sleep 0.5
-if [ "$(names)" != "1 2" ]; then
-	fail "clearing the name gave '$(names)', wanted '1 2'"
+if [ "$(names)" != "2 3" ]; then
+	fail "clearing the name gave '$(names)', wanted '2 3'"
 fi
 
 # ---------- a workspace named by hand keeps the name it was given ----------
