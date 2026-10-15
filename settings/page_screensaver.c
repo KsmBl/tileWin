@@ -337,6 +337,13 @@ static void refresh(struct screensaver_page *p) {
 			bool on = v ? g_ascii_strcasecmp(v, "yes") == 0 || g_ascii_strcasecmp(v, "on") == 0 ||
 				g_ascii_strcasecmp(v, "true") == 0 : r->option->on;
 			gtk_switch_set_active(GTK_SWITCH(r->control), on);
+		} else if (r->option->type == SAVER_COLOR) {
+			double rgb[3];
+			if (!saver_color_parse(r->option, v, rgb)) {
+				saver_color_parse(r->option, r->option->values[0], rgb);
+			}
+			GdkRGBA rgba = { rgb[0], rgb[1], rgb[2], 1 };
+			gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(r->control), &rgba);
 		} else {
 			guint k = 0;
 			for (guint j = 0; v && r->option->values[j]; j++) {
@@ -454,9 +461,26 @@ static void own_changed(struct screensaver_page *p, struct own_row *r) {
 		return;
 	}
 	const char *value = NULL;
+	char color[8];
 	if (r->option->type == SAVER_TOGGLE) {
 		bool on = gtk_switch_get_active(GTK_SWITCH(r->control));
 		value = on == r->option->on ? NULL : on ? "yes" : "no";
+	} else if (r->option->type == SAVER_COLOR) {
+		const GdkRGBA *c =
+			gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(r->control));
+		snprintf(color, sizeof(color), "#%02x%02x%02x", (int)(c->red * 255 + 0.5),
+			(int)(c->green * 255 + 0.5), (int)(c->blue * 255 + 0.5));
+		// the default is not written; nor is a colour that only looks like the one there
+		double was[3], now[3];
+		const char *written = saver_value(p, r->key);
+		saver_color_parse(r->option, color, now);
+		if (written && saver_color_parse(r->option, written, was) &&
+				lround(was[0] * 255) == lround(now[0] * 255) &&
+				lround(was[1] * 255) == lround(now[1] * 255) &&
+				lround(was[2] * 255) == lround(now[2] * 255)) {
+			return;
+		}
+		value = g_ascii_strcasecmp(color, r->option->values[0]) == 0 ? NULL : color;
 	} else {
 		guint k = gtk_drop_down_get_selected(GTK_DROP_DOWN(r->control));
 		value = k == 0 || k == GTK_INVALID_LIST_POSITION ? NULL : r->option->values[k];
@@ -492,6 +516,12 @@ static void add_own_rows(struct screensaver_page *p, GtkWidget *group) {
 			if (o->type == SAVER_TOGGLE) {
 				r->control = gtk_switch_new();
 				g_signal_connect(r->control, "notify::active", G_CALLBACK(on_own_toggle), r);
+			} else if (o->type == SAVER_COLOR) {
+				GtkColorDialog *dialog = gtk_color_dialog_new();
+				gtk_color_dialog_set_with_alpha(dialog, false);
+				r->control = gtk_color_dialog_button_new(dialog);
+				gtk_widget_set_valign(r->control, GTK_ALIGN_CENTER);
+				g_signal_connect(r->control, "notify::rgba", G_CALLBACK(on_own_toggle), r);
 			} else {
 				r->control = gtk_drop_down_new_from_strings(o->labels);
 				g_signal_connect(r->control, "notify::selected", G_CALLBACK(on_own_choice), r);

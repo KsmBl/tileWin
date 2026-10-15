@@ -76,18 +76,26 @@ picked and which are kept in the `screensaver` block of `taskbar.conf` as
 ```c
 static const char *const colour_values[] = { "red", "purple", "green", NULL };
 static const char *const colour_labels[] = { "Red", "Purple", "Green", NULL };
+static const char *const glow_values[] = { "#ffb833", NULL };
 static const struct saver_option my_options[] = {
 	{ "colour", "Wax", "The colour of the wax", SAVER_CHOICE, colour_values, colour_labels, false,
 		NULL },
 	{ "bubbles", "Bubbles", NULL, SAVER_TOGGLE, NULL, NULL, true, NULL },
+	{ "glow", "Glow", "The colour of the light", SAVER_COLOR, glow_values, NULL, false, NULL },
 	{ 0 },
 };
 ```
 
+A colour (`SAVER_COLOR`) is picked with a colour button and kept as
+`#rrggbb`; its values are the default first and then, if you like, names it
+had before as `"<name>=#rrggbb"`, e.g. `{ "#ffb833", "orange=#ffb833", NULL }`.
+
 Read them in `create` with `saver_choice(options, &my_saver, "colour")` (the
 index into the values, 0 when not set) and `saver_toggle(options, &my_saver,
-"bubbles")`. The last field of a setting, `when`, shows it only while another
-choice of the saver has a value, as `"kind=blizzard"`.
+"bubbles")`, and a colour with `saver_color(options, &my_saver, "glow", rgb)`,
+which fills `double rgb[3]` from 0 to 1. The last field of a setting, `when`,
+shows it only while another choice of the saver has a value, as
+`"kind=blizzard"`.
 
 ## Helpers
 

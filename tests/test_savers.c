@@ -12,6 +12,7 @@
  * frames a second and CPU use any saver can show: read from taskbar.conf, and
  * drawn in the top left corner and nowhere else.
  */
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,90 @@ static void measure(cairo_surface_t *surface, long *lit, long *opaque) {
 			*lit += (row[x] & 0x00ffffff) != 0;
 			*opaque += (row[x] >> 24) == 0xff;
 		}
+	}
+}
+
+/*
+ * The coloured pixels of the Matrix with that colour setting (the heads of the
+ * drops are nearly white): how many have the most green, and how many the least.
+ */
+static void matrix_tint(const struct saver *matrix, const char *color, long *most_green,
+		long *least_green) {
+	const char *settings[] = { "matrix_color", color };
+	struct saver_options o = { .speed = 1, .settings = settings, .setting_count = color ? 2 : 0 };
+	const int w = 320, h = 200;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+	cairo_t *cr = cairo_create(surface);
+	struct saver_run *run = saver_run_new(matrix, w, h, &o);
+	for (int frame = 0; frame < 60; frame++) {
+		saver_run_draw(run, cr, 1 / 30.0);
+	}
+	cairo_surface_flush(surface);
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	*most_green = *least_green = 0;
+	for (int y = 0; y < h; y++) {
+		uint32_t *row = (uint32_t *)(data + y * stride);
+		for (int x = 0; x < w; x++) {
+			int r = (row[x] >> 16) & 0xff, g = (row[x] >> 8) & 0xff, b = row[x] & 0xff;
+			int max = r > g ? (r > b ? r : b) : (g > b ? g : b);
+			int min = r < g ? (r < b ? r : b) : (g < b ? g : b);
+			if (max - min < 40) {
+				continue; // dark, grey or nearly white
+			}
+			*most_green += g == max;
+			*least_green += g == min;
+		}
+	}
+	saver_run_free(run);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+}
+
+/*
+ * The colour of the Matrix is any colour: read as #rrggbb or #rgb, by the
+ * names that could be picked before, green when not set or not a colour, and
+ * the rain is drawn in it.
+ */
+static void check_matrix_color(const struct saver *matrix) {
+	static const struct {
+		const char *value;
+		int rgb[3];
+	} cases[] = {
+		{ NULL, { 0x59, 0xff, 0x80 } },
+		{ "#ff00ff", { 0xff, 0x00, 0xff } },
+		{ "#0AF", { 0x00, 0xaa, 0xff } },
+		{ "red", { 0xff, 0x4d, 0x4d } },
+		{ "Amber", { 0xff, 0xb8, 0x33 } },
+		{ "purple-ish", { 0x59, 0xff, 0x80 } },
+		{ "#12345", { 0x59, 0xff, 0x80 } },
+	};
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		const char *settings[] = { "matrix_color", cases[i].value };
+		struct saver_options o = { .settings = settings, .setting_count = cases[i].value ? 2 : 0 };
+		double rgb[3];
+		saver_color(&o, matrix, "color", rgb);
+		for (int c = 0; c < 3; c++) {
+			if (lround(rgb[c] * 255) != cases[i].rgb[c]) {
+				char what[128];
+				snprintf(what, sizeof(what), "colour \"%s\" is read as %ld %ld %ld",
+					cases[i].value ? cases[i].value : "(none)", lround(rgb[0] * 255),
+					lround(rgb[1] * 255), lround(rgb[2] * 255));
+				fail("matrix", what);
+				break;
+			}
+		}
+	}
+	long green_most, green_least, magenta_most, magenta_least;
+	matrix_tint(matrix, NULL, &green_most, &green_least);
+	matrix_tint(matrix, "#ff00ff", &magenta_most, &magenta_least);
+	printf("matrix coloured pixels with the most / least green: default %ld / %ld, "
+		"#ff00ff %ld / %ld\n", green_most, green_least, magenta_most, magenta_least);
+	if (green_most < 200 || green_most < 10 * green_least) {
+		fail("matrix", "does not rain green by default");
+	}
+	if (magenta_least < 200 || magenta_least < 10 * magenta_most) {
+		fail("matrix", "does not rain in the colour #ff00ff that was set");
 	}
 }
 
@@ -116,6 +201,21 @@ static void check_options(const struct saver *saver) {
 			if (values < 2 || values != labels) {
 				fail(saver->name, "has a choice without values, or not a label for each");
 			}
+		} else if (o->type == SAVER_COLOR) {
+			double rgb[3];
+			if (!o->values || !o->values[0] || o->values[0][0] != '#' ||
+					!saver_color_parse(o, o->values[0], rgb) || o->labels) {
+				fail(saver->name, "has a colour without a default #rrggbb, or with labels");
+			}
+			for (int v = 1; o->values && o->values[v]; v++) {
+				const char *eq = strchr(o->values[v], '=');
+				char name[64];
+				snprintf(name, sizeof(name), "%.*s", eq ? (int)(eq - o->values[v]) : 0,
+					o->values[v]);
+				if (!eq || !saver_color_parse(o, name, rgb)) {
+					fail(saver->name, "has a colour with a name that is no \"<name>=#rrggbb\"");
+				}
+			}
 		} else if (o->values || o->labels) {
 			fail(saver->name, "has a toggle with values");
 		}
@@ -190,6 +290,7 @@ int main(int argc, char **argv) {
 		o.settings = settings;
 		o.setting_count = 2;
 		try_saver(matrix, "matrix (its own code)", o);
+		check_matrix_color(matrix);
 	} else {
 		fail("matrix", "is not there");
 	}

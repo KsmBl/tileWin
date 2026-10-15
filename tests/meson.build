@@ -552,6 +552,17 @@ test(
 )
 
 test(
+	'settings-saver-color',
+	find_program('settings_saver_color.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'settings-icon',
 	find_program('settings_icon.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

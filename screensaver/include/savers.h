@@ -24,6 +24,8 @@
 enum saver_option_type {
 	SAVER_CHOICE, // one of values, the first the default
 	SAVER_TOGGLE, // yes or no
+	SAVER_COLOR,  // a colour, "#rrggbb", picked with a colour button; values[0] is the
+	              // default, more values are names kept from before as "<name>=#rrggbb"
 };
 
 struct saver_option {
@@ -100,6 +102,13 @@ const struct saver_module *saver_load_dir(const char *dir, char **why);
 int saver_choice(const struct saver_options *options, const struct saver *saver, const char *key);
 /* A toggle of a saver's own settings, its default when not set. */
 bool saver_toggle(const struct saver_options *options, const struct saver *saver, const char *key);
+/* A colour of a saver's own settings as red, green and blue from 0 to 1; its default when
+ * not set or not a colour. */
+void saver_color(const struct saver_options *options, const struct saver *saver, const char *key,
+	double rgb[3]);
+/* A value of a colour setting ("#rrggbb", "#rgb" or one of its names) as red, green and blue
+ * from 0 to 1; false when it is none. */
+bool saver_color_parse(const struct saver_option *option, const char *value, double rgb[3]);
 
 /*
  * The saver of that name; "random" picks one. NULL for none or an unknown name.

@@ -163,9 +163,7 @@ static void *matrix_create(int width, int height, const struct saver_options *op
 	struct matrix *m = calloc(1, sizeof(*m));
 	m->width = width;
 	m->height = height;
-	static const double colors[][3] = { { 0.35, 1, 0.5 }, { 0.35, 0.7, 1 }, { 1, 0.3, 0.3 },
-		{ 1, 0.72, 0.2 }, { 0.9, 0.9, 0.95 } };
-	memcpy(m->color, colors[saver_choice(options, &saver_matrix, "color")], sizeof(m->color));
+	saver_color(options, &saver_matrix, "color", m->color);
 	m->code = saver_choice(options, &saver_matrix, "characters") == 1;
 	if (m->code) {
 		load_code(m);
@@ -204,7 +202,8 @@ static void put_glyph(struct matrix *m, cairo_t *cr, int col, int row, double r,
 	cairo_restore(cr);
 }
 
-/* Fading by a fraction leaves the darkest greens behind for ever: those go. */
+/* Fading by a fraction leaves the darkest colours behind for ever: those go. Their
+ * brightest part decides, so a colour without green (red, blue) is not wiped too. */
 static void clear_residue(struct matrix *m) {
 	cairo_surface_flush(m->canvas);
 	unsigned char *data = cairo_image_surface_get_data(m->canvas);
@@ -212,7 +211,8 @@ static void clear_residue(struct matrix *m) {
 	for (int y = 0; y < m->height; y++) {
 		uint32_t *row = (uint32_t *)(data + y * stride);
 		for (int x = 0; x < m->width; x++) {
-			if (((row[x] >> 8) & 0xff) < 14) {
+			uint32_t r = (row[x] >> 16) & 0xff, g = (row[x] >> 8) & 0xff, b = row[x] & 0xff;
+			if (r < 14 && g < 14 && b < 14) {
 				row[x] = 0;
 			}
 		}
@@ -267,13 +267,14 @@ static void matrix_destroy(void *state) {
 	free(m);
 }
 
-static const char *const matrix_values[] = { "green", "blue", "red", "amber", "white", NULL };
-static const char *const matrix_labels[] = { "Green", "Blue", "Red", "Amber", "White", NULL };
+// green as in the film; the names are the colours that could be picked before
+static const char *const matrix_colors[] = { "#59ff80", "green=#59ff80", "blue=#59b3ff",
+	"red=#ff4d4d", "amber=#ffb833", "white=#e6e6f2", NULL };
 static const char *const characters_values[] = { "film", "code", NULL };
 static const char *const characters_labels[] = { "As in the film", "Its own code", NULL };
 static const struct saver_option matrix_options[] = {
-	{ "color", "Colour", "Green, as in the film, or another", SAVER_CHOICE, matrix_values,
-		matrix_labels, false, NULL },
+	{ "color", "Colour", "Green, as in the film, or any other", SAVER_COLOR, matrix_colors,
+		NULL, false, NULL },
 	{ "characters", "Characters", "The film's katakana and digits, or the source code of this "
 		"screen saver itself, read downwards", SAVER_CHOICE, characters_values,
 		characters_labels, false, NULL },

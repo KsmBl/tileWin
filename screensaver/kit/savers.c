@@ -539,6 +539,49 @@ bool saver_toggle(const struct saver_options *options, const struct saver *saver
 		strcasecmp(value, "true") == 0;
 }
 
+static bool parse_hex(const char *value, double rgb[3]) {
+	size_t len = value && value[0] == '#' ? strlen(value + 1) : 0;
+	if ((len != 6 && len != 3) || strspn(value + 1, "0123456789abcdefABCDEF") != len) {
+		return false;
+	}
+	int digits = len == 6 ? 2 : 1;
+	for (int i = 0; i < 3; i++) {
+		char part[3] = { 0 };
+		memcpy(part, value + 1 + i * digits, digits);
+		long v = strtol(part, NULL, 16);
+		rgb[i] = digits == 2 ? v / 255.0 : v / 15.0;
+	}
+	return true;
+}
+
+bool saver_color_parse(const struct saver_option *option, const char *value, double rgb[3]) {
+	if (!value) {
+		return false;
+	}
+	if (parse_hex(value, rgb)) {
+		return true;
+	}
+	size_t len = strlen(value);
+	for (int i = 1; option && option->values && option->values[i]; i++) {
+		const char *alias = option->values[i];
+		if (strncasecmp(alias, value, len) == 0 && alias[len] == '=') {
+			return parse_hex(alias + len + 1, rgb);
+		}
+	}
+	return false;
+}
+
+void saver_color(const struct saver_options *options, const struct saver *saver,
+		const char *key, double rgb[3]) {
+	const struct saver_option *o = find_option(saver, key);
+	if (saver_color_parse(o, setting(options, saver, key), rgb)) {
+		return;
+	}
+	if (!o || !o->values || !parse_hex(o->values[0], rgb)) {
+		rgb[0] = rgb[1] = rgb[2] = 1;
+	}
+}
+
 char *saver_options_load(struct saver_options *options) {
 	*options = (struct saver_options){ .speed = 1, .photo_seconds = 8 };
 	char *dir = tw_config_dir();
