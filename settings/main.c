@@ -279,6 +279,14 @@ static void on_config_dir_changed(GFileMonitor *monitor, GFile *file, GFile *oth
 	if (same_path(file, s->tilemode->path) || same_path(other, s->tilemode->path)) {
 		check_external_change(s, s->tilemode, s->modes_timer);
 	}
+	// another theme or colour scheme, from here or from anywhere else: the window follows
+	for (int i = 0; i < 2; i++) {
+		char *base = (i ? other : file) ? g_file_get_basename(i ? other : file) : NULL;
+		if (base && (strcmp(base, "current-theme") == 0 || strcmp(base, "color-scheme") == 0)) {
+			settings_apply_theme();
+		}
+		g_free(base);
+	}
 }
 
 /* ---------- search ---------- */
@@ -721,6 +729,7 @@ static void build_window(struct settings *s) {
 	gtk_widget_set_size_request(s->results_scroll, 190, -1);
 	gtk_widget_set_visible(s->results_scroll, FALSE);
 	GtkWidget *left = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_add_css_class(left, "tw-side");
 	gtk_box_append(GTK_BOX(left), search);
 	gtk_box_append(GTK_BOX(left), sidebar);
 	gtk_box_append(GTK_BOX(left), s->results_scroll);
@@ -755,6 +764,7 @@ static void on_startup(GApplication *app, gpointer data) {
 		GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 	g_object_unref(provider);
 	settings_apply_color_scheme(tw_color_scheme_is_dark());
+	settings_apply_theme();
 }
 
 static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, gpointer data) {

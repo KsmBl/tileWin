@@ -552,6 +552,16 @@ test(
 )
 
 test(
+	'settings-theme-look',
+	find_program('settings_theme_look.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 180,
+)
+
+test(
 	'settings-saver-color',
 	find_program('settings_saver_color.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

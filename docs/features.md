@@ -96,7 +96,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - `reload`: config.
   - `restart panel`: taskbar only.
   - `restart`: everything else. It keeps the session and every window open, unless the compositor binary itself has been replaced, which is the one thing that cannot be done without ending the session. `restart session` ends it anyway, and `restart relaunch-apps` starts your apps again afterwards.
-- **Settings app** (`tilewin-settings`, GTK4, Super+I): theme and mode, wallpaper per theme or for all themes, taskbar layout and widgets, right-click and start menus, application launcher and default programs.
+- **Settings app** (`tilewin-settings`, GTK4, Super+I): theme and mode, wallpaper per theme or for all themes, taskbar layout and widgets, right-click and start menus, application launcher and default programs. It looks like the theme that is on (the grey bevels of Windows 95, the beige and blue task pane of XP, Aero, flat Windows 10, Fluent Windows 11, light or dark) and follows when the theme or the colour scheme changes.
 - **Fish completions** for `tilewinmsg` (including all tileWin commands and theme names), `tilewin`, `tilewin-theme`, `tilewin-panel` and `tilewin-settings`.
 - **Low resource use:**
   - Decorations are drawn once and cached.

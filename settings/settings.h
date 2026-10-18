@@ -103,6 +103,10 @@ char *settings_current_theme(void);
 char *settings_current_mode(void);
 /* Makes the settings window itself light or dark. */
 void settings_apply_color_scheme(bool dark);
+/* themecss.c: the window in the look of the theme that is on, made again when that changes */
+struct tw_theme;
+char *settings_theme_css(const struct tw_theme *theme);
+void settings_apply_theme(void);
 
 /* ui.c */
 /* A setting found by the search of the settings window. */

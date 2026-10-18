@@ -96,6 +96,7 @@ static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data
 			scheme);
 	}
 	settings_apply_color_scheme(active);
+	settings_apply_theme(); // the dark or light colours of the theme
 	return FALSE;
 }
 
@@ -179,6 +180,7 @@ static void on_theme_activated(GtkFlowBox *flow, GtkFlowBoxChild *child, gpointe
 	select_target_theme(p);
 	p->updating = false;
 	wallpaper_page_refresh(p->s);
+	settings_apply_theme();
 }
 
 static void on_mode_changed(GObject *dropdown, GParamSpec *pspec, gpointer data) {
