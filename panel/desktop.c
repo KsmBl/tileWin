@@ -217,6 +217,55 @@ static char **icon_candidates(const char *name, bool dir) {
 	return (char **)g_ptr_array_free(names, FALSE);
 }
 
+/*
+ * A Type=Link entry: its own Icon first, then one for what the URL points to,
+ * so a link whose icon the theme lacks (folder-music) still looks like a folder.
+ */
+static char **link_icons(const struct tw_desktop_entry *entry) {
+	GPtrArray *names = g_ptr_array_new();
+	if (entry->icon && *entry->icon) {
+		g_ptr_array_add(names, g_strdup(entry->icon));
+	}
+	const char *url = entry->url ? entry->url : "";
+	char *scheme = g_uri_parse_scheme(url);
+	char *path = g_filename_from_uri(url, NULL, NULL);
+	if (path) {
+		struct stat st;
+		char **more = icon_candidates(path, stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+		for (int i = 0; more[i]; i++) {
+			g_ptr_array_add(names, more[i]);
+		}
+		g_free(more);
+	} else {
+		const char *kind[4] = { "folder" };
+		if (!scheme) {
+			// no URL to go by
+		} else if (strcmp(scheme, "trash") == 0) {
+			kind[0] = "user-trash";
+		} else if (strcmp(scheme, "mtp") == 0 || strcmp(scheme, "gphoto2") == 0 ||
+				strcmp(scheme, "afc") == 0) {
+			kind[0] = "phone";
+			kind[1] = "multimedia-player";
+			kind[2] = "drive-removable-media";
+		} else if (strcmp(scheme, "http") == 0 || strcmp(scheme, "https") == 0) {
+			kind[0] = "text-html";
+		} else {
+			// smb, sftp, ftp, dav, nfs and the like
+			kind[0] = "folder-remote";
+			kind[1] = "network-server";
+			kind[2] = "folder";
+		}
+		for (int i = 0; i < 4 && kind[i]; i++) {
+			g_ptr_array_add(names, g_strdup(kind[i]));
+		}
+		g_ptr_array_add(names, g_strdup("unknown"));
+	}
+	g_ptr_array_add(names, NULL);
+	g_free(path);
+	g_free(scheme);
+	return (char **)g_ptr_array_free(names, FALSE);
+}
+
 static int item_cmp(const void *a, const void *b) {
 	const struct desktop_item *ia = *(struct desktop_item **)a;
 	const struct desktop_item *ib = *(struct desktop_item **)b;
@@ -259,7 +308,10 @@ static void desktop_scan(void) {
 		if (!item->dir && len > 8 && strcmp(item->name + len - 8, ".desktop") == 0) {
 			item->entry = tw_desktop_load(item->path, item->name);
 		}
-		if (item->entry && item->entry->name) {
+		if (item->entry && item->entry->name && item->entry->link) {
+			item->label = strdup(item->entry->name);
+			item->icons = link_icons(item->entry);
+		} else if (item->entry && item->entry->name) {
 			item->label = strdup(item->entry->name);
 			const char *names[] = { item->entry->icon ? item->entry->icon :
 				"application-x-executable", "application-x-executable", NULL };
@@ -774,15 +826,39 @@ static int surface_offset_y(struct psurface *s) {
 	return !bottom && s->output && s->output->bar ? s->output->bar->height : 0;
 }
 
-static void open_item(struct panel *panel, struct desktop_item *item) {
-	if (item->entry && item->entry->url && *item->entry->url) {
-		// a shortcut to a place (KDE writes short urls such as trash:/)
-		const char *url = item->entry->url;
-		char *full = strncmp(url, "trash:", 6) == 0 ? strdup("trash:///") : strdup(url);
-		char *quoted = g_shell_quote(full);
+/*
+ * A shortcut to a place. A file:// URL opens as the file it names, a scheme
+ * with a program of its own (http, smb) with that program, and places only a
+ * file manager knows (trash, mtp, sftp) with the default file manager.
+ */
+static void open_link(struct panel *panel, const char *url) {
+	// KDE writes short urls such as trash:/
+	char *full = strncmp(url, "trash:", 6) == 0 ? strdup("trash:///") : strdup(url);
+	char *path = g_filename_from_uri(full, NULL, NULL);
+	char *scheme = g_uri_parse_scheme(full);
+	GAppInfo *handler = scheme && !path ? g_app_info_get_default_for_uri_scheme(scheme) : NULL;
+	GAppInfo *files = scheme && !path && !handler ?
+		g_app_info_get_default_for_type("inode/directory", FALSE) : NULL;
+	const char *exec = files ? g_app_info_get_commandline(files) : NULL;
+	if (exec) {
+		char *cmd = jumplist_exec_with(exec, full, full);
+		ipc_panel_commandf(panel, "exec %s", cmd);
+		free(cmd);
+	} else {
+		char *quoted = g_shell_quote(path ? path : full);
 		ipc_panel_commandf(panel, "exec xdg-open %s", quoted);
 		g_free(quoted);
-		free(full);
+	}
+	g_clear_object(&handler);
+	g_clear_object(&files);
+	g_free(scheme);
+	g_free(path);
+	free(full);
+}
+
+static void open_item(struct panel *panel, struct desktop_item *item) {
+	if (item->entry && item->entry->url && *item->entry->url) {
+		open_link(panel, item->entry->url);
 		return;
 	}
 	if (item->entry && item->entry->exec) {
@@ -1185,6 +1261,7 @@ enum {
 struct name_dialog {
 	enum dialog_mode mode;
 	char *path;    // item being renamed
+	bool entry;    // it is a .desktop file: renaming changes its Name=
 	list_t *paths; // char *, items to delete for good
 	char text[512];
 	struct text_cursor tc;
@@ -1394,6 +1471,35 @@ static bool create_shortcut(struct panel *panel, const char *dir, const char *ta
 	return ok;
 }
 
+/*
+ * Renames a shortcut or launcher the way its icon shows it: the Name= of the
+ * file, without the translations that would hide it. The file keeps its name,
+ * and with it its place on the desktop, and its mode.
+ */
+static int set_entry_name(const char *path, const char *name) {
+	GKeyFile *key_file = g_key_file_new();
+	GKeyFileFlags flags = G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS;
+	struct stat st;
+	int result = -1;
+	if (stat(path, &st) == 0 && g_key_file_load_from_file(key_file, path, flags, NULL)) {
+		const char *group = G_KEY_FILE_DESKTOP_GROUP;
+		char **keys = g_key_file_get_keys(key_file, group, NULL, NULL);
+		for (int i = 0; keys && keys[i]; i++) {
+			if (strncmp(keys[i], "Name[", 5) == 0) {
+				g_key_file_remove_key(key_file, group, keys[i], NULL);
+			}
+		}
+		g_strfreev(keys);
+		g_key_file_set_string(key_file, group, G_KEY_FILE_DESKTOP_KEY_NAME, name);
+		if (g_key_file_save_to_file(key_file, path, NULL)) {
+			chmod(path, st.st_mode & 07777);
+			result = 0;
+		}
+	}
+	g_key_file_free(key_file);
+	return result;
+}
+
 static void dialog_submit(struct popup *p) {
 	struct name_dialog *d = p->data;
 	struct panel *panel = p->panel;
@@ -1437,7 +1543,9 @@ static void dialog_submit(struct popup *p) {
 		result = fd < 0 ? -1 : close(fd);
 		break;
 	case DIALOG_RENAME:
-		if (strcmp(path, d->path) != 0) {
+		if (d->entry) {
+			result = set_entry_name(d->path, text);
+		} else if (strcmp(path, d->path) != 0) {
 			if (access(path, F_OK) == 0) {
 				errno = EEXIST;
 				result = -1;
@@ -1550,7 +1658,8 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 	char *dir = desktop_directory();
 	if (item) {
 		d->path = strdup(item->path);
-		snprintf(d->text, sizeof(d->text), "%s", item->name);
+		d->entry = item->entry != NULL;
+		snprintf(d->text, sizeof(d->text), "%s", d->entry ? item->label : item->name);
 	} else if (mode == DIALOG_NEW_FOLDER || mode == DIALOG_NEW_TEXT) {
 		const char *base = mode == DIALOG_NEW_FOLDER ? "New folder" : "New text document";
 		const char *extension = mode == DIALOG_NEW_FOLDER ? "" : ".txt";
@@ -1562,7 +1671,7 @@ static void open_dialog(struct panel *panel, enum dialog_mode mode, struct deskt
 	// like Windows: the name is selected, without the extension of a file
 	const char *dot = strrchr(d->text, '.');
 	bool keep_extension = dot && dot != d->text && mode != DIALOG_NEW_FOLDER &&
-		!(item && item->dir);
+		!(item && (item->dir || item->entry));
 	d->tc.anchor = 0;
 	d->tc.cursor = keep_extension ? (size_t)(dot - d->text) : strlen(d->text);
 	int M = popup_shadow_margin(panel);

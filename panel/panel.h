@@ -795,6 +795,8 @@ void appsound_change_volume(struct panel *panel, struct pwindow *win, bool group
 /* jumplist.c: recent files and tasks of an app, ahead of its window menu */
 struct tw_desktop_entry;
 void jumplist_add(const struct tw_desktop_entry *entry, list_t *items);
+/* An Exec line with %f %F %u %U filled in by the file or URI, the rest dropped. */
+char *jumplist_exec_with(const char *exec, const char *path, const char *uri);
 
 /* snaplayouts.c: the layouts offered on the maximize button (Windows 11) */
 void snaplayouts_open(struct panel *panel, struct panel_output *output, int64_t con_id,

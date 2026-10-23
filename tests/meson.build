@@ -594,6 +594,17 @@ test(
 )
 
 test(
+	'desktop-links',
+	find_program('desktop_links.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'desktop-alt-f4',
 	find_program('desktop_alt_f4.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

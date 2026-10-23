@@ -39,7 +39,7 @@ static char *quote(const char *s) {
  * for %f %F %u %U, the rest dropped. Without such a code the file goes at the
  * end, which is what most apps take.
  */
-static char *exec_with(const char *exec, const char *path, const char *uri) {
+char *jumplist_exec_with(const char *exec, const char *path, const char *uri) {
 	GString *out = g_string_new(NULL);
 	bool used = false;
 	for (const char *p = exec; *p; p++) {
@@ -182,7 +182,7 @@ static void add_recent(const struct tw_desktop_entry *e, list_t *items) {
 		if (i < RECENT_MAX) {
 			char *local = g_filename_from_uri(r->uri, NULL, NULL);
 			char *name = g_path_get_basename(local ? local : r->uri);
-			char *cmd_line = exec_with(e->exec, local ? local : r->uri, r->uri);
+			char *cmd_line = jumplist_exec_with(e->exec, local ? local : r->uri, r->uri);
 			char *cmd = format_str("exec %s", cmd_line);
 			struct menu_item *item = menu_item_new(name, cmd);
 			// the icon of the file's type
