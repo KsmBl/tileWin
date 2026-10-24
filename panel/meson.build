@@ -8,6 +8,7 @@ panel_tray_files = have_tray ? files(
 panel_deps = [
 	cairo,
 	dependency('gio-2.0'),
+	dependency('gio-unix-2.0'),
 	gdk_pixbuf,
 	jsonc,
 	math,
@@ -34,6 +35,7 @@ executable(
 		'clipboard.c',
 		'config.c',
 		'desktop.c',
+		'deskprops.c',
 		'infoflyouts.c',
 		'deskwidgets.c',
 		'gadgets.c',

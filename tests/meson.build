@@ -597,11 +597,22 @@ test(
 	'desktop-links',
 	find_program('desktop_links.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
-	depends: [keyboard_tool],
+	depends: [pointer_tool, keyboard_tool],
 	env: saver_gui_env,
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 120,
+)
+
+test(
+	'desktop-properties',
+	find_program('desktop_properties.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool, keyboard_tool],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 150,
 )
 
 test(

@@ -770,10 +770,61 @@ static list_t *background_menu(struct panel *panel) {
 	return items;
 }
 
+/*
+ * "Open with": the programs that say they take this kind of file, the
+ * default one first. NULL when there are none, or nothing local to open.
+ */
+static struct menu_item *open_with_menu(struct desktop_item *item) {
+	char *target = deskprops_local_target(item->path);
+	char *type = target ? deskprops_content_type(target) : NULL;
+	free(target);
+	if (!type) {
+		return NULL;
+	}
+	GAppInfo *def = g_app_info_get_default_for_type(type, FALSE);
+	GList *apps = g_app_info_get_all_for_type(type);
+	g_free(type);
+	if (!apps) {
+		g_clear_object(&def);
+		return NULL;
+	}
+	struct menu_item *menu = menu_item_new("Open with", NULL);
+	menu->children = create_list();
+	int count = 0;
+	for (int pass = 0; pass < 2; pass++) {
+		for (GList *l = apps; l && count < 16; l = l->next) {
+			GAppInfo *app = l->data;
+			bool is_default = def && g_app_info_equal(app, def);
+			const char *id = g_app_info_get_id(app);
+			if ((pass == 0) != is_default || !id || strchr(id, ' ') ||
+					(!g_app_info_should_show(app) && !is_default)) {
+				continue;
+			}
+			GIcon *gicon = g_app_info_get_icon(app);
+			const char *icon = gicon && G_IS_THEMED_ICON(gicon) ?
+				g_themed_icon_get_names(G_THEMED_ICON(gicon))[0] : NULL;
+			char *command = format_str("panel desktop openwith {id} %s", id);
+			struct menu_item *entry = add_item(menu->children,
+				g_app_info_get_display_name(app), icon ? icon : "application-x-executable",
+				command);
+			entry->bold = is_default;
+			free(command);
+			count++;
+		}
+	}
+	g_list_free_full(apps, g_object_unref);
+	g_clear_object(&def);
+	return menu;
+}
+
 static list_t *item_menu(struct desktop_item *item) {
 	list_t *items = create_list();
 	struct menu_item *open = add_item(items, "Open", NULL, "panel desktop open {id}");
 	open->bold = true;
+	struct menu_item *open_with = selection_count() < 2 ? open_with_menu(item) : NULL;
+	if (open_with) {
+		list_add(items, open_with);
+	}
 	if (item->dir) {
 		add_item(items, "Open terminal here", "utilities-terminal", "panel desktop terminal {id}");
 	}
@@ -787,6 +838,8 @@ static list_t *item_menu(struct desktop_item *item) {
 		add_item(items, label, "edit-delete", "panel desktop delete {id}");
 		free(label);
 	}
+	list_add(items, menu_item_separator());
+	add_item(items, "Properties", "document-properties", "panel desktop properties {id}");
 	return items;
 }
 
@@ -1146,7 +1199,61 @@ static void delete_selection(struct panel *panel, struct desktop_item *clicked) 
 	}
 }
 
-/* Delete moves the selected icons to the trash, F2 renames one. */
+/*
+ * The arrow keys move the selection to the closest icon that way, as on
+ * Windows: in the same row or column first, then the nearest one off it.
+ * With nothing selected they start at the first icon.
+ */
+static void select_step(struct panel *panel, int dx, int dy) {
+	if (!desktop.items || desktop.items->length == 0) {
+		return;
+	}
+	struct desktop_item *from = item_at(desktop.selected);
+	int best = from ? -1 : 0, best_score = 0;
+	for (int i = 0; from && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		int along = dx ? (item->col - from->col) * dx : (item->row - from->row) * dy;
+		int across = abs(dx ? item->row - from->row : item->col - from->col);
+		if (item == from || along <= 0) {
+			continue;
+		}
+		int score = across * 1000 + along;
+		if (best < 0 || score < best_score) {
+			best = i;
+			best_score = score;
+		}
+	}
+	if (best < 0) {
+		return;
+	}
+	select_none();
+	struct desktop_item *item = desktop.items->items[best];
+	item->selected = true;
+	desktop.selected = best;
+	desktop_refresh_surfaces(panel);
+}
+
+/* Enter opens every selected icon. */
+static void open_selection(struct panel *panel) {
+	for (int i = 0; desktop.items && i < desktop.items->length; i++) {
+		struct desktop_item *item = desktop.items->items[i];
+		if (item->selected) {
+			open_item(panel, item);
+		}
+	}
+}
+
+static void open_properties(struct panel *panel, struct desktop_item *item) {
+	struct psurface *s = primary_icons(panel);
+	deskprops_open(panel, s ? s->output : panel_focused_output(panel), item->path,
+		item->label, item->icons);
+}
+
+/*
+ * Delete moves the selected icons to the trash, F2 renames one, Enter opens
+ * them, Alt+Enter shows the properties of one, the arrow keys move the
+ * selection.
+ */
 static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 		uint32_t modifiers) {
 	struct panel *panel = s->panel;
@@ -1159,6 +1266,18 @@ static void desktop_key(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 		if (one) {
 			open_dialog(panel, DIALOG_RENAME, one);
 		}
+	} else if ((sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) &&
+			(modifiers & TEXT_MOD_ALT)) {
+		struct desktop_item *one = item ? item : only_selected();
+		if (one) {
+			open_properties(panel, one);
+		}
+	} else if (sym == XKB_KEY_Return || sym == XKB_KEY_KP_Enter) {
+		open_selection(panel);
+	} else if (sym == XKB_KEY_Left || sym == XKB_KEY_Right) {
+		select_step(panel, sym == XKB_KEY_Left ? -1 : 1, 0);
+	} else if (sym == XKB_KEY_Up || sym == XKB_KEY_Down) {
+		select_step(panel, 0, sym == XKB_KEY_Up ? -1 : 1);
 	} else if (sym == XKB_KEY_Escape) {
 		select_none(); // also what the rubber band selected
 		desktop_refresh_surfaces(panel);
@@ -1752,5 +1871,9 @@ void desktop_handle_command(struct panel *panel, int argc, char **argv) {
 		open_dialog(panel, DIALOG_RENAME, item);
 	} else if (strcmp(action, "delete") == 0 && item) {
 		delete_selection(panel, item);
+	} else if (strcmp(action, "properties") == 0 && item) {
+		open_properties(panel, item);
+	} else if (strcmp(action, "openwith") == 0 && item && argc > 2) {
+		deskprops_open_with(panel, item->path, argv[2]);
 	}
 }

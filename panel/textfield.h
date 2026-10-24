@@ -11,6 +11,7 @@ struct panel;
 /* modifier bits of the popup key handlers */
 #define TEXT_MOD_CTRL 1
 #define TEXT_MOD_SHIFT 2
+#define TEXT_MOD_ALT 4
 
 /*
  * Editing of the single line text fields (start menu search, run dialog,

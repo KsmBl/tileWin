@@ -404,6 +404,10 @@ static void dispatch_key(struct panel_seat *seat, uint32_t key) {
 			XKB_STATE_MODS_EFFECTIVE) > 0) {
 		mods |= 2;
 	}
+	if (xkb_state_mod_name_is_active(seat->xkb_state, XKB_MOD_NAME_ALT,
+			XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= 4;
+	}
 	s->impl->key(s, sym, utf8, mods);
 }
 

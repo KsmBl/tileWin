@@ -537,6 +537,14 @@ void desktop_destroy(struct panel_output *output);
 void desktop_main_output_changed(struct panel *panel);
 void desktop_dir_changed(struct panel *panel);
 void desktop_handle_command(struct panel *panel, int argc, char **argv);
+/* deskprops.c: the Properties dialog of a desktop icon */
+void deskprops_open(struct panel *panel, struct panel_output *output, const char *path,
+	const char *label, char *const *icons);
+/* The file or folder an icon opens (a link's target), NULL for programs and remote places. */
+char *deskprops_local_target(const char *path);
+char *deskprops_content_type(const char *path);
+/* Opens what an icon opens with the program of that desktop id. */
+void deskprops_open_with(struct panel *panel, const char *path, const char *app_id);
 
 /* deskwidgets.c: widgets on the desktop */
 void deskwidgets_load(struct panel *panel, struct panel_config *config);

@@ -2,11 +2,12 @@
 # Desktop links, the Type=Link .desktop files a file manager puts on the desktop
 # ("Create Link on Desktop"): a file:// link opens the folder it names, with
 # its %20 decoded; a scheme that has a program of its own (smb here) goes to
-# xdg-open, which starts that program; trash, KDE's short trash:/ and mtp, which only a file manager
-# knows, open with the default file manager. Renaming such an icon changes
-# the Name= of the file (and drops its translations), not the file name, and
-# keeps it executable. xdg-open and the two programs are stand-ins that write down
-# what they were given.
+# xdg-open, which starts that program; trash, KDE's short trash:/ and mtp,
+# which only a file manager knows, open with the default file manager.
+# Renaming such an icon changes the Name= of the file (and drops its
+# translations), not the file name, and keeps it executable. xdg-open and the
+# two programs are stand-ins that write down what they were given. The arrow
+# keys move the selection from icon to icon, and Enter opens the selected one.
 #
 # usage: desktop_links.sh <build dir> <source dir>
 set -u
@@ -16,9 +17,10 @@ source_dir=$2
 compositor=$build/sway/tilewin
 msg=$build/swaymsg/tilewinmsg
 panel=$build/panel/tilewin-panel
+pointer=$build/tests/pointer-tool
 keys=$build/tests/keyboard-tool
 
-for needed in "$compositor" "$msg" "$panel" "$keys"; do
+for needed in "$compositor" "$msg" "$panel" "$pointer" "$keys"; do
 	if [ ! -x "$needed" ]; then
 		echo "$needed was not built: skipping"
 		exit 77
@@ -124,26 +126,41 @@ ipc() { "$msg" -s "$sock" "$@"; }
 ipc mode window >/dev/null 2>&1
 sleep 3
 
-opens() { # number, what should have been started
-	: > "$work/opened"
-	ipc panel desktop open "$1" >/dev/null
+started() { # what should have been started, what started it
 	attempt=0
 	while [ ! -s "$work/opened" ] && [ $attempt -lt 20 ]; do
 		sleep 0.2
 		attempt=$((attempt + 1))
 	done
 	got=$(cat "$work/opened")
-	if [ "$got" = "$2" ]; then
-		echo "ok   $2"
+	if [ "$got" = "$1" ]; then
+		echo "ok   $2: $1"
 	else
-		fail "link $1 should start \"$2\", started \"$got\""
+		fail "$2 should start \"$1\", started \"$got\""
 	fi
+}
+opens() { # number, what should have been started
+	: > "$work/opened"
+	ipc panel desktop open "$1" >/dev/null
+	started "$2" "link $1"
 }
 opens 0 "xdg-open $work/My Music"
 opens 1 "fakefiles trash:///"
 opens 2 "fakefiles mtp://Pixel_8_ABC123/"
 opens 3 "xdg-open smb://server/share/"
 opens 4 "fakefiles trash:///"
+
+# the keyboard: the icons are in the first column, one below the other
+enter() { # keys before Enter, what should have been started
+	: > "$work/opened"
+	"$keys" $1 key none return >/dev/null 2>&1
+	started "$2" "$1, Enter"
+}
+"$pointer" 1280 720 click 60 45 >/dev/null 2>&1 # Alpha
+enter "key none down key none down" "fakefiles mtp://Pixel_8_ABC123/"
+enter "key none up" "fakefiles trash:///"
+enter "key none right" "fakefiles trash:///" # nothing to the right: it stays
+enter "key none escape key none down" "xdg-open $work/My Music" # from the first
 
 # rename Bravo: the dialog holds its shown name, all of it selected
 ipc panel desktop rename 1 >/dev/null
