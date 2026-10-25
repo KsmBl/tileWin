@@ -402,7 +402,10 @@ build() { # version profile compression livepatch
 	exec 9> "$cache/build.lock"
 	flock -n 9 || die "A kernel is being built already"
 
-	kver=$(next_kver "$version")
+	# 7.3 calls itself 7.3.0: its Makefile has SUBLEVEL = 0
+	local release=$version
+	[[ $release == *.*.* ]] || release=$release.0
+	kver=$(next_kver "$release")
 	dir=$data/$kver
 	build=$cache/build/$kver
 	mkdir -p "$dir"

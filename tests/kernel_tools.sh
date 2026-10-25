@@ -57,6 +57,7 @@ store=$XDG_DATA_HOME/tileWin/kernels
 
 mk_tree() { # version dir
 	local v=$1 t=$2/linux-$1
+	[[ $v == *.*.* ]] || v=$v.0 # what the Makefile of 9.10 says: SUBLEVEL = 0
 	mkdir -p "$t/scripts" "$t/arch/x86/include" "$t/include/linux"
 	cat > "$t/Kconfig" <<'EOF'
 config FOO_DRIVER
@@ -132,11 +133,13 @@ EOF
 mirror=$work/mirror
 mkdir -p "$mirror/v9.x" "$mirror/v8.x" "$work/trees"
 mk_tree 9.9.1 "$work/trees"
-(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.9.1.tar.xz" linux-9.9.1)
-(cd "$mirror/v9.x" && sha256sum linux-9.9.1.tar.xz > sha256sums.asc &&
+mk_tree 9.10 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.9.1.tar.xz" linux-9.9.1 &&
+	tar -cJf "$mirror/v9.x/linux-9.10.tar.xz" linux-9.10)
+(cd "$mirror/v9.x" && sha256sum linux-9.9.1.tar.xz linux-9.10.tar.xz > sha256sums.asc &&
 	echo "0000000000000000000000000000000000000000000000000000000000000000  linux-9.9.tar.xz" >> sha256sums.asc)
 cp "$mirror/v9.x/linux-9.9.1.tar.xz" "$mirror/v9.x/linux-9.9.tar.xz" # a broken checksum
-for f in linux-9.9.1.tar.xz linux-9.9.tar.xz linux-9.8.5.tar.xz; do
+for f in linux-9.10.tar.xz linux-9.9.1.tar.xz linux-9.9.tar.xz linux-9.8.5.tar.xz; do
 	echo "<a href=\"$f\">$f</a>"
 done > "$mirror/v9.x/index.html"
 echo '<a href="linux-8.1.2.tar.xz">linux-8.1.2.tar.xz</a>' > "$mirror/v8.x/index.html"
@@ -191,7 +194,7 @@ K() { bash "$tool" "$@"; }
 # ---------- the releases ----------
 
 got=$(K versions | tr '\t' '|' | tr '\n' ' ')
-want="9.9.1|stable, latest 9.9| 9.8.5| 8.1.2|longterm "
+want="9.10| 9.9.1|stable, latest 9.9| 9.8.5| 8.1.2|longterm "
 [ "$got" = "$want" ] && ok "the releases, newest first: $got" ||
 	fail "the releases should be \"$want\", are \"$got\""
 [ "$(K latest)" = 9.9.1 ] && ok "latest is 9.9.1" || fail "latest should be 9.9.1"
@@ -249,9 +252,14 @@ check "  builds the drivers the running kernel leaves off" has $k3 CONFIG_FOO_DR
 check "  but not the tests" has $k3 "# CONFIG_FOO_TEST is not set"
 check "  lz4 leaves the modules uncompressed" has $k3 "# CONFIG_MODULE_COMPRESS is not set"
 
+K build 9.10 device zstd off > "$work/out" 2>&1
+check "a release without a third number is called 9.10.0-tilewin1, as its Makefile says" \
+	test "$(cat "$store/9.10.0-tilewin1/state" 2>/dev/null)" = built
+K delete 9.10.0-tilewin1
+
 K build 9.9 running zstd off > "$work/out" 2>&1
 check "a download that does not match its checksum fails" \
-	grep -q "does not match" "$store/9.9-tilewin1/progress"
+	grep -q "does not match" "$store/9.9.0-tilewin1/progress"
 check "  and is not kept" test ! -e "$XDG_CACHE_HOME/tileWin/kernel/src/linux-9.9.tar.xz"
 check "bad arguments are refused" bash -c "! bash '$tool' build 9.9.1 nonsense zstd on 2>/dev/null"
 
@@ -265,7 +273,7 @@ K cancel
 wait
 check "a build can be cancelled" test "$(cat "$store/9.9.1-tilewin4/state" 2>/dev/null)" = cancelled
 got=$(K list | cut -f1,2 | sort | tr '\t\n' ': ')
-check "the list names them all with their state" test "$got" = "$(printf '%s\n' 9.9-tilewin1:failed 9.9.1-tilewin1:built 9.9.1-tilewin2:built 9.9.1-tilewin3:built 9.9.1-tilewin4:cancelled | sort | tr '\n' ' ')"
+check "the list names them all with their state" test "$got" = "$(printf '%s\n' 9.9.0-tilewin1:failed 9.9.1-tilewin1:built 9.9.1-tilewin2:built 9.9.1-tilewin3:built 9.9.1-tilewin4:cancelled | sort | tr '\n' ' ')"
 K delete 9.9.1-tilewin4
 check "a built kernel can be deleted" test ! -e "$store/9.9.1-tilewin4"
 
