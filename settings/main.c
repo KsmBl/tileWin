@@ -645,6 +645,9 @@ static void build_window(struct settings *s) {
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 5, "avatar-default-symbolic" },
 		{ "backup", "Backup", "restore save export import copy settings file another computer",
 			backup_page_new, 5, "document-save-symbolic" },
+		{ "kernel", "Kernel", "linux kernel build compile version latest longterm live patching "
+			"livepatch kpatch kexec load boot grub uki efi modules drivers compression zstd xz lz4 "
+			"gzip lzo localmodconfig", kernel_page_new, 5, "applications-engineering-symbolic" },
 		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 5, "help-about-symbolic" },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);

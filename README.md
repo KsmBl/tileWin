@@ -54,6 +54,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **12 themes**, Windows 1 to Windows 11 and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, the accent color taken from the wallpaper if you like.
 - **Little helpers:** clipboard history, a snipping tool that also reads text, an emoji picker, sticky notes, screen savers, night light and a lock screen.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
+- **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.
 - **A settings app** for all of it, so no config file has to be touched.
 - **Light:** written in C, no CPU use while nothing happens.
 

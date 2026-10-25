@@ -1,0 +1,495 @@
+#!/bin/bash
+# Puts the kernels tilewin-kernel built onto the computer, for the Kernel page
+# of the tileWin settings, which runs it with pkexec. It is the only part that
+# runs as root:
+#
+#   tilewin-kernel-root info               how this computer boots, key=value
+#   tilewin-kernel-root install KVER STORE puts the kernel built in STORE/KVER on
+#                                          the computer and into the boot menu
+#   tilewin-kernel-root remove KVER        takes it off again
+#   tilewin-kernel-root load KVER [STORE]  starts it now with kexec: the programs
+#                                          end, the firmware and the boot menu
+#                                          are skipped
+#   tilewin-kernel-root boot KVER [STORE]  restarts the computer into it, once
+#                                          (with STORE, a kernel not on the
+#                                          computer yet is put on first)
+#   tilewin-kernel-root tools PACKAGE...   installs the programs a build needs
+#
+# What it never touches, so that the computer boots as before whatever goes
+# wrong: the kernel of the distribution and its boot image, the boot loader
+# and its settings (grub.cfg, grubenv, /etc/default/grub, loader.conf) and the
+# boot order of the firmware.
+#
+#  - Where the boot loader finds unified kernel images (UKIs) by itself, the
+#    kernel becomes one: EFI/Linux/tilewin-KVER.efi on the EFI system
+#    partition. systemd-boot lists those, GRUB does with its "uki" command
+#    (grub.d/15_uki), and the firmware can start one directly. Booting into it
+#    once is systemd-boot's one-shot entry, or else the firmware's BootNext
+#    pointing at a boot entry of its own (made without adding it to the boot
+#    order): the next start after that is the usual one again.
+#  - With a GRUB that knows no UKIs (or no UEFI at all), vmlinuz-KVER and
+#    initramfs-KVER.img go to /boot and grub.cfg is made anew by grub-mkconfig,
+#    only replacing the old one when grub-script-check finds no fault in it;
+#    the old one stays beside it as grub.cfg.tilewin-backup. Booting once is
+#    grub-reboot, which needs GRUB_DEFAULT=saved.
+#
+# The modules go to /usr/lib/modules/KVER, which a .tilewin-kernel file marks
+# as ours: nothing without that file is ever removed. KVER is VERSION-tilewinN,
+# a name no distribution kernel has.
+#
+# For the tests: TILEWIN_KERNEL_ROOT puts every file below a directory of its
+# own, TILEWIN_KERNEL_ESP names the EFI system partition, TILEWIN_KERNEL_RUNNING
+# the running kernel (pkexec passes no such variable on).
+set -uo pipefail
+export PATH=${TILEWIN_KERNEL_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin}
+umask 022
+
+root=${TILEWIN_KERNEL_ROOT:-}
+modules=$root/usr/lib/modules
+efivars=$root/sys/firmware/efi/efivars
+running=${TILEWIN_KERNEL_RUNNING:-$(uname -r)}
+loader_guid=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+marker=.tilewin-kernel
+# the packages a build may ask for (Arch names)
+allowed_tools=" make gcc binutils bc flex bison perl openssl cpio xz zstd lz4 gzip lzop curl python tar pahole libelf kexec-tools base-devel "
+
+die() { echo "$*" >&2; exit 1; }
+note() { echo "$*"; }
+
+valid_kver() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-tilewin[0-9]+$ ]]; }
+
+# ---------- how this computer boots ----------
+
+efi() { [[ -d $root/sys/firmware/efi ]]; }
+
+esp() {
+	if [[ -n ${TILEWIN_KERNEL_ESP:-} ]]; then
+		echo "$TILEWIN_KERNEL_ESP"
+		return
+	fi
+	local p
+	p=$(bootctl --print-esp-path 2>/dev/null) && [[ -d $p ]] && { echo "$p"; return; }
+	for p in /efi /boot /boot/efi; do
+		[[ $(findmnt -n -o FSTYPE --mountpoint "$p" 2>/dev/null) == vfat ]] && { echo "$p"; return; }
+	done
+	return 1
+}
+
+# What the boot loader says it is, through the Boot Loader Interface.
+loader() {
+	local f=$efivars/LoaderInfo-$loader_guid
+	[[ -r $f ]] || return 0
+	tail -c +5 "$f" | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\0'
+}
+
+grub_cfg() {
+	local p e
+	e=$(esp 2>/dev/null)
+	for p in "$root/boot/grub/grub.cfg" "$root/boot/grub2/grub.cfg" ${e:+"$e/grub/grub.cfg"}; do
+		[[ -f $p ]] && { echo "$p"; return; }
+	done
+	return 1
+}
+
+# uki: an image on the EFI partition; grub: vmlinuz and initramfs in /boot and
+# grub-mkconfig; how a kernel is booted once: oneshot (systemd-boot), bootnext
+# (the firmware) or grub-reboot.
+method() {
+	local name cfg
+	name=$(loader)
+	if efi && [[ $name == systemd-boot* ]]; then
+		echo "uki oneshot"
+		return
+	fi
+	cfg=$(grub_cfg 2>/dev/null)
+	if efi && [[ -n $cfg ]] && grep -Eq '^[[:space:]]*uki([[:space:]]|$)' "$cfg"; then
+		echo "uki bootnext"
+	elif [[ -n $cfg ]]; then
+		echo "grub grub-reboot"
+	elif efi && esp >/dev/null; then
+		# a boot loader of its own kind: the firmware starts the image
+		echo "uki bootnext"
+	else
+		echo "none none"
+	fi
+}
+
+initramfs_tool() {
+	if command -v mkinitcpio >/dev/null 2>&1; then
+		echo mkinitcpio
+	elif command -v dracut >/dev/null 2>&1; then
+		echo dracut
+	fi
+}
+
+# The command line the kernel of the distribution gets, as mkinitcpio finds it.
+cmdline() {
+	if [[ -s $root/etc/kernel/cmdline ]]; then
+		tr -s '\n' ' ' < "$root/etc/kernel/cmdline"
+	elif [[ -d $root/etc/cmdline.d ]] && ls "$root"/etc/cmdline.d/*.conf >/dev/null 2>&1; then
+		cat "$root"/etc/cmdline.d/*.conf | grep -v '^#' | tr -s '\n' ' '
+	else
+		tr ' ' '\n' < "$root/proc/cmdline" | grep -Ev '^(BOOT_IMAGE|initrd)=' | tr '\n' ' '
+	fi | sed 's/ *$//'
+}
+
+# Secure Boot on: the firmware starts only signed images, and these are not.
+secure_boot() {
+	local f=$efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+	[[ -r $f ]] && [[ $(od -An -tu1 -j4 -N1 "$f" 2>/dev/null | tr -d ' ') == 1 ]]
+}
+
+kexec_ready() {
+	command -v kexec >/dev/null 2>&1 || { echo "no: install kexec-tools"; return; }
+	[[ $(cat "$root/proc/sys/kernel/kexec_load_disabled" 2>/dev/null) == 1 ]] &&
+		{ echo "no: kexec is switched off (kernel.kexec_load_disabled)"; return; }
+	echo yes
+}
+
+info() {
+	local m e free=""
+	read -r m _ <<<"$(method)"
+	e=$(esp 2>/dev/null)
+	[[ -n $e ]] && free=$(df -Pk "$e" | awk 'NR == 2 { print $4 }')
+	echo "loader=$(loader)"
+	echo "efi=$(efi && echo yes || echo no)"
+	echo "method=$(method | tr ' ' ',')"
+	echo "esp=$e"
+	echo "esp_free_kb=$free"
+	echo "initramfs=$(initramfs_tool)"
+	echo "kexec=$(kexec_ready)"
+	echo "livepatch=$([[ -d $root/sys/kernel/livepatch ]] && echo yes || echo no)"
+	echo "secureboot=$(secure_boot && echo on || echo off)"
+	echo "running=$running"
+}
+
+# ---------- putting a kernel on ----------
+
+lock() {
+	mkdir -p "$root/run"
+	exec 9> "$root/run/tilewin-kernel.lock"
+	flock -n 9 || die "Another kernel is being put on or taken off"
+}
+
+ours() { [[ -f $modules/$1/$marker ]]; }
+
+marker_get() { # kver key
+	sed -n "s/^$2=//p" "$modules/$1/$marker" | head -n 1
+}
+
+os_release() { # kver out
+	local name
+	name=$(. "$root/etc/os-release" 2>/dev/null; echo "${NAME:-Linux}")
+	{
+		grep -Ev '^(PRETTY_NAME|IMAGE_ID|IMAGE_VERSION)=' "$root/etc/os-release" 2>/dev/null
+		echo "PRETTY_NAME=\"$name (tileWin kernel $1)\""
+		echo "IMAGE_ID=tilewin-kernel"
+		echo "IMAGE_VERSION=$1"
+	} > "$2"
+}
+
+# Makes the initramfs (and the UKI), in work.
+make_images() { # kver work compression uki
+	local kver=$1 work=$2 comp=$3 uki=$4 tool z
+	tool=$(initramfs_tool)
+	case $comp in lzo) z=lzop ;; *) z=$comp ;; esac
+	case $tool in
+	mkinitcpio)
+		mkinitcpio -k "$kver" -g "$work/initramfs.img" -z "$z" >&2 ||
+			die "mkinitcpio could not make the initramfs"
+		if [[ $uki == yes ]]; then
+			os_release "$kver" "$work/os-release"
+			mkinitcpio -k "$kver" -U "$work/kernel.efi" -z "$z" \
+				--osrelease "$work/os-release" >&2 || die "mkinitcpio could not make the boot image"
+		fi
+		;;
+	dracut)
+		dracut --force --kver "$kver" --compress "$z" "$work/initramfs.img" >&2 ||
+			die "dracut could not make the initramfs"
+		if [[ $uki == yes ]]; then
+			dracut --force --uefi --kver "$kver" --compress "$z" \
+				--kernel-cmdline "$(cmdline)" "$work/kernel.efi" >&2 ||
+				die "dracut could not make the boot image"
+		fi
+		;;
+	*) die "Neither mkinitcpio nor dracut is installed" ;;
+	esac
+}
+
+fits() { # file dir
+	local need free
+	need=$(( $(stat -c %s "$1") / 1024 + 16384 )) # and 16 MB to spare
+	free=$(df -Pk "$2" | awk 'NR == 2 { print $4 }')
+	[[ $free -ge $need ]] || die "There is not enough room on $2: $((need / 1024)) MB are needed, $((free / 1024)) MB are free. Take another kernel off first."
+}
+
+# grub.cfg anew, only when the new one is sound; the old one is kept beside it.
+grub_update() {
+	local cfg
+	cfg=$(grub_cfg) || die "There is no grub.cfg"
+	grub-mkconfig -o "$cfg.tilewin-new" >&2 || { rm -f "$cfg.tilewin-new"; die "grub-mkconfig failed: grub.cfg is as it was"; }
+	if command -v grub-script-check >/dev/null 2>&1 && ! grub-script-check "$cfg.tilewin-new" >&2; then
+		rm -f "$cfg.tilewin-new"
+		die "The new grub.cfg has faults: grub.cfg is as it was"
+	fi
+	cp -p "$cfg" "$cfg.tilewin-backup"
+	mv "$cfg.tilewin-new" "$cfg"
+	sync
+}
+
+install_kernel() { # kver store
+	local kver=$1 store=$2 src
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	src=$store/$kver
+	[[ -d $src && -f $src/info && -f $src/vmlinuz && -d $src/modules/lib/modules/$kver ]] ||
+		die "$kver is not built"
+	[[ $(cat "$src/state" 2>/dev/null) == built ]] || die "$kver is not built"
+	# the store of the user who asked, or root's
+	local owner
+	owner=$(stat -c %u "$src")
+	[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+	if [[ -e $modules/$kver ]]; then
+		ours "$kver" || die "$modules/$kver is there already and not ours"
+		die "$kver is on the computer already"
+	fi
+	local m how
+	read -r m how <<<"$(method)"
+	[[ $m != none ]] || die "No boot loader was found that tileWin can add a kernel to"
+	[[ -n $(initramfs_tool) ]] || die "Neither mkinitcpio nor dracut is installed"
+	local comp
+	comp=$(sed -n 's/^compression=//p' "$src/info")
+	lock
+
+	local work
+	work=$(mktemp -d "$root/var/tmp/tilewin-kernel.XXXXXX" 2>/dev/null || mktemp -d)
+	placed=()
+	cleanup() {
+		local p
+		for p in "${placed[@]}"; do
+			rm -rf -- "$p"
+		done
+		rm -rf -- "$work"
+	}
+	trap 'cleanup' EXIT
+
+	note "Copying the modules"
+	mkdir -p "$modules"
+	rm -rf -- "$modules/.$kver.new"
+	cp -a "$src/modules/lib/modules/$kver" "$modules/.$kver.new" || die "could not copy the modules"
+	placed+=("$modules/.$kver.new")
+	cp "$src/vmlinuz" "$modules/.$kver.new/vmlinuz"
+	[[ -d $src/headers ]] && cp -a "$src/headers" "$modules/.$kver.new/build"
+	chown -R 0:0 "$modules/.$kver.new" 2>/dev/null
+	mv "$modules/.$kver.new" "$modules/$kver"
+	placed=("$modules/$kver")
+	{
+		echo "method=$m"
+		echo "boot=$how"
+		echo "installed=$(date +%s)"
+	} > "$modules/$kver/$marker"
+	depmod ${root:+-b "$root"} "$kver" >&2 || die "depmod failed"
+	if command -v dkms >/dev/null 2>&1 && [[ -d $modules/$kver/build ]]; then
+		note "Building the DKMS modules"
+		dkms autoinstall -k "$kver" >&2 || note "Some DKMS modules could not be built for $kver"
+	fi
+
+	note "Making the boot image"
+	make_images "$kver" "$work" "${comp:-zstd}" "$([[ $m == uki ]] && echo yes || echo no)"
+	cp "$work/initramfs.img" "$modules/$kver/initramfs-tilewin.img"
+
+	if [[ $m == uki ]]; then
+		local e
+		e=$(esp) || die "The EFI system partition was not found"
+		mkdir -p "$e/EFI/Linux"
+		fits "$work/kernel.efi" "$e"
+		local dest=$e/EFI/Linux/tilewin-$kver.efi
+		cp "$work/kernel.efi" "$dest.new" || { rm -f "$dest.new"; die "could not write to $e"; }
+		placed+=("$dest.new")
+		sync
+		mv "$dest.new" "$dest"
+		placed+=("$dest")
+		sync
+		echo "image=$dest" >> "$modules/$kver/$marker"
+	else
+		local b=$root/boot
+		fits "$work/initramfs.img" "$b"
+		cp "$src/vmlinuz" "$b/vmlinuz-$kver" && placed+=("$b/vmlinuz-$kver")
+		cp "$work/initramfs.img" "$b/initramfs-$kver.img" && placed+=("$b/initramfs-$kver.img")
+		echo "image=$b/vmlinuz-$kver" >> "$modules/$kver/$marker"
+		echo "initramfs=$b/initramfs-$kver.img" >> "$modules/$kver/$marker"
+		grub_update
+	fi
+	placed=()
+	note "$kver is on the computer"
+}
+
+# ---------- the firmware's boot entries ----------
+
+efi_entry() { # kver: its Boot number, if it has one
+	efibootmgr 2>/dev/null | sed -n "s/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} tileWin $1\([[:space:]].*\)\{0,1\}$/\1/p" |
+		head -n 1
+}
+
+boot_order() {
+	efibootmgr 2>/dev/null | sed -n 's/^BootOrder: //p'
+}
+
+efi_entry_make() { # kver image
+	local kver=$1 image=$2 e source disk part rel num before after
+	num=$(efi_entry "$kver")
+	[[ -n $num ]] && { echo "$num"; return; }
+	e=$(esp) || die "The EFI system partition was not found"
+	source=$(findmnt -n -o SOURCE --target "$e") || die "The disk of $e was not found"
+	disk=$(lsblk -no PKNAME "$source" | head -n 1)
+	part=$(cat "$root/sys/class/block/$(basename "$source")/partition" 2>/dev/null)
+	[[ -n $disk && -n $part ]] || die "The disk of $e was not found"
+	rel=${image#"$e"}
+	rel=${rel//\//\\}
+	before=$(boot_order)
+	efibootmgr -C -d "/dev/$disk" -p "$part" -L "tileWin $kver" -l "$rel" >&2 ||
+		die "The firmware took no boot entry"
+	after=$(boot_order)
+	# -C adds no entry to the boot order; should a firmware do it anyway,
+	# the order goes back to what it was
+	[[ $before == "$after" || -z $before ]] || efibootmgr -o "$before" >&2
+	num=$(efi_entry "$kver")
+	[[ -n $num ]] || die "The firmware took no boot entry"
+	echo "$num"
+}
+
+efi_entry_remove() { # kver
+	local num
+	while num=$(efi_entry "$1") && [[ -n $num ]]; do
+		# a BootNext left pointing at nothing would be skipped by most
+		# firmware, but not by all
+		if efibootmgr 2>/dev/null | grep -qx "BootNext: $num"; then
+			efibootmgr -N >&2
+		fi
+		efibootmgr -b "$num" -B >&2 || break
+	done
+}
+
+# ---------- taking a kernel off ----------
+
+remove_kernel() { # kver
+	local kver=$1
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	[[ $kver != "$running" ]] || die "$kver is running now: start another kernel first"
+	ours "$kver" || die "$kver is not on the computer"
+	lock
+	local m image initramfs
+	m=$(marker_get "$kver" method)
+	image=$(marker_get "$kver" image)
+	initramfs=$(marker_get "$kver" initramfs)
+	if efi && command -v efibootmgr >/dev/null 2>&1; then
+		efi_entry_remove "$kver"
+	fi
+	case $image in
+	*/tilewin-"$kver".efi|*/vmlinuz-"$kver") rm -f -- "$image" ;;
+	esac
+	case $initramfs in
+	*/initramfs-"$kver".img) rm -f -- "$initramfs" ;;
+	esac
+	[[ $m == grub ]] && grub_update
+	if command -v dkms >/dev/null 2>&1; then
+		dkms status -k "$kver" 2>/dev/null | cut -d, -f1 | while read -r module; do
+			[[ -n $module ]] && dkms remove "$module" -k "$kver" >/dev/null 2>&1
+		done
+	fi
+	rm -rf -- "${modules:?}/$kver"
+	sync
+	note "$kver is off the computer"
+}
+
+# ---------- starting a kernel ----------
+
+load_kernel() { # kver
+	local kver=$1 ready
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	ours "$kver" || die "$kver is not on the computer"
+	ready=$(kexec_ready)
+	[[ $ready == yes ]] || die "Cannot load a kernel: ${ready#no: }"
+	local dir=$modules/$kver
+	[[ -f $dir/vmlinuz && -f $dir/initramfs-tilewin.img ]] || die "The files of $kver are missing"
+	kexec -s -l "$dir/vmlinuz" --initrd="$dir/initramfs-tilewin.img" \
+			--command-line="$(cmdline)" >&2 ||
+		kexec -l "$dir/vmlinuz" --initrd="$dir/initramfs-tilewin.img" \
+			--command-line="$(cmdline)" >&2 ||
+		die "kexec could not load $kver"
+	note "Starting $kver"
+	systemctl kexec
+}
+
+# The menu entry of GRUB that boots vmlinuz-KVER, as grub-reboot wants it.
+grub_entry() { # kver
+	local cfg
+	cfg=$(grub_cfg) || return 1
+	awk -v k="vmlinuz-$1" '
+		function id(line,   m) {
+			if (match(line, /\$menuentry_id_option +'\''[^'\'']+'\''/)) {
+				m = substr(line, RSTART, RLENGTH); sub(/.*option +'\''/, "", m); sub(/'\''$/, "", m)
+				return m
+			}
+			return ""
+		}
+		/^[ \t]*submenu / { sub_id = id($0) }
+		/^}/ { sub_id = "" }
+		/^[ \t]*menuentry / { entry = id($0) }
+		/^[ \t]*linux[ \t]/ && index($0, k) && entry != "" {
+			print (sub_id != "" ? sub_id ">" : "") entry; exit
+		}' "$cfg"
+}
+
+boot_kernel() { # kver
+	local kver=$1 how image
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	ours "$kver" || die "$kver is not on the computer"
+	how=$(marker_get "$kver" boot)
+	image=$(marker_get "$kver" image)
+	case $how in
+	oneshot)
+		bootctl set-oneshot "tilewin-$kver.efi" >&2 || die "systemd-boot took no one-shot entry"
+		;;
+	bootnext)
+		local num
+		num=$(efi_entry_make "$kver" "$image") || exit 1
+		efibootmgr -n "$num" >&2 || die "The firmware took no BootNext"
+		;;
+	grub-reboot)
+		local entry def
+		def=$(sed -n 's/^GRUB_DEFAULT=["'\'']\{0,1\}\([^"'\'']*\).*/\1/p' "$root/etc/default/grub" 2>/dev/null)
+		[[ $def == saved ]] || die "GRUB starts a kernel once only with GRUB_DEFAULT=saved in /etc/default/grub; choose $kver in the boot menu instead"
+		entry=$(grub_entry "$kver")
+		[[ -n $entry ]] || die "GRUB has no entry for $kver"
+		grub-reboot "$entry" >&2 || die "grub-reboot failed"
+		;;
+	*) die "It is not known how to start $kver" ;;
+	esac
+	note "Restarting into $kver"
+	systemctl reboot
+}
+
+tools() {
+	command -v pacman >/dev/null 2>&1 || die "Install these with the package manager: $*"
+	local p
+	for p in "$@"; do
+		[[ $allowed_tools == *" $p "* ]] || die "not a build tool: $p"
+	done
+	pacman -S --needed --noconfirm "$@"
+}
+
+case ${1:-} in
+info) info ;;
+install) [[ $# -eq 3 ]] || die "usage: tilewin-kernel-root install KVER STORE"; install_kernel "$2" "$3" ;;
+remove) [[ $# -eq 2 ]] || die "usage: tilewin-kernel-root remove KVER"; remove_kernel "$2" ;;
+load|boot)
+	[[ $# -eq 2 || $# -eq 3 ]] || die "usage: tilewin-kernel-root $1 KVER [STORE]"
+	if [[ $# -eq 3 ]] && valid_kver "$2" && ! ours "$2"; then
+		install_kernel "$2" "$3" || exit 1
+		trap - EXIT
+		exec 9>&-
+	fi
+	if [[ $1 == load ]]; then load_kernel "$2"; else boot_kernel "$2"; fi ;;
+tools) shift; [[ $# -gt 0 ]] || die "usage: tilewin-kernel-root tools PACKAGE..."; tools "$@" ;;
+*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools" ;;
+esac

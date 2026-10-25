@@ -1,0 +1,581 @@
+#!/bin/bash
+# Builds Linux kernels for the Kernel page of the tileWin settings. Everything
+# here runs as the user; putting a kernel on the computer (and taking it off,
+# loading it, booting it) is the work of tilewin-kernel-root, run with pkexec.
+#
+#   tilewin-kernel versions             the releases of kernel.org, newest first:
+#                                       VERSION<tab>NOTE (stable, longterm, ...;
+#                                       "latest" for the one "latest" builds)
+#   tilewin-kernel latest               the latest stable release
+#   tilewin-kernel check [COMPRESSION]  what a build still needs, one a line:
+#                                       PROGRAM:PACKAGE
+#   tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH
+#                                       downloads, configures and builds a kernel:
+#                                       VERSION is a release or "latest", PROFILE
+#                                       running|device|portable|full, COMPRESSION
+#                                       zstd|xz|lz4|gzip|lzo, LIVEPATCH on|off
+#   tilewin-kernel cancel               stops the build that is running
+#   tilewin-kernel list                 the kernels built, one a line:
+#                                       KVER<tab>STATE<tab>key=value...
+#   tilewin-kernel delete KVER          removes a built kernel (not an installed one)
+#   tilewin-kernel foreign              the modules in use that a kernel built here
+#                                       will not have: built outside the kernel
+#                                       and not by DKMS (nvidia of the nvidia-open
+#                                       package, say), MODULE<tab>PACKAGE
+#   tilewin-kernel store                the folder the built kernels are kept in
+#
+# A kernel is called VERSION-tilewinN (what uname -r says), N counting up, so
+# it never meets the modules of a kernel of the distribution. Its files are
+# kept in the store, $XDG_DATA_HOME/tileWin/kernels/KVER:
+#
+#   info      key=value: version, profile, compression, livepatch, built, ...
+#   state     building, built, failed or cancelled
+#   progress  what the build does now, for the page
+#   log       everything the build said
+#   vmlinuz, config, System.map, modules/ (lib/modules/KVER), headers/ (the
+#   files to build modules for it, for DKMS)
+#
+# For the tests: TILEWIN_KERNEL_MIRROR (instead of https://cdn.kernel.org/pub/
+# linux/kernel), TILEWIN_KERNEL_RELEASES (releases.json), TILEWIN_KERNEL_CONFIG
+# (instead of the config of the running kernel), TILEWIN_KERNEL_LSMOD (instead
+# of lsmod), TILEWIN_KERNEL_FRAGMENTS (the profile files), TILEWIN_KERNEL_INCLUDE
+# (where the headers a build needs are looked for), TILEWIN_KERNEL_NEED_GB (the
+# free space a build wants), TILEWIN_KERNEL_BOOT_MODULES (instead of the
+# modules of the running initramfs), TILEWIN_KERNEL_NO_BOOT_CHECK, TILEWIN_KERNEL_JOBS.
+set -uo pipefail
+
+data=${XDG_DATA_HOME:-$HOME/.local/share}/tileWin/kernels
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/tileWin/kernel
+mirror=${TILEWIN_KERNEL_MIRROR:-https://cdn.kernel.org/pub/linux/kernel}
+releases_url=${TILEWIN_KERNEL_RELEASES:-https://www.kernel.org/releases.json}
+jobs=${TILEWIN_KERNEL_JOBS:-$(nproc)}
+fragments=${TILEWIN_KERNEL_FRAGMENTS:-@datadir@/kernel}
+
+die() { echo "$*" >&2; exit 1; }
+
+valid_version() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; }
+valid_kver() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-tilewin[0-9]+$ ]]; }
+
+fetch() { # url file
+	case $1 in
+	file://*) cp -- "${1#file://}" "$2" ;;
+	*) curl -fsSL --retry 2 -o "$2" -- "$1" ;;
+	esac
+}
+
+# ---------- the releases ----------
+
+releases_json() {
+	mkdir -p "$cache"
+	local file=$cache/releases.json
+	if [[ ! -s $file ]] || [[ -n $(find "$file" -mmin +60 2>/dev/null) ]]; then
+		fetch "$releases_url" "$file.new" && mv "$file.new" "$file"
+	fi
+	[[ -s $file ]] || die "Could not reach kernel.org"
+	cat "$file"
+}
+
+# moniker<tab>version<tab>eol of every branch kernel.org looks after
+branches() {
+	releases_json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("latest\t%s\t" % d["latest_stable"]["version"])
+for r in d["releases"]:
+    if r["moniker"] in ("mainline", "stable", "longterm"):
+        print("%s\t%s\t%s" % (r["moniker"], r["version"], "eol" if r["iseol"] else ""))'
+}
+
+latest() {
+	local v
+	v=$(branches | awk -F'\t' '$1 == "latest" { print $2 }')
+	valid_version "$v" || die "kernel.org named no latest release"
+	echo "$v"
+}
+
+# The tarballs in the folders of the newest two majors, newest first.
+versions() {
+	local list major newest
+	list=$(branches) || exit 1
+	newest=$(awk -F'\t' '$1 == "latest" { print $2 }' <<<"$list")
+	major=$(awk -F'\t' '$1 == "latest" { split($2, a, "."); print a[1] }' <<<"$list")
+	[[ $major =~ ^[0-9]+$ ]] || die "kernel.org named no latest release"
+	{
+		for m in "$major" $((major - 1)); do
+			[[ $m -gt 0 ]] || continue
+			local index=$cache/index-v$m.html
+			if [[ ! -s $index ]] || [[ -n $(find "$index" -mmin +60 2>/dev/null) ]]; then
+				fetch "$mirror/v$m.x/" "$index.new" && mv "$index.new" "$index"
+			fi
+			[[ -s $index ]] && grep -o 'linux-[0-9][0-9.]*\.tar\.xz"' "$index" |
+				sed 's/^linux-//; s/\.tar\.xz"$//'
+		done
+		# the long-term branches, however far down they are
+		awk -F'\t' '$1 == "longterm" { print $2 }' <<<"$list"
+	} | sort -uVr | awk -v keep="$(awk -F'\t' '$1 == "longterm" { print $2 }' <<<"$list" | tr '\n' ' ')" '
+		NR <= 60 || index(" " keep, " " $0 " ")' | while read -r v; do
+		valid_version "$v" || continue
+		local branch=${v%.*} note=""
+		[[ $v == *.*.* ]] || branch=$v
+		note=$(awk -F'\t' -v v="$v" -v b="$branch" '
+			$1 != "latest" && $2 == v { print $1 ($3 ? ", end of life" : ""); exit }
+			$1 == "longterm" { split($2, a, "."); if (a[1] "." a[2] == b) print "longterm branch" }' \
+			<<<"$list" | head -n 1)
+		[[ $v == "$newest" ]] && note=${note:+$note, }latest
+		printf '%s\t%s\n' "$v" "$note"
+	done
+}
+
+# ---------- what a build needs ----------
+
+# program:package (Arch names)
+needed_tools() { # compression
+	printf '%s\n' make:make gcc:gcc ld:binutils bc:bc flex:flex bison:bison perl:perl \
+		openssl:openssl cpio:cpio xz:xz zstd:zstd gzip:gzip curl:curl python3:python \
+		tar:tar pahole:pahole
+	case ${1:-} in
+	lz4) echo lz4:lz4 ;;
+	lzo) echo lzop:lzop ;;
+	esac
+}
+
+check() { # compression
+	local missing=()
+	while IFS=: read -r tool pkg; do
+		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool:$pkg")
+	done < <(needed_tools "${1:-}")
+	# objtool and the module signing need these headers
+	local inc=${TILEWIN_KERNEL_INCLUDE:-/usr/include}
+	[[ -e $inc/libelf.h || -e $inc/libelf/libelf.h ]] || missing+=("libelf.h:libelf")
+	[[ -e $inc/openssl/ssl.h ]] || missing+=("openssl/ssl.h:openssl")
+	printf '%s\n' "${missing[@]}"
+}
+
+# ---------- building ----------
+
+kver_free() { # kver
+	[[ ! -e $data/$1 && ! -e /usr/lib/modules/$1 ]]
+}
+
+next_kver() { # version
+	local n=1
+	while ! kver_free "$1-tilewin$n"; do
+		n=$((n + 1))
+	done
+	echo "$1-tilewin$n"
+}
+
+base_config() {
+	if [[ -n ${TILEWIN_KERNEL_CONFIG:-} ]]; then
+		cat -- "$TILEWIN_KERNEL_CONFIG"
+	elif [[ -r /proc/config.gz ]]; then
+		zcat /proc/config.gz
+	elif [[ -r /usr/lib/modules/$(uname -r)/build/.config ]]; then
+		cat "/usr/lib/modules/$(uname -r)/build/.config"
+	else
+		die "The configuration of the running kernel cannot be read (no /proc/config.gz)"
+	fi
+}
+
+lsmod_now() {
+	if [[ -n ${TILEWIN_KERNEL_LSMOD:-} ]]; then
+		cat -- "$TILEWIN_KERNEL_LSMOD"
+	else
+		lsmod
+	fi
+}
+
+progress() { # text
+	printf '%s\n' "$*" > "$dir/progress"
+	printf '\n==> %s\n' "$*" >> "$dir/log"
+}
+
+set_state() {
+	printf '%s\n' "$1" > "$dir/state"
+}
+
+fail() {
+	progress "Failed: $*"
+	set_state failed
+	rm -f "$data/current"
+	exit 1
+}
+
+# The modules the initramfs of the running kernel holds, with the hooks of
+# this computer (encrypt wants dm-integrity, which need not be loaded now): a
+# kernel built for this computer alone keeps them, or it would not start.
+boot_modules() {
+	if [[ -n ${TILEWIN_KERNEL_BOOT_MODULES:-} ]]; then
+		cat -- "$TILEWIN_KERNEL_BOOT_MODULES"
+		return
+	fi
+	command -v mkinitcpio >/dev/null 2>&1 && command -v lsinitcpio >/dev/null 2>&1 || return 0
+	mkinitcpio -k "$(uname -r)" -g "$build/initramfs-running.img" >> "$dir/log" 2>&1
+	[[ -s $build/initramfs-running.img ]] || return 0
+	lsinitcpio -l "$build/initramfs-running.img" 2>/dev/null |
+		sed -n 's|.*/\([^/]*\)\.ko\(\.[a-z0-9]*\)\{0,1\}$|\1|p' | tr '-' '_' | sort -u
+	rm -f "$build/initramfs-running.img"
+}
+
+# Switches on the options of a list file, one SYMBOL a line (an m or y after
+# it is only a note): a tristate as a module unless it is built in already, a
+# bool as y. "m" for a bool is no value Kconfig knows, and it would switch the
+# option off, with everything under it (MD takes device-mapper and dm-crypt).
+apply_list() { # file
+	local sym rest
+	[[ -s $build/tristates ]] || tristates > "$build/tristates"
+	while read -r sym rest; do
+		[[ -z $sym || $sym == \#* ]] && continue
+		if grep -qx "$sym" "$build/tristates"; then
+			grep -q "^CONFIG_$sym=y" .config || scripts/config --module "$sym"
+		else
+			scripts/config --enable "$sym"
+		fi
+	done < "$1"
+}
+
+# The tristate options of the tree: the ones "full" builds as modules.
+tristates() {
+	find . -name 'Kconfig*' -not -path './Documentation/*' -print0 |
+		xargs -0 awk '
+			/^[ \t]*(menu)?config[ \t]+[A-Za-z0-9_]+/ { sym = $2; next }
+			sym != "" && /^[ \t]+(def_)?tristate/ { print sym; sym = "" }
+			/^[ \t]*$/ { sym = "" }' | sort -u
+}
+
+configure() { # profile compression livepatch
+	local profile=$1 compression=$2 livepatch=$3 cfg=scripts/config
+	base_config > .config || fail "no configuration to start from"
+	case $profile in
+	running)
+		make olddefconfig >> "$dir/log" 2>&1 || fail "make olddefconfig"
+		;;
+	device|portable)
+		lsmod_now > "$build/lsmod" || fail "lsmod"
+		progress "Configuring ($profile): what this computer needs to start"
+		boot_modules | awk '{ print $1, 0, 0 }' >> "$build/lsmod"
+		progress "Configuring ($profile)"
+		# the questions about new options take their defaults; yes ends
+		# with a broken pipe, which is no failure
+		{ yes '' || true; } | make LSMOD="$build/lsmod" localmodconfig >> "$dir/log" 2>&1 ||
+			fail "make localmodconfig"
+		local lists=("$fragments/boot.list")
+		[[ $profile == portable ]] && lists+=("$fragments/portable.list")
+		# twice: options switched on drag in others that were off, and the
+		# second round lets the drivers that needed those take hold
+		for _ in 1 2; do
+			for list in "${lists[@]}"; do
+				apply_list "$list"
+			done
+			make olddefconfig >> "$dir/log" 2>&1 || fail "make olddefconfig"
+		done
+		;;
+	full)
+		# the running kernel, with every tristate it leaves off as a module;
+		# tests, debugging aids and fuzzers stay as they are
+		tristates | grep -Ev 'TEST|KUNIT|DEBUG|FUZZ|BENCHMARK|SELFTEST|_DUMMY|SAMPLE|COMPILE' \
+			> "$build/tristates-full"
+		awk 'NR == FNR { t["# CONFIG_" $1 " is not set"] = 1; next } !($0 in t)' \
+			"$build/tristates-full" .config > "$build/allconfig"
+		cat "$fragments/full-off.config" >> "$build/allconfig"
+		KCONFIG_ALLCONFIG="$build/allconfig" make allmodconfig >> "$dir/log" 2>&1 ||
+			fail "make allmodconfig"
+		;;
+	*) fail "unknown profile $profile" ;;
+	esac
+
+	local kernel_sym module_sym
+	case $compression in
+	zstd) kernel_sym=KERNEL_ZSTD module_sym=MODULE_COMPRESS_ZSTD ;;
+	xz) kernel_sym=KERNEL_XZ module_sym=MODULE_COMPRESS_XZ ;;
+	gzip) kernel_sym=KERNEL_GZIP module_sym=MODULE_COMPRESS_GZIP ;;
+	lz4) kernel_sym=KERNEL_LZ4 module_sym="" ;;
+	lzo) kernel_sym=KERNEL_LZO module_sym="" ;;
+	*) fail "unknown compression $compression" ;;
+	esac
+	for sym in KERNEL_GZIP KERNEL_BZIP2 KERNEL_LZMA KERNEL_XZ KERNEL_LZO KERNEL_LZ4 KERNEL_ZSTD; do
+		$cfg --disable "$sym"
+	done
+	$cfg --enable "$kernel_sym"
+	for sym in MODULE_COMPRESS_GZIP MODULE_COMPRESS_XZ MODULE_COMPRESS_ZSTD; do
+		$cfg --disable "$sym"
+	done
+	if [[ -n $module_sym ]]; then
+		$cfg --enable MODULE_COMPRESS --enable MODULE_COMPRESS_ALL --enable "$module_sym" \
+			--disable MODULE_COMPRESS_NONE
+	else
+		# lz4 and lzo are not offered for modules: they stay uncompressed,
+		# which loads fastest
+		$cfg --disable MODULE_COMPRESS --enable MODULE_COMPRESS_NONE
+	fi
+
+	if [[ $livepatch == on ]]; then
+		$cfg --enable FTRACE --enable FUNCTION_TRACER --enable DYNAMIC_FTRACE \
+			--enable KALLSYMS_ALL --disable TRIM_UNUSED_KSYMS --enable LIVEPATCH
+	else
+		$cfg --disable LIVEPATCH
+	fi
+	# loading a kernel without the firmware needs these
+	$cfg --enable KEXEC --enable KEXEC_FILE
+	$cfg --set-str LOCALVERSION "-tilewin${kver##*-tilewin}" --disable LOCALVERSION_AUTO
+	make olddefconfig >> "$dir/log" 2>&1 || fail "make olddefconfig"
+
+	grep -q "^CONFIG_$kernel_sym=y" .config || fail "$compression compression could not be chosen"
+	if [[ -n $module_sym ]] && ! grep -q "^CONFIG_$module_sym=y" .config; then
+		fail "$compression compression of the modules could not be chosen"
+	fi
+	if [[ $livepatch == on ]] && ! grep -q '^CONFIG_LIVEPATCH=y' .config; then
+		fail "live patching cannot be switched on for this kernel"
+	fi
+	make -s syncconfig >> "$dir/log" 2>&1 || fail "make syncconfig"
+	[[ $(make -s kernelrelease 2>>"$dir/log") == "$kver" ]] ||
+		fail "the kernel would not be called $kver"
+}
+
+# Whether this computer can start the kernel: an initramfs made from its own
+# modules with the hooks of this computer (mkinitcpio, as the user, nothing
+# written outside the build). A module the hooks want that the kernel lacks
+# fails the build here, not on the computer.
+boot_check() {
+	[[ -z ${TILEWIN_KERNEL_NO_BOOT_CHECK:-} ]] || return 0
+	command -v mkinitcpio >/dev/null 2>&1 || return 0
+	progress "Checking that this computer can start it"
+	local stage=$build/boot-check z
+	rm -rf "$stage"
+	mkdir -p "$stage/lib/modules"
+	cp -a "$dir/modules/lib/modules/$kver" "$stage/lib/modules/"
+	cp "$dir/vmlinuz" "$stage/lib/modules/$kver/vmlinuz"
+	depmod -b "$stage" "$kver" >> "$dir/log" 2>&1
+	case $compression in lzo) z=lzop ;; *) z=$compression ;; esac
+	if ! mkinitcpio -k "$kver" -r "$stage" -g "$build/boot-check.img" -z "$z" \
+			> "$build/boot-check.log" 2>&1; then
+		cat "$build/boot-check.log" >> "$dir/log"
+		local missing
+		missing=$(sed -n "s/.*module not found: '\([^']*\)'.*/\1/p" "$build/boot-check.log" |
+			sort -u | tr '\n' ' ')
+		rm -rf "$stage"
+		fail "this computer could not start it: ${missing:+the modules ${missing% } are missing, }see the log"
+	fi
+	cat "$build/boot-check.log" >> "$dir/log"
+	rm -rf "$stage" "$build/boot-check.img"
+}
+
+# The files that build modules for the kernel, as Arch's linux-headers has them.
+stage_headers() {
+	local hb=$dir/headers
+	rm -rf "$hb"
+	mkdir -p "$hb"
+	cp -t "$hb" .config Makefile Module.symvers System.map 2>/dev/null
+	cp -a -t "$hb" scripts include 2>/dev/null
+	mkdir -p "$hb/arch/x86/kernel" "$hb/kernel" "$hb/tools/objtool" \
+		"$hb/tools/bpf/resolve_btfids"
+	cp -t "$hb/arch/x86" arch/x86/Makefile 2>/dev/null
+	cp -a -t "$hb/arch/x86" arch/x86/include 2>/dev/null
+	cp -t "$hb/arch/x86/kernel" arch/x86/kernel/asm-offsets.s 2>/dev/null
+	cp -t "$hb/kernel" kernel/Makefile 2>/dev/null
+	cp -t "$hb/tools/objtool" tools/objtool/objtool 2>/dev/null
+	cp -t "$hb/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids 2>/dev/null
+	local d
+	for d in drivers/md net/mac80211 drivers/media/i2c drivers/media/usb/dvb-usb \
+			drivers/media/dvb-frontends drivers/media/tuners drivers/iio/common/hid-sensors; do
+		[[ -d $d ]] || continue
+		mkdir -p "$hb/$d"
+		find "$d" -maxdepth 1 -name '*.h' -exec cp -t "$hb/$d" {} +
+	done
+	find . -name 'Kconfig*' -not -path './Documentation/*' -exec cp --parents -t "$hb" {} +
+	find -L "$hb" -type l -delete
+	find "$hb" -type f -name '*.o' -delete
+}
+
+build() { # version profile compression livepatch
+	local version=$1 profile=$2 compression=$3 livepatch=$4
+	case $profile in running|device|portable|full) ;; *) die "unknown profile $profile" ;; esac
+	case $compression in zstd|xz|lz4|gzip|lzo) ;; *) die "unknown compression $compression" ;; esac
+	case $livepatch in on|off) ;; *) die "live patching is on or off" ;; esac
+	[[ $version == latest ]] && { version=$(latest) || exit 1; }
+	valid_version "$version" || die "not a release: $version"
+	local missing
+	missing=$(check "$compression")
+	[[ -z $missing ]] || die "Missing for building a kernel: $(cut -d: -f1 <<<"$missing" | tr '\n' ' ')"
+
+	mkdir -p "$data" "$cache"
+	exec 9> "$cache/build.lock"
+	flock -n 9 || die "A kernel is being built already"
+
+	kver=$(next_kver "$version")
+	dir=$data/$kver
+	build=$cache/build/$kver
+	mkdir -p "$dir"
+	: > "$dir/log"
+	set_state building
+	echo "$kver" > "$data/current"
+	echo $$ > "$cache/build.pid"
+	{
+		echo "version=$version"
+		echo "profile=$profile"
+		echo "compression=$compression"
+		echo "livepatch=$livepatch"
+		echo "started=$(date +%s)"
+	} > "$dir/info"
+	trap 'progress "Cancelled"; set_state cancelled; rm -f "$data/current"; rm -rf "$build"; trap - TERM; kill -TERM 0 2>/dev/null; exit 130' TERM INT
+
+	# the space it takes: the tree, the objects, the modules
+	local need
+	case $profile in full) need=60 ;; running) need=35 ;; *) need=12 ;; esac
+	need=${TILEWIN_KERNEL_NEED_GB:-$need}
+	local free
+	free=$(df -Pk "$cache" | awk 'NR == 2 { print int($4 / 1048576) }')
+	[[ $free -ge $need ]] || fail "Needs about $need GB of free space in $cache, $free GB are free"
+
+	local major=${version%%.*} tarball=$cache/src/linux-$version.tar.xz
+	mkdir -p "$cache/src"
+	if [[ ! -s $tarball ]]; then
+		progress "Downloading Linux $version"
+		fetch "$mirror/v$major.x/linux-$version.tar.xz" "$tarball.part" >> "$dir/log" 2>&1 ||
+			fail "could not download Linux $version"
+		mv "$tarball.part" "$tarball"
+	fi
+	progress "Checking the download"
+	fetch "$mirror/v$major.x/sha256sums.asc" "$cache/src/sha256sums-v$major.asc" >> "$dir/log" 2>&1 ||
+		fail "could not download the checksums of kernel.org"
+	if command -v gpg >/dev/null 2>&1 &&
+			gpg --verify "$cache/src/sha256sums-v$major.asc" >> "$dir/log" 2>&1; then
+		echo "signature=good" >> "$dir/info"
+	else
+		echo "signature=unchecked" >> "$dir/info"
+	fi
+	local want got
+	want=$(awk -v f="linux-$version.tar.xz" '$2 == f { print $1 }' "$cache/src/sha256sums-v$major.asc")
+	got=$(sha256sum "$tarball" | cut -d' ' -f1)
+	if [[ -z $want || $want != "$got" ]]; then
+		rm -f "$tarball"
+		fail "the download does not match the checksum of kernel.org"
+	fi
+
+	progress "Unpacking"
+	rm -rf "$build"
+	mkdir -p "$build"
+	tar -xf "$tarball" -C "$build" --strip-components=1 >> "$dir/log" 2>&1 || fail "could not unpack"
+	cd "$build" || fail "no build folder"
+
+	progress "Configuring ($profile)"
+	configure "$profile" "$compression" "$livepatch"
+	cp .config "$dir/config"
+
+	local total
+	total=$(grep -c '=[ym]$' .config)
+	progress "Compiling"
+	echo "options=$total" >> "$dir/info"
+	# a low priority keeps the desktop smooth while every core compiles
+	nice -n 15 ionice -c 3 make -j"$jobs" bzImage modules > >(
+		count=0
+		while IFS= read -r line; do
+			printf '%s\n' "$line" >> "$dir/log"
+			case $line in
+			"  CC "*|"  RUSTC "*|"  AS "*)
+				count=$((count + 1))
+				[[ $((count % 50)) -eq 0 ]] && printf 'Compiling: %d files\n' "$count" > "$dir/progress"
+				;;
+			esac
+		done
+	) 2>> "$dir/log" || fail "the kernel did not compile (see the log)"
+	wait
+
+	progress "Collecting the modules"
+	rm -rf "$dir/modules"
+	make INSTALL_MOD_PATH="$dir/modules" INSTALL_MOD_STRIP=1 DEPMOD=true modules_install \
+		>> "$dir/log" 2>&1 || fail "make modules_install"
+	rm -f "$dir/modules/lib/modules/$kver/build" "$dir/modules/lib/modules/$kver/source"
+	cp arch/x86/boot/bzImage "$dir/vmlinuz" || fail "no kernel image"
+	cp System.map "$dir/System.map"
+	progress "Collecting the files for DKMS"
+	stage_headers
+	boot_check
+
+	{
+		echo "built=$(date +%s)"
+		echo "size=$(du -sk "$dir" | cut -f1)"
+		echo "image=$(stat -c %s "$dir/vmlinuz")"
+	} >> "$dir/info"
+	cd "$cache" || true
+	rm -rf "$build"
+	rm -f "$data/current" "$cache/build.pid"
+	progress "Built"
+	set_state built
+}
+
+cancel() {
+	local pid
+	pid=$(cat "$cache/build.pid" 2>/dev/null) || die "No kernel is being built"
+	[[ $pid =~ ^[0-9]+$ ]] || die "No kernel is being built"
+	# the whole group: bash would only see the signal once make is done,
+	# which can be hours; the build leads a session of its own
+	kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null ||
+		die "No kernel is being built"
+	rm -f "$cache/build.pid"
+}
+
+# ---------- the kernels built ----------
+
+list() {
+	local d kver state
+	for d in "$data"/*/; do
+		[[ -d $d ]] || continue
+		kver=$(basename "$d")
+		valid_kver "$kver" || continue
+		state=$(cat "$d/state" 2>/dev/null || echo failed)
+		# a build whose process is gone did not finish
+		if [[ $state == building ]] && ! { [[ -s $cache/build.pid ]] &&
+				kill -0 "$(cat "$cache/build.pid")" 2>/dev/null; }; then
+			state=failed
+		fi
+		local installed=no
+		[[ -e /usr/lib/modules/$kver/.tilewin-kernel ]] && installed=yes
+		[[ $(uname -r) == "$kver" ]] && installed=running
+		printf '%s\t%s\tinstalled=%s' "$kver" "$state" "$installed"
+		tr '\n' '\t' < "$d/info" 2>/dev/null | sed 's/\t$//; s/^/\t/'
+		printf '\tprogress=%s\n' "$(head -n 1 "$d/progress" 2>/dev/null)"
+	done
+}
+
+delete() { # kver
+	valid_kver "$1" || die "not a kernel of tileWin: $1"
+	[[ -d $data/$1 ]] || die "There is no kernel $1"
+	[[ -e /usr/lib/modules/$1/.tilewin-kernel ]] &&
+		die "$1 is still on the computer: take it off first"
+	[[ $(cat "$data/current" 2>/dev/null) == "$1" ]] && cancel 2>/dev/null
+	rm -rf -- "${data:?}/$1" "${cache:?}/build/$1"
+}
+
+# Out-of-tree modules (taint O) that came with a package for the distribution's
+# kernel. DKMS builds its own for every kernel, so those are not named.
+foreign() {
+	local sys=${TILEWIN_KERNEL_SYS:-/sys} m name path pkg
+	for m in "$sys"/module/*/taint; do
+		[[ $(cat "$m" 2>/dev/null) == *O* ]] || continue
+		name=$(basename "$(dirname "$m")")
+		path=$(modinfo -n "$name" 2>/dev/null) || continue
+		[[ $path == */updates/dkms/* ]] && continue
+		pkg=$(pacman -Qqo "$path" 2>/dev/null | head -n 1)
+		printf '%s\t%s\n' "$name" "$pkg"
+	done
+}
+
+case ${1:-} in
+versions) versions ;;
+foreign) foreign ;;
+latest) latest ;;
+check) check "${2:-}" ;;
+build) [[ $# -eq 5 ]] || die "usage: tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH"
+	# a session of its own: cancelling stops the build and what it started,
+	# not the programs that started it
+	if [[ -z ${TILEWIN_KERNEL_SESSION:-} ]] && command -v setsid >/dev/null 2>&1; then
+		TILEWIN_KERNEL_SESSION=1 exec setsid --wait bash "$0" "$@"
+	fi
+	build "$2" "$3" "$4" "$5" ;;
+cancel) cancel ;;
+list) list ;;
+delete) [[ $# -eq 2 ]] || die "usage: tilewin-kernel delete KVER"; delete "$2" ;;
+store) echo "$data" ;;
+*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store" ;;
+esac

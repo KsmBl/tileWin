@@ -324,6 +324,7 @@ bool dns_service_enabled(void);
 /* NetworkManager's own servers for all networks, with their files; "" if none. */
 char *dns_networkmanager_global(void);
 GtkWidget *dns_page_new(struct settings *s);
+GtkWidget *kernel_page_new(struct settings *s);
 void dns_page_refresh(struct settings *s);
 /* page_network.c: IP address and Wi-Fi password of each network; and the DNS
  * servers of single networks, a section of the DNS page */
