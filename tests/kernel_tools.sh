@@ -106,6 +106,19 @@ for s in $(awk '/^config/ { s = $2 } /tristate/ { print s }' Kconfig); do
 done
 EOF
 	chmod +x "$t/allmod.sh"
+	mkdir -p "$t/scripts/livepatch"
+	cat > "$t/scripts/livepatch/klp-build" <<'KLP'
+#!/bin/bash
+# a patch with "broken" in it does not build, as one that touches data would not
+out=
+while [ $# -gt 0 ]; do
+	case $1 in -o) out=$2; shift 2 ;; -j) shift 2 ;; *) patch=$1; shift ;; esac
+done
+[ -f .config ] || { echo "error: not a kernel tree"; exit 1; }
+grep -q broken "$patch" && { echo "error: changed data: cannot be patched live"; exit 1; }
+echo "livepatch module" > "$out"
+KLP
+	chmod +x "$t/scripts/livepatch/klp-build"
 	cat > "$t/Makefile" <<EOF
 .PHONY: olddefconfig localmodconfig allmodconfig syncconfig kernelrelease bzImage modules modules_install
 olddefconfig:
@@ -173,7 +186,7 @@ export PATH="$work/bin:$PATH"
 export TILEWIN_KERNEL_MIRROR=http://mirror.test TILEWIN_KERNEL_RELEASES=file://$work/releases.json
 export TILEWIN_KERNEL_FRAGMENTS=$source_dir/kernel TILEWIN_KERNEL_INCLUDE=$work/include
 export TILEWIN_KERNEL_JOBS=2 TILEWIN_KERNEL_NEED_GB=0 TILEWIN_KERNEL_LSMOD=$work/lsmod TILEWIN_KERNEL_CONFIG=$work/base.config
-echo "dm_crypt 1 0" > "$work/lsmod"
+printf 'Module Size Used by\ndm_crypt 1 0\n' > "$work/lsmod"
 # what the initramfs of the running kernel holds
 echo dm_integrity > "$work/boot-modules"
 export TILEWIN_KERNEL_BOOT_MODULES=$work/boot-modules TILEWIN_KERNEL_NO_BOOT_CHECK=1
@@ -198,7 +211,8 @@ want="9.10| 9.9.1|stable, latest 9.9| 9.8.5| 8.1.2|longterm "
 [ "$got" = "$want" ] && ok "the releases, newest first: $got" ||
 	fail "the releases should be \"$want\", are \"$got\""
 [ "$(K latest)" = 9.9.1 ] && ok "latest is 9.9.1" || fail "latest should be 9.9.1"
-[ -z "$(K check zstd)" ] && ok "nothing missing for a build" || fail "missing: $(K check zstd)"
+[ -z "$(K check zstd | grep -v ':optional$')" ] && ok "nothing missing for a build" ||
+	fail "missing: $(K check zstd)"
 got=$(TILEWIN_KERNEL_INCLUDE=$work/none K check lzo | cut -d: -f2 | tr '\n' ' ')
 [[ $got == *libelf* && $got == *openssl* ]] && ok "missing headers are named with their packages" ||
 	fail "the check missed the headers: $got"
@@ -216,6 +230,14 @@ got=$(TILEWIN_KERNEL_SYS=$work/sys K foreign | tr '\t\n' ': ')
 	fail "the drivers a new kernel will not have should be nvidia of nvidia-open, are \"$got\""
 rm "$work/bin/modinfo" "$work/bin/pacman"
 
+# ---------- the modules this computer used ----------
+
+printf 'Module Size Used by\ndm_crypt 1 0\nusb_storage 1 0\n' > "$work/lsmod"
+K record-modules
+printf 'Module Size Used by\ndm_crypt 1 0\n' > "$work/lsmod"
+K record-modules
+check "the modules seen are kept, also once they are gone" test "$(K seen | cut -f1)" = 2
+
 # ---------- building ----------
 
 has() { grep -qx -- "$2" "$store/$1/config"; }
@@ -229,21 +251,40 @@ check "  the modules are zstd compressed" has $k1 CONFIG_MODULE_COMPRESS_ZSTD=y
 check "  it is called -tilewin1" has $k1 'CONFIG_LOCALVERSION="-tilewin1"'
 check "  only what is in use (localmodconfig)" has $k1 "# CONFIG_UNUSED_DRIVER is not set"
 check "  and what the initramfs needs, loaded or not" grep -qx "dm_integrity 0 0" "$XDG_CACHE_HOME/tileWin/kernel/lsmod-used"
+check "  and what was loaded before (usb_storage)" grep -qx "usb_storage 0 0" "$XDG_CACHE_HOME/tileWin/kernel/lsmod-used"
+check "  not for this processor only" has $k1 "# CONFIG_X86_NATIVE_CPU is not set"
+check "  klp-build can make livepatches for it" grep -qx klp=yes "$store/$k1/info"
 check "  and what it takes to start a computer" has $k1 CONFIG_DM_INTEGRITY=m
 check "  an option that is a bool is switched on, not made a module" has $k1 CONFIG_MD=y
 check "  kexec stays possible" has $k1 CONFIG_KEXEC_FILE=y
 check "  the modules are collected" test -f "$store/$k1/modules/lib/modules/$k1/kernel/foo.ko"
 check "  without links into the build tree" test ! -e "$store/$k1/modules/lib/modules/$k1/build" -a ! -L "$store/$k1/modules/lib/modules/$k1/build"
 check "  the files for DKMS are kept" test -f "$store/$k1/headers/include/linux/foo.h" -a -f "$store/$k1/headers/Kconfig"
-check "  the build tree is gone" test ! -e "$XDG_CACHE_HOME/tileWin/kernel/build/$k1"
+check "  with live patching its build tree is kept, for klp-build" test -d "$XDG_CACHE_HOME/tileWin/kernel/build/$k1"
 check "  the info names its profile" grep -qx profile=device "$store/$k1/info"
 
-K build 9.9.1 portable xz off > "$work/out" 2>&1
+K build 9.9.1 portable xz off on > "$work/out" 2>&1
 k2=9.9.1-tilewin2
 check "a second build is $k2" test "$(cat "$store/$k2/state" 2>/dev/null)" = built
 check "  common hardware is added (NVMe)" has $k2 CONFIG_BLK_DEV_NVME=m
 check "  xz for the kernel and its modules" has $k2 CONFIG_MODULE_COMPRESS_XZ=y
 check "  live patching is off" has $k2 "# CONFIG_LIVEPATCH is not set"
+check "  for this processor only" has $k2 CONFIG_X86_NATIVE_CPU=y
+check "  and it says so" grep -qx native=on "$store/$k2/info"
+check "  without live patching its build tree goes" test ! -e "$XDG_CACHE_HOME/tileWin/kernel/build/$k2"
+
+# ---------- live fixes ----------
+
+printf 'fix\n' > "$work/Fix-The-Crash.patch"
+K patch-build $k1 "$work/Fix-The-Crash.patch" > "$work/out" 2>&1
+check "a patch becomes a livepatch module, named after its file" test -s "$store/$k1/livepatches/fix_the_crash.ko"
+check "  listed as built" test "$(K livepatches $k1 | cut -f1,2 | tr '\t' :)" = "fix_the_crash:built"
+printf 'broken\n' > "$work/data.patch"
+K patch-build $k1 "$work/data.patch" > "$work/out" 2>&1
+check "a patch klp-build cannot take fails, and says why" \
+	grep -q "changed data" "$store/$k1/livepatches/data.progress"
+K patch-build $k2 "$work/Fix-The-Crash.patch" > "$work/out" 2>&1
+check "a kernel without its build tree cannot be fixed live" grep -q "keeps no build tree" "$work/out"
 
 K build 9.9.1 full lz4 off > "$work/out" 2>&1
 k3=9.9.1-tilewin3
@@ -426,6 +467,51 @@ check "a full EFI partition is refused" grep -q "not enough room" "$work/out"
 check "  and nothing is left behind" bash -c "[ ! -e '$sb/usr/lib/modules/$k1' ] && ! ls '$esp/EFI/Linux/' | grep -q tilewin"
 rm "$work/rbin/df"
 check "only build tools are installed" bash -c "bash '$root_tool' tools rm 2>&1 | grep -q 'not a build tool'"
+
+# ---------- live fixes and the scheduler, as root ----------
+
+mkdir -p "$sb/sys/kernel/livepatch"
+cat > "$work/rbin/insmod" <<INSMOD
+#!/bin/bash
+echo "insmod \$*" >> $calls
+d=$sb/sys/kernel/livepatch/\$(basename "\$1" .ko)
+mkdir -p "\$d"; echo 1 > "\$d/enabled"; echo 0 > "\$d/transition"
+INSMOD
+cat > "$work/rbin/rmmod" <<RMMOD
+#!/bin/bash
+echo "rmmod \$*" >> $calls
+rm -rf "$sb/sys/kernel/livepatch/\$1"
+RMMOD
+printf '#!/bin/sh\nexit 0\n' > "$work/rbin/scx_lavd"
+chmod +x "$work/rbin"/*
+R livepatch-apply $k1 fix_the_crash "$store" > "$work/out" 2>&1
+check "a livepatch only goes into the kernel it was made for" grep -q "is not running" "$work/out"
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$k1 R livepatch-apply $k1 fix_the_crash "$store" > "$work/out" 2>&1
+check "applying one loads it into the running kernel" grep -q "^insmod .*livepatch_fix_the_crash.ko" "$calls"
+check "  from a copy of root's own, gone again" bash -c "! ls '$sb/run/tilewin-kernel/' 2>/dev/null | grep -q ."
+TILEWIN_KERNEL_RUNNING=$k1 R livepatch-apply $k1 fix_the_crash "$store" > "$work/out" 2>&1
+check "  once" grep -q "applied already" "$work/out"
+R livepatch-undo fix_the_crash > "$work/out" 2>&1
+check "undoing it unloads it" grep -qx "rmmod livepatch_fix_the_crash" "$calls"
+check "  and it is gone from the kernel" test ! -e "$sb/sys/kernel/livepatch/livepatch_fix_the_crash"
+R livepatch-apply $k1 '../x' "$store" > "$work/out" 2>&1
+check "a livepatch name with a path in it is refused" grep -q "not a livepatch" "$work/out"
+
+: > "$calls"
+R scheduler-default scx_lavd Gaming > "$work/out" 2>&1
+check "the scheduler at start goes into scx_loader's config" grep -qx 'default_sched = "scx_lavd"' "$sb/etc/scx_loader/config.toml"
+check "  in its mode" grep -qx 'default_mode = "Gaming"' "$sb/etc/scx_loader/config.toml"
+check "  and scx_loader starts with the computer" grep -qx "systemctl enable scx_loader.service" "$calls"
+R scheduler-default scx_nothere Auto > "$work/out" 2>&1
+check "a scheduler that is not installed is refused" grep -q "not installed" "$work/out"
+R scheduler-default none Auto > "$work/out" 2>&1
+check "none takes the config away again" test ! -e "$sb/etc/scx_loader/config.toml"
+printf 'default_sched = "scx_rusty"\n' > "$sb/etc/scx_loader/config.toml"
+R scheduler-default scx_lavd Auto > "$work/out" 2>&1
+check "a config written by hand stays as it is" grep -qx 'default_sched = "scx_rusty"' "$sb/etc/scx_loader/config.toml"
+R scheduler-default none Auto > /dev/null 2>&1
+check "  also by none" test -f "$sb/etc/scx_loader/config.toml"
 
 # ---------- GRUB without UKIs ----------
 

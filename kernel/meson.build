@@ -3,6 +3,7 @@ kernel_libexecdir = join_paths(prefix, get_option('libexecdir'))
 kernel_conf = configuration_data()
 kernel_conf.set('datadir', tilewin_datadir)
 kernel_conf.set('libexecdir', kernel_libexecdir)
+kernel_conf.set('bindir', join_paths(prefix, get_option('bindir')))
 
 tilewin_kernel = configure_file(
 	input: 'tilewin-kernel.in',
@@ -34,4 +35,22 @@ configure_file(
 	output: 'org.tilewin.kernel.policy',
 	configuration: kernel_conf,
 	install_dir: '/usr/share/polkit-1/actions',
+)
+
+# the timer that notes the modules in use (the Kernel page switches it on)
+configure_file(
+	input: 'tilewin-kernel-modules.service.in',
+	output: 'tilewin-kernel-modules.service',
+	configuration: kernel_conf,
+	install_dir: join_paths(prefix, 'lib', 'systemd', 'user'),
+)
+install_data(
+	'tilewin-kernel-modules.timer',
+	install_dir: join_paths(prefix, 'lib', 'systemd', 'user'),
+)
+
+# switching the scheduler for a game without asking for the password
+install_data(
+	'org.tilewin.scx.rules',
+	install_dir: '/usr/share/polkit-1/rules.d',
 )

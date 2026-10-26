@@ -27,18 +27,18 @@
 
 static const char *const profile_values[] = { "running", "device", "portable", "full", NULL };
 static const char *const profile_labels[] = {
-	"Same as the running kernel", "Only this computer", "This computer and common hardware",
+	"Same as the distribution's kernel", "Only this computer", "This computer and common hardware",
 	"Everything", NULL };
 static const char *const profile_hints[] = {
-	"Everything the kernel you run now has; what is new in the version gets its default. "
-	"The safest choice. Builds in about an hour.",
-	"Only the drivers in use right now. Builds in minutes and is small, but what is not "
-	"plugged in now (a USB stick, a printer, a phone) may not work: plug in everything "
-	"you use before building.",
-	"What this computer uses, and the drivers for the parts one may put in instead: "
+	"Everything the kernel of your distribution has, also while one built here runs; what "
+	"is new in the version gets its default. The safest choice. Builds in about an hour.",
+	"Only the drivers this computer used: the ones loaded now and, with \"Remember the "
+	"drivers in use\" on, every one seen since. Builds in minutes and is small; what was "
+	"never plugged in (a new USB device) does not work.",
+	"What this computer used, and the drivers for the parts one may put in instead: "
 	"graphics cards of AMD, Intel and NVIDIA, NVMe and SATA disks, USB devices, Wi-Fi and "
 	"network cards, sound, webcams, Bluetooth, the common file systems.",
-	"Every driver and feature that can be a module, on top of the running kernel. The "
+	"Every driver and feature that can be a module, on top of the distribution's kernel. The "
 	"biggest: builds for hours and needs about 60 GB while it does.",
 };
 
@@ -62,6 +62,15 @@ struct kernel_page {
 	GtkWidget *missing_row, *missing_label, *tools_button, *kexec_button;
 	GtkWidget *build_button, *cancel_button, *progress_row, *progress_label, *spinner;
 	GtkWidget *built_list, *built_empty, *message;
+	GtkWidget *native, *seen_switch, *seen_row;
+	GtkWidget *fixes_group, *fixes_list;     // the livepatches of the running kernel
+	char *fixes_kver, *fixes;               // its name and what livepatches said last
+	GtkWidget *sched_row, *sched_dd, *mode_dd, *sched_apply, *sched_boot, *sched_full_dd;
+	GtkWidget *full_mode_dd;
+	GtkWidget *sched_install, *sched_rows[3]; // the rows that need scx_loader
+	GPtrArray *scheds;  // char *, the schedulers of sched_dd after [0], the kernel's own
+	GDBusProxy *scx;    // scx_loader
+	bool seen_refreshing, full_refreshing;
 	GPtrArray *versions; // char *, what the version dropdown offers; [0] is "latest"
 	GPtrArray *missing;  // char *, packages a build still needs
 	char *info;          // what tilewin-kernel-root info said
@@ -227,7 +236,9 @@ static void show_info(struct kernel_page *p) {
 	if (method && g_str_has_prefix(method, "uki")) {
 		boot = g_strdup_printf("%s. New kernels go to %s/EFI/Linux as unified kernel images, "
 			"which it lists by itself; its settings and grub.cfg are not touched. Booting "
-			"one once is %s.", loader && *loader ? loader : "The firmware", esp ? esp : "the EFI partition",
+			"one once is %s.", loader && *loader ? loader : "The boot loader is not known: this "
+			"start came straight from the firmware (Boot into does that)", esp ? esp :
+			"the EFI partition",
 			strstr(method, "oneshot") ? "systemd-boot's one-shot entry" :
 			"the firmware's BootNext: the start after it is the usual one again");
 	} else if (method && g_str_has_prefix(method, "grub")) {
@@ -281,10 +292,13 @@ static void show_info(struct kernel_page *p) {
 	g_free(initramfs);
 }
 
+static void scx_show(struct kernel_page *p);
+
 static void on_info(struct kernel_page *p, bool ok, const char *out, const char *err) {
 	g_free(p->info);
 	p->info = g_strdup(out);
 	show_info(p);
+	scx_show(p);
 }
 
 /* Drivers in use that came for the distribution's kernel only. */
@@ -385,6 +399,7 @@ static void on_profile(GObject *dd, GParamSpec *pspec, gpointer data) {
 }
 
 static void check_tools(struct kernel_page *p);
+static bool building(struct kernel_page *p);
 
 static void on_compression(GObject *dd, GParamSpec *pspec, gpointer data) {
 	struct kernel_page *p = data;
@@ -393,31 +408,60 @@ static void on_compression(GObject *dd, GParamSpec *pspec, gpointer data) {
 	check_tools(p);
 }
 
+/*
+ * PROGRAM:PACKAGE lines, PROGRAM:PACKAGE:optional for what a build goes
+ * without: the Rust tools (or the Rust drivers are left out) and ccache.
+ */
 static void on_check(struct kernel_page *p, bool ok, const char *out, const char *err) {
 	g_ptr_array_set_size(p->missing, 0);
-	GString *names = g_string_new(NULL);
+	GString *needed = g_string_new(NULL), *rust = g_string_new(NULL);
+	bool ccache = false, patchutils = false;
 	char **lines = g_strsplit(out, "\n", -1);
 	for (int i = 0; lines[i]; i++) {
-		char *colon = strchr(lines[i], ':');
-		if (!colon) {
-			continue;
+		char **f = g_strsplit(lines[i], ":", 3);
+		if (f[0] && f[1]) {
+			bool optional = f[2] && strcmp(f[2], "optional") == 0;
+			if (!optional) {
+				g_string_append_printf(needed, "%s%s", needed->len ? ", " : "", f[0]);
+			} else if (strcmp(f[0], "ccache") == 0) {
+				ccache = true;
+			} else if (strcmp(f[0], "recountdiff") == 0) {
+				patchutils = true;
+			} else {
+				g_string_append_printf(rust, "%s%s", rust->len ? ", " : "", f[0]);
+			}
+			bool have = false;
+			for (guint k = 0; k < p->missing->len; k++) {
+				have = have || strcmp(p->missing->pdata[k], f[1]) == 0;
+			}
+			if (!have) {
+				g_ptr_array_add(p->missing, g_strdup(f[1]));
+			}
 		}
-		*colon = '\0';
-		g_string_append_printf(names, "%s%s", names->len ? ", " : "", lines[i]);
-		bool have = false;
-		for (guint k = 0; k < p->missing->len; k++) {
-			have = have || strcmp(p->missing->pdata[k], colon + 1) == 0;
-		}
-		if (!have) {
-			g_ptr_array_add(p->missing, g_strdup(colon + 1));
-		}
+		g_strfreev(f);
 	}
 	g_strfreev(lines);
-	char *text = g_strdup_printf("Not installed: %s", names->str);
-	set_subtitle(p->missing_row, text);
-	g_free(text);
+	GString *text = g_string_new(NULL);
+	if (needed->len) {
+		g_string_append_printf(text, "Not installed: %s. ", needed->str);
+	}
+	if (rust->len) {
+		g_string_append_printf(text, "Without %s the kernel leaves out its Rust drivers (the "
+			"QR code of the crash screen, NVIDIA's nova). ", rust->str);
+	}
+	if (ccache) {
+		g_string_append(text, "With ccache the next build of a kernel takes minutes, not the "
+			"whole time again. ");
+	}
+	if (patchutils) {
+		g_string_append(text, "Live fixes need patchutils.");
+	}
+	set_subtitle(p->missing_row, g_strstrip(text->str));
 	gtk_widget_set_visible(p->missing_row, p->missing->len > 0);
-	g_string_free(names, TRUE);
+	gtk_widget_set_sensitive(p->build_button, !needed->len && !building(p));
+	g_string_free(text, TRUE);
+	g_string_free(needed, TRUE);
+	g_string_free(rust, TRUE);
 }
 
 static void check_tools(struct kernel_page *p) {
@@ -507,6 +551,7 @@ static void on_build(GtkButton *button, gpointer data) {
 	g_ptr_array_add(argv, g_strdup(profile));
 	g_ptr_array_add(argv, g_strdup(comp));
 	g_ptr_array_add(argv, g_strdup(patch));
+	g_ptr_array_add(argv, g_strdup(gtk_switch_get_active(GTK_SWITCH(p->native)) ? "on" : "off"));
 	g_ptr_array_add(argv, NULL);
 	GError *error = NULL;
 	GSubprocess *proc = g_subprocess_newv((const char *const *)argv->pdata,
@@ -524,6 +569,79 @@ static void on_build(GtkButton *button, gpointer data) {
 	gtk_widget_set_sensitive(p->build_button, FALSE);
 	// the list picks it up once the build has written its first files
 	g_timeout_add_once(800, (GSourceOnceFunc)refresh_list, p);
+}
+
+/* ---------- the drivers this computer used ---------- */
+
+static void run_systemctl(struct kernel_page *p, done_fn done, const char *what) {
+	const char *argv[] = { "systemctl", "--user", what, "tilewin-kernel-modules.timer", NULL };
+	const char *now[] = { "systemctl", "--user", what, "--now", "tilewin-kernel-modules.timer",
+		NULL };
+	run(p, strcmp(what, "is-enabled") == 0 ? argv : now, done);
+}
+
+static void on_seen(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	char **f = g_strsplit(out, "\t", 2);
+	long count = f[0] ? strtol(f[0], NULL, 10) : 0;
+	char *text;
+	if (count > 0 && f[1] && *f[1]) {
+		GDateTime *t = g_date_time_new_from_unix_local(g_ascii_strtoll(f[1], NULL, 10));
+		char *when = t ? g_date_time_format(t, "%e %B %Y") : g_strdup("");
+		text = g_strdup_printf("%ld drivers seen since %s. Only this computer and Common "
+			"hardware keep every one of them, not only the ones loaded at the build.", count,
+			g_strstrip(when));
+		g_free(when);
+		if (t) {
+			g_date_time_unref(t);
+		}
+	} else {
+		text = g_strdup("Notes the drivers loaded every ten minutes, so that Only this computer "
+			"keeps the USB stick of last week too.");
+	}
+	set_subtitle(p->seen_row, text);
+	g_free(text);
+	g_strfreev(f);
+}
+
+static void on_seen_state(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (strstr(out, "not-found") || strstr(err, "not-found") || strstr(err, "No such file")) {
+		// the timer comes with the install of tileWin
+		gtk_widget_set_sensitive(p->seen_switch, FALSE);
+		set_subtitle(p->seen_row, "Comes with the install of tileWin, which this one was "
+			"before: install it again, then switch it on here.");
+		return;
+	}
+	gtk_widget_set_sensitive(p->seen_switch, TRUE);
+	p->seen_refreshing = true;
+	gtk_switch_set_active(GTK_SWITCH(p->seen_switch), ok);
+	p->seen_refreshing = false;
+	// on from the first time the page is opened: the user may switch it off
+	char *asked = g_build_filename(g_get_user_state_dir(), "tileWin", "kernel-modules-asked", NULL);
+	if (!ok && !g_file_test(asked, G_FILE_TEST_EXISTS)) {
+		char *dir = g_path_get_dirname(asked);
+		g_mkdir_with_parents(dir, 0755);
+		g_file_set_contents(asked, "", 0, NULL);
+		g_free(dir);
+		gtk_switch_set_active(GTK_SWITCH(p->seen_switch), TRUE);
+	}
+	g_free(asked);
+	run_tool(p, on_seen, "seen", NULL);
+}
+
+static void on_seen_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (!ok) {
+		set_message(p, *err ? err : "The timer that notes the drivers could not be switched");
+	}
+	run_tool(p, on_seen, "seen", NULL);
+}
+
+static void on_seen_switch(GObject *sw, GParamSpec *pspec, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->seen_refreshing) {
+		return;
+	}
+	bool on = gtk_switch_get_active(GTK_SWITCH(p->seen_switch));
+	run_systemctl(p, on_seen_done, on ? "enable" : "disable");
 }
 
 static void on_cancel_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
@@ -677,6 +795,8 @@ static void confirm(struct kernel_page *p, const char *action, const char *kver,
 	g_object_unref(dialog);
 }
 
+static void choose_fix(struct kernel_page *p);
+
 static void on_row_button(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
 	const char *action = g_object_get_data(G_OBJECT(button), "action");
@@ -684,6 +804,8 @@ static void on_row_button(GtkButton *button, gpointer data) {
 	bool installed = g_object_get_data(G_OBJECT(button), "installed") != NULL;
 	if (strcmp(action, "install") == 0) {
 		act(p, action, kver, installed);
+	} else if (strcmp(action, "fix") == 0) {
+		choose_fix(p);
 	} else if (strcmp(action, "log") == 0) {
 		char *dir = store_dir();
 		char *log = g_build_filename(dir, kver, "log", NULL);
@@ -710,6 +832,158 @@ static GtkWidget *row_button(struct kernel_page *p, const char *label, const cha
 	return b;
 }
 
+/* ---------- live fixes of the running kernel ---------- */
+
+static void on_fix_built(struct kernel_page *p, bool ok, const char *out, const char *err);
+
+static void on_fix_chosen(GObject *source, GAsyncResult *result, gpointer data) {
+	struct kernel_page *p = data;
+	GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (!file || !p->fixes_kver) {
+		g_clear_object(&file);
+		return;
+	}
+	char *path = g_file_get_path(file);
+	g_object_unref(file);
+	set_note(p, "Making the livepatch: klp-build compiles the kernel with the patch and "
+		"without, and keeps what changed. This takes a few minutes…");
+	char *tool = tool_path();
+	const char *argv[] = { "bash", tool, "patch-build", p->fixes_kver, path, NULL };
+	run(p, argv, on_fix_built);
+	g_free(tool);
+	g_free(path);
+}
+
+static void choose_fix(struct kernel_page *p) {
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Pick the patch to apply to the running kernel");
+	GtkFileFilter *filter = gtk_file_filter_new();
+	gtk_file_filter_set_name(filter, "Patches (.patch, .diff)");
+	gtk_file_filter_add_pattern(filter, "*.patch");
+	gtk_file_filter_add_pattern(filter, "*.diff");
+	GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+	g_list_store_append(filters, filter);
+	g_object_unref(filter);
+	gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+	g_object_unref(filters);
+	gtk_file_dialog_open(dialog, p->s->window, NULL, on_fix_chosen, p);
+	g_object_unref(dialog);
+}
+
+static void refresh_fixes(struct kernel_page *p);
+
+static void on_fix_built(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (ok) {
+		set_note(p, "The livepatch is ready: apply it below.");
+	} else {
+		set_message(p, *err ? err : "The livepatch could not be made: see its log");
+	}
+	refresh_fixes(p);
+}
+
+static void on_fix_action_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	p->busy = false;
+	gtk_spinner_set_spinning(GTK_SPINNER(p->spinner), FALSE);
+	if (ok) {
+		set_message(p, NULL);
+		settings_status(p->s, "%s", *out ? g_strstrip((char *)out) : "Done");
+	} else {
+		set_message(p, *err ? err : "It did not work");
+	}
+	g_clear_pointer(&p->fixes, g_free);
+	refresh_fixes(p);
+}
+
+static void on_fix_button(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	const char *action = g_object_get_data(G_OBJECT(button), "action");
+	const char *name = g_object_get_data(G_OBJECT(button), "name");
+	if (!p->fixes_kver || p->busy) {
+		return;
+	}
+	if (strcmp(action, "log") == 0) {
+		char *dir = store_dir();
+		char *file = g_strdup_printf("%s.log", name);
+		char *log = g_build_filename(dir, p->fixes_kver, "livepatches", file, NULL);
+		char *uri = g_filename_to_uri(log, NULL, NULL);
+		g_app_info_launch_default_for_uri(uri, NULL, NULL);
+		g_free(uri);
+		g_free(log);
+		g_free(file);
+		g_free(dir);
+		return;
+	}
+	p->busy = true;
+	gtk_spinner_set_spinning(GTK_SPINNER(p->spinner), TRUE);
+	if (strcmp(action, "apply") == 0) {
+		set_note(p, "Applying the livepatch: the running programs go on as they are…");
+		char *store = store_dir();
+		char *helper = root_helper_path();
+		const char *argv[] = { g_getenv("TILEWIN_KERNEL_ROOT_HELPER") ? "bash" : "pkexec",
+			helper, "livepatch-apply", p->fixes_kver, name, store, NULL };
+		run(p, argv, on_fix_action_done);
+		g_free(helper);
+		g_free(store);
+	} else {
+		set_note(p, "Taking the livepatch out…");
+		run_root(p, on_fix_action_done, "livepatch-undo", name, NULL);
+	}
+}
+
+static GtkWidget *fix_button(struct kernel_page *p, const char *label, const char *action,
+		const char *name) {
+	GtkWidget *b = gtk_button_new_with_label(label);
+	g_object_set_data_full(G_OBJECT(b), "action", g_strdup(action), g_free);
+	g_object_set_data_full(G_OBJECT(b), "name", g_strdup(name), g_free);
+	gtk_widget_set_sensitive(b, !p->busy || strcmp(action, "log") == 0);
+	g_signal_connect(b, "clicked", G_CALLBACK(on_fix_button), p);
+	return b;
+}
+
+/* NAME<tab>STATE<tab>PROGRESS lines of tilewin-kernel livepatches. */
+static void on_fixes(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (p->fixes && strcmp(p->fixes, out) == 0) {
+		return;
+	}
+	g_free(p->fixes);
+	p->fixes = g_strdup(out);
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(p->fixes_list))) {
+		gtk_list_box_remove(GTK_LIST_BOX(p->fixes_list), child);
+	}
+	bool any = false;
+	char **lines = g_strsplit(out, "\n", -1);
+	for (int i = 0; lines[i]; i++) {
+		char **f = g_strsplit(lines[i], "\t", 3);
+		if (f[0] && *f[0] && f[1]) {
+			any = true;
+			const char *state = f[1];
+			GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+			if (strcmp(state, "built") == 0) {
+				gtk_box_append(GTK_BOX(buttons), fix_button(p, "Apply", "apply", f[0]));
+			} else if (strcmp(state, "applied") == 0) {
+				gtk_box_append(GTK_BOX(buttons), fix_button(p, "Undo", "undo", f[0]));
+			}
+			gtk_box_append(GTK_BOX(buttons), fix_button(p, "Log", "log", f[0]));
+			const char *what = strcmp(state, "applied") == 0 ? "Applied: the running kernel "
+				"has it now" : f[2] && *f[2] ? f[2] : state;
+			ui_row(p->fixes_list, f[0], what, buttons);
+		}
+		g_strfreev(f);
+	}
+	g_strfreev(lines);
+	if (!any) {
+		ui_row(p->fixes_list, "No live fix yet", "\"Fix live…\" on the running kernel turns a "
+			"patch into a livepatch module", NULL);
+	}
+}
+
+static void refresh_fixes(struct kernel_page *p) {
+	if (p->fixes_kver) {
+		run_tool(p, on_fixes, "livepatches", p->fixes_kver);
+	}
+}
+
 static char *size_text(const char *kb) {
 	return kb ? g_format_size(g_ascii_strtoull(kb, NULL, 10) * 1024) : g_strdup("");
 }
@@ -725,7 +999,7 @@ static void show_list(struct kernel_page *p) {
 	char *method = value_of(p->info, "method");
 	bool can_install = method && !g_str_has_prefix(method, "none");
 	g_free(method);
-	bool any = false, build_running = false;
+	bool any = false, build_running = false, running_with_tree = false;
 	char **lines = g_strsplit(p->list ? p->list : "", "\n", -1);
 	for (int i = 0; lines[i]; i++) {
 		char **f = g_strsplit(lines[i], "\t", 3);
@@ -739,6 +1013,8 @@ static void show_list(struct kernel_page *p) {
 		char *comp = value_of(rest, "compression"), *patch = value_of(rest, "livepatch");
 		char *size = value_of(rest, "size"), *built = value_of(rest, "built");
 		char *progress = value_of(rest, "progress");
+		char *native = value_of(rest, "native"), *rust = value_of(rest, "rust");
+		char *tree = value_of(rest, "tree");
 		bool on = installed && strcmp(installed, "no") != 0;
 		bool is_running = installed && strcmp(installed, "running") == 0;
 		GString *sub = g_string_new(profile_name(profile));
@@ -747,6 +1023,9 @@ static void show_list(struct kernel_page *p) {
 		}
 		if (patch && strcmp(patch, "on") == 0) {
 			g_string_append(sub, " · live patching");
+		}
+		if (native && strcmp(native, "on") == 0) {
+			g_string_append(sub, " · for this processor");
 		}
 		if (strcmp(state, "built") == 0) {
 			char *s = size_text(size);
@@ -765,6 +1044,12 @@ static void show_list(struct kernel_page *p) {
 			}
 			g_string_append(sub, is_running ? "\nRunning now" : on ?
 				"\nOn the computer: in the boot menu" : "\nNot on the computer");
+			if (rust && g_str_has_prefix(rust, "off: ")) {
+				g_string_append_printf(sub, "\nWithout its Rust drivers: %s", rust + 5);
+			}
+			if (native && g_str_has_prefix(native, "off: ")) {
+				g_string_append_printf(sub, "\nNot for this processor only: %s", native + 5);
+			}
 		} else if (strcmp(state, "building") == 0) {
 			build_running = true;
 			g_string_append_printf(sub, "\n%s", progress && *progress ? progress : "Building…");
@@ -791,6 +1076,15 @@ static void show_list(struct kernel_page *p) {
 			gtk_box_append(GTK_BOX(buttons), row_button(p, "Take off", "remove", kver, on,
 				!p->busy));
 		}
+		if (ready && is_running && tree) {
+			gtk_box_append(GTK_BOX(buttons), row_button(p, "Fix live…", "fix", kver, on,
+				!p->busy));
+			if (!p->fixes_kver || strcmp(p->fixes_kver, kver) != 0) {
+				g_free(p->fixes_kver);
+				p->fixes_kver = g_strdup(kver);
+			}
+			running_with_tree = true;
+		}
 		gtk_box_append(GTK_BOX(buttons), row_button(p, "Log", "log", kver, on, true));
 		if (strcmp(state, "building") != 0 && !is_running) {
 			GtkWidget *del = row_button(p, "Delete", "delete", kver, on, !p->busy);
@@ -807,9 +1101,16 @@ static void show_list(struct kernel_page *p) {
 		g_free(size);
 		g_free(built);
 		g_free(progress);
+		g_free(native);
+		g_free(rust);
+		g_free(tree);
 		g_strfreev(f);
 	}
 	g_strfreev(lines);
+	if (!running_with_tree) {
+		g_clear_pointer(&p->fixes_kver, g_free);
+	}
+	gtk_widget_set_visible(p->fixes_group, running_with_tree);
 	if (!any) {
 		ui_row(p->built_list, "No kernel built yet", NULL, NULL);
 	}
@@ -835,8 +1136,262 @@ static gboolean on_tick(gpointer data) {
 	struct kernel_page *p = data;
 	if (gtk_widget_get_mapped(p->built_list) && !p->busy) {
 		refresh_list(p);
+		refresh_fixes(p);
 	}
 	return G_SOURCE_CONTINUE;
+}
+
+/* ---------- the CPU scheduler (sched_ext, through scx_loader) ---------- */
+
+static const char *const mode_values[] = { "Auto", "Gaming", "PowerSave", "LowLatency", "Server",
+	NULL };
+static const char *const mode_labels[] = { "Automatic", "Gaming", "Power saving", "Low latency",
+	"Server", NULL };
+
+/* What the better known ones are for; the others go by their name. */
+static const char *sched_hint(const char *name) {
+	static const struct {
+		const char *name, *hint;
+	} hints[] = {
+		{ "scx_lavd", "games and a quick desktop" },
+		{ "scx_bpfland", "a quick desktop under load" },
+		{ "scx_cosmos", "light, for every day" },
+		{ "scx_flash", "even and quick" },
+		{ "scx_rusty", "heavy work on many cores" },
+		{ "scx_p2dq", "many cores" },
+		{ "scx_tickless", "servers" },
+		{ "scx_rustland", "an experiment in user space" },
+	};
+	for (size_t i = 0; i < G_N_ELEMENTS(hints); i++) {
+		if (strcmp(hints[i].name, name) == 0) {
+			return hints[i].hint;
+		}
+	}
+	return NULL;
+}
+
+static char *sched_label(const char *name) {
+	const char *hint = sched_hint(name);
+	return hint ? g_strdup_printf("%s (%s)", name, hint) : g_strdup(name);
+}
+
+static GBusType scx_bus(void) {
+	const char *which = g_getenv("TILEWIN_SCX_BUS");
+	return which && strcmp(which, "session") == 0 ? G_BUS_TYPE_SESSION : G_BUS_TYPE_SYSTEM;
+}
+
+static char *scx_string(struct kernel_page *p, const char *property) {
+	GVariant *v = p->scx ? g_dbus_proxy_get_cached_property(p->scx, property) : NULL;
+	char *text = v && g_variant_is_of_type(v, G_VARIANT_TYPE_STRING) ?
+		g_variant_dup_string(v, NULL) : NULL;
+	if (v) {
+		g_variant_unref(v);
+	}
+	return text;
+}
+
+static void scx_show(struct kernel_page *p) {
+	char *state = value_of(p->info, "sched_ext"), *have = value_of(p->info, "scx");
+	bool kernel_has = state && strcmp(state, "none") != 0;
+	bool installed = have && strcmp(have, "yes") == 0;
+	char *current = scx_string(p, "CurrentScheduler");
+	GVariant *mode = p->scx ? g_dbus_proxy_get_cached_property(p->scx, "SchedulerMode") : NULL;
+	guint m = mode && g_variant_is_of_type(mode, G_VARIANT_TYPE_UINT32) ?
+		g_variant_get_uint32(mode) : 0;
+	if (mode) {
+		g_variant_unref(mode);
+	}
+	bool running = current && *current && strcmp(current, "unknown") != 0;
+	char *text;
+	if (!kernel_has) {
+		text = g_strdup("The running kernel has no sched_ext: its own scheduler (EEVDF) runs. "
+			"Kernels built here keep sched_ext when the distribution's kernel has it.");
+	} else if (!installed) {
+		text = g_strdup("sched_ext lets a scheduler of its own decide which program runs next, "
+			"loaded and swapped while the computer runs. The schedulers come with scx-scheds "
+			"and scx-tools.");
+	} else if (running) {
+		text = g_strdup_printf("Now: %s, %s", current, mode_labels[m < 5 ? m : 0]);
+	} else {
+		text = g_strdup("Now: the kernel's own (EEVDF)");
+	}
+	set_subtitle(p->sched_row, text);
+	g_free(text);
+	gtk_widget_set_visible(p->sched_install, kernel_has && !installed);
+	for (int i = 0; i < 3; i++) {
+		gtk_widget_set_visible(p->sched_rows[i], kernel_has && installed);
+	}
+
+	// the schedulers there are, once
+	GVariant *list = p->scx ? g_dbus_proxy_get_cached_property(p->scx, "SupportedSchedulers") : NULL;
+	if (list && g_variant_is_of_type(list, G_VARIANT_TYPE_STRING_ARRAY) && p->scheds->len == 0) {
+		GtkStringList *strings = gtk_string_list_new(NULL);
+		GtkStringList *full = gtk_string_list_new(NULL);
+		gtk_string_list_append(strings, "The kernel's own (EEVDF)");
+		gtk_string_list_append(full, "Off: leave it as it is");
+		gsize n;
+		const char **names = g_variant_get_strv(list, &n);
+		for (gsize i = 0; i < n; i++) {
+			char *label = sched_label(names[i]);
+			gtk_string_list_append(strings, label);
+			gtk_string_list_append(full, label);
+			g_free(label);
+			g_ptr_array_add(p->scheds, g_strdup(names[i]));
+		}
+		g_free(names);
+		ui_drop_down_set_strings(GTK_DROP_DOWN(p->sched_dd), strings);
+		p->full_refreshing = true;
+		ui_drop_down_set_strings(GTK_DROP_DOWN(p->sched_full_dd), full);
+		const char *chosen = cstmt_arg(confdoc_child(p->s->taskbar->root, "fullscreen_scheduler",
+			NULL), 0);
+		guint at = 0;
+		for (guint i = 0; chosen && i < p->scheds->len; i++) {
+			if (strcmp(p->scheds->pdata[i], chosen) == 0) {
+				at = i + 1;
+			}
+		}
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->sched_full_dd), at);
+		const char *full_mode = cstmt_arg(confdoc_child(p->s->taskbar->root,
+			"fullscreen_scheduler_mode", NULL), 0);
+		guint fm = 1;
+		for (guint i = 0; full_mode && mode_values[i]; i++) {
+			if (g_ascii_strcasecmp(mode_values[i], full_mode) == 0) {
+				fm = i;
+			}
+		}
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->full_mode_dd), fm);
+		p->full_refreshing = false;
+		g_object_unref(strings);
+		g_object_unref(full);
+	}
+	if (list) {
+		g_variant_unref(list);
+	}
+	// what runs is what the dropdowns show
+	guint at = 0;
+	for (guint i = 0; running && i < p->scheds->len; i++) {
+		if (strcmp(p->scheds->pdata[i], current) == 0) {
+			at = i + 1;
+		}
+	}
+	if (p->scheds->len) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->sched_dd), at);
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mode_dd), running && m < 5 ? m : 1);
+	}
+	g_free(current);
+	g_free(state);
+	g_free(have);
+}
+
+static void on_scx_changed(GDBusProxy *proxy, GVariant *changed, GStrv invalidated,
+		gpointer data) {
+	scx_show(data);
+}
+
+static void on_scx_proxy(GObject *source, GAsyncResult *result, gpointer data) {
+	struct kernel_page *p = data;
+	p->scx = g_dbus_proxy_new_for_bus_finish(result, NULL);
+	if (p->scx) {
+		g_signal_connect(p->scx, "g-properties-changed", G_CALLBACK(on_scx_changed), p);
+	}
+	scx_show(p);
+}
+
+static void scx_connect(struct kernel_page *p) {
+	g_clear_object(&p->scx);
+	g_ptr_array_set_size(p->scheds, 0);
+	g_dbus_proxy_new_for_bus(scx_bus(), G_DBUS_PROXY_FLAGS_NONE, NULL, "org.scx.Loader",
+		"/org/scx/Loader", "org.scx.Loader", NULL, on_scx_proxy, p);
+}
+
+static void on_scx_call(GObject *source, GAsyncResult *result, gpointer data) {
+	struct kernel_page *p = data;
+	GError *error = NULL;
+	GVariant *v = g_dbus_proxy_call_finish(G_DBUS_PROXY(source), result, &error);
+	if (v) {
+		g_variant_unref(v);
+		set_message(p, NULL);
+	} else {
+		char *text = g_strdup_printf("The scheduler could not be changed: %s",
+			error ? error->message : "scx_loader did not answer");
+		set_message(p, text);
+		g_free(text);
+	}
+	g_clear_error(&error);
+	gtk_widget_set_sensitive(p->sched_apply, TRUE);
+}
+
+static void on_sched_apply(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	if (!p->scx) {
+		return;
+	}
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->sched_dd));
+	guint m = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->mode_dd));
+	char *current = scx_string(p, "CurrentScheduler");
+	bool running = current && *current && strcmp(current, "unknown") != 0;
+	gtk_widget_set_sensitive(p->sched_apply, FALSE);
+	if (i == 0 || i > p->scheds->len) {
+		g_dbus_proxy_call(p->scx, "StopScheduler", NULL, G_DBUS_CALL_FLAGS_NONE, 30000, NULL,
+			on_scx_call, p);
+	} else {
+		g_dbus_proxy_call(p->scx, running ? "SwitchScheduler" : "StartScheduler",
+			g_variant_new("(su)", (const char *)p->scheds->pdata[i - 1], m < 5 ? m : 0),
+			G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION, 30000, NULL, on_scx_call, p);
+	}
+	g_free(current);
+}
+
+static void on_sched_boot(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->busy) {
+		return;
+	}
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->sched_dd));
+	guint m = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->mode_dd));
+	p->busy = true;
+	set_note(p, NULL);
+	if (i == 0 || i > p->scheds->len) {
+		run_root(p, on_action_done, "scheduler-default", "none", "Auto");
+	} else {
+		run_root(p, on_action_done, "scheduler-default", p->scheds->pdata[i - 1],
+			mode_values[m < 5 ? m : 0]);
+	}
+}
+
+static void on_sched_full(GObject *dd, GParamSpec *pspec, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->full_refreshing) {
+		return;
+	}
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->sched_full_dd));
+	confdoc_set(p->s->taskbar, p->s->taskbar->root, "fullscreen_scheduler", NULL,
+		i == 0 || i > p->scheds->len ? NULL : p->scheds->pdata[i - 1]);
+	// Gaming is what the taskbar takes when nothing is written
+	guint m = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->full_mode_dd));
+	confdoc_set(p->s->taskbar, p->s->taskbar->root, "fullscreen_scheduler_mode", NULL,
+		m == 1 || m >= 5 ? NULL : mode_values[m]);
+	settings_taskbar_changed(p->s);
+}
+
+static void on_scx_tools_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	on_tools_done(p, ok, out, err);
+	// scx_loader is there now: it answers on the bus
+	scx_connect(p);
+}
+
+static void on_scx_tools(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->busy) {
+		return;
+	}
+	p->busy = true;
+	set_note(p, "Installing scx-scheds and scx-tools…");
+	char *helper = root_helper_path();
+	const char *argv[] = { g_getenv("TILEWIN_KERNEL_ROOT_HELPER") ? "bash" : "pkexec", helper,
+		"tools", "scx-scheds", "scx-tools", NULL };
+	run(p, argv, on_scx_tools_done);
+	g_free(helper);
 }
 
 /* ---------- the page ---------- */
@@ -846,6 +1401,7 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	p->s = s;
 	p->versions = g_ptr_array_new_with_free_func(g_free);
 	p->missing = g_ptr_array_new_with_free_func(g_free);
+	p->scheds = g_ptr_array_new_with_free_func(g_free);
 	g_ptr_array_add(p->versions, g_strdup("latest"));
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Kernel", "Build Linux kernels of kernel.org for this computer "
@@ -890,6 +1446,13 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	ui_row(group, "Live patching", "Lets fixes be applied to the running kernel without a "
 		"restart (CONFIG_LIVEPATCH, for kpatch and livepatch modules). A whole other kernel "
 		"version cannot be patched in: that always takes a restart or Load.", p->livepatch);
+	p->native = gtk_switch_new();
+	ui_row(group, "For this processor only", "Built for the instructions of this computer's "
+		"processor (X86_NATIVE_CPU): a little faster, but it may not start on another computer. "
+		"Leave it off for a kernel that has to go elsewhere.", p->native);
+	p->seen_switch = gtk_switch_new();
+	g_signal_connect(p->seen_switch, "notify::active", G_CALLBACK(on_seen_switch), p);
+	p->seen_row = ui_row(group, "Remember the drivers in use", "", p->seen_switch);
 	p->tools_button = gtk_button_new_with_label("Install…");
 	g_signal_connect(p->tools_button, "clicked", G_CALLBACK(on_tools), p);
 	p->missing_row = ui_row(group, "Programs a build needs", "", p->tools_button);
@@ -914,10 +1477,63 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	p->spinner = gtk_spinner_new();
 	gtk_box_append(GTK_BOX(gtk_widget_get_parent(p->built_list)), p->spinner);
 
+	p->fixes_list = ui_group(content, "Live fixes", "Changes to the running kernel that take "
+		"hold at once, without a restart: every program goes on with all it has open. A patch "
+		"(a .patch file, a fix from the mailing list, say) becomes a livepatch module made with "
+		"the kernel's own klp-build, in the build tree kept for it. It changes what functions do; "
+		"a new kernel version, or a change to the data the kernel keeps, still takes a restart. "
+		"A fix lasts until the next restart.");
+	p->fixes_group = gtk_widget_get_parent(p->fixes_list);
+	gtk_widget_set_visible(p->fixes_group, FALSE);
+
+	group = ui_group(content, "CPU scheduler", "Which program runs next on which core. With "
+		"sched_ext a scheduler of its own takes over from the kernel's, swapped while every "
+		"program goes on running; when one stops or fails, the kernel's own is back at once.");
+	p->sched_install = gtk_button_new_with_label("Install…");
+	g_signal_connect(p->sched_install, "clicked", G_CALLBACK(on_scx_tools), p);
+	gtk_widget_set_visible(p->sched_install, FALSE);
+	p->sched_row = ui_row(group, "Scheduler", "Looking…", p->sched_install);
+	GtkWidget *sched_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	const char *const none[] = { "The kernel's own (EEVDF)", NULL };
+	p->sched_dd = gtk_drop_down_new_from_strings(none);
+	p->mode_dd = gtk_drop_down_new_from_strings(mode_labels);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mode_dd), 1);
+	gtk_box_append(GTK_BOX(sched_box), p->sched_dd);
+	gtk_box_append(GTK_BOX(sched_box), p->mode_dd);
+	p->sched_rows[0] = ui_row(group, "Choose", "The scheduler and what it leans to: games, "
+		"saving power, the quickest answer to every click", sched_box);
+	GtkWidget *sched_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	p->sched_apply = gtk_button_new_with_label("Use it now");
+	gtk_widget_add_css_class(p->sched_apply, "suggested-action");
+	g_signal_connect(p->sched_apply, "clicked", G_CALLBACK(on_sched_apply), p);
+	p->sched_boot = gtk_button_new_with_label("Start it with the computer");
+	g_signal_connect(p->sched_boot, "clicked", G_CALLBACK(on_sched_boot), p);
+	gtk_box_append(GTK_BOX(sched_buttons), p->sched_boot);
+	gtk_box_append(GTK_BOX(sched_buttons), p->sched_apply);
+	p->sched_rows[1] = ui_row(group, "Apply", "Now, or from every start on (the kernel's own: "
+		"none at start)", sched_buttons);
+	const char *const off[] = { "Off: leave it as it is", NULL };
+	p->sched_full_dd = gtk_drop_down_new_from_strings(off);
+	g_signal_connect(p->sched_full_dd, "notify::selected", G_CALLBACK(on_sched_full), p);
+	p->full_mode_dd = gtk_drop_down_new_from_strings(mode_labels);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->full_mode_dd), 1);
+	g_signal_connect(p->full_mode_dd, "notify::selected", G_CALLBACK(on_sched_full), p);
+	GtkWidget *full_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_box_append(GTK_BOX(full_box), p->sched_full_dd);
+	gtk_box_append(GTK_BOX(full_box), p->full_mode_dd);
+	p->sched_rows[2] = ui_row(group, "While a window fills a screen", "A game in fullscreen, "
+		"say: the taskbar switches to this scheduler in this mode, and back to what ran before "
+		"once no window fills a screen", full_box);
+	for (int i = 0; i < 3; i++) {
+		gtk_widget_set_visible(p->sched_rows[i], FALSE);
+	}
+
 	run_root(p, on_info, "info", NULL, NULL);
 	run_tool(p, on_versions, "versions", NULL);
 	run_tool(p, on_foreign, "foreign", NULL);
 	check_tools(p);
+	run_systemctl(p, on_seen_state, "is-enabled");
+	scx_connect(p);
 	refresh_list(p);
 	p->timer = g_timeout_add_seconds(1, on_tick, p);
 	return page;

@@ -8,12 +8,15 @@
 #                                       "latest" for the one "latest" builds)
 #   tilewin-kernel latest               the latest stable release
 #   tilewin-kernel check [COMPRESSION]  what a build still needs, one a line:
-#                                       PROGRAM:PACKAGE
-#   tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH
+#                                       PROGRAM:PACKAGE, or PROGRAM:PACKAGE:optional
+#                                       for what a build goes without (Rust,
+#                                       ccache)
+#   tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE]
 #                                       downloads, configures and builds a kernel:
 #                                       VERSION is a release or "latest", PROFILE
 #                                       running|device|portable|full, COMPRESSION
-#                                       zstd|xz|lz4|gzip|lzo, LIVEPATCH on|off
+#                                       zstd|xz|lz4|gzip|lzo, LIVEPATCH on|off,
+#                                       NATIVE on|off (for this processor only)
 #   tilewin-kernel cancel               stops the build that is running
 #   tilewin-kernel list                 the kernels built, one a line:
 #                                       KVER<tab>STATE<tab>key=value...
@@ -23,6 +26,18 @@
 #                                       and not by DKMS (nvidia of the nvidia-open
 #                                       package, say), MODULE<tab>PACKAGE
 #   tilewin-kernel store                the folder the built kernels are kept in
+#   tilewin-kernel record-modules       adds the modules loaded now to the ones
+#                                       seen before (a timer runs it every ten
+#                                       minutes), for the profiles that keep only
+#                                       what this computer uses
+#   tilewin-kernel seen                 how many modules were seen, since when:
+#                                       COUNT<tab>SINCE (seconds since 1970)
+#   tilewin-kernel patch-build KVER PATCH
+#                                       makes a livepatch module of a patch for a
+#                                       kernel built with live patching (its tree
+#                                       is kept for it), with klp-build
+#   tilewin-kernel livepatches KVER     its livepatch modules, one a line:
+#                                       NAME<tab>STATE<tab>PROGRESS
 #
 # A kernel is called VERSION-tilewinN (what uname -r says), N counting up, so
 # it never meets the modules of a kernel of the distribution. Its files are
@@ -33,7 +48,13 @@
 #   progress  what the build does now, for the page
 #   log       everything the build said
 #   vmlinuz, config, System.map, modules/ (lib/modules/KVER), headers/ (the
-#   files to build modules for it, for DKMS)
+#   files to build modules for it, for DKMS), livepatches/ (NAME.ko, NAME.log,
+#   NAME.state, NAME.progress)
+#
+# Every profile starts from the configuration of the distribution's kernel,
+# also while a kernel built here runs. A kernel with live patching keeps its
+# build tree, $XDG_CACHE_HOME/tileWin/kernel/build/KVER: klp-build makes the
+# livepatch modules in it. Builds go through ccache when it is installed.
 #
 # For the tests: TILEWIN_KERNEL_MIRROR (instead of https://cdn.kernel.org/pub/
 # linux/kernel), TILEWIN_KERNEL_RELEASES (releases.json), TILEWIN_KERNEL_CONFIG
@@ -41,7 +62,9 @@
 # of lsmod), TILEWIN_KERNEL_FRAGMENTS (the profile files), TILEWIN_KERNEL_INCLUDE
 # (where the headers a build needs are looked for), TILEWIN_KERNEL_NEED_GB (the
 # free space a build wants), TILEWIN_KERNEL_BOOT_MODULES (instead of the
-# modules of the running initramfs), TILEWIN_KERNEL_NO_BOOT_CHECK, TILEWIN_KERNEL_JOBS.
+# modules of the running initramfs), TILEWIN_KERNEL_NO_BOOT_CHECK, TILEWIN_KERNEL_JOBS,
+# TILEWIN_KERNEL_MODULES (the modules folder the distribution's kernels are in),
+# TILEWIN_KERNEL_CCACHE (the folder of ccache's compiler links, "" for none).
 set -uo pipefail
 
 data=${XDG_DATA_HOME:-$HOME/.local/share}/tileWin/kernels
@@ -50,6 +73,9 @@ mirror=${TILEWIN_KERNEL_MIRROR:-https://cdn.kernel.org/pub/linux/kernel}
 releases_url=${TILEWIN_KERNEL_RELEASES:-https://www.kernel.org/releases.json}
 jobs=${TILEWIN_KERNEL_JOBS:-$(nproc)}
 fragments=${TILEWIN_KERNEL_FRAGMENTS:-@datadir@/kernel}
+seen_file=${XDG_DATA_HOME:-$HOME/.local/share}/tileWin/kernel-modules-seen
+system_modules=${TILEWIN_KERNEL_MODULES:-/usr/lib/modules}
+ccache_dir=${TILEWIN_KERNEL_CCACHE-/usr/lib/ccache/bin}
 
 die() { echo "$*" >&2; exit 1; }
 
@@ -139,11 +165,29 @@ needed_tools() { # compression
 	esac
 }
 
+# Rust: without it the kernel leaves out its Rust drivers, without a word.
+# Asked for only when the distribution's kernel has them.
+rust_missing() {
+	grep -q '^CONFIG_RUST=y' <(base_config 2>/dev/null) || return 0
+	command -v rustc >/dev/null 2>&1 || echo rustc:rust:optional
+	command -v bindgen >/dev/null 2>&1 || echo bindgen:rust-bindgen:optional
+	local sysroot
+	sysroot=$(rustc --print sysroot 2>/dev/null)
+	[[ -n $sysroot && -d $sysroot/lib/rustlib/src/rust/library ]] ||
+		echo rust-src:rust-src:optional
+}
+
 check() { # compression
 	local missing=()
 	while IFS=: read -r tool pkg; do
 		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool:$pkg")
 	done < <(needed_tools "${1:-}")
+	while read -r line; do
+		[[ -n $line ]] && missing+=("$line")
+	done < <(rust_missing)
+	command -v ccache >/dev/null 2>&1 || missing+=("ccache:ccache:optional")
+	# klp-build, for live fixes
+	command -v recountdiff >/dev/null 2>&1 || missing+=("recountdiff:patchutils:optional")
 	# objtool and the module signing need these headers
 	local inc=${TILEWIN_KERNEL_INCLUDE:-/usr/include}
 	[[ -e $inc/libelf.h || -e $inc/libelf/libelf.h ]] || missing+=("libelf.h:libelf")
@@ -165,9 +209,27 @@ next_kver() { # version
 	echo "$1-tilewin$n"
 }
 
+# The newest kernel of the distribution: what is in the modules folder and is
+# not one of ours.
+distro_kernel() {
+	local d best=""
+	for d in "$system_modules"/*/; do
+		d=$(basename "$d")
+		[[ $d == *-tilewin[0-9]* || ! -r $system_modules/$d/build/.config ]] && continue
+		best=$(printf '%s\n%s\n' "$best" "$d" | sort -V | tail -n 1)
+	done
+	echo "$best"
+}
+
+# What every profile starts from: the configuration of the distribution's
+# kernel. While a kernel built here runs, /proc/config.gz is that kernel's,
+# maybe one cut down to this computer.
 base_config() {
+	local distro
 	if [[ -n ${TILEWIN_KERNEL_CONFIG:-} ]]; then
 		cat -- "$TILEWIN_KERNEL_CONFIG"
+	elif [[ $(uname -r) == *-tilewin[0-9]* ]] && distro=$(distro_kernel) && [[ -n $distro ]]; then
+		cat "$system_modules/$distro/build/.config"
 	elif [[ -r /proc/config.gz ]]; then
 		zcat /proc/config.gz
 	elif [[ -r /usr/lib/modules/$(uname -r)/build/.config ]]; then
@@ -183,6 +245,24 @@ lsmod_now() {
 	else
 		lsmod
 	fi
+}
+
+# ---------- the modules this computer used ----------
+
+# NAME SINCE lines: every module seen loaded, and when it was first.
+record_modules() {
+	mkdir -p "$(dirname "$seen_file")"
+	local now
+	now=$(date +%s)
+	{
+		[[ -f $seen_file ]] && cat "$seen_file"
+		lsmod_now | awk -v t="$now" 'NR > 1 && $1 != "" { print $1, t }'
+	} | sort -k1,1 -k2,2n | awk '!seen[$1]++' > "$seen_file.new" && mv "$seen_file.new" "$seen_file"
+}
+
+seen() {
+	[[ -s $seen_file ]] || { printf '0\t\n'; return; }
+	awk 'NR == 1 || $2 < m { m = $2 } END { printf "%d\t%s\n", NR, m }' "$seen_file"
 }
 
 progress() { # text
@@ -243,8 +323,8 @@ tristates() {
 			/^[ \t]*$/ { sym = "" }' | sort -u
 }
 
-configure() { # profile compression livepatch
-	local profile=$1 compression=$2 livepatch=$3 cfg=scripts/config
+configure() { # profile compression livepatch native
+	local profile=$1 compression=$2 livepatch=$3 native=$4 cfg=scripts/config
 	base_config > .config || fail "no configuration to start from"
 	case $profile in
 	running)
@@ -252,6 +332,9 @@ configure() { # profile compression livepatch
 		;;
 	device|portable)
 		lsmod_now > "$build/lsmod" || fail "lsmod"
+		# and what was loaded before: the USB stick of last week
+		record_modules
+		awk '{ print $1, 0, 0 }' "$seen_file" >> "$build/lsmod"
 		progress "Configuring ($profile): what this computer needs to start"
 		boot_modules | awk '{ print $1, 0, 0 }' >> "$build/lsmod"
 		progress "Configuring ($profile)"
@@ -310,10 +393,17 @@ configure() { # profile compression livepatch
 	fi
 
 	if [[ $livepatch == on ]]; then
+		# KLP_BUILD: klp-build makes livepatch modules for it later
 		$cfg --enable FTRACE --enable FUNCTION_TRACER --enable DYNAMIC_FTRACE \
-			--enable KALLSYMS_ALL --disable TRIM_UNUSED_KSYMS --enable LIVEPATCH
+			--enable KALLSYMS_ALL --disable TRIM_UNUSED_KSYMS --enable LIVEPATCH \
+			--enable KLP_BUILD
 	else
 		$cfg --disable LIVEPATCH
+	fi
+	if [[ $native == on ]]; then
+		$cfg --enable X86_NATIVE_CPU
+	else
+		$cfg --disable X86_NATIVE_CPU
 	fi
 	# loading a kernel without the firmware needs these
 	$cfg --enable KEXEC --enable KEXEC_FILE
@@ -326,6 +416,29 @@ configure() { # profile compression livepatch
 	fi
 	if [[ $livepatch == on ]] && ! grep -q '^CONFIG_LIVEPATCH=y' .config; then
 		fail "live patching cannot be switched on for this kernel"
+	fi
+	if grep -q '^CONFIG_KLP_BUILD=y' .config; then
+		echo "klp=yes" >> "$dir/info"
+	fi
+	# Rust: the kernel drops it when the tools are missing; it says why
+	if grep -q '^CONFIG_RUST=y' <(base_config); then
+		if grep -q '^CONFIG_RUST=y' .config; then
+			echo "rust=on" >> "$dir/info"
+		else
+			local why
+			why=$(make -s rustavailable 2>&1 | grep -m1 -iE 'not found|cannot|could not|too old|error' |
+				sed 's/^\*\*\* //; s/\t/ /g')
+			echo "rust=off: ${why:-the Rust tools are missing}" >> "$dir/info"
+		fi
+	fi
+	if [[ $native == on ]]; then
+		if grep -q '^CONFIG_X86_NATIVE_CPU=y' .config; then
+			echo "native=on" >> "$dir/info"
+		elif grep -q '^CONFIG_RUST=y' .config; then
+			echo "native=off: the Rust compiler does not know this processor's instructions yet (APX), and the Rust drivers were kept" >> "$dir/info"
+		else
+			echo "native=off: this kernel version cannot be built for one processor only" >> "$dir/info"
+		fi
 	fi
 	make -s syncconfig >> "$dir/log" 2>&1 || fail "make syncconfig"
 	[[ $(make -s kernelrelease 2>>"$dir/log") == "$kver" ]] ||
@@ -387,15 +500,16 @@ stage_headers() {
 	find "$hb" -type f -name '*.o' -delete
 }
 
-build() { # version profile compression livepatch
-	local version=$1 profile=$2 compression=$3 livepatch=$4
+build() { # version profile compression livepatch native
+	local version=$1 profile=$2 compression=$3 livepatch=$4 native=${5:-off}
 	case $profile in running|device|portable|full) ;; *) die "unknown profile $profile" ;; esac
 	case $compression in zstd|xz|lz4|gzip|lzo) ;; *) die "unknown compression $compression" ;; esac
 	case $livepatch in on|off) ;; *) die "live patching is on or off" ;; esac
+	case $native in on|off) ;; *) die "for this processor is on or off" ;; esac
 	[[ $version == latest ]] && { version=$(latest) || exit 1; }
 	valid_version "$version" || die "not a release: $version"
 	local missing
-	missing=$(check "$compression")
+	missing=$(check "$compression" | grep -v ':optional$')
 	[[ -z $missing ]] || die "Missing for building a kernel: $(cut -d: -f1 <<<"$missing" | tr '\n' ' ')"
 
 	mkdir -p "$data" "$cache"
@@ -418,6 +532,7 @@ build() { # version profile compression livepatch
 		echo "profile=$profile"
 		echo "compression=$compression"
 		echo "livepatch=$livepatch"
+		echo "asked_native=$native"
 		echo "started=$(date +%s)"
 	} > "$dir/info"
 	trap 'progress "Cancelled"; set_state cancelled; rm -f "$data/current"; rm -rf "$build"; trap - TERM; kill -TERM 0 2>/dev/null; exit 130' TERM INT
@@ -461,8 +576,16 @@ build() { # version profile compression livepatch
 	tar -xf "$tarball" -C "$build" --strip-components=1 >> "$dir/log" 2>&1 || fail "could not unpack"
 	cd "$build" || fail "no build folder"
 
+	# ccache stands in for gcc through the PATH: the commands of the build stay
+	# what they are, so klp-build later finds every object up to date
+	if [[ -n $ccache_dir && -x $ccache_dir/gcc ]] && command -v ccache >/dev/null 2>&1; then
+		export PATH="$ccache_dir:$PATH" CCACHE_BASEDIR=$build CCACHE_NOHASHDIR=1
+		export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros
+		echo "ccache=on" >> "$dir/info"
+	fi
+
 	progress "Configuring ($profile)"
-	configure "$profile" "$compression" "$livepatch"
+	configure "$profile" "$compression" "$livepatch" "$native"
 	cp .config "$dir/config"
 
 	local total
@@ -501,7 +624,13 @@ build() { # version profile compression livepatch
 		echo "image=$(stat -c %s "$dir/vmlinuz")"
 	} >> "$dir/info"
 	cd "$cache" || true
-	rm -rf "$build"
+	if grep -q '^klp=yes' "$dir/info"; then
+		# klp-build makes the livepatch modules for it in this tree
+		echo "tree=$build" >> "$dir/info"
+		echo "tree_size=$(du -sk "$build" | cut -f1)" >> "$dir/info"
+	else
+		rm -rf "$build"
+	fi
 	rm -f "$data/current" "$cache/build.pid"
 	progress "Built"
 	set_state built
@@ -550,6 +679,75 @@ delete() { # kver
 	rm -rf -- "${data:?}/$1" "${cache:?}/build/$1"
 }
 
+# ---------- livepatch modules ----------
+
+valid_patch_name() { [[ $1 =~ ^[a-z0-9_]{1,48}$ ]]; }
+
+# The name of a livepatch module for a patch file: fix-crash.patch is
+# livepatch_fix_crash, as klp-build names the module after the file.
+patch_name() { # patch file
+	local n
+	n=$(basename "$1")
+	n=${n%.patch}
+	n=${n%.diff}
+	n=$(tr 'A-Z' 'a-z' <<<"$n" | tr -c 'a-z0-9\n' '_' | sed 's/__*/_/g; s/^_//; s/_$//')
+	echo "${n:0:40}"
+}
+
+patch_build() { # kver patch
+	local kver=$1 patch=$2
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	[[ -f $patch ]] || die "There is no patch $patch"
+	local d=$data/$kver tree
+	tree=$(sed -n 's/^tree=//p' "$d/info" 2>/dev/null)
+	[[ -n $tree && -d $tree ]] ||
+		die "$kver keeps no build tree: only kernels built with live patching can be fixed live"
+	[[ -x $tree/scripts/livepatch/klp-build ]] ||
+		die "Linux ${kver%-tilewin*} has no klp-build: fixing live needs 6.19 or newer"
+	local name
+	name=$(patch_name "$patch")
+	valid_patch_name "$name" || die "The patch needs a name of letters and digits"
+	local lp=$d/livepatches
+	mkdir -p "$lp"
+	exec 9> "$cache/build.lock"
+	flock -n 9 || die "A kernel is being built: wait for it to finish"
+	cp -- "$patch" "$lp/$name.patch"
+	echo building > "$lp/$name.state"
+	echo "Making the livepatch module" > "$lp/$name.progress"
+	: > "$lp/$name.log"
+	if [[ -n $ccache_dir && -x $ccache_dir/gcc ]] && command -v ccache >/dev/null 2>&1; then
+		export PATH="$ccache_dir:$PATH" CCACHE_BASEDIR=$tree CCACHE_NOHASHDIR=1
+		export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros
+	fi
+	local out=$lp/livepatch_$name.ko
+	if (cd "$tree" && nice -n 15 ionice -c 3 ./scripts/livepatch/klp-build -j "$jobs" \
+			-o "$out" "$lp/$name.patch") >> "$lp/$name.log" 2>&1 && [[ -f $out ]]; then
+		mv "$out" "$lp/$name.ko"
+		echo built > "$lp/$name.state"
+		echo "Ready to apply" > "$lp/$name.progress"
+	else
+		echo failed > "$lp/$name.state"
+		local why
+		why=$(grep -m1 -iE 'error|cannot|unsupported|failed' "$lp/$name.log" | cut -c1-200)
+		echo "Failed: ${why:-see the log}" > "$lp/$name.progress"
+		exit 1
+	fi
+}
+
+livepatches() { # kver
+	valid_kver "$1" || die "not a kernel of tileWin: $1"
+	local lp=$data/$1/livepatches f name state
+	for f in "$lp"/*.state; do
+		[[ -f $f ]] || continue
+		name=$(basename "$f" .state)
+		state=$(cat "$f")
+		# applied: the kernel has it now
+		[[ -d ${TILEWIN_KERNEL_SYS:-/sys}/kernel/livepatch/livepatch_$name ]] &&
+			[[ $(uname -r) == "$1" ]] && state=applied
+		printf '%s\t%s\t%s\n' "$name" "$state" "$(head -n 1 "$lp/$name.progress" 2>/dev/null)"
+	done
+}
+
 # Out-of-tree modules (taint O) that came with a package for the distribution's
 # kernel. DKMS builds its own for every kernel, so those are not named.
 foreign() {
@@ -569,16 +767,22 @@ versions) versions ;;
 foreign) foreign ;;
 latest) latest ;;
 check) check "${2:-}" ;;
-build) [[ $# -eq 5 ]] || die "usage: tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH"
+build) [[ $# -eq 5 || $# -eq 6 ]] ||
+		die "usage: tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE]"
 	# a session of its own: cancelling stops the build and what it started,
 	# not the programs that started it
 	if [[ -z ${TILEWIN_KERNEL_SESSION:-} ]] && command -v setsid >/dev/null 2>&1; then
 		TILEWIN_KERNEL_SESSION=1 exec setsid --wait bash "$0" "$@"
 	fi
-	build "$2" "$3" "$4" "$5" ;;
+	build "$2" "$3" "$4" "$5" "${6:-off}" ;;
 cancel) cancel ;;
 list) list ;;
 delete) [[ $# -eq 2 ]] || die "usage: tilewin-kernel delete KVER"; delete "$2" ;;
 store) echo "$data" ;;
-*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store" ;;
+record-modules) record_modules ;;
+seen) seen ;;
+patch-build) [[ $# -eq 3 ]] || die "usage: tilewin-kernel patch-build KVER PATCH"
+	patch_build "$2" "$3" ;;
+livepatches) [[ $# -eq 2 ]] || die "usage: tilewin-kernel livepatches KVER"; livepatches "$2" ;;
+*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store|record-modules|seen|patch-build|livepatches" ;;
 esac

@@ -1,0 +1,12 @@
+# The Kernel page of the tileWin settings switches it on: the kernels built
+# "only for this computer" keep every driver it used, not only those loaded
+# at the moment of the build.
+[Unit]
+Description=Note the kernel modules in use every ten minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

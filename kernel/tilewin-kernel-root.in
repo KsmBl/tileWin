@@ -14,6 +14,15 @@
 #                                          (with STORE, a kernel not on the
 #                                          computer yet is put on first)
 #   tilewin-kernel-root tools PACKAGE...   installs the programs a build needs
+#   tilewin-kernel-root livepatch-apply KVER NAME STORE
+#                                          loads the livepatch module NAME built
+#                                          for the running kernel KVER: the fix
+#                                          takes hold without a restart
+#   tilewin-kernel-root livepatch-undo NAME
+#                                          takes it back out again
+#   tilewin-kernel-root scheduler-default SCHEDULER MODE
+#                                          the sched_ext scheduler scx_loader
+#                                          starts with the computer, or "none"
 #
 # What it never touches, so that the computer boots as before whatever goes
 # wrong: the kernel of the distribution and its boot image, the boot loader
@@ -51,7 +60,9 @@ running=${TILEWIN_KERNEL_RUNNING:-$(uname -r)}
 loader_guid=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
 marker=.tilewin-kernel
 # the packages a build may ask for (Arch names)
-allowed_tools=" make gcc binutils bc flex bison perl openssl cpio xz zstd lz4 gzip lzop curl python tar pahole libelf kexec-tools base-devel "
+allowed_tools=" make gcc binutils bc flex bison perl openssl cpio xz zstd lz4 gzip lzop curl python tar pahole libelf kexec-tools base-devel rust rust-bindgen rust-src ccache patchutils scx-scheds scx-tools "
+livepatch_sys=$root/sys/kernel/livepatch
+scx_conf=$root/etc/scx_loader/config.toml
 
 die() { echo "$*" >&2; exit 1; }
 note() { echo "$*"; }
@@ -160,6 +171,8 @@ info() {
 	echo "kexec=$(kexec_ready)"
 	echo "livepatch=$([[ -d $root/sys/kernel/livepatch ]] && echo yes || echo no)"
 	echo "secureboot=$(secure_boot && echo on || echo off)"
+	echo "sched_ext=$(cat "$root/sys/kernel/sched_ext/state" 2>/dev/null || echo none)"
+	echo "scx=$(command -v scx_loader >/dev/null 2>&1 && echo yes || echo no)"
 	echo "running=$running"
 }
 
@@ -469,6 +482,82 @@ boot_kernel() { # kver
 	systemctl reboot
 }
 
+# ---------- livepatches ----------
+
+valid_patch_name() { [[ $1 =~ ^[a-z0-9_]{1,48}$ ]]; }
+
+livepatch_apply() { # kver name store
+	local kver=$1 name=$2 store=$3
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	valid_patch_name "$name" || die "not a livepatch: $name"
+	[[ $kver == "$running" ]] || die "A livepatch only goes into the kernel it was made for: $kver is not running"
+	[[ -d $livepatch_sys ]] || die "The running kernel takes no livepatches"
+	local src=$store/$kver/livepatches/$name.ko owner
+	[[ -f $src ]] || die "The livepatch $name is not built"
+	owner=$(stat -c %u "$src")
+	[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+	local module=livepatch_$name
+	[[ -d $livepatch_sys/$module ]] && die "$name is applied already"
+	# a copy of root's own, so the file cannot change between check and load
+	mkdir -p "$root/run/tilewin-kernel"
+	local copy=$root/run/tilewin-kernel/$module.ko
+	cp "$src" "$copy"
+	insmod "$copy" >&2 || { rm -f "$copy"; die "The kernel did not take the livepatch $name"; }
+	rm -f "$copy"
+	note "$name is applied"
+}
+
+livepatch_undo() { # name
+	local name=$1
+	valid_patch_name "$name" || die "not a livepatch: $name"
+	local module=livepatch_$name d=$livepatch_sys/livepatch_$name
+	[[ -d $d ]] || die "$name is not applied"
+	echo 0 > "$d/enabled" || die "The kernel did not let go of $name"
+	# the change goes through task by task; the module stays until it is done
+	local n
+	for n in $(seq 120); do
+		[[ -d $d && $(cat "$d/transition" 2>/dev/null) == 1 ]] || break
+		sleep 0.5
+	done
+	[[ -d $d && $(cat "$d/transition" 2>/dev/null) == 1 ]] &&
+		die "$name is still being taken out: some tasks are busy; try again in a minute"
+	rmmod "$module" 2>/dev/null || true
+	note "$name is undone"
+}
+
+# ---------- the scheduler at start ----------
+
+scheduler_default() { # scheduler mode
+	local sched=$1 mode=$2
+	if [[ $sched == none ]]; then
+		if [[ -f $scx_conf ]] && grep -q '^# written by the Kernel page of the tileWin settings' "$scx_conf"; then
+			rm -f "$scx_conf"
+		fi
+		systemctl disable scx_loader.service >&2 2>/dev/null || true
+		note "No sched_ext scheduler at start"
+		return
+	fi
+	[[ $sched =~ ^scx_[a-z0-9_]{1,32}$ ]] || die "not a sched_ext scheduler: $sched"
+	case $mode in Auto|Gaming|PowerSave|LowLatency|Server) ;; *) die "not a mode: $mode" ;; esac
+	command -v "$sched" >/dev/null 2>&1 || die "$sched is not installed"
+	# a config of the administrator's own stays as it is
+	if [[ -f $scx_conf ]] && ! grep -q '^# written by the Kernel page of the tileWin settings' "$scx_conf"; then
+		die "$scx_conf was written by hand: set default_sched there"
+	fi
+	if [[ -f $root/etc/scx_loader.toml ]]; then
+		die "$root/etc/scx_loader.toml was written by hand: set default_sched there"
+	fi
+	mkdir -p "$(dirname "$scx_conf")"
+	{
+		echo '# written by the Kernel page of the tileWin settings'
+		echo "default_sched = \"$sched\""
+		echo "default_mode = \"$mode\""
+	} > "$scx_conf.new"
+	mv "$scx_conf.new" "$scx_conf"
+	systemctl enable scx_loader.service >&2 || die "scx_loader could not be set to start"
+	note "$sched starts with the computer"
+}
+
 tools() {
 	command -v pacman >/dev/null 2>&1 || die "Install these with the package manager: $*"
 	local p
@@ -491,5 +580,11 @@ load|boot)
 	fi
 	if [[ $1 == load ]]; then load_kernel "$2"; else boot_kernel "$2"; fi ;;
 tools) shift; [[ $# -gt 0 ]] || die "usage: tilewin-kernel-root tools PACKAGE..."; tools "$@" ;;
-*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools" ;;
+livepatch-apply) [[ $# -eq 4 ]] || die "usage: tilewin-kernel-root livepatch-apply KVER NAME STORE"
+	livepatch_apply "$2" "$3" "$4" ;;
+livepatch-undo) [[ $# -eq 2 ]] || die "usage: tilewin-kernel-root livepatch-undo NAME"
+	livepatch_undo "$2" ;;
+scheduler-default) [[ $# -eq 3 ]] || die "usage: tilewin-kernel-root scheduler-default SCHEDULER MODE"
+	scheduler_default "$2" "$3" ;;
+*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|scheduler-default" ;;
 esac

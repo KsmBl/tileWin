@@ -72,6 +72,7 @@ static void update_window_from_json(struct pwindow *w, json_object *con) {
 	w->urgent = jbool(con, "urgent");
 	w->minimized = jbool(con, "minimized");
 	w->maximized = jbool(con, "maximized");
+	w->fullscreen = jint(con, "fullscreen_mode") > 0;
 	w->above = jbool(con, "above");
 	w->pid = (int)jint(con, "pid");
 	const char *identifier = jstr(con, "foreign_toplevel_identifier");
@@ -172,6 +173,7 @@ static void notify_widgets(struct panel *panel) {
 	}
 	deskwidgets_state_changed(panel);
 	minicons_update(panel);
+	scheduler_update(panel);
 	panel_set_dirty(panel);
 }
 
