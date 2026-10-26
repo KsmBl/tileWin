@@ -71,6 +71,10 @@ struct kernel_page {
 	GtkWidget *sched_install, *sched_rows[3]; // the rows that need scx_loader
 	GPtrArray *scheds;  // char *, the schedulers of sched_dd after [0], the kernel's own
 	GDBusProxy *scx;    // scx_loader
+	char *scx_seen;     // "SCHEDULER MODE" the dropdowns were last set to
+	char *scx_want;     // the scheduler "Use it now" asked for, until it is checked
+	guint scx_want_mode;
+	int ticks;
 	bool seen_refreshing, full_refreshing;
 	GPtrArray *versions; // char *, what the version dropdown offers; [0] is "latest"
 	GPtrArray *missing;  // char *, packages a build still needs
@@ -1280,11 +1284,17 @@ static void refresh_list(struct kernel_page *p) {
 }
 
 /* While the page is on screen: the progress of a build, every second. */
+static void scx_refresh(struct kernel_page *p);
+
 static gboolean on_tick(gpointer data) {
 	struct kernel_page *p = data;
 	if (gtk_widget_get_mapped(p->built_list) && !p->busy) {
 		refresh_list(p);
 		refresh_fixes(p);
+		// a scheduler the taskbar or anyone else switched to, every few seconds
+		if (++p->ticks % 3 == 0) {
+			scx_refresh(p);
+		}
 	}
 	return G_SOURCE_CONTINUE;
 }
@@ -1415,16 +1425,22 @@ static void scx_show(struct kernel_page *p) {
 	if (list) {
 		g_variant_unref(list);
 	}
-	// what runs is what the dropdowns show
-	guint at = 0;
-	for (guint i = 0; running && i < p->scheds->len; i++) {
-		if (strcmp(p->scheds->pdata[i], current) == 0) {
-			at = i + 1;
+	// what runs is what the dropdowns show, when it changes: not over a choice
+	// being made
+	char *seen = g_strdup_printf("%s %u", running ? current : "", m);
+	if (p->scheds->len && g_strcmp0(seen, p->scx_seen) != 0) {
+		guint at = 0;
+		for (guint i = 0; running && i < p->scheds->len; i++) {
+			if (strcmp(p->scheds->pdata[i], current) == 0) {
+				at = i + 1;
+			}
 		}
-	}
-	if (p->scheds->len) {
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->sched_dd), at);
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mode_dd), running && m < 5 ? m : 1);
+		g_free(p->scx_seen);
+		p->scx_seen = seen;
+	} else {
+		g_free(seen);
 	}
 	g_free(current);
 	g_free(state);
@@ -1445,11 +1461,100 @@ static void on_scx_proxy(GObject *source, GAsyncResult *result, gpointer data) {
 	scx_show(p);
 }
 
+/*
+ * scx_loader says its properties emit changes, but sends no
+ * PropertiesChanged: what the proxy has cached stays what it was when the
+ * page connected. So they are asked for again, and put into the cache.
+ */
+typedef void (*scx_fn)(struct kernel_page *p);
+
+struct scx_get {
+	struct kernel_page *p;
+	scx_fn then;
+};
+
+static void on_scx_all(GObject *source, GAsyncResult *result, gpointer data) {
+	struct scx_get *g = data;
+	GVariant *v = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result, NULL);
+	struct kernel_page *p = g->p;
+	if (v && p->scx) {
+		GVariant *all = g_variant_get_child_value(v, 0);
+		GVariantIter iter;
+		const char *key;
+		GVariant *value;
+		g_variant_iter_init(&iter, all);
+		while (g_variant_iter_next(&iter, "{&sv}", &key, &value)) {
+			g_dbus_proxy_set_cached_property(p->scx, key, value);
+			g_variant_unref(value);
+		}
+		g_variant_unref(all);
+		g_variant_unref(v);
+		scx_show(p);
+	}
+	if (g->then) {
+		g->then(p);
+	}
+	g_free(g);
+}
+
+static void scx_get_all(struct kernel_page *p, scx_fn then) {
+	if (!p->scx) {
+		if (then) {
+			then(p);
+		}
+		return;
+	}
+	struct scx_get *g = g_new0(struct scx_get, 1);
+	g->p = p;
+	g->then = then;
+	g_dbus_connection_call(g_dbus_proxy_get_connection(p->scx), "org.scx.Loader",
+		"/org/scx/Loader", "org.freedesktop.DBus.Properties", "GetAll",
+		g_variant_new("(s)", "org.scx.Loader"), G_VARIANT_TYPE("(a{sv})"),
+		G_DBUS_CALL_FLAGS_NO_AUTO_START, 5000, NULL, on_scx_all, g);
+}
+
+static void scx_refresh(struct kernel_page *p) {
+	char *owner = p->scx ? g_dbus_proxy_get_name_owner(p->scx) : NULL;
+	if (owner) {
+		scx_get_all(p, NULL);
+	}
+	g_free(owner);
+}
+
 static void scx_connect(struct kernel_page *p) {
 	g_clear_object(&p->scx);
 	g_ptr_array_set_size(p->scheds, 0);
 	g_dbus_proxy_new_for_bus(scx_bus(), G_DBUS_PROXY_FLAGS_NONE, NULL, "org.scx.Loader",
 		"/org/scx/Loader", "org.scx.Loader", NULL, on_scx_proxy, p);
+}
+
+/* Whether what "Use it now" asked for runs: scx_loader answers before it knows. */
+static void on_scx_checked(struct kernel_page *p) {
+	if (!p->scx_want) {
+		return;
+	}
+	char *current = scx_string(p, "CurrentScheduler");
+	bool running = current && *current && strcmp(current, "unknown") != 0;
+	bool ok = *p->scx_want ? running && strcmp(current, p->scx_want) == 0 : !running;
+	if (ok) {
+		set_message(p, NULL);
+		settings_status(p->s, *p->scx_want ? "%s runs now" : "The kernel's own scheduler runs now",
+			p->scx_want);
+	} else {
+		char *text = *p->scx_want ? g_strdup_printf("%s did not start: scx_loader's log says why "
+			"(journalctl -u scx_loader)", p->scx_want) :
+			g_strdup("The scheduler did not stop: scx_loader's log says why (journalctl -u scx_loader)");
+		set_message(p, text);
+		g_free(text);
+	}
+	g_clear_pointer(&p->scx_want, g_free);
+	g_free(current);
+	gtk_widget_set_sensitive(p->sched_apply, TRUE);
+}
+
+static gboolean scx_check_later(gpointer data) {
+	scx_get_all(data, on_scx_checked);
+	return G_SOURCE_REMOVE;
 }
 
 static void on_scx_call(GObject *source, GAsyncResult *result, gpointer data) {
@@ -1458,36 +1563,51 @@ static void on_scx_call(GObject *source, GAsyncResult *result, gpointer data) {
 	GVariant *v = g_dbus_proxy_call_finish(G_DBUS_PROXY(source), result, &error);
 	if (v) {
 		g_variant_unref(v);
-		set_message(p, NULL);
+		set_note(p, "Switching the scheduler…");
+		// a scheduler takes a second or two to load
+		g_timeout_add(3000, scx_check_later, p);
 	} else {
 		char *text = g_strdup_printf("The scheduler could not be changed: %s",
 			error ? error->message : "scx_loader did not answer");
 		set_message(p, text);
 		g_free(text);
+		g_clear_pointer(&p->scx_want, g_free);
+		gtk_widget_set_sensitive(p->sched_apply, TRUE);
 	}
 	g_clear_error(&error);
-	gtk_widget_set_sensitive(p->sched_apply, TRUE);
+}
+
+/* With what runs now, not what the page saw when it opened: Start while one
+ * runs is refused by scx_loader (in its log only). */
+static void sched_apply_now(struct kernel_page *p) {
+	char *current = scx_string(p, "CurrentScheduler");
+	bool running = current && *current && strcmp(current, "unknown") != 0;
+	if (!*p->scx_want) {
+		if (!running) {
+			on_scx_checked(p);
+		} else {
+			g_dbus_proxy_call(p->scx, "StopScheduler", NULL,
+				G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION, 30000, NULL, on_scx_call, p);
+		}
+	} else {
+		g_dbus_proxy_call(p->scx, running ? "SwitchScheduler" : "StartScheduler",
+			g_variant_new("(su)", p->scx_want, p->scx_want_mode),
+			G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION, 30000, NULL, on_scx_call, p);
+	}
+	g_free(current);
 }
 
 static void on_sched_apply(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
-	if (!p->scx) {
+	if (!p->scx || p->scx_want) {
 		return;
 	}
 	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->sched_dd));
 	guint m = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->mode_dd));
-	char *current = scx_string(p, "CurrentScheduler");
-	bool running = current && *current && strcmp(current, "unknown") != 0;
+	p->scx_want = g_strdup(i == 0 || i > p->scheds->len ? "" : (const char *)p->scheds->pdata[i - 1]);
+	p->scx_want_mode = m < 5 ? m : 0;
 	gtk_widget_set_sensitive(p->sched_apply, FALSE);
-	if (i == 0 || i > p->scheds->len) {
-		g_dbus_proxy_call(p->scx, "StopScheduler", NULL, G_DBUS_CALL_FLAGS_NONE, 30000, NULL,
-			on_scx_call, p);
-	} else {
-		g_dbus_proxy_call(p->scx, running ? "SwitchScheduler" : "StartScheduler",
-			g_variant_new("(su)", (const char *)p->scheds->pdata[i - 1], m < 5 ? m : 0),
-			G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION, 30000, NULL, on_scx_call, p);
-	}
-	g_free(current);
+	scx_get_all(p, sched_apply_now);
 }
 
 static void on_sched_boot(GtkButton *button, gpointer data) {
