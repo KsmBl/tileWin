@@ -49,6 +49,14 @@ install_data(
 	install_dir: join_paths(prefix, 'lib', 'systemd', 'user'),
 )
 
+# the livepatches set for every start of a kernel (the root helper enables it)
+configure_file(
+	input: 'tilewin-kernel-livepatch.service.in',
+	output: 'tilewin-kernel-livepatch.service',
+	configuration: kernel_conf,
+	install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),
+)
+
 # switching the scheduler for a game without asking for the password
 install_data(
 	'org.tilewin.scx.rules',

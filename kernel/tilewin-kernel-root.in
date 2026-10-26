@@ -20,6 +20,12 @@
 #                                          takes hold without a restart
 #   tilewin-kernel-root livepatch-undo NAME
 #                                          takes it back out again
+#   tilewin-kernel-root livepatch-start KVER NAME STORE on|off
+#                                          applies it at every start of KVER (a
+#                                          kernel on the computer, running or
+#                                          not), or no more
+#   tilewin-kernel-root livepatch-boot     applies those of the running kernel;
+#                                          tilewin-kernel-livepatch.service runs it
 #   tilewin-kernel-root scheduler-default SCHEDULER MODE
 #                                          the sched_ext scheduler scx_loader
 #                                          starts with the computer, or "none"
@@ -43,8 +49,8 @@
 #    grub-reboot, which needs GRUB_DEFAULT=saved.
 #
 # The modules go to /usr/lib/modules/KVER, which a .tilewin-kernel file marks
-# as ours: nothing without that file is ever removed. KVER is VERSION-tilewinN,
-# a name no distribution kernel has.
+# as ours: nothing without that file is ever removed, nor installed over. KVER
+# is VERSION-NAME, VERSION-tilewinN unless the user named it.
 #
 # For the tests: TILEWIN_KERNEL_ROOT puts every file below a directory of its
 # own, TILEWIN_KERNEL_ESP names the EFI system partition, TILEWIN_KERNEL_RUNNING
@@ -67,7 +73,12 @@ scx_conf=$root/etc/scx_loader/config.toml
 die() { echo "$*" >&2; exit 1; }
 note() { echo "$*"; }
 
-valid_kver() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-tilewin[0-9]+$ ]]; }
+# VERSION-NAME, the name what tilewin-kernel takes; which kernels are ours
+# the marker says
+valid_kver() {
+	[[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-(.+)$ ]] &&
+		[[ ${BASH_REMATCH[2]} =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$ ]]
+}
 
 # ---------- how this computer boots ----------
 
@@ -504,7 +515,74 @@ livepatch_apply() { # kver name store
 	cp "$src" "$copy"
 	insmod "$copy" >&2 || { rm -f "$copy"; die "The kernel did not take the livepatch $name"; }
 	rm -f "$copy"
+	superseded "$name"
 	note "$name is applied"
+}
+
+# The fixes of kernel.org come as one module for each release, each with all
+# the fixes of the ones before: a newer one takes the place of the older.
+superseded() { # name now applied
+	[[ $1 == security_* ]] || return 0
+	local d old
+	for d in "$livepatch_sys"/livepatch_security_*; do
+		[[ -d $d ]] || continue
+		old=${d##*/livepatch_}
+		[[ $old != "$1" ]] && livepatch_undo "$old" > /dev/null
+	done
+	return 0
+}
+
+livepatch_start() { # kver name store on|off
+	local kver=$1 name=$2 store=$3 how=$4
+	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
+	valid_patch_name "$name" || die "not a livepatch: $name"
+	ours "$kver" || die "$kver is not on the computer: add it to the boot menu first"
+	local dir=$modules/$kver/livepatch
+	case $how in
+	on)
+		local src=$store/$kver/livepatches/$name.ko owner
+		[[ -f $src ]] || die "The livepatch $name is not built"
+		owner=$(stat -c %u "$src")
+		[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+		mkdir -p "$dir"
+		cp "$src" "$dir/livepatch_$name.ko.new"
+		mv "$dir/livepatch_$name.ko.new" "$dir/livepatch_$name.ko"
+		if [[ $name == security_* ]]; then
+			local f
+			for f in "$dir"/livepatch_security_*.ko; do
+				[[ $f == "$dir/livepatch_$name.ko" ]] || rm -f -- "$f"
+			done
+		fi
+		systemctl enable tilewin-kernel-livepatch.service >&2 2>/dev/null ||
+			note "tilewin-kernel-livepatch.service could not be enabled: install tileWin again"
+		note "$name is applied at every start of $kver"
+		;;
+	off)
+		rm -f -- "$dir/livepatch_$name.ko"
+		rmdir "$dir" 2>/dev/null
+		note "$name is no more applied at start"
+		;;
+	*) die "on or off" ;;
+	esac
+}
+
+# At start: the livepatches set for the running kernel, if it is ours.
+livepatch_boot() {
+	ours "$running" || return 0
+	local dir=$modules/$running/livepatch f name
+	[[ -d $dir && -d $livepatch_sys ]] || return 0
+	for f in "$dir"/livepatch_*.ko; do
+		[[ -f $f ]] || continue
+		name=${f##*/livepatch_}
+		name=${name%.ko}
+		valid_patch_name "$name" || continue
+		[[ -d $livepatch_sys/livepatch_$name ]] && continue
+		if insmod "$f" >&2; then
+			note "$name is applied"
+		else
+			echo "The kernel did not take the livepatch $name" >&2
+		fi
+	done
 }
 
 livepatch_undo() { # name
@@ -582,9 +660,12 @@ load|boot)
 tools) shift; [[ $# -gt 0 ]] || die "usage: tilewin-kernel-root tools PACKAGE..."; tools "$@" ;;
 livepatch-apply) [[ $# -eq 4 ]] || die "usage: tilewin-kernel-root livepatch-apply KVER NAME STORE"
 	livepatch_apply "$2" "$3" "$4" ;;
+livepatch-start) [[ $# -eq 5 ]] || die "usage: tilewin-kernel-root livepatch-start KVER NAME STORE on|off"
+	livepatch_start "$2" "$3" "$4" "$5" ;;
+livepatch-boot) livepatch_boot ;;
 livepatch-undo) [[ $# -eq 2 ]] || die "usage: tilewin-kernel-root livepatch-undo NAME"
 	livepatch_undo "$2" ;;
 scheduler-default) [[ $# -eq 3 ]] || die "usage: tilewin-kernel-root scheduler-default SCHEDULER MODE"
 	scheduler_default "$2" "$3" ;;
-*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|scheduler-default" ;;
+*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|livepatch-start|livepatch-boot|scheduler-default" ;;
 esac

@@ -79,6 +79,13 @@ config BLK_DEV_NVME
 	tristate "NVM Express"
 EOF
 	echo '/* header */' > "$t/include/linux/foo.h"
+	# what the fixes of kernel.org change: built (an object beside it) or not
+	mkdir -p "$t/fs" "$t/drivers"
+	echo one > "$t/fs/a.c"; [ "$v" = 9.9.1 ] && echo fixed1 >> "$t/fs/a.c"
+	echo two > "$t/fs/b.c"
+	echo three > "$t/drivers/unbuilt.c"
+	mkdir -p "$t/Documentation"; echo doc > "$t/Documentation/x.txt"
+	touch "$t/fs/a.o" "$t/fs/b.o"
 	cat > "$t/scripts/config" <<'EOF'
 #!/bin/bash
 file=.config
@@ -109,13 +116,27 @@ EOF
 	mkdir -p "$t/scripts/livepatch"
 	cat > "$t/scripts/livepatch/klp-build" <<'KLP'
 #!/bin/bash
-# a patch with "broken" in it does not build, as one that touches data would not
-out=
+# a patch with "broken" in it does not build, as one that touches data would
+# not, and the error names its file
+out= patches=()
+[ -n "${TW_KLP_CALLS:-}" ] && echo "klp-build $*" >> "$TW_KLP_CALLS"
 while [ $# -gt 0 ]; do
-	case $1 in -o) out=$2; shift 2 ;; -j) shift 2 ;; *) patch=$1; shift ;; esac
+	case $1 in
+	-o) out=$2; shift 2 ;;
+	-j|-S) shift 2 ;;
+	-T) mkdir -p klp-tmp/1-orig; touch klp-tmp/1-orig/.complete; shift ;;
+	--no-replace) shift ;;
+	*) patches+=("$1"); shift ;;
+	esac
 done
 [ -f .config ] || { echo "error: not a kernel tree"; exit 1; }
-grep -q broken "$patch" && { echo "error: changed data: cannot be patched live"; exit 1; }
+for patch in "${patches[@]}"; do
+	if grep -q broken "$patch"; then
+		f=$(sed -n 's|^+++ b/||p' "$patch" | head -n 1)
+		echo "${f:-x.c}:1:1: error: changed data: cannot be patched live"
+		exit 1
+	fi
+done
 echo "livepatch module" > "$out"
 KLP
 	chmod +x "$t/scripts/livepatch/klp-build"
@@ -286,6 +307,52 @@ check "a patch klp-build cannot take fails, and says why" \
 K patch-build $k2 "$work/Fix-The-Crash.patch" > "$work/out" 2>&1
 check "a kernel without its build tree cannot be fixed live" grep -q "keeps no build tree" "$work/out"
 
+# the fixes of kernel.org: 9.9 to 9.9.1 and to 9.9.3, as kernel.org has them
+mkdir -p "$work/stable/a/fs" "$work/stable/a/drivers" "$work/stable/a/include/linux" \
+	"$work/stable/a/Documentation"
+(
+	cd "$work/stable"
+	echo one > a/fs/a.c; echo two > a/fs/b.c; echo three > a/drivers/unbuilt.c
+	echo '/* header */' > a/include/linux/foo.h; echo doc > a/Documentation/x.txt
+	cp -a a b1; echo fixed1 >> b1/fs/a.c
+	cp -a a b3; printf 'fixed1\nfixed3\n' >> b3/fs/a.c; echo broken >> b3/fs/b.c
+	echo fixed > b3/drivers/unbuilt.c; echo '/* fixed */' >> b3/include/linux/foo.h
+	echo fixed >> b3/Documentation/x.txt
+	mv a linux-9.9 && mv b1 linux-9.9.1 && mv b3 linux-9.9.3
+	diff -urN linux-9.9 linux-9.9.1 | xz > "$mirror/v9.x/patch-9.9.1.xz"
+	diff -urN linux-9.9 linux-9.9.3 | xz > "$mirror/v9.x/patch-9.9.3.xz"
+)
+cp "$mirror/v9.x/sha256sums.asc" "$work/sums-before"
+(cd "$mirror/v9.x" && sha256sum patch-9.9.1.xz >> sha256sums.asc)
+K security-build $k1 > "$work/out" 2>&1
+check "without a newer release of its series there is nothing to fix" grep -q "no fixes for it yet" "$work/out"
+(cd "$mirror/v9.x" && sha256sum patch-9.9.3.xz >> sha256sums.asc)
+export TW_KLP_CALLS=$work/klp-calls
+: > "$TW_KLP_CALLS"
+K security-build $k1 > "$work/out" 2>&1
+lp=$store/$k1/livepatches
+check "the fixes of kernel.org become a livepatch module, also for a kernel that does not run" \
+	test -s "$lp/security_9_9_3.ko" -a "$(cat "$lp/security_9_9_3.state" 2>/dev/null)" = built
+check "  what the kernel lacks of them goes in" grep -q "^klp-build .* --no-replace .*/1.patch" "$TW_KLP_CALLS"
+check "  only that: what 9.9.1 had already is not in it" \
+	bash -c "grep -qx '+fixed3' '$lp/security_9_9_3.patch' && ! grep -q '^+fixed1' '$lp/security_9_9_3.patch'"
+check "  a file klp-build refuses is left out, and the rest goes in again" \
+	test "$(grep -c . "$TW_KLP_CALLS")" = 2
+check "  without building the kernel without them once more" grep -q -- "-S 2" "$TW_KLP_CALLS"
+check "  the file it refused is listed" grep -q "^fs/b.c	klp-build: " "$lp/security_9_9_3.left"
+check "  and a header" grep -q "^include/linux/foo.h	a header" "$lp/security_9_9_3.left"
+check "  but not what is not built into it, nor the documentation" \
+	bash -c "! grep -qE 'unbuilt|Documentation' '$lp/security_9_9_3.left'"
+check "  and the list says how many" grep -q "1 files live; 2 need a restart" "$lp/security_9_9_3.progress"
+check "  its work is gone, and klp-build's" \
+	test ! -e "$lp/security_9_9_3.work" -a ! -e "$XDG_CACHE_HOME/tileWin/kernel/build/$k1/klp-tmp"
+K security-build $k1 > "$work/out" 2>&1
+check "made once" grep -q "made already" "$work/out"
+unset TW_KLP_CALLS
+check "  listed as built, not at start" test "$(K livepatches $k1 | grep '^security' | cut -f1,2,4 | tr '\t' :)" = "security_9_9_3:built:no"
+K security-build $k2 > "$work/out" 2>&1
+check "a kernel without its build tree gets no fixes live" grep -q "keeps no build tree" "$work/out"
+
 K build 9.9.1 full lz4 off > "$work/out" 2>&1
 k3=9.9.1-tilewin3
 check "an \"everything\" build" test "$(cat "$store/$k3/state" 2>/dev/null)" = built
@@ -297,6 +364,18 @@ K build 9.10 device zstd off > "$work/out" 2>&1
 check "a release without a third number is called 9.10.0-tilewin1, as its Makefile says" \
 	test "$(cat "$store/9.10.0-tilewin1/state" 2>/dev/null)" = built
 K delete 9.10.0-tilewin1
+
+K build 9.10 device zstd off off mycustomname > "$work/out" 2>&1
+check "a kernel can have a name of its own" \
+	test "$(cat "$store/9.10.0-mycustomname/state" 2>/dev/null)" = built
+check "  which uname -r gives" grep -qx 'CONFIG_LOCALVERSION="-mycustomname"' "$store/9.10.0-mycustomname/config"
+check "  and the list shows" bash -c "bash '$tool' list | cut -f1 | grep -qx 9.10.0-mycustomname"
+K build 9.10 device zstd off off mycustomname > "$work/out" 2>&1
+check "a name taken already is refused" grep -q "already" "$work/out"
+K build 9.10 device zstd off off 'bad/name' > "$work/out" 2>&1
+check "a name with a slash in it is refused" grep -q "A name is" "$work/out"
+check "  and builds nothing" test ! -e "$store/9.10.0-bad"
+K delete 9.10.0-mycustomname
 
 K build 9.9 running zstd off > "$work/out" 2>&1
 check "a download that does not match its checksum fails" \
@@ -497,6 +576,30 @@ check "undoing it unloads it" grep -qx "rmmod livepatch_fix_the_crash" "$calls"
 check "  and it is gone from the kernel" test ! -e "$sb/sys/kernel/livepatch/livepatch_fix_the_crash"
 R livepatch-apply $k1 '../x' "$store" > "$work/out" 2>&1
 check "a livepatch name with a path in it is refused" grep -q "not a livepatch" "$work/out"
+
+mkdir -p "$sb/sys/kernel/livepatch/livepatch_security_9_9_2"
+echo 0 > "$sb/sys/kernel/livepatch/livepatch_security_9_9_2/transition"
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$k1 R livepatch-apply $k1 security_9_9_3 "$store" > "$work/out" 2>&1
+check "the newer fixes of kernel.org take the place of the older" \
+	grep -qx "rmmod livepatch_security_9_9_2" "$calls"
+check "  once they are in" bash -c "grep -n . '$calls' | grep -q '^1:insmod .*security_9_9_3'"
+R livepatch-undo security_9_9_3 > /dev/null 2>&1
+R livepatch-start $k1 security_9_9_3 "$store" on > "$work/out" 2>&1
+check "a fix is set for every start only of a kernel on the computer" grep -q "not on the computer" "$work/out"
+mkdir -p "$sb/usr/lib/modules/$k1" && echo "method=uki" > "$sb/usr/lib/modules/$k1/.tilewin-kernel"
+: > "$calls"
+R livepatch-start $k1 security_9_9_3 "$store" on > "$work/out" 2>&1
+check "  then it goes into its modules, running or not" test -f "$sb/usr/lib/modules/$k1/livepatch/livepatch_security_9_9_3.ko"
+check "  and the service that applies it is on" grep -qx "systemctl enable tilewin-kernel-livepatch.service" "$calls"
+check "  which the list says" test "$(TILEWIN_KERNEL_MODULES=$sb/usr/lib/modules K livepatches $k1 | grep '^security' | cut -f4)" = yes
+R livepatch-boot > "$work/out" 2>&1
+check "at the start of another kernel nothing is applied" bash -c "! grep -q '^insmod' '$calls'"
+TILEWIN_KERNEL_RUNNING=$k1 R livepatch-boot > "$work/out" 2>&1
+check "at its own start it is" grep -q "^insmod .*/livepatch/livepatch_security_9_9_3.ko" "$calls"
+R livepatch-start $k1 security_9_9_3 "$store" off > "$work/out" 2>&1
+check "  and no more once taken off the start" test ! -e "$sb/usr/lib/modules/$k1/livepatch"
+rm -rf "$sb/usr/lib/modules/$k1" "$sb/sys/kernel/livepatch"/*
 
 : > "$calls"
 R scheduler-default scx_lavd Gaming > "$work/out" 2>&1

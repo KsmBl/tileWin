@@ -141,8 +141,9 @@ icon_theme_installed() { # name
 
 # Sets the icon theme of every toolkit that is configured on this system.
 set_icon_theme() { # name
-	for target in $targets; do
-		target_put "$target" "$1"
+	# not $target: apply writes that one to the applied file afterwards
+	for each in $targets; do
+		target_put "$each" "$1"
 	done
 }
 

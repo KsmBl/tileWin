@@ -62,9 +62,10 @@ struct kernel_page {
 	GtkWidget *missing_row, *missing_label, *tools_button, *kexec_button;
 	GtkWidget *build_button, *cancel_button, *progress_row, *progress_label, *spinner;
 	GtkWidget *built_list, *built_empty, *message;
-	GtkWidget *native, *seen_switch, *seen_row;
-	GtkWidget *fixes_group, *fixes_list;     // the livepatches of the running kernel
+	GtkWidget *native, *seen_switch, *seen_row, *name_entry;
+	GtkWidget *fixes_group, *fixes_list;     // the livepatches of one kernel with a tree
 	char *fixes_kver, *fixes;               // its name and what livepatches said last
+	bool fixes_running, fixes_installed;    // whether it runs, whether it is on the computer
 	GtkWidget *sched_row, *sched_dd, *mode_dd, *sched_apply, *sched_boot, *sched_full_dd;
 	GtkWidget *full_mode_dd;
 	GtkWidget *sched_install, *sched_rows[3]; // the rows that need scx_loader
@@ -512,6 +513,39 @@ static void on_kexec_tools(GtkButton *button, gpointer data) {
 
 static bool building(struct kernel_page *p);
 
+// What may follow the version in a kernel's name, as tilewin-kernel takes it:
+// what uname -r, file names and the boot menu do with.
+static bool valid_kernel_name(const char *name) {
+	size_t n = strlen(name);
+	if (n == 0 || n > 32 || !g_ascii_isalnum(name[0])) {
+		return false;
+	}
+	for (size_t i = 0; i < n; i++) {
+		if (!g_ascii_isalnum(name[i]) && !strchr("._+-", name[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Whether a kernel of that name is built or on the computer already. The
+// build would refuse it too, but after the page could still say so.
+static bool kernel_name_taken(const char *version, const char *name) {
+	char *release = strchr(strchr(version, '.') + 1, '.') ? g_strdup(version) :
+		g_strdup_printf("%s.0", version);
+	char *kver = g_strdup_printf("%s-%s", release, name);
+	char *store = store_dir();
+	char *built = g_build_filename(store, kver, NULL);
+	char *installed = g_build_filename("/usr/lib/modules", kver, NULL);
+	bool taken = g_file_test(built, G_FILE_TEST_EXISTS) || g_file_test(installed, G_FILE_TEST_EXISTS);
+	g_free(release);
+	g_free(kver);
+	g_free(store);
+	g_free(built);
+	g_free(installed);
+	return taken;
+}
+
 static void on_build(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
 	if (building(p)) {
@@ -519,6 +553,24 @@ static void on_build(GtkButton *button, gpointer data) {
 	}
 	guint v = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->version_dd));
 	const char *version = v < p->versions->len ? p->versions->pdata[v] : "latest";
+	char *name = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(p->name_entry))));
+	if (*name && !valid_kernel_name(name)) {
+		set_message(p, "A name is up to 32 letters, digits and . _ + -, starting with a letter or digit");
+		g_free(name);
+		return;
+	}
+	// "latest" is the release after it in the list
+	const char *release = strcmp(version, "latest") == 0 && p->versions->len > 1 ?
+		p->versions->pdata[1] : version;
+	if (*name && strcmp(release, "latest") != 0 && strchr(release, '.') &&
+			kernel_name_taken(release, name)) {
+		char *text = g_strdup_printf("There is a kernel called %s already: choose another name, "
+			"or delete it", name);
+		set_message(p, text);
+		g_free(text);
+		g_free(name);
+		return;
+	}
 	char *tool = tool_path();
 	const char *profile = selected(p->profile_dd, profile_values);
 	const char *comp = selected(p->comp_dd, comp_values);
@@ -552,6 +604,7 @@ static void on_build(GtkButton *button, gpointer data) {
 	g_ptr_array_add(argv, g_strdup(comp));
 	g_ptr_array_add(argv, g_strdup(patch));
 	g_ptr_array_add(argv, g_strdup(gtk_switch_get_active(GTK_SWITCH(p->native)) ? "on" : "off"));
+	g_ptr_array_add(argv, name);
 	g_ptr_array_add(argv, NULL);
 	GError *error = NULL;
 	GSubprocess *proc = g_subprocess_newv((const char *const *)argv->pdata,
@@ -796,6 +849,8 @@ static void confirm(struct kernel_page *p, const char *action, const char *kver,
 }
 
 static void choose_fix(struct kernel_page *p);
+static void security_build(struct kernel_page *p);
+static void refresh_list(struct kernel_page *p);
 
 static void on_row_button(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
@@ -804,8 +859,20 @@ static void on_row_button(GtkButton *button, gpointer data) {
 	bool installed = g_object_get_data(G_OBJECT(button), "installed") != NULL;
 	if (strcmp(action, "install") == 0) {
 		act(p, action, kver, installed);
-	} else if (strcmp(action, "fix") == 0) {
-		choose_fix(p);
+	} else if (strcmp(action, "fix") == 0 || strcmp(action, "security") == 0) {
+		// the Live fixes below show that kernel's from now on
+		if (g_strcmp0(p->fixes_kver, kver) != 0) {
+			g_free(p->fixes_kver);
+			p->fixes_kver = g_strdup(kver);
+			g_clear_pointer(&p->fixes, g_free);
+			g_clear_pointer(&p->list, g_free);
+			refresh_list(p);
+		}
+		if (strcmp(action, "fix") == 0) {
+			choose_fix(p);
+		} else {
+			security_build(p);
+		}
 	} else if (strcmp(action, "log") == 0) {
 		char *dir = store_dir();
 		char *log = g_build_filename(dir, kver, "log", NULL);
@@ -832,7 +899,7 @@ static GtkWidget *row_button(struct kernel_page *p, const char *label, const cha
 	return b;
 }
 
-/* ---------- live fixes of the running kernel ---------- */
+/* ---------- live fixes of a kernel with its build tree ---------- */
 
 static void on_fix_built(struct kernel_page *p, bool ok, const char *out, const char *err);
 
@@ -856,7 +923,7 @@ static void on_fix_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 
 static void choose_fix(struct kernel_page *p) {
 	GtkFileDialog *dialog = gtk_file_dialog_new();
-	gtk_file_dialog_set_title(dialog, "Pick the patch to apply to the running kernel");
+	gtk_file_dialog_set_title(dialog, "Pick the patch to make a live fix of");
 	GtkFileFilter *filter = gtk_file_filter_new();
 	gtk_file_filter_set_name(filter, "Patches (.patch, .diff)");
 	gtk_file_filter_add_pattern(filter, "*.patch");
@@ -879,6 +946,31 @@ static void on_fix_built(struct kernel_page *p, bool ok, const char *out, const 
 		set_message(p, *err ? err : "The livepatch could not be made: see its log");
 	}
 	refresh_fixes(p);
+}
+
+static void on_security_built(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (ok) {
+		set_note(p, *out ? g_strstrip((char *)out) : "The fixes are ready: apply them below.");
+	} else {
+		set_message(p, *err ? err : "The fixes could not be made: see their log");
+	}
+	g_clear_pointer(&p->fixes, g_free);
+	refresh_fixes(p);
+}
+
+static void security_build(struct kernel_page *p) {
+	if (!p->fixes_kver) {
+		return;
+	}
+	set_note(p, "Making a livepatch of kernel.org's fixes for this kernel: the newest release of "
+		"its series is downloaded, and klp-build turns every fixed file it can into the "
+		"livepatch. This takes a while, the first time most…");
+	char *tool = tool_path();
+	const char *argv[] = { "bash", tool, "security-build", p->fixes_kver, NULL };
+	run(p, argv, on_security_built);
+	g_free(tool);
+	g_clear_pointer(&p->fixes, g_free);
+	g_timeout_add_once(1500, (GSourceOnceFunc)refresh_fixes, p);
 }
 
 static void on_fix_action_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
@@ -924,6 +1016,17 @@ static void on_fix_button(GtkButton *button, gpointer data) {
 		run(p, argv, on_fix_action_done);
 		g_free(helper);
 		g_free(store);
+	} else if (strcmp(action, "start-on") == 0 || strcmp(action, "start-off") == 0) {
+		bool on = strcmp(action, "start-on") == 0;
+		set_note(p, on ? "Setting the livepatch for every start of this kernel…" :
+			"Taking the livepatch off the start…");
+		char *store = store_dir();
+		char *helper = root_helper_path();
+		const char *argv[] = { g_getenv("TILEWIN_KERNEL_ROOT_HELPER") ? "bash" : "pkexec",
+			helper, "livepatch-start", p->fixes_kver, name, store, on ? "on" : "off", NULL };
+		run(p, argv, on_fix_action_done);
+		g_free(helper);
+		g_free(store);
 	} else {
 		set_note(p, "Taking the livepatch out…");
 		run_root(p, on_fix_action_done, "livepatch-undo", name, NULL);
@@ -951,30 +1054,53 @@ static void on_fixes(struct kernel_page *p, bool ok, const char *out, const char
 	while ((child = gtk_widget_get_first_child(p->fixes_list))) {
 		gtk_list_box_remove(GTK_LIST_BOX(p->fixes_list), child);
 	}
+	char *title = g_strdup_printf("Linux %s", p->fixes_kver ? p->fixes_kver : "");
+	ui_row(p->fixes_list, title, p->fixes_running ? "Running now: a fix applied takes hold at "
+		"once, every program goes on" : p->fixes_installed ? "Not running: set a fix for its "
+		"every start, or apply it once it runs" : "Not on the computer: add it to the boot "
+		"menu to set fixes for its start", NULL);
+	g_free(title);
 	bool any = false;
 	char **lines = g_strsplit(out, "\n", -1);
 	for (int i = 0; lines[i]; i++) {
-		char **f = g_strsplit(lines[i], "\t", 3);
+		char **f = g_strsplit(lines[i], "\t", 4);
 		if (f[0] && *f[0] && f[1]) {
 			any = true;
 			const char *state = f[1];
+			bool ready = strcmp(state, "built") == 0 || strcmp(state, "applied") == 0;
+			bool at_start = f[2] && f[3] && strcmp(f[3], "yes") == 0;
 			GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-			if (strcmp(state, "built") == 0) {
+			if (strcmp(state, "built") == 0 && p->fixes_running) {
 				gtk_box_append(GTK_BOX(buttons), fix_button(p, "Apply", "apply", f[0]));
 			} else if (strcmp(state, "applied") == 0) {
 				gtk_box_append(GTK_BOX(buttons), fix_button(p, "Undo", "undo", f[0]));
 			}
+			if (ready && (p->fixes_installed || at_start)) {
+				gtk_box_append(GTK_BOX(buttons), at_start ?
+					fix_button(p, "Not at start", "start-off", f[0]) :
+					fix_button(p, "Apply at start", "start-on", f[0]));
+			}
 			gtk_box_append(GTK_BOX(buttons), fix_button(p, "Log", "log", f[0]));
-			const char *what = strcmp(state, "applied") == 0 ? "Applied: the running kernel "
-				"has it now" : f[2] && *f[2] ? f[2] : state;
-			ui_row(p->fixes_list, f[0], what, buttons);
+			GString *what = g_string_new(strcmp(state, "applied") == 0 ? "Applied: the running "
+				"kernel has it now" : f[2] && *f[2] ? f[2] : state);
+			if (strcmp(state, "applied") == 0 && f[2] && *f[2]) {
+				g_string_append_printf(what, "\n%s", f[2]);
+			}
+			if (at_start) {
+				g_string_append(what, "\nApplied at every start of this kernel");
+			}
+			char *label = g_str_has_prefix(f[0], "security_") ?
+				g_strdup("Security fixes of kernel.org") : g_strdup(f[0]);
+			ui_row(p->fixes_list, label, what->str, buttons);
+			g_free(label);
+			g_string_free(what, TRUE);
 		}
 		g_strfreev(f);
 	}
 	g_strfreev(lines);
 	if (!any) {
-		ui_row(p->fixes_list, "No live fix yet", "\"Fix live…\" on the running kernel turns a "
-			"patch into a livepatch module", NULL);
+		ui_row(p->fixes_list, "No live fix yet", "\"Security fixes\" makes one of kernel.org's "
+			"fixes for this kernel; \"Fix live…\" one of a patch of your own", NULL);
 	}
 }
 
@@ -999,7 +1125,8 @@ static void show_list(struct kernel_page *p) {
 	char *method = value_of(p->info, "method");
 	bool can_install = method && !g_str_has_prefix(method, "none");
 	g_free(method);
-	bool any = false, build_running = false, running_with_tree = false;
+	bool any = false, build_running = false, fixes_kver_seen = false;
+	char *first_tree = NULL, *running_tree = NULL;
 	char **lines = g_strsplit(p->list ? p->list : "", "\n", -1);
 	for (int i = 0; lines[i]; i++) {
 		char **f = g_strsplit(lines[i], "\t", 3);
@@ -1076,14 +1203,23 @@ static void show_list(struct kernel_page *p) {
 			gtk_box_append(GTK_BOX(buttons), row_button(p, "Take off", "remove", kver, on,
 				!p->busy));
 		}
-		if (ready && is_running && tree) {
+		if (ready && tree) {
+			gtk_box_append(GTK_BOX(buttons), row_button(p, "Security fixes", "security", kver,
+				on, !p->busy));
 			gtk_box_append(GTK_BOX(buttons), row_button(p, "Fix live…", "fix", kver, on,
 				!p->busy));
-			if (!p->fixes_kver || strcmp(p->fixes_kver, kver) != 0) {
-				g_free(p->fixes_kver);
-				p->fixes_kver = g_strdup(kver);
+			if (!first_tree) {
+				first_tree = g_strdup(kver);
 			}
-			running_with_tree = true;
+			if (is_running) {
+				g_free(running_tree);
+				running_tree = g_strdup(kver);
+			}
+			if (g_strcmp0(p->fixes_kver, kver) == 0) {
+				fixes_kver_seen = true;
+				p->fixes_running = is_running;
+				p->fixes_installed = on;
+			}
 		}
 		gtk_box_append(GTK_BOX(buttons), row_button(p, "Log", "log", kver, on, true));
 		if (strcmp(state, "building") != 0 && !is_running) {
@@ -1107,10 +1243,22 @@ static void show_list(struct kernel_page *p) {
 		g_strfreev(f);
 	}
 	g_strfreev(lines);
-	if (!running_with_tree) {
-		g_clear_pointer(&p->fixes_kver, g_free);
+	// the fixes of the kernel picked last, else of the running one, else the first
+	if (!fixes_kver_seen) {
+		g_free(p->fixes_kver);
+		p->fixes_kver = g_strdup(running_tree ? running_tree : first_tree);
+		g_clear_pointer(&p->fixes, g_free);
+		if (p->fixes_kver) {
+			// what the loop saw of it: show the list again with it picked
+			g_free(running_tree);
+			g_free(first_tree);
+			show_list(p);
+			return;
+		}
 	}
-	gtk_widget_set_visible(p->fixes_group, running_with_tree);
+	g_free(running_tree);
+	g_free(first_tree);
+	gtk_widget_set_visible(p->fixes_group, p->fixes_kver != NULL);
 	if (!any) {
 		ui_row(p->built_list, "No kernel built yet", NULL, NULL);
 	}
@@ -1436,6 +1584,11 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	p->version_dd = gtk_drop_down_new_from_strings(loading);
 	ui_row(group, "Version", "\"Latest\" is the newest stable release when the build starts",
 		p->version_dd);
+	p->name_entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->name_entry), "tilewin1");
+	gtk_entry_set_max_length(GTK_ENTRY(p->name_entry), 32);
+	ui_row(group, "Name", "What follows the version in uname -r and the boot menu, as in "
+		"7.3.0-mycustomname. Left empty, it is tilewin and a number counting up.", p->name_entry);
 	p->profile_dd = gtk_drop_down_new_from_strings(profile_labels);
 	p->profile_row = ui_row(group, "What goes in", profile_hints[0], p->profile_dd);
 	g_signal_connect(p->profile_dd, "notify::selected", G_CALLBACK(on_profile), p);
@@ -1477,12 +1630,16 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	p->spinner = gtk_spinner_new();
 	gtk_box_append(GTK_BOX(gtk_widget_get_parent(p->built_list)), p->spinner);
 
-	p->fixes_list = ui_group(content, "Live fixes", "Changes to the running kernel that take "
-		"hold at once, without a restart: every program goes on with all it has open. A patch "
-		"(a .patch file, a fix from the mailing list, say) becomes a livepatch module made with "
-		"the kernel's own klp-build, in the build tree kept for it. It changes what functions do; "
-		"a new kernel version, or a change to the data the kernel keeps, still takes a restart. "
-		"A fix lasts until the next restart.");
+	p->fixes_list = ui_group(content, "Live fixes", "Changes to a kernel built with live "
+		"patching that take hold at once, without a restart: every program goes on with all it "
+		"has open. \"Security fixes\" turns what kernel.org fixed in the newest release of the "
+		"kernel's series into one; \"Fix live…\" a patch of your own (a .patch file, a fix from "
+		"the mailing list, say). The kernel's own klp-build makes them, in the build tree kept "
+		"for it, also for a kernel that does not run now. They change what functions do: a fix "
+		"to a header or to the data the kernel keeps is left out (its log lists them) and needs "
+		"the newest release built. Applied, a fix lasts until the next restart; \"Apply at "
+		"start\" applies it at every start of that kernel. Nobody looked over a fix made here as "
+		"a distribution does: if the computer acts up after one, Undo takes it out again.");
 	p->fixes_group = gtk_widget_get_parent(p->fixes_list);
 	gtk_widget_set_visible(p->fixes_group, FALSE);
 

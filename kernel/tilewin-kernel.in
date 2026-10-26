@@ -11,12 +11,14 @@
 #                                       PROGRAM:PACKAGE, or PROGRAM:PACKAGE:optional
 #                                       for what a build goes without (Rust,
 #                                       ccache)
-#   tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE]
+#   tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE [NAME]]
 #                                       downloads, configures and builds a kernel:
 #                                       VERSION is a release or "latest", PROFILE
 #                                       running|device|portable|full, COMPRESSION
 #                                       zstd|xz|lz4|gzip|lzo, LIVEPATCH on|off,
-#                                       NATIVE on|off (for this processor only)
+#                                       NATIVE on|off (for this processor only),
+#                                       NAME what the kernel is called after its
+#                                       version (tilewinN when left out or "")
 #   tilewin-kernel cancel               stops the build that is running
 #   tilewin-kernel list                 the kernels built, one a line:
 #                                       KVER<tab>STATE<tab>key=value...
@@ -36,12 +38,21 @@
 #                                       makes a livepatch module of a patch for a
 #                                       kernel built with live patching (its tree
 #                                       is kept for it), with klp-build
+#   tilewin-kernel security-build KVER  makes a livepatch module of the fixes
+#                                       kernel.org has for it (the stable releases
+#                                       of its series after its own), also for a
+#                                       kernel that does not run
 #   tilewin-kernel livepatches KVER     its livepatch modules, one a line:
-#                                       NAME<tab>STATE<tab>PROGRESS
+#                                       NAME<tab>STATE<tab>PROGRESS<tab>START
+#                                       (START: yes when it is applied at every
+#                                       start of that kernel)
 #
-# A kernel is called VERSION-tilewinN (what uname -r says), N counting up, so
-# it never meets the modules of a kernel of the distribution. Its files are
-# kept in the store, $XDG_DATA_HOME/tileWin/kernels/KVER:
+# A kernel is called VERSION-NAME (what uname -r says), VERSION-tilewinN when
+# no name is given, N counting up. A name a kernel on the computer has already
+# is refused, so it never meets the modules of a kernel of the distribution.
+# Which kernels are ours the store says (and .tilewin-kernel in their modules
+# folder), not their name. Its files are kept in the store,
+# $XDG_DATA_HOME/tileWin/kernels/KVER:
 #
 #   info      key=value: version, profile, compression, livepatch, built, ...
 #   state     building, built, failed or cancelled
@@ -80,7 +91,11 @@ ccache_dir=${TILEWIN_KERNEL_CCACHE-/usr/lib/ccache/bin}
 die() { echo "$*" >&2; exit 1; }
 
 valid_version() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; }
-valid_kver() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-tilewin[0-9]+$ ]]; }
+# what may follow the version: what uname -r, file names and the boot menu take
+valid_name() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$ ]]; }
+valid_kver() { [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?-(.+)$ ]] && valid_name "${BASH_REMATCH[2]}"; }
+# built here: in the store, or put on the computer by tilewin-kernel-root
+ours() { [[ -d $data/$1 || -e $system_modules/$1/.tilewin-kernel ]]; }
 
 fetch() { # url file
 	case $1 in
@@ -201,7 +216,12 @@ kver_free() { # kver
 	[[ ! -e $data/$1 && ! -e /usr/lib/modules/$1 ]]
 }
 
-next_kver() { # version
+next_kver() { # version [name]
+	if [[ -n ${2:-} ]]; then
+		kver_free "$1-$2" || die "There is a kernel $1-$2 already: choose another name, or delete it"
+		echo "$1-$2"
+		return
+	fi
 	local n=1
 	while ! kver_free "$1-tilewin$n"; do
 		n=$((n + 1))
@@ -215,7 +235,7 @@ distro_kernel() {
 	local d best=""
 	for d in "$system_modules"/*/; do
 		d=$(basename "$d")
-		[[ $d == *-tilewin[0-9]* || ! -r $system_modules/$d/build/.config ]] && continue
+		{ ours "$d" || [[ ! -r $system_modules/$d/build/.config ]]; } && continue
 		best=$(printf '%s\n%s\n' "$best" "$d" | sort -V | tail -n 1)
 	done
 	echo "$best"
@@ -228,7 +248,7 @@ base_config() {
 	local distro
 	if [[ -n ${TILEWIN_KERNEL_CONFIG:-} ]]; then
 		cat -- "$TILEWIN_KERNEL_CONFIG"
-	elif [[ $(uname -r) == *-tilewin[0-9]* ]] && distro=$(distro_kernel) && [[ -n $distro ]]; then
+	elif ours "$(uname -r)" && distro=$(distro_kernel) && [[ -n $distro ]]; then
 		cat "$system_modules/$distro/build/.config"
 	elif [[ -r /proc/config.gz ]]; then
 		zcat /proc/config.gz
@@ -407,7 +427,7 @@ configure() { # profile compression livepatch native
 	fi
 	# loading a kernel without the firmware needs these
 	$cfg --enable KEXEC --enable KEXEC_FILE
-	$cfg --set-str LOCALVERSION "-tilewin${kver##*-tilewin}" --disable LOCALVERSION_AUTO
+	$cfg --set-str LOCALVERSION "-${kver#*-}" --disable LOCALVERSION_AUTO
 	make olddefconfig >> "$dir/log" 2>&1 || fail "make olddefconfig"
 
 	grep -q "^CONFIG_$kernel_sym=y" .config || fail "$compression compression could not be chosen"
@@ -500,12 +520,14 @@ stage_headers() {
 	find "$hb" -type f -name '*.o' -delete
 }
 
-build() { # version profile compression livepatch native
-	local version=$1 profile=$2 compression=$3 livepatch=$4 native=${5:-off}
+build() { # version profile compression livepatch native name
+	local version=$1 profile=$2 compression=$3 livepatch=$4 native=${5:-off} name=${6:-}
 	case $profile in running|device|portable|full) ;; *) die "unknown profile $profile" ;; esac
 	case $compression in zstd|xz|lz4|gzip|lzo) ;; *) die "unknown compression $compression" ;; esac
 	case $livepatch in on|off) ;; *) die "live patching is on or off" ;; esac
 	case $native in on|off) ;; *) die "for this processor is on or off" ;; esac
+	[[ -z $name ]] || valid_name "$name" ||
+		die "A name is up to 32 letters, digits and . _ + -, starting with a letter or digit"
 	[[ $version == latest ]] && { version=$(latest) || exit 1; }
 	valid_version "$version" || die "not a release: $version"
 	local missing
@@ -519,7 +541,7 @@ build() { # version profile compression livepatch native
 	# 7.3 calls itself 7.3.0: its Makefile has SUBLEVEL = 0
 	local release=$version
 	[[ $release == *.*.* ]] || release=$release.0
-	kver=$(next_kver "$release")
+	kver=$(next_kver "$release" "$name") || exit 1
 	dir=$data/$kver
 	build=$cache/build/$kver
 	mkdir -p "$dir"
@@ -533,6 +555,7 @@ build() { # version profile compression livepatch native
 		echo "compression=$compression"
 		echo "livepatch=$livepatch"
 		echo "asked_native=$native"
+		[[ -z $name ]] || echo "name=$name"
 		echo "started=$(date +%s)"
 	} > "$dir/info"
 	trap 'progress "Cancelled"; set_state cancelled; rm -f "$data/current"; rm -rf "$build"; trap - TERM; kill -TERM 0 2>/dev/null; exit 130' TERM INT
@@ -694,16 +717,42 @@ patch_name() { # patch file
 	echo "${n:0:40}"
 }
 
+# klp-build in the kept tree, through ccache when it is there. --no-replace:
+# a livepatch goes beside the others instead of taking their place.
+klp_build() { # tree out [klp-build options --] patch...
+	local tree=$1 out=$2 opts=()
+	shift 2
+	if [[ " $* " == *" -- "* ]]; then
+		while [[ $1 != -- ]]; do opts+=("$1"); shift; done
+		shift
+	fi
+	(
+		if [[ -n $ccache_dir && -x $ccache_dir/gcc ]] && command -v ccache >/dev/null 2>&1; then
+			export PATH="$ccache_dir:$PATH" CCACHE_BASEDIR=$tree CCACHE_NOHASHDIR=1
+			export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros
+		fi
+		cd "$tree" && nice -n 15 ionice -c 3 ./scripts/livepatch/klp-build -j "$jobs" \
+			--no-replace "${opts[@]}" -o "$out" "$@"
+	)
+}
+
+# The tree a kernel kept for its livepatches, or the reason there is none.
+klp_tree() { # kver
+	local tree
+	tree=$(sed -n 's/^tree=//p' "$data/$1/info" 2>/dev/null)
+	[[ -n $tree && -d $tree ]] ||
+		die "$1 keeps no build tree: only kernels built with live patching can be fixed live"
+	[[ -x $tree/scripts/livepatch/klp-build ]] ||
+		die "Linux ${1%%-*} has no klp-build: fixing live needs 6.19 or newer"
+	echo "$tree"
+}
+
 patch_build() { # kver patch
 	local kver=$1 patch=$2
 	valid_kver "$kver" || die "not a kernel of tileWin: $kver"
 	[[ -f $patch ]] || die "There is no patch $patch"
 	local d=$data/$kver tree
-	tree=$(sed -n 's/^tree=//p' "$d/info" 2>/dev/null)
-	[[ -n $tree && -d $tree ]] ||
-		die "$kver keeps no build tree: only kernels built with live patching can be fixed live"
-	[[ -x $tree/scripts/livepatch/klp-build ]] ||
-		die "Linux ${kver%-tilewin*} has no klp-build: fixing live needs 6.19 or newer"
+	tree=$(klp_tree "$kver") || exit 1
 	local name
 	name=$(patch_name "$patch")
 	valid_patch_name "$name" || die "The patch needs a name of letters and digits"
@@ -715,13 +764,8 @@ patch_build() { # kver patch
 	echo building > "$lp/$name.state"
 	echo "Making the livepatch module" > "$lp/$name.progress"
 	: > "$lp/$name.log"
-	if [[ -n $ccache_dir && -x $ccache_dir/gcc ]] && command -v ccache >/dev/null 2>&1; then
-		export PATH="$ccache_dir:$PATH" CCACHE_BASEDIR=$tree CCACHE_NOHASHDIR=1
-		export CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros
-	fi
 	local out=$lp/livepatch_$name.ko
-	if (cd "$tree" && nice -n 15 ionice -c 3 ./scripts/livepatch/klp-build -j "$jobs" \
-			-o "$out" "$lp/$name.patch") >> "$lp/$name.log" 2>&1 && [[ -f $out ]]; then
+	if klp_build "$tree" "$out" "$lp/$name.patch" >> "$lp/$name.log" 2>&1 && [[ -f $out ]]; then
 		mv "$out" "$lp/$name.ko"
 		echo built > "$lp/$name.state"
 		echo "Ready to apply" > "$lp/$name.progress"
@@ -734,6 +778,201 @@ patch_build() { # kver patch
 	fi
 }
 
+# ---------- the fixes of kernel.org, live ----------
+
+# A patch of kernel.org (patch-7.2.12.xz, from 7.2 to 7.2.12), checked
+# against its checksums, unpacked to FILE.
+stable_patch() { # release sums file
+	local xz=$cache/src/patch-$1.xz want
+	want=$(awk -v f="patch-$1.xz" '$2 == f { print $1 }' "$2")
+	[[ -n $want ]] || return 1
+	if [[ ! -s $xz || $(sha256sum "$xz" | cut -d' ' -f1) != "$want" ]]; then
+		fetch "$mirror/v${1%%.*}.x/patch-$1.xz" "$xz.part" || return 1
+		mv "$xz.part" "$xz"
+	fi
+	[[ $(sha256sum "$xz" | cut -d' ' -f1) == "$want" ]] || { rm -f "$xz"; return 1; }
+	xz -dc "$xz" > "$3"
+}
+
+# Why a changed file cannot go into a livepatch, or nothing when it can;
+# "-" for what is not part of this kernel at all.
+fix_kind() { # tree file before after
+	local tree=$1 f=$2
+	case $f in
+	Documentation/*|tools/*|samples/*|LICENSES/*|scripts/*|usr/*|*/dts/*|MAINTAINERS|.mailmap|CREDITS|README)
+		echo - ; return ;;
+	arch/x86/*) ;;
+	arch/*) echo - ; return ;;
+	esac
+	if [[ ! -f $3 ]]; then
+		echo "a new file"
+	elif [[ ! -f $4 ]]; then
+		echo "a file taken out"
+	elif [[ $f == *.c ]]; then
+		if [[ ! -f $tree/${f%.c}.o ]]; then
+			echo -
+		elif [[ $f == lib/* || $f == */vdso/* || $f == */realmode/rm/* ]]; then
+			echo "code klp-build does not patch"
+		fi
+	elif [[ $f == *.h ]]; then
+		echo "a header: the data the kernel keeps may change shape"
+	elif [[ $f == *.S ]]; then
+		echo "assembly"
+	elif [[ $f == *.rs ]]; then
+		[[ -f $tree/${f%.rs}.o ]] && echo "Rust" || echo -
+	else
+		echo "how the kernel is built"
+	fi
+}
+
+# The fixes of kernel.org for a kernel, as one livepatch module: what the
+# newest stable release of its series changed since its own release (7.2.9 to
+# 7.2.12; 7.3, the first of its series, to 7.3.4). Every file goes in as a
+# patch of its own, so what klp-build refuses (a function whose data changes,
+# a fix that needs a changed header) is left out and the rest still goes in.
+# Left out and listed: headers, assembly, new files. Those need the newest
+# release built and started.
+security_build() { # kver
+	local kver=$1
+	valid_kver "$kver" || die "not a kernel name: $kver"
+	local d=$data/$kver tree
+	[[ $(cat "$d/state" 2>/dev/null) == built ]] || die "$kver is not built"
+	tree=$(klp_tree "$kver") || exit 1
+	local version release series z
+	version=$(sed -n 's/^version=//p' "$d/info")
+	valid_version "$version" || die "$kver has no version in its info"
+	release=$version
+	[[ $release == *.*.* ]] || release=$release.0
+	series=${release%.*}
+	z=${release##*.}
+	local major=${series%%.*} sums=$cache/src/sha256sums-v${series%%.*}.asc lp=$d/livepatches
+	mkdir -p "$cache/src" "$lp"
+	exec 9> "$cache/build.lock"
+	flock -n 9 || die "A kernel is being built: wait for it to finish"
+	fetch "$mirror/v$major.x/sha256sums.asc" "$sums.part" ||
+		die "could not download the checksums of kernel.org"
+	mv "$sums.part" "$sums"
+	local newest
+	newest=$(awk '{ print $2 }' "$sums" | sed -n "s/^patch-${series//./\\.}\.\([0-9][0-9]*\)\.xz$/\1/p" |
+		sort -n | tail -n 1)
+	if [[ -z $newest || $newest -le $z ]]; then
+		echo "Linux $release is the newest of $series: kernel.org has no fixes for it yet"
+		return 0
+	fi
+	local to=$series.$newest name=security_${series//./_}_$newest
+	if [[ $(cat "$lp/$name.state" 2>/dev/null) == built ]]; then
+		echo "The fixes of Linux $to are made already: apply them under Live fixes"
+		return 0
+	fi
+	local log=$lp/$name.log work=$lp/$name.work
+	: > "$log"
+	echo building > "$lp/$name.state"
+	step() { echo "$*" > "$lp/$name.progress"; echo "== $*" >> "$log"; }
+	give_up() {
+		echo failed > "$lp/$name.state"
+		echo "Failed: $*" > "$lp/$name.progress"
+		echo "$*" >> "$log"
+		rm -rf "$work" "$tree/klp-tmp"
+		die "$*"
+	}
+	trap 'give_up "Stopped"' TERM INT
+
+	step "Downloading the fixes of Linux $to"
+	rm -rf "$work"
+	mkdir -p "$work/a" "$work/o" "$work/b" "$work/p"
+	stable_patch "$to" "$sums" "$work/new.diff" ||
+		give_up "The fixes of Linux $to could not be downloaded, or do not match the checksums of kernel.org"
+	if [[ $z -gt 0 ]]; then
+		stable_patch "$release" "$sums" "$work/old.diff" ||
+			give_up "Linux $release could not be downloaded as a patch from kernel.org"
+	fi
+
+	# the files as this kernel has them (a), as the release of the series
+	# before them (o) and as the newest (b): b - a is what is new
+	step "Sorting the fixes of Linux $to"
+	local f files
+	files=$( { lsdiff --strip=1 "$work/new.diff"; [[ -f $work/old.diff ]] && lsdiff --strip=1 "$work/old.diff"; } | sort -u)
+	while read -r f; do
+		[[ -n $f && -f $tree/$f ]] || continue
+		mkdir -p "$work/a/$(dirname "$f")"
+		cp -- "$tree/$f" "$work/a/$f"
+	done <<<"$files"
+	cp -a "$work/a/." "$work/o/"
+	if [[ -f $work/old.diff ]]; then
+		(cd "$work/o" && patch -R -p1 -s -f --no-backup-if-mismatch < ../old.diff) >> "$log" 2>&1 ||
+			give_up "The source of $kver is not what Linux $release is: the fixes cannot be sorted"
+	fi
+	cp -a "$work/o/." "$work/b/"
+	(cd "$work/b" && patch -p1 -s -f --no-backup-if-mismatch < ../new.diff) >> "$log" 2>&1 ||
+		give_up "The fixes of Linux $to do not apply to $kver"
+
+	local kept=() files_of=() why n=0
+	: > "$lp/$name.left"
+	while read -r f; do
+		[[ -n $f ]] || continue
+		cmp -s "$work/a/$f" "$work/b/$f" && continue
+		[[ ! -e $work/a/$f && ! -e $work/b/$f ]] && continue
+		why=$(fix_kind "$tree" "$f" "$work/a/$f" "$work/b/$f")
+		[[ $why == - ]] && continue
+		if [[ -n $why ]]; then
+			printf '%s\t%s\n' "$f" "$why" >> "$lp/$name.left"
+			continue
+		fi
+		n=$((n + 1))
+		diff -u --label "a/$f" --label "b/$f" "$work/a/$f" "$work/b/$f" > "$work/p/$n.patch"
+		kept+=("$work/p/$n.patch")
+		files_of[n]=$f
+	done <<<"$files"
+
+	# klp-build, again without what it refused, until it takes the rest; the
+	# kernel without the fixes is built only the first time
+	local round=0 opts=(-T) out=$lp/livepatch_$name.ko total=${#kept[@]} before bad p
+	while :; do
+		[[ ${#kept[@]} -gt 0 ]] ||
+			give_up "None of the $total fixed files of Linux $to can be applied live: they need a restart"
+		round=$((round + 1))
+		[[ $round -le 12 ]] || give_up "klp-build refused too many fixes: see the log"
+		step "Making the livepatch module of Linux $to (${#kept[@]} files)"
+		before=$(stat -c %s "$log")
+		if klp_build "$tree" "$out" "${opts[@]}" -- "${kept[@]}" >> "$log" 2>&1 && [[ -f $out ]]; then
+			break
+		fi
+		[[ -f $tree/klp-tmp/1-orig/.complete ]] && opts=(-T -S 2)
+		# the files this round's errors name
+		local errors
+		errors=$(tail -c +"$((before + 1))" "$log" | grep -iE 'error|did not apply|unsupported|fatal')
+		bad=()
+		for p in "${kept[@]}"; do
+			n=$(basename "$p" .patch)
+			f=${files_of[n]}
+			if grep -qF -e "$f:" -e "${f%.c}.o:" -e "$p" <<<"$errors"; then
+				bad+=("$p")
+				printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F -e "$f:" -e "${f%.c}.o:" -e "$p" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
+			fi
+		done
+		[[ ${#bad[@]} -gt 0 ]] || give_up "klp-build stopped without naming a file: see the log"
+		local still=()
+		for p in "${kept[@]}"; do
+			[[ " ${bad[*]} " == *" $p "* ]] || still+=("$p")
+		done
+		kept=("${still[@]}")
+	done
+	rm -rf "$tree/klp-tmp"
+	mv "$out" "$lp/$name.ko"
+	cat -- "${kept[@]}" > "$lp/$name.patch" # what went in
+	rm -rf "$work"
+	local left
+	left=$(wc -l < "$lp/$name.left")
+	echo built > "$lp/$name.state"
+	if [[ $left -gt 0 ]]; then
+		echo "Fixes of Linux $to: ${#kept[@]} files live; $left need a restart (Log)" > "$lp/$name.progress"
+		{ echo "== Left out, they need Linux $to built and started:"; cat "$lp/$name.left"; } >> "$log"
+	else
+		echo "Fixes of Linux $to: all ${#kept[@]} files live" > "$lp/$name.progress"
+	fi
+	echo "The fixes of Linux $to are ready: apply them under Live fixes"
+}
+
 livepatches() { # kver
 	valid_kver "$1" || die "not a kernel of tileWin: $1"
 	local lp=$data/$1/livepatches f name state
@@ -744,7 +983,9 @@ livepatches() { # kver
 		# applied: the kernel has it now
 		[[ -d ${TILEWIN_KERNEL_SYS:-/sys}/kernel/livepatch/livepatch_$name ]] &&
 			[[ $(uname -r) == "$1" ]] && state=applied
-		printf '%s\t%s\t%s\n' "$name" "$state" "$(head -n 1 "$lp/$name.progress" 2>/dev/null)"
+		local start=no
+		[[ -f $system_modules/$1/livepatch/livepatch_$name.ko ]] && start=yes
+		printf '%s\t%s\t%s\t%s\n' "$name" "$state" "$(head -n 1 "$lp/$name.progress" 2>/dev/null)" "$start"
 	done
 }
 
@@ -767,14 +1008,14 @@ versions) versions ;;
 foreign) foreign ;;
 latest) latest ;;
 check) check "${2:-}" ;;
-build) [[ $# -eq 5 || $# -eq 6 ]] ||
-		die "usage: tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE]"
+build) [[ $# -ge 5 && $# -le 7 ]] ||
+		die "usage: tilewin-kernel build VERSION PROFILE COMPRESSION LIVEPATCH [NATIVE [NAME]]"
 	# a session of its own: cancelling stops the build and what it started,
 	# not the programs that started it
 	if [[ -z ${TILEWIN_KERNEL_SESSION:-} ]] && command -v setsid >/dev/null 2>&1; then
 		TILEWIN_KERNEL_SESSION=1 exec setsid --wait bash "$0" "$@"
 	fi
-	build "$2" "$3" "$4" "$5" "${6:-off}" ;;
+	build "$2" "$3" "$4" "$5" "${6:-off}" "${7:-}" ;;
 cancel) cancel ;;
 list) list ;;
 delete) [[ $# -eq 2 ]] || die "usage: tilewin-kernel delete KVER"; delete "$2" ;;
@@ -783,6 +1024,8 @@ record-modules) record_modules ;;
 seen) seen ;;
 patch-build) [[ $# -eq 3 ]] || die "usage: tilewin-kernel patch-build KVER PATCH"
 	patch_build "$2" "$3" ;;
+security-build) [[ $# -eq 2 ]] || die "usage: tilewin-kernel security-build KVER"
+	security_build "$2" ;;
 livepatches) [[ $# -eq 2 ]] || die "usage: tilewin-kernel livepatches KVER"; livepatches "$2" ;;
-*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store|record-modules|seen|patch-build|livepatches" ;;
+*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store|record-modules|seen|patch-build|security-build|livepatches" ;;
 esac
