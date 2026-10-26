@@ -201,6 +201,7 @@ subdir('polkit')
 subdir('clipboard')
 subdir('screensaver')
 subdir('dns')
+subdir('kernel')
 
 gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
 if gtk4.found()

@@ -616,6 +616,16 @@ test(
 )
 
 test(
+	'fullscreen-scheduler',
+	find_program('fullscreen_scheduler.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'desktop-alt-f4',
 	find_program('desktop_alt_f4.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
@@ -635,6 +645,16 @@ test(
 
 python = find_program('python3', required: false)
 if python.found()
+	# a kernel tree, a mirror, a root and boot loaders of its own: nothing is
+	# built for real and nothing of this computer is touched
+	test(
+		'kernel-tools',
+		find_program('kernel_tools.sh'),
+		args: [tilewin_kernel, tilewin_kernel_root, meson.project_source_root()],
+		suite: 'unit',
+		timeout: 120,
+	)
+
 	# fake DNS servers, block lists and NetworkManager files of its own
 	test(
 		'dns-apply',

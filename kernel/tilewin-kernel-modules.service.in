@@ -1,0 +1,8 @@
+[Unit]
+Description=Note the kernel modules in use, for kernels built for this computer
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/tilewin-kernel record-modules
+Nice=19
+IOSchedulingClass=idle

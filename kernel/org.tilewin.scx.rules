@@ -1,0 +1,10 @@
+// The panel of tileWin switches the sched_ext scheduler while a window fills
+// a screen (a game) and back after it, through scx_loader: for administrators
+// at the computer itself that goes without a password, as it would otherwise
+// ask each time. A scheduler only decides which program runs next.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.scx.loader.manage-schedulers" &&
+        subject.isInGroup("wheel") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

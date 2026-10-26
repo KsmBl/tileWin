@@ -15,6 +15,7 @@ executable(
 		'page_datetime.c',
 		'page_desktop.c',
 		'page_dns.c',
+		'page_kernel.c',
 		'page_keyboard.c',
 		'page_launcher.c',
 		'page_menus.c',
@@ -40,7 +41,8 @@ executable(
 	# the kit whole, its functions lent to the savers the preview loads
 	link_whole: [lib_saver_kit],
 	link_with: [lib_sway_common],
-	c_args: ['-DTILEWIN_LIBEXECDIR="@0@"'.format(join_paths(prefix, get_option('libexecdir')))],
+	c_args: ['-DTILEWIN_LIBEXECDIR="@0@"'.format(join_paths(prefix, get_option('libexecdir'))),
+		'-DTILEWIN_BINDIR="@0@"'.format(join_paths(prefix, get_option('bindir')))],
 	export_dynamic: true,
 	install: true,
 )

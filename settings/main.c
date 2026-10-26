@@ -645,6 +645,9 @@ static void build_window(struct settings *s) {
 		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 5, "avatar-default-symbolic" },
 		{ "backup", "Backup", "restore save export import copy settings file another computer",
 			backup_page_new, 5, "document-save-symbolic" },
+		{ "kernel", "Kernel", "linux kernel build compile version latest longterm live patching "
+			"livepatch kpatch kexec load boot grub uki efi modules drivers compression zstd xz lz4 "
+			"gzip lzo localmodconfig", kernel_page_new, 5, "applications-engineering-symbolic" },
 		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 5, "help-about-symbolic" },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
@@ -854,7 +857,10 @@ int main(int argc, char **argv) {
 	s->windowmode = confdoc_open("windowmode.conf");
 	s->tilemode = confdoc_open("tilemode.conf");
 
-	s->app = gtk_application_new("org.tilewin.Settings", G_APPLICATION_HANDLES_COMMAND_LINE);
+	// every start is a window of its own: the others pick up what it saves
+	// (on_config_dir_changed), as they do any change made on disk
+	s->app = gtk_application_new("org.tilewin.Settings",
+		G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_NON_UNIQUE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
 		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);

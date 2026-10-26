@@ -226,6 +226,7 @@ static void do_reload(void *data) {
 	panel_outputs_update_bars(p);
 	notify_theme_changed(p);
 	notes_theme_changed();
+	scheduler_update(p);
 	watch_files(p);
 }
 
@@ -366,6 +367,7 @@ int main(int argc, char **argv) {
 	media_init(&panel);
 	appsound_init(&panel);
 	bt_init(&panel);
+	scheduler_init(&panel);
 	clipboard_init(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
@@ -396,6 +398,7 @@ int main(int argc, char **argv) {
 	clipboard_fini(&panel);
 	thumbnails_fini(&panel);
 	notes_fini(); // what was typed last is written before the taskbar goes
+	scheduler_fini();
 	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);

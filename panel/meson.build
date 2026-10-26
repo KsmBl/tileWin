@@ -32,6 +32,7 @@ executable(
 		'media.c',
 		'bar.c',
 		'bluetooth.c',
+		'scheduler.c',
 		'clipboard.c',
 		'config.c',
 		'desktop.c',

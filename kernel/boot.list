@@ -1,0 +1,33 @@
+# What every kernel built here keeps, whatever its profile: what it takes to
+# start this kind of computer (encrypted and LVM disks, the EFI partition,
+# keyboards for the password). The modules the initramfs of the running
+# kernel holds are kept besides. One option a line without CONFIG_; m or y
+# after it is a note: a tristate becomes a module, a bool is switched on.
+BLK_DEV_DM m
+DM_CRYPT m
+DM_INTEGRITY m
+DM_SNAPSHOT m
+DM_MIRROR m
+DM_RAID m
+MD y
+BLK_DEV_MD y
+CRYPTO_XTS y
+CRYPTO_AES y
+CRYPTO_USER_API_SKCIPHER m
+CRYPTO_USER_API_HASH m
+BLK_DEV_NVME m
+SATA_AHCI m
+BLK_DEV_SD m
+USB_STORAGE m
+USB_UAS m
+USB_XHCI_PCI m
+USB_HID m
+HID_GENERIC m
+VFAT_FS m
+NLS_CODEPAGE_437 m
+NLS_ISO8859_1 m
+NLS_UTF8 m
+EFIVAR_FS y
+EFI_PARTITION y
+DRM_SIMPLEDRM y
+BLK_DEV_INITRD y

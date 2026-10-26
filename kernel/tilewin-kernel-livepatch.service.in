@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply the livepatches set for the running kernel built by tileWin
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=sysinit.target
+ConditionDirectoryNotEmpty=/usr/lib/modules/%v/livepatch
+
+[Service]
+Type=oneshot
+ExecStart=@libexecdir@/tilewin-kernel-root livepatch-boot
+
+[Install]
+WantedBy=sysinit.target

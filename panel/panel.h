@@ -164,7 +164,7 @@ struct pwindow {
 	char *output;
 	char *identifier; // foreign toplevel identifier
 	int pid;
-	bool focused, urgent, minimized, maximized, floating, above;
+	bool focused, urgent, minimized, maximized, floating, above, fullscreen;
 	int order; // creation order
 	int x, y, width, height; // its frame, title bar included, on its output
 	int title_height;        // the title bar at the top of it
@@ -223,6 +223,8 @@ struct panel_config {
 	list_t *desk_widgets; // struct deskwidget *, the widgets on the desktop
 	struct twconf_node *startmenu;
 	int tooltip_delay;
+	// the sched_ext scheduler while a window fills a screen (scheduler.c)
+	char *fullscreen_scheduler, *fullscreen_scheduler_mode;
 	bool desktop_icons;
 	// the desktop grid: the picture, the cell it sits in and the outer margin
 	int desktop_icon_size, desktop_cell_width, desktop_cell_height, desktop_margin;
@@ -713,6 +715,11 @@ struct bt_device {
 	bool busy; // connecting or pairing
 };
 void bt_init(struct panel *panel);
+
+/* scheduler.c: the sched_ext scheduler for windows that fill a screen */
+void scheduler_init(struct panel *panel);
+void scheduler_update(struct panel *panel);
+void scheduler_fini(void);
 void bt_fini(void);
 bool bt_available(void); // bluetoothd runs and there is an adapter
 bool bt_powered(void);
