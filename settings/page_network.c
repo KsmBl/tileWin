@@ -27,6 +27,7 @@ struct network_page {
 	char *device;     // its device while connected
 	char *key_mgmt;   // its Wi-Fi security, "" for an open network
 	GtkWidget *conn_dd, *conn_sub, *details, *message;
+	GtkWidget *now_list; // the Network page's "Connected now": every network in use
 	GtkWidget *method_dd, *address, *prefix_dd, *gateway, *fixed_rows[3], *apply_row, *now_sub;
 	GtkWidget *dns_now, *dns_dd, *dns_list, *dns_pick, *dns_entry_row, *dns_entry, *dns_note, *dns_empty;
 	GPtrArray *dns, *dns_rows, *dns_picks;
@@ -372,6 +373,96 @@ static int by_activity(gconstpointer a, gconstpointer b) {
 	return g_utf8_collate(x->name, y->name);
 }
 
+/* ---------- the networks in use ---------- */
+
+/* How a connected network gets its address, under its row: "Automatic (DHCP) ·
+ * 192.168.1.129/24 · gateway 192.168.1.1". */
+static void now_loaded(struct network_page *p, bool ok, char *out, char *err, gpointer data) {
+	GtkWidget *label = data;
+	if (gtk_widget_get_parent(label)) {
+		const char *method = NULL;
+		char *addr = NULL, *gw = NULL;
+		char **lines = g_strsplit(ok && out ? out : "", "\n", -1);
+		for (int i = 0; lines[i]; i++) {
+			char *colon = strchr(lines[i], ':');
+			if (!colon) {
+				continue;
+			}
+			*colon = '\0';
+			const char *key = lines[i], *value = colon + 1;
+			if (strcmp(key, "ipv4.method") == 0) {
+				method = strcmp(value, "auto") == 0 ? "Automatic (DHCP)" :
+					strcmp(value, "manual") == 0 ? "Fixed address" :
+					strcmp(value, "link-local") == 0 ? "Link-local only" :
+					strcmp(value, "shared") == 0 ? "Shared to other computers" :
+					strcmp(value, "disabled") == 0 ? "No IPv4" : NULL;
+			} else if (g_str_has_prefix(key, "IP4.ADDRESS") && !addr && *value) {
+				addr = g_strdup(value);
+			} else if (strcmp(key, "IP4.GATEWAY") == 0 && *value) {
+				gw = g_strdup(value);
+			}
+		}
+		GString *text = g_string_new(method ? method : ok ? "Connected" :
+			"NetworkManager did not say how it is set up");
+		if (addr) {
+			g_string_append_printf(text, " · %s", addr);
+		}
+		if (gw) {
+			g_string_append_printf(text, " · gateway %s", gw);
+		}
+		gtk_label_set_text(GTK_LABEL(label), text->str);
+		g_string_free(text, TRUE);
+		g_strfreev(lines);
+		g_free(addr);
+		g_free(gw);
+	}
+	g_object_unref(label);
+}
+
+static void on_now_edit(GtkButton *button, gpointer data) {
+	struct network_page *p = data;
+	const char *uuid = g_object_get_data(G_OBJECT(button), "uuid");
+	for (guint i = 0; i < p->conns->len; i++) {
+		struct net_conn *c = p->conns->pdata[i];
+		if (strcmp(c->uuid, uuid) == 0) {
+			gtk_drop_down_set_selected(GTK_DROP_DOWN(p->conn_dd), i);
+		}
+	}
+}
+
+/* Every network in use at once, Wi-Fi and cable alike, with how each is set up. */
+static void now_show(struct network_page *p) {
+	if (!p->now_list) {
+		return;
+	}
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(p->now_list))) {
+		gtk_list_box_remove(GTK_LIST_BOX(p->now_list), child);
+	}
+	bool any = false;
+	for (guint i = 0; i < p->conns->len; i++) {
+		struct net_conn *c = p->conns->pdata[i];
+		if (!c->active) {
+			continue;
+		}
+		any = true;
+		char *title = g_strdup_printf("%s (%s%s%s)", c->name, type_label(c->type),
+			*c->device ? ", " : "", c->device);
+		GtkWidget *edit = gtk_button_new_with_label("Edit");
+		g_object_set_data_full(G_OBJECT(edit), "uuid", g_strdup(c->uuid), g_free);
+		g_signal_connect(edit, "clicked", G_CALLBACK(on_now_edit), p);
+		GtkWidget *row = ui_row(p->now_list, title, "…", edit);
+		g_free(title);
+		GtkWidget *sub = gtk_widget_get_last_child(gtk_widget_get_first_child(ui_row_box(row)));
+		const char *argv[] = { "-t", "-f", "ipv4.method,IP4.ADDRESS,IP4.GATEWAY", "connection",
+			"show", "uuid", c->uuid, NULL };
+		run(p, argv, now_loaded, g_object_ref(sub));
+	}
+	if (!any) {
+		ui_row(p->now_list, "Not connected", NULL, NULL);
+	}
+}
+
 static void conns_loaded(struct network_page *p, bool ok, char *out, char *err, gpointer data) {
 	g_ptr_array_set_size(p->conns, 0);
 	char **lines = g_strsplit(out ? out : "", "\n", -1);
@@ -391,6 +482,7 @@ static void conns_loaded(struct network_page *p, bool ok, char *out, char *err, 
 	}
 	g_strfreev(lines);
 	g_ptr_array_sort(p->conns, by_activity);
+	now_show(p);
 	GtkStringList *names = gtk_string_list_new(NULL);
 	guint keep = 0;
 	for (guint i = 0; i < p->conns->len; i++) {
@@ -829,6 +921,8 @@ GtkWidget *network_page_new(struct settings *s) {
 		"The address and the password of each saved network; its DNS servers are set on the "
 		"DNS page. New Wi-Fi networks are joined from the network menu of the taskbar.",
 		&content);
+	p->now_list = ui_group(content, "Connected now", "Every network in use, over the air and "
+		"by cable, and how each gets its address. Edit shows one below.");
 	add_picker(p, content, NULL, NULL);
 
 	GtkWidget *ip = ui_group(p->details, "IP address", NULL);

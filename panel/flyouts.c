@@ -450,6 +450,7 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 #define NET_MESSAGE 56
 #define NET_DETAILS 46
 #define NET_LINK 20 // the line of the Wi-Fi link below them
+#define NET_WIRED 46 // a wired connection: its card and how it is set up
 
 enum {
 	NET_HS_TOGGLE = 1,
@@ -538,7 +539,12 @@ struct net_flyout {
 	char *wired_connection;
 	char *wired_device;
 	char wired_speed[48]; // "1 Gbit/s, full duplex", empty when the card does not say
+	char wired_method[24]; // NetworkManager's ipv4.method: auto, manual, ...
+	char wired_addr[64], wired_gw[48];
 	bool wired;
+	char *connecting;    // SSID being connected to, or disconnected from, until nmcli is done
+	bool disconnecting;
+	char *failed;        // SSID the last connecting failed for
 	bool have_nmcli, wifi_enabled, loaded, rescanned;
 	char *expanded; // SSID of the expanded row
 	char *secret_ssid; // saved network whose password was asked for
@@ -601,6 +607,7 @@ static void net_clear(struct net_flyout *f) {
 	free(f->wired_device);
 	f->wired_device = NULL;
 	f->wired_speed[0] = '\0';
+	f->wired_method[0] = f->wired_addr[0] = f->wired_gw[0] = '\0';
 	f->wifi_device = NULL;
 	f->wired_connection = NULL;
 	f->wired = false;
@@ -619,7 +626,7 @@ static int net_visible_rows(struct net_flyout *f) {
 }
 
 static int net_height(struct net_flyout *f) {
-	int h = NET_HEADER + 1 + (f->iface[0] ? NET_DETAILS + 1 : 0) +
+	int h = NET_HEADER + 1 + (f->wired ? NET_WIRED + 1 : 0) + (f->iface[0] ? NET_DETAILS + 1 : 0) +
 		(f->iface[0] && f->have_link ? NET_LINK : 0);
 	if (net_list_shown(f)) {
 		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
@@ -771,7 +778,7 @@ static void net_query_done(void *data, const char *output) {
 	struct wifi_ap *aps = NULL;
 	int ap_count = 0;
 	bool asked_caps = false, have_adapter = false;
-	enum { S_RADIO, S_DEVICES, S_WIFI, S_KNOWN } section = S_RADIO;
+	enum { S_RADIO, S_DEVICES, S_WIFI, S_KNOWN, S_WIRED } section = S_RADIO;
 	list_t *known = create_list();
 	char *copy = strdup(output);
 	char *save = NULL;
@@ -784,6 +791,28 @@ static void net_query_done(void *data, const char *output) {
 			continue;
 		} else if (strcmp(line, "--known") == 0) {
 			section = S_KNOWN;
+			continue;
+		} else if (strcmp(line, "--wired") == 0) {
+			section = S_WIRED;
+			continue;
+		}
+		if (section == S_WIRED) {
+			// DEVICE<tab>METHOD<tab>ADDRESS<tab>GATEWAY of a connected wired card
+			char *fields[4] = { line, NULL, NULL, NULL };
+			for (int i = 1; i < 4 && fields[i - 1]; i++) {
+				char *tab = strchr(fields[i - 1], '\t');
+				if (tab) {
+					*tab = '\0';
+					fields[i] = tab + 1;
+				}
+			}
+			if (f->wired_device && strcmp(fields[0], f->wired_device) == 0) {
+				snprintf(f->wired_method, sizeof(f->wired_method), "%s", fields[1] ? fields[1] : "");
+				// IP4.ADDRESS lists them as "a | b": the first
+				snprintf(f->wired_addr, sizeof(f->wired_addr), "%.*s",
+					fields[2] ? (int)strcspn(fields[2], " |") : 0, fields[2] ? fields[2] : "");
+				snprintf(f->wired_gw, sizeof(f->wired_gw), "%s", fields[3] ? fields[3] : "");
+			}
 			continue;
 		}
 		if (section == S_RADIO) {
@@ -884,7 +913,16 @@ static void net_query(struct net_flyout *f, bool rescan) {
 		"while IFS=: read -r uuid type; do "
 		"[ \"$type\" = 802-11-wireless ] || continue; "
 		"ssid=$(nmcli -g 802-11-wireless.ssid connection show uuid \"$uuid\" 2>/dev/null); "
-		"[ -n \"$ssid\" ] && printf '%%s:%%s\\n' \"$uuid\" \"$ssid\"; done",
+		"[ -n \"$ssid\" ] && printf '%%s:%%s\\n' \"$uuid\" \"$ssid\"; done; "
+		// how each connected wired card is set up: DHCP or an address of its own
+		"echo --wired; nmcli -t -f DEVICE,TYPE,STATE device 2>/dev/null | "
+		"while IFS=: read -r dev type state; do "
+		"[ \"$type\" = ethernet ] && [ \"${state#connected}\" != \"$state\" ] || continue; "
+		"con=$(nmcli -g GENERAL.CONNECTION device show \"$dev\" 2>/dev/null); "
+		"m=$(nmcli -g ipv4.method connection show \"$con\" 2>/dev/null); "
+		"a=$(nmcli -g IP4.ADDRESS device show \"$dev\" 2>/dev/null); "
+		"g=$(nmcli -g IP4.GATEWAY device show \"$dev\" 2>/dev/null); "
+		"printf '%%s\\t%%s\\t%%s\\t%%s\\n' \"$dev\" \"$m\" \"$a\" \"$g\"; done",
 		rescan ? "auto" : "no");
 	proc_run(f->base.panel, cmd, false, NULL, net_query_done, NULL);
 	free(cmd);
@@ -904,6 +942,12 @@ static void net_action_done(void *data, const char *output) {
 		return;
 	}
 	const char *error = strstr(output, "Error");
+	free(f->failed);
+	f->failed = error && f->connecting && !f->disconnecting ? f->connecting : NULL;
+	if (!f->failed) {
+		free(f->connecting);
+	}
+	f->connecting = NULL;
 	if (error) {
 		snprintf(f->status, sizeof(f->status), "%.*s", (int)strcspn(error, "\n"), error);
 		f->status_error = true;
@@ -1003,6 +1047,11 @@ static void net_connect(struct net_flyout *f, int index) {
 	}
 	char *ssid = shell_quote(n->ssid);
 	char *status = format_str("Connecting to %s...", n->ssid);
+	free(f->connecting);
+	f->connecting = strdup(n->ssid);
+	f->disconnecting = false;
+	free(f->failed);
+	f->failed = NULL;
 	char *cmd;
 	if (n->known) {
 		cmd = format_str("nmcli connection up id %s 2>&1", ssid);
@@ -1201,9 +1250,13 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	struct wifi_net *active = net_active(f);
 	const char *title, *subtitle;
 	char wired_subtitle[80];
-	if (active) {
+	if (f->connecting && !f->disconnecting) {
+		title = f->connecting;
+		subtitle = "Connecting...";
+	} else if (active) {
 		title = active->ssid;
-		subtitle = active->security[0] ? "Connected, secured" : "Connected";
+		subtitle = f->connecting ? "Disconnecting..." :
+			active->security[0] ? "Connected, secured" : "Connected";
 	} else if (f->wired) {
 		title = f->wired_connection && *f->wired_connection ? f->wired_connection : "Ethernet";
 		if (f->wired_speed[0]) {
@@ -1231,6 +1284,35 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	y += NET_HEADER;
 	draw_line(cr, &st, p, y);
 	y += 1;
+
+	// a wired connection, also beside the Wi-Fi: its card, speed and how it gets its address
+	if (f->wired) {
+		ti_network(p->panel, cr, x0, y + 12, 20, 4, false, true, st.fg);
+		char head[160], how[200];
+		snprintf(head, sizeof(head), "%s%s%s%s", f->wired_connection && *f->wired_connection ?
+			f->wired_connection : "Ethernet", f->wired_device ? " (" : "",
+			f->wired_device ? f->wired_device : "", f->wired_device ? ")" : "");
+		const char *m = f->wired_method;
+		const char *method = strcmp(m, "auto") == 0 ? "Automatic (DHCP)" :
+			strcmp(m, "manual") == 0 ? "Fixed address" : strcmp(m, "link-local") == 0 ?
+			"Link-local only" : strcmp(m, "shared") == 0 ? "Shared to other computers" :
+			strcmp(m, "disabled") == 0 ? "IPv4 off" : "Connected";
+		int n = snprintf(how, sizeof(how), "%s", method);
+		if (f->wired_addr[0] && n < (int)sizeof(how)) {
+			n += snprintf(how + n, sizeof(how) - n, " · %s", f->wired_addr);
+		}
+		if (f->wired_gw[0] && n < (int)sizeof(how)) {
+			n += snprintf(how + n, sizeof(how) - n, " · gateway %s", f->wired_gw);
+		}
+		if (f->wired_speed[0] && n < (int)sizeof(how)) {
+			snprintf(how + n, sizeof(how) - n, " · %s", f->wired_speed);
+		}
+		pd_text(cr, st.font, head, x0 + 34, y + 4, cw - 34, 20, st.fg, PD_LEFT);
+		pd_text(cr, st.font, how, x0 + 34, y + 23, cw - 34, 20, st.dim, PD_LEFT);
+		y += NET_WIRED;
+		draw_line(cr, &st, p, y);
+		y += 1;
+	}
 
 	if (f->iface[0]) {
 		if (!f->ipv4[0] && !f->ipv6[0]) {
@@ -1334,9 +1416,16 @@ static void net_render(struct popup *p, cairo_t *cr) {
 				st.fg, PD_LEFT);
 			bool secured = n->security[0] && strcmp(n->security, "--") != 0;
 			char sub[96];
-			snprintf(sub, sizeof(sub), "%s%s%s", n->active ? "Connected, " : "",
-				secured ? "secured" : "open", n->known && !n->active ? ", saved" : "");
-			sub[0] = toupper((unsigned char)sub[0]);
+			if (f->connecting && strcmp(f->connecting, n->ssid) == 0) {
+				snprintf(sub, sizeof(sub), "%s", f->disconnecting ? "Disconnecting..." :
+					"Connecting...");
+			} else if (f->failed && strcmp(f->failed, n->ssid) == 0) {
+				snprintf(sub, sizeof(sub), "Could not connect");
+			} else {
+				snprintf(sub, sizeof(sub), "%s%s%s", n->active ? "Connected, " : "",
+					secured ? "secured" : "open", n->known && !n->active ? ", saved" : "");
+				sub[0] = toupper((unsigned char)sub[0]);
+			}
 			pd_text(cr, st.font, sub, x0 + 34, y + 25, cw - 34 - tag, 18, st.dim, PD_LEFT);
 			psurface_add_hotspot(p->surface, row.x, row.y, row.width, NET_ROW, NULL,
 				NET_HS_ROW, i, NULL);
@@ -1498,6 +1587,10 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 		if (f->wifi_device) {
 			char *device = shell_quote(f->wifi_device);
 			char *cmd = format_str("nmcli device disconnect %s 2>&1", device);
+			struct wifi_net *was = net_active(f);
+			free(f->connecting);
+			f->connecting = was ? strdup(was->ssid) : NULL;
+			f->disconnecting = true;
 			net_run_action(f, cmd, "Disconnecting...");
 			free(cmd);
 			free(device);
@@ -1565,6 +1658,8 @@ static void net_destroy(struct popup *p) {
 	net_clear(f);
 	list_free(f->nets);
 	free(f->expanded);
+	free(f->connecting);
+	free(f->failed);
 	free(f->base.settings);
 	free(f);
 }

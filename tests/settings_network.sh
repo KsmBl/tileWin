@@ -125,12 +125,12 @@ fail() {
 }
 
 start network 1500
-click 1116 360 # Show, beside the password
+click 1116 489 # Show, beside the password
 grep -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||
 	fail "showing the password did not ask NetworkManager for it"
-click 1135 255 # Get the address: ...
-click 1105 338 # ... Fixed address, filled in from the lease
-click 1194 480 # Apply
+click 1135 384 # Get the address: ...
+click 1105 467 # ... Fixed address, filled in from the lease
+click 1194 609 # Apply
 sleep 1
 grep -q 'connection modify uuid aaaa-1111 ipv4.method manual ipv4.addresses 192.168.1.129/24 ipv4.gateway 192.168.1.1' \
 	"$work/nm.log" || fail "the fixed address was not saved with its subnet and gateway"
