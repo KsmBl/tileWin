@@ -25,9 +25,7 @@ struct taskbar_page {
 	GtkWidget *font_entry, *terminal_entry, *delay_spin;
 	GtkWidget *screens_dd, *screens_box, *screens_row; // which screens get a taskbar
 	GPtrArray *screen_checks; // GtkCheckButton *, the screen's name as "name"
-	struct app_list *quick;
 	GPtrArray *root_settings;
-	GHashTable *quick_icons;
 	guint rebuild_id;
 	char *open_dialog; // widget whose settings open after the next rebuild
 };
@@ -746,22 +744,6 @@ static void refresh_general(struct taskbar_page *p) {
 	g_free(font);
 	g_free(terminal);
 
-	g_hash_table_remove_all(p->quick_icons);
-	GPtrArray *ids = g_ptr_array_new_with_free_func(g_free);
-	struct cstmt *quick = confdoc_block(doc(p), "widget", "quicklaunch", false);
-	for (guint i = 0; quick && i < quick->children->len; i++) {
-		struct cstmt *item = quick->children->pdata[i];
-		if (strcmp(item->name, "item") != 0 || cstmt_argc(item) < 1) {
-			continue;
-		}
-		g_ptr_array_add(ids, g_strdup(cstmt_arg(item, 0)));
-		if (cstmt_argc(item) > 1) {
-			g_hash_table_insert(p->quick_icons, g_strdup(cstmt_arg(item, 0)),
-				g_strdup(cstmt_arg(item, 1)));
-		}
-	}
-	ui_app_list_set(p->quick, ids);
-	g_ptr_array_unref(ids);
 }
 
 static void rebuild_all(struct taskbar_page *p) {
@@ -923,95 +905,6 @@ static void on_delay_changed(GtkSpinButton *spin, gpointer data) {
 	settings_taskbar_changed(p->s);
 }
 
-static void on_quick_changed(struct app_list *list, gpointer data) {
-	struct taskbar_page *p = data;
-	GPtrArray *lines = g_ptr_array_new_with_free_func(g_free);
-	for (guint i = 0; i < list->ids->len; i++) {
-		const char *id = list->ids->pdata[i];
-		const char *icon = g_hash_table_lookup(p->quick_icons, id);
-		char *qid = conf_quote(id);
-		char *qicon = icon ? conf_quote(icon) : NULL;
-		g_ptr_array_add(lines, qicon ? g_strdup_printf("%s %s", qid, qicon) : g_strdup(qid));
-		g_free(qid);
-		g_free(qicon);
-	}
-	struct cstmt *block = confdoc_block(doc(p), "widget", "quicklaunch", true);
-	confdoc_set_list(doc(p), block, "item", NULL, lines);
-	g_ptr_array_unref(lines);
-	settings_taskbar_changed(p->s);
-}
-
-/* ---------- the icon of a quick launch app ---------- */
-
-struct icon_request {
-	struct taskbar_page *p;
-	char *id;
-};
-
-static void icon_request_free(struct icon_request *r) {
-	g_free(r->id);
-	g_free(r);
-}
-
-static void on_icon_chosen(const char *icon, gpointer data) {
-	struct icon_request *r = data;
-	if (icon) {
-		g_hash_table_insert(r->p->quick_icons, g_strdup(r->id), g_strdup(icon));
-	} else {
-		g_hash_table_remove(r->p->quick_icons, r->id);
-	}
-	on_quick_changed(r->p->quick, r->p);
-	ui_app_list_refresh(r->p->quick);
-	settings_status(r->p->s, icon ? "Icon changed" : "Using the app's own icon");
-	icon_request_free(r);
-}
-
-static const char *quick_row_icon(struct app_list *l, guint index, gpointer data) {
-	struct taskbar_page *p = data;
-	return index < l->ids->len ? g_hash_table_lookup(p->quick_icons, l->ids->pdata[index]) : NULL;
-}
-
-static void on_quick_icon(struct app_list *l, guint index, gpointer data) {
-	struct taskbar_page *p = data;
-	if (index >= l->ids->len) {
-		return;
-	}
-	struct icon_request *r = g_new0(struct icon_request, 1);
-	r->p = p;
-	r->id = g_strdup(l->ids->pdata[index]);
-	const struct tw_desktop_entry *e = ui_find_app(r->id);
-	ui_icon_dialog(p->s->window, e ? e->name : r->id,
-		"The icon shown in the taskbar: an icon name of your icon theme, e.g. firefox, "
-		"or an image file.", g_hash_table_lookup(p->quick_icons, r->id),
-		e ? e->icon : NULL, "Use the app's icon", on_icon_chosen, r);
-}
-
-/* ---------- a command of one's own in the quick launch ---------- */
-
-static void on_command_chosen(const char *command, gpointer data) {
-	struct taskbar_page *p = data;
-	char *text = command ? g_strstrip(g_strdup(command)) : NULL;
-	if (!text || !*text) {
-		g_free(text);
-		return;
-	}
-	ui_app_list_add(p->quick, text); // there already, and its icon is asked for next
-	struct icon_request *r = g_new0(struct icon_request, 1);
-	r->p = p;
-	r->id = text;
-	ui_icon_dialog(p->s->window, "Icon of the command",
-		"The icon its button shows: an icon name of your icon theme, e.g. utilities-terminal, "
-		"or an image file.", NULL, "utilities-terminal", "No icon of its own",
-		on_icon_chosen, r);
-}
-
-static void on_quick_command(struct app_list *l, gpointer data) {
-	struct taskbar_page *p = data;
-	ui_command_dialog(p->s->window, "Quick launch command",
-		"A command the button runs, e.g. firefox --private-window or a script of yours.",
-		NULL, on_command_chosen, p);
-}
-
 static GtkWidget *root_entry(struct taskbar_page *p, const char *key, const char *placeholder) {
 	GtkWidget *entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), placeholder);
@@ -1025,7 +918,6 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	struct taskbar_page *p = g_new0(struct taskbar_page, 1);
 	p->s = s;
 	p->root_settings = g_ptr_array_new();
-	p->quick_icons = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	GtkWidget *content;
 	GtkWidget *page = ui_page("Taskbar",
 		"Changes are saved to taskbar.conf and the taskbar reloads them right away.", &content);
@@ -1079,7 +971,7 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	for (int i = 0; i < SECTION_COUNT; i++) {
 		char *title = g_strdup_printf("%s section", section_titles[i]);
 		p->sections[i] = ui_group(content, title, i == SECTION_LEFT ?
-			"The Windows 11 theme centers the left section. Click a widget to change its settings; "
+			"Centered by Taskbar alignment (Windows 11). Click a widget to change its settings; "
 			"drag it by its handle to move it, also into another section." :
 			NULL);
 		g_signal_connect(p->sections[i], "row-activated", G_CALLBACK(on_row_activated), p);
@@ -1119,17 +1011,6 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(content), scripts_hint);
 	p->scripts = ui_group(content, NULL, NULL);
 	g_signal_connect(p->scripts, "row-activated", G_CALLBACK(on_row_activated), p);
-
-	p->quick = ui_app_list_new(content, "Quick launch",
-		"Apps and commands shown by the quick launch widget. The button beside one changes its "
-		"icon.", on_quick_changed, p);
-	p->quick->commands = true;
-	p->quick->add_other_label = "Add command…";
-	p->quick->add_other = on_quick_command;
-	p->quick->extra = on_quick_icon;
-	p->quick->extra_icon = "image-x-generic-symbolic";
-	p->quick->extra_tooltip = "Change the icon";
-	p->quick->row_icon = quick_row_icon;
 
 	menus_section_attach(s, content);
 	GtkWidget *screens = ui_group(content, "Screens",

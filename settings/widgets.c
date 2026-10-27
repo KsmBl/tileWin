@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "settings.h"
+#include "tw_desktop.h"
 #include "tw_disks.h"
 #include "tw_widgets.h"
 
@@ -389,6 +390,148 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 	g_free(value);
 }
 
+/* ---------- the apps of the quick launch ---------- */
+
+/* The list of the quick launch widget, in its settings: what widget
+ * quicklaunch { item ID [ICON] } says in taskbar.conf, edited as the Start
+ * menu's pinned apps are. Its own for every dialog, gone with it. */
+struct quick_editor {
+	struct settings *s;
+	struct app_list *list;
+	GHashTable *icons; // id -> icon of its own
+};
+
+static GtkWindow *quick_window(struct quick_editor *q) {
+	GtkRoot *root = gtk_widget_get_root(q->list->list);
+	return GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : q->s->window;
+}
+
+static void on_quick_changed(struct app_list *list, gpointer data) {
+	struct quick_editor *q = data;
+	GPtrArray *lines = g_ptr_array_new_with_free_func(g_free);
+	for (guint i = 0; i < list->ids->len; i++) {
+		const char *id = list->ids->pdata[i];
+		const char *icon = g_hash_table_lookup(q->icons, id);
+		char *qid = conf_quote(id);
+		char *qicon = icon ? conf_quote(icon) : NULL;
+		g_ptr_array_add(lines, qicon ? g_strdup_printf("%s %s", qid, qicon) : g_strdup(qid));
+		g_free(qid);
+		g_free(qicon);
+	}
+	struct cstmt *block = confdoc_block(q->s->taskbar, "widget", "quicklaunch", true);
+	confdoc_set_list(q->s->taskbar, block, "item", NULL, lines);
+	g_ptr_array_unref(lines);
+	settings_taskbar_changed(q->s);
+}
+
+struct icon_request {
+	struct quick_editor *q;
+	char *id;
+};
+
+static void on_icon_chosen(const char *icon, gpointer data) {
+	struct icon_request *r = data;
+	if (r->q->list) {
+		if (icon) {
+			g_hash_table_insert(r->q->icons, g_strdup(r->id), g_strdup(icon));
+		} else {
+			g_hash_table_remove(r->q->icons, r->id);
+		}
+		on_quick_changed(r->q->list, r->q);
+		ui_app_list_refresh(r->q->list);
+		settings_status(r->q->s, icon ? "Icon changed" : "Using the app's own icon");
+	}
+	g_free(r->id);
+	g_free(r);
+}
+
+static const char *quick_row_icon(struct app_list *l, guint index, gpointer data) {
+	struct quick_editor *q = data;
+	return index < l->ids->len ? g_hash_table_lookup(q->icons, l->ids->pdata[index]) : NULL;
+}
+
+static void on_quick_icon(struct app_list *l, guint index, gpointer data) {
+	struct quick_editor *q = data;
+	if (index >= l->ids->len) {
+		return;
+	}
+	struct icon_request *r = g_new0(struct icon_request, 1);
+	r->q = q;
+	r->id = g_strdup(l->ids->pdata[index]);
+	const struct tw_desktop_entry *e = ui_find_app(r->id);
+	ui_icon_dialog(quick_window(q), e ? e->name : r->id,
+		"The icon shown in the taskbar: an icon name of your icon theme, e.g. firefox, "
+		"or an image file.", g_hash_table_lookup(q->icons, r->id),
+		e ? e->icon : NULL, "Use the app's icon", on_icon_chosen, r);
+}
+
+static void on_command_chosen(const char *command, gpointer data) {
+	struct quick_editor *q = data;
+	char *text = command ? g_strstrip(g_strdup(command)) : NULL;
+	if (!text || !*text || !q->list) {
+		g_free(text);
+		return;
+	}
+	ui_app_list_add(q->list, text); // there already, and its icon is asked for next
+	struct icon_request *r = g_new0(struct icon_request, 1);
+	r->q = q;
+	r->id = text;
+	ui_icon_dialog(quick_window(q), "Icon of the command",
+		"The icon its button shows: an icon name of your icon theme, e.g. utilities-terminal, "
+		"or an image file.", NULL, "utilities-terminal", "No icon of its own",
+		on_icon_chosen, r);
+}
+
+static void on_quick_command(struct app_list *l, gpointer data) {
+	struct quick_editor *q = data;
+	ui_command_dialog(quick_window(q), "Quick launch command",
+		"A command the button runs, e.g. firefox --private-window or a script of yours.",
+		NULL, on_command_chosen, q);
+}
+
+/* The dialog is gone: its rows are, so a pending rebuild of them may not run.
+ * The editor itself stays for a request still open (an icon being picked). */
+static void on_quick_gone(GtkWidget *widget, gpointer data) {
+	struct quick_editor *q = data;
+	if (q->list->rebuild_id) {
+		g_source_remove(q->list->rebuild_id);
+	}
+	g_ptr_array_unref(q->list->ids);
+	g_free(q->list);
+	q->list = NULL;
+}
+
+static void quick_editor_attach(struct settings *s, GtkWidget *content) {
+	struct quick_editor *q = g_new0(struct quick_editor, 1);
+	q->s = s;
+	q->icons = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	q->list = ui_app_list_new(content, "Apps", "The apps and commands it shows, in this "
+		"order. The button beside one changes its icon.", on_quick_changed, q);
+	q->list->commands = true;
+	q->list->add_other_label = "Add command…";
+	q->list->add_other = on_quick_command;
+	q->list->extra = on_quick_icon;
+	q->list->extra_icon = "image-x-generic-symbolic";
+	q->list->extra_tooltip = "Change the icon";
+	q->list->row_icon = quick_row_icon;
+	GPtrArray *ids = g_ptr_array_new_with_free_func(g_free);
+	struct cstmt *block = confdoc_block(s->taskbar, "widget", "quicklaunch", false);
+	for (guint i = 0; block && i < block->children->len; i++) {
+		struct cstmt *item = block->children->pdata[i];
+		if (strcmp(item->name, "item") != 0 || cstmt_argc(item) < 1) {
+			continue;
+		}
+		g_ptr_array_add(ids, g_strdup(cstmt_arg(item, 0)));
+		if (cstmt_argc(item) > 1) {
+			g_hash_table_insert(q->icons, g_strdup(cstmt_arg(item, 0)),
+				g_strdup(cstmt_arg(item, 1)));
+		}
+	}
+	ui_app_list_set(q->list, ids);
+	g_ptr_array_unref(ids);
+	g_signal_connect(q->list->list, "destroy", G_CALLBACK(on_quick_gone), q);
+}
+
 /* ---------- the dialog ---------- */
 
 struct delete_request {
@@ -448,21 +591,24 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
-	GtkWidget *list = ui_group(content, "Settings", desktop ?
-		"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
-		"Leave a field empty to use the default.");
-	int count = 0;
 	const struct tw_widget_info *info = tw_widget_find(type);
-	for (const struct tw_widget_option *opt = info ? info->options : NULL; opt && opt->key; opt++) {
-		add_option_row(s, list, name, opt, false);
-		count++;
+	bool quick = strcmp(type, "quicklaunch") == 0;
+	bool any = info && info->options && info->options->key;
+	// the quick launch's settings are its apps, in a group of their own below
+	if (any || !quick) {
+		GtkWidget *list = ui_group(content, "Settings", desktop ?
+			"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
+			"Leave a field empty to use the default.");
+		for (const struct tw_widget_option *opt = any ? info->options : NULL; opt && opt->key;
+				opt++) {
+			add_option_row(s, list, name, opt, false);
+		}
+		if (!any) {
+			ui_row(list, NULL, "This widget has no settings of its own.", NULL);
+		}
 	}
-	if (strcmp(type, "quicklaunch") == 0) {
-		ui_row(list, "Apps", "Edit the apps under Quick launch on the Taskbar page.", NULL);
-		count++;
-	}
-	if (count == 0) {
-		ui_row(list, NULL, "This widget has no settings of its own.", NULL);
+	if (quick) {
+		quick_editor_attach(s, content);
 	}
 
 	GtkWidget *events = ui_group(content, "Mouse actions",
