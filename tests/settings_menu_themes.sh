@@ -86,9 +86,9 @@ sleep 6 # the settings app has to be up and laid out before it is clicked
 # The page is tall enough to show the taskbar menu, the last one of the
 # right-click menus: open its Theme submenu, then add a separator to it, which
 # saves the menu.
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2760 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2817 >/dev/null 2>&1
 sleep 1
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2368 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2425 >/dev/null 2>&1
 sleep 3
 kill "$starter" 2>/dev/null
 pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
@@ -102,6 +102,6 @@ if echo "$theme" | grep -q '^[[:space:]]*themes$' && echo "$theme" | grep -q sep
 fi
 echo "the Theme submenu was not saved as the list of every installed theme."
 echo "Either the editor keeps the old items, or the Taskbar page has been"
-echo "rearranged and the submenu is no longer at 1094,2760."
+echo "rearranged and the submenu is no longer at 1094,2817."
 echo "$theme"
 exit 1

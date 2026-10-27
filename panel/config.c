@@ -439,6 +439,9 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 	const char *terminal = twconf_value(root, "terminal");
 	config->terminal = strdup(terminal ? terminal : "xfce4-terminal -x");
 	config->desktop_icons = twconf_parse_bool(twconf_value(root, "desktop_icons"), true);
+	const char *align = twconf_value(root, "alignment");
+	config->alignment = align && (strcmp(align, "left") == 0 || strcmp(align, "center") == 0) ?
+		strdup(align) : NULL;
 	const char *sched = twconf_value(root, "fullscreen_scheduler");
 	config->fullscreen_scheduler = sched && *sched ? strdup(sched) : NULL;
 	const char *sched_mode = twconf_value(root, "fullscreen_scheduler_mode");
@@ -551,6 +554,7 @@ void panel_config_free(struct panel_config *config) {
 	free(config->font);
 	free(config->terminal);
 	free(config->fullscreen_scheduler);
+	free(config->alignment);
 	free(config->fullscreen_scheduler_mode);
 	twconf_free(config->root);
 	free(config);

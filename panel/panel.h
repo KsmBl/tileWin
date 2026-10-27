@@ -225,6 +225,7 @@ struct panel_config {
 	int tooltip_delay;
 	// the sched_ext scheduler while a window fills a screen (scheduler.c)
 	char *fullscreen_scheduler, *fullscreen_scheduler_mode;
+	char *alignment;    // left, center, or NULL for the theme's
 	bool desktop_icons;
 	// the desktop grid: the picture, the cell it sits in and the outer margin
 	int desktop_icon_size, desktop_cell_width, desktop_cell_height, desktop_margin;
@@ -428,6 +429,9 @@ enum pstyle {
 	PS_FLUENT,
 };
 enum pstyle panel_style(struct panel *panel);
+/* Whether the start button and the windows sit in the middle of the taskbar
+ * (Windows 11), as taskbar.conf's alignment or the theme has it. */
+bool panel_centered(struct panel *panel);
 
 /* main.c */
 void panel_set_dirty(struct panel *panel);

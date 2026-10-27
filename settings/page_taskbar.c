@@ -1062,6 +1062,12 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 		"The theme's height"));
 	ui_taskbar_key(s, p->root_settings, layout, "theme_layout", "Let the theme bring its own layout",
 		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
+	static const char *const align_values[] = { "theme", "left", "center", NULL };
+	static const char *const align_labels[] = { "As the theme has it", "Left", "Center",
+		NULL };
+	ui_taskbar_choice(s, p->root_settings, layout, "alignment", "Taskbar alignment",
+		"Windows 11 centers the start button and the windows; the start menu follows",
+		align_values, align_labels);
 
 
 	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);

@@ -138,6 +138,12 @@ static bool is_system_widget(struct widget *w) {
 	return info && (info->flags & TW_WIDGET_STATUS);
 }
 
+bool panel_centered(struct panel *panel) {
+	const char *align = panel->config && panel->config->alignment ? panel->config->alignment :
+		tw_theme_str(panel->theme, "panel.alignment", "left");
+	return strcmp(align, "center") == 0;
+}
+
 static bool use_groups(struct panel *panel) {
 	return tw_theme_bool(panel->theme, "panel.groups", false);
 }
@@ -268,8 +274,7 @@ static void bar_render(struct psurface *s, cairo_t *cr) {
 	// background hotspot for the empty area (right-click menu)
 	psurface_add_hotspot(s, 0, 0, s->width, s->height, NULL, 0, 0, NULL);
 
-	bool center_left = !layout->center->length && strcmp(tw_theme_str(panel->theme,
-		"panel.alignment", "left"), "center") == 0;
+	bool center_left = !layout->center->length && panel_centered(panel);
 	list_t *left = create_list(), *center = create_list(), *right = create_list();
 	int left_fixed = 0, center_fixed = 0, right_fixed = 0;
 	int left_exp = 0, center_exp = 0, right_exp = 0;

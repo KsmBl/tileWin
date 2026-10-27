@@ -1897,7 +1897,9 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	if (height > output->height - bar - 8) {
 		height = output->height - bar - 8;
 	}
-	int x = layout == SM_CENTERED ? (output->width - width) / 2 : 0;
+	// the start menu of Windows 11 opens over the start button: in the middle, or
+	// at the left with the taskbar aligned left
+	int x = layout == SM_CENTERED && panel_centered(panel) ? (output->width - width) / 2 : 0;
 	int y = bottom ? output->height - bar - height + (layout == SM_CENTERED ? -4 : M) :
 		bar - M;
 	popup_create(panel, POPUP_STARTMENU, NULL, output, x - (layout == SM_CENTERED ? 0 : M) +
