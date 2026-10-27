@@ -277,20 +277,71 @@ static char *about_swap(void) {
 	return out;
 }
 
-static char *about_disk(void) {
+/* "12 GB of 50 GB (25%) · ext4" for a mounted file system. */
+static char *about_disk(const char *mountpoint, const char *type) {
 	struct statvfs st;
-	if (statvfs("/", &st) != 0 || st.f_blocks == 0) {
+	if (statvfs(mountpoint, &st) != 0 || st.f_blocks == 0) {
 		return NULL;
 	}
 	double total = (double)st.f_blocks * st.f_frsize;
 	double used = total - (double)st.f_bfree * st.f_frsize;
 	char *used_text = human_bytes(used);
 	char *total_text = human_bytes(total);
-	char *out = g_strdup_printf("%s of %s (%.0f%%)", used_text, total_text,
-		used * 100 / total);
+	char *out = g_strdup_printf("%s of %s (%.0f%%) · %s", used_text, total_text,
+		used * 100 / total, type);
 	g_free(used_text);
 	g_free(total_text);
 	return out;
+}
+
+struct mounted {
+	char *source, *target, *type;
+};
+
+static void mounted_free(gpointer data) {
+	struct mounted *m = data;
+	g_free(m->source);
+	g_free(m->target);
+	g_free(m->type);
+	g_free(m);
+}
+
+/* The file systems of the disks, "/" first, each device once (a bind mount or
+ * a subvolume mounted twice is the same space). Network mounts stay out: a
+ * server that is gone would hang the page. */
+static GPtrArray *about_mounts(void) {
+	GPtrArray *list = g_ptr_array_new_with_free_func(mounted_free);
+	char *text = NULL;
+	if (!g_file_get_contents("/proc/self/mounts", &text, NULL, NULL)) {
+		return list;
+	}
+	char **lines = g_strsplit(text, "\n", -1);
+	for (int i = 0; lines[i]; i++) {
+		char **f = g_strsplit(lines[i], " ", 4);
+		if (g_strv_length(f) >= 3 && g_str_has_prefix(f[0], "/dev/") &&
+				strcmp(f[2], "squashfs") != 0 && strcmp(f[2], "iso9660") != 0) {
+			bool seen = false;
+			for (guint j = 0; j < list->len && !seen; j++) {
+				seen = strcmp(((struct mounted *)list->pdata[j])->source, f[0]) == 0;
+			}
+			if (!seen) {
+				struct mounted *m = g_new0(struct mounted, 1);
+				// the kernel writes a space in a path as \040
+				m->source = g_strcompress(f[0]);
+				m->target = g_strcompress(f[1]);
+				m->type = g_strdup(f[2]);
+				if (strcmp(m->target, "/") == 0) {
+					g_ptr_array_insert(list, 0, m);
+				} else {
+					g_ptr_array_add(list, m);
+				}
+			}
+		}
+		g_strfreev(f);
+	}
+	g_strfreev(lines);
+	g_free(text);
+	return list;
 }
 
 static char *about_battery(void) {
@@ -512,7 +563,14 @@ GtkWidget *about_page_new(struct settings *s) {
 	add_row(p, hardware, "Graphics", about_gpu());
 	add_row(p, hardware, "Memory", about_memory());
 	add_row(p, hardware, "Swap", about_swap());
-	add_row(p, hardware, "Disk (/)", about_disk());
+	GPtrArray *mounts = about_mounts();
+	for (guint i = 0; i < mounts->len; i++) {
+		struct mounted *m = mounts->pdata[i];
+		char *title = g_strdup_printf("Disk (%s)", m->target);
+		add_row(p, hardware, title, about_disk(m->target, m->type));
+		g_free(title);
+	}
+	g_ptr_array_unref(mounts);
 	add_row(p, hardware, "Battery", about_battery());
 
 	GtkWidget *look = ui_group(content, "This page", NULL);
