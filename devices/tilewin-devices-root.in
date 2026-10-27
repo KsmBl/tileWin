@@ -1,0 +1,200 @@
+#!/bin/bash
+# What the Device manager page of the tileWin settings does to a device, run
+# with pkexec (check needs no root):
+#
+#   tilewin-devices-root check BUS NAME    "ok", or why the device may not be
+#                                          disabled or restarted
+#   tilewin-devices-root disable BUS NAME  stops it, also after a restart: a
+#                                          udev rule of tileWin's keeps it off
+#   tilewin-devices-root enable BUS NAME   takes the rule away, lets its driver
+#                                          take it again
+#   tilewin-devices-root restart BUS NAME  its driver lets go of it and takes it
+#                                          again (a USB device: as if plugged in
+#                                          anew)
+#   tilewin-devices-root rescan            looks for devices that came (PCI)
+#
+# BUS is pci, usb, i2c, serio or hdaudio, NAME the device's name on it
+# (0000:6d:00.0, 1-5). A USB device is disabled with its authorized switch,
+# the others by taking them from their driver; udev does the same at every
+# start from 90-tilewin-disabled.rules. What the running system stands on is
+# refused: the disk of a mounted file system or of the swap and the
+# controllers it hangs on, the graphics of a connected screen.
+#
+# For the tests: TILEWIN_DEVICES_ROOT puts /sys, /proc, /etc and /dev below a
+# folder of its own.
+set -uo pipefail
+
+root=${TILEWIN_DEVICES_ROOT:-}
+sys=$root/sys
+rules=$root/etc/udev/rules.d/90-tilewin-disabled.rules
+
+die() { echo "$*" >&2; exit 1; }
+
+valid() { # bus name
+	case $1 in pci|usb|i2c|serio|hdaudio) ;; *) return 1 ;; esac
+	[[ $2 =~ ^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$ ]]
+}
+
+# The device below /sys/devices, resolved.
+device_of() { # bus name
+	readlink -f "$sys/bus/$1/devices/$2" 2>/dev/null
+}
+
+# The block devices a mounted file system or the swap is on, down to the disks:
+# a partition's disk, the devices below a dm (LUKS, LVM) device.
+in_use_blocks() {
+	local src dev name
+	{
+		awk '{ print $1 }' "$root/proc/mounts" 2>/dev/null
+		awk 'NR > 1 && $2 == "partition" { print $1 }' "$root/proc/swaps" 2>/dev/null
+	} | sort -u | while read -r src; do
+		[[ $src == /dev/* ]] || continue
+		name=${src#/dev/}
+		if [[ $name == mapper/* ]]; then
+			for dev in "$sys"/class/block/dm-*; do
+				[[ $(cat "$dev/dm/name" 2>/dev/null) == "${name#mapper/}" ]] && echo "${dev##*/}"
+			done
+		else
+			echo "${name##*/}"
+		fi
+	done | below_blocks | sort -u
+}
+
+below_blocks() {
+	local b s
+	while read -r b; do
+		[[ -e $sys/class/block/$b ]] || continue
+		echo "$b"
+		for s in "$sys/class/block/$b"/slaves/*; do
+			[[ -e $s ]] && echo "${s##*/}"
+		done | below_blocks
+	done
+}
+
+# Why the device must stay, or nothing.
+protected() { # device path below /sys/devices
+	local dev=$1 b leaf c
+	for b in $(in_use_blocks); do
+		leaf=$(readlink -f "$sys/class/block/$b")
+		[[ $leaf == "$dev" || $leaf == "$dev"/* ]] || continue
+		echo "Linux runs from a disk on this device ($b is in use): disabling it would stop the computer"
+		return
+	done
+	for c in "$sys"/class/drm/card*-*; do
+		[[ $(cat "$c/status" 2>/dev/null) == connected ]] || continue
+		leaf=$(readlink -f "$c")
+		[[ $leaf == "$dev"/* ]] || continue
+		echo "A screen in use hangs on this device (${c##*/}): disabling it would turn it off"
+		return
+	done
+}
+
+check() { # bus name
+	valid "$1" "$2" || { echo "This device is not one tileWin can disable"; return; }
+	local dev why
+	dev=$(device_of "$1" "$2")
+	[[ -n $dev && -d $dev ]] || { echo "The device is gone"; return; }
+	if [[ $1 == usb ]]; then
+		[[ -f $dev/authorized ]] || { echo "Only a USB device as a whole can be disabled"; return; }
+		[[ $2 == usb* ]] && { echo "A root hub is part of its controller: disable the controller"; return; }
+	elif [[ ! -e $dev/driver ]]; then
+		echo "No driver has this device: there is nothing to stop"
+		return
+	fi
+	why=$(protected "$dev")
+	echo "${why:-ok}"
+}
+
+rules_without() { # bus name: the rules, without those of that device
+	[[ -f $rules ]] || return 0
+	awk -v tag="# tilewin-disabled $1 $2 " '
+		skip { skip = 0; next }
+		index($0 " ", tag) == 1 { skip = 1; next }
+		{ print }' "$rules"
+}
+
+reload_udev() {
+	command -v udevadm >/dev/null 2>&1 && udevadm control --reload 2>/dev/null
+	return 0
+}
+
+disable() { # bus name
+	local why dev drv
+	why=$(check "$1" "$2")
+	[[ $why == ok ]] || die "$why"
+	dev=$(device_of "$1" "$2")
+	drv=$(basename "$(readlink "$dev/driver" 2>/dev/null)" 2>/dev/null)
+	mkdir -p "$(dirname "$rules")"
+	{
+		if [[ ! -s $rules ]]; then
+			echo "# Devices disabled in the Device manager of the tileWin settings; Enable there"
+			echo "# takes a device's two lines away again."
+		else
+			rules_without "$1" "$2"
+		fi
+		echo "# tilewin-disabled $1 $2 ${drv:--}"
+		if [[ $1 == usb ]]; then
+			echo "ACTION==\"add\", SUBSYSTEM==\"usb\", ENV{DEVTYPE}==\"usb_device\", KERNEL==\"$2\", ATTR{authorized}=\"0\""
+		else
+			echo "ACTION==\"bind\", SUBSYSTEM==\"$1\", KERNEL==\"$2\", RUN+=\"/bin/sh -c 'echo %k > /sys%p/driver/unbind'\""
+		fi
+	} > "$rules.new" && mv "$rules.new" "$rules" || die "The rule could not be written"
+	reload_udev
+	if [[ $1 == usb ]]; then
+		echo 0 > "$dev/authorized" || die "The device did not stop"
+	else
+		echo "$2" > "$dev/driver/unbind" || die "The driver did not let go of the device"
+	fi
+	echo "$2 is disabled"
+}
+
+enable() { # bus name
+	valid "$1" "$2" || die "not a device: $1 $2"
+	local dev drv
+	dev=$(device_of "$1" "$2")
+	drv=$(grep -m1 "^# tilewin-disabled $1 $2 " "$rules" 2>/dev/null | awk '{ print $5 }')
+	if [[ -f $rules ]]; then
+		rules_without "$1" "$2" > "$rules.new" && mv "$rules.new" "$rules"
+		grep -q '^# tilewin-disabled ' "$rules" || rm -f "$rules"
+	fi
+	reload_udev
+	[[ -n $dev && -d $dev ]] || die "The device is gone; it is enabled when it comes back"
+	if [[ $1 == usb ]]; then
+		echo 1 > "$dev/authorized" || die "The device did not start"
+	elif [[ ! -e $dev/driver ]]; then
+		echo "$2" > "$sys/bus/$1/drivers_probe" 2>/dev/null ||
+			{ [[ -n $drv && $drv != - ]] && echo "$2" > "$sys/bus/$1/drivers/$drv/bind"; } ||
+			die "No driver took the device"
+	fi
+	echo "$2 is enabled"
+}
+
+restart() { # bus name
+	local why dev drv
+	why=$(check "$1" "$2")
+	[[ $why == ok ]] || die "$why"
+	dev=$(device_of "$1" "$2")
+	if [[ $1 == usb ]]; then
+		echo 0 > "$dev/authorized" && sleep 1 && echo 1 > "$dev/authorized" ||
+			die "The device did not restart"
+	else
+		drv=$(basename "$(readlink "$dev/driver")")
+		echo "$2" > "$dev/driver/unbind" || die "The driver did not let go of the device"
+		echo "$2" > "$sys/bus/$1/drivers/$drv/bind" 2>/dev/null ||
+			echo "$2" > "$sys/bus/$1/drivers_probe" || die "$drv did not take the device again"
+	fi
+	echo "$2 is restarted"
+}
+
+rescan() {
+	echo 1 > "$sys/bus/pci/rescan" 2>/dev/null
+	command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=10 2>/dev/null
+	echo "Scanned for hardware changes"
+}
+
+case ${1:-} in
+check) [[ $# -eq 3 ]] || die "usage: tilewin-devices-root check BUS NAME"; check "$2" "$3" ;;
+disable|enable|restart) [[ $# -eq 3 ]] || die "usage: tilewin-devices-root $1 BUS NAME"; "$1" "$2" "$3" ;;
+rescan) rescan ;;
+*) die "usage: tilewin-devices-root check|disable|enable|restart|rescan" ;;
+esac

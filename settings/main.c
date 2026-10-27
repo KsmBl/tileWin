@@ -1,6 +1,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include "devices.h"
 #include "settings.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
@@ -638,6 +639,10 @@ static void build_window(struct settings *s) {
 			"history right click context menu", taskbar_page_new, 2, "view-continuous-symbolic" },
 		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new, 2, "start-here-symbolic" },
 		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new, 2, "system-search-symbolic" },
+		{ "devices", "Device manager", "device manager devmgmt hardware drivers driver "
+			"missing firmware pci usb disable enable restart unknown other devices properties "
+			"display adapters network adapters disk drives sound processors",
+			devices_page_new, 3, "preferences-system-devices-symbolic" },
 		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new, 3, "input-keyboard-symbolic" },
 		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap magnifier zoom "
 			"magnify enlarge", mouse_page_new, 3, "input-mouse-symbolic" },
@@ -831,6 +836,10 @@ static int pick_file(const char *title) {
 
 int main(int argc, char **argv) {
 	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--list-devices") == 0) {
+			bool hidden = i + 1 < argc && strcmp(argv[i + 1], "--hidden") == 0;
+			return tw_devices_print(hidden);
+		}
 		if (strcmp(argv[i], "--pick-file") == 0) {
 			return pick_file(i + 1 < argc ? argv[i + 1] : NULL);
 		}
@@ -862,7 +871,7 @@ int main(int argc, char **argv) {
 	s->app = gtk_application_new("org.tilewin.Settings",
 		G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_NON_UNIQUE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup or about", "PAGE");
+		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup, kernel, devices or about", "PAGE");
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
 	g_signal_connect(s->app, "command-line", G_CALLBACK(on_command_line), s);
 

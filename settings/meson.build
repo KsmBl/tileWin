@@ -1,7 +1,8 @@
-executable(
+tilewin_settings = executable(
 	'tilewin-settings', [
 		'backup.c',
 		'confdoc.c',
+		'devices.c',
 		'ipc.c',
 		'main.c',
 		'themecss.c',
@@ -14,6 +15,7 @@ executable(
 		'page_bluetooth.c',
 		'page_datetime.c',
 		'page_desktop.c',
+		'page_devices.c',
 		'page_dns.c',
 		'page_kernel.c',
 		'page_keyboard.c',

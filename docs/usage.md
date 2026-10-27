@@ -85,6 +85,21 @@ The **DNS** page drives `tilewin-dnsd`, tileWin's own DNS service, which systemd
 
 The page shows what the service is doing: the servers it asks with their times, today's queries, cache hits, blocked and prefetched names, and the names it prefetches. The settings are in `/etc/tileWin/dns.conf` ([reference](configuration.md#the-dns-service-etctilewindnsconf)); the settings app changes them through `tilewin-dns-apply` with pkexec, which polkit allows administrators (the group wheel) at the computer without a password.
 
+## Device manager
+
+The **Device manager** page (Devices; also its own **Device Manager** entry in the start menu, `tilewin-settings --page devices`) lists every device Linux found, by kind as the Device Manager of Windows does: batteries, disk drives, display adapters, keyboards, monitors, network adapters, processors, sound, USB and the rest. A category opens with a click; one with a problem opens by itself.
+
+- **Problems** are marked as on Windows. A device that needs a driver and has none goes to **Other devices**, as do a PCI device without one (a controller, a network or sound card) and a USB device whose functions lack one. A driver that could not load its firmware, or that failed to start the device, is a problem too. Bridges and the like that need no driver are not.
+- **Properties** (double-click, Enter or the button):
+  - *General*: the kind, manufacturer, location and status in words.
+  - *Driver*: the driver and kernel module, the version, the package it comes with, its file, license and signer, and the firmware files it loaded.
+  - *Details*: every property sysfs and udev have, picked from a list.
+  - *Resources*: its IRQ, and the memory and I/O ranges.
+  - *Events*: what the kernel said about the device since the start.
+- **Disable**, **Enable**, **Restart** and **Scan for hardware changes** go through `tilewin-devices-root` with pkexec. A disabled device stays off after a restart (`/etc/udev/rules.d/90-tilewin-disabled.rules`) until it is enabled again. A USB device is switched off as a whole; the others are taken from their driver. Restart has the driver let go of the device and take it again, which helps one that hangs. The disk Linux runs from (also through LUKS and LVM) and every controller it hangs on are never disabled, nor the graphics of a connected screen: the page says why.
+- **Show hidden devices** adds the computer's own software devices (loop devices, virtual networks), the jacks of the sound cards and the platform's parts.
+- The list follows when a device is plugged in or out. Nothing is read that wakes a sleeping device (a GPU that is off stays off). `tilewin-settings --list-devices [--hidden]` prints it in a terminal.
+
 ## Kernels
 
 The **Kernel** page builds Linux kernels of kernel.org for this computer and starts them, next to the kernel of the distribution, which stays as it is.

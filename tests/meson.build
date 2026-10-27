@@ -655,6 +655,16 @@ if python.found()
 		timeout: 120,
 	)
 
+	# a sysfs, udev database and kernel log of its own: nothing of this computer is
+	# read or changed
+	test(
+		'devices',
+		find_program('devices.sh'),
+		args: [tilewin_settings, tilewin_devices_root],
+		suite: 'unit',
+		timeout: 60,
+	)
+
 	# fake DNS servers, block lists and NetworkManager files of its own
 	test(
 		'dns-apply',

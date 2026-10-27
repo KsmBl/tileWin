@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Device Manager
+GenericName=Devices and drivers
+Comment=Every device of the computer, its driver and whether it works
+Exec=tilewin-settings --page devices
+Icon=preferences-system-devices
+Categories=Settings;HardwareSettings;System;
+Keywords=devmgmt;devices;drivers;hardware;pci;usb;
+StartupNotify=false
