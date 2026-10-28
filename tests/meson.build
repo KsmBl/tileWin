@@ -101,6 +101,18 @@ test(
 )
 
 test(
+	'netusage',
+	executable(
+		'test-netusage',
+		'test_netusage.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'widgets',
 	executable(
 		'test-widgets',

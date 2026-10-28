@@ -23,6 +23,7 @@
 #include "popup.h"
 #include "stringop.h"
 #include "tw_disks.h"
+#include "tw_netusage.h"
 #include "tw_paths.h"
 
 /*
@@ -533,7 +534,22 @@ struct net_state {
 		double down, up;
 	} ifaces[NET_MAX];
 	double sampled;
+	struct tw_net_ledger ledger; // what went in and out since the machine came up
+	char *ledger_path;
+	double ledger_saved;
 };
+
+static void net_save(struct net_state *s) {
+	tw_net_ledger_save(&s->ledger, s->ledger_path);
+	s->ledger_saved = seconds_now();
+}
+
+static void net_free(void *state) {
+	struct net_state *s = state;
+	net_save(s);
+	free(s->ledger_path);
+	free(s);
+}
 
 static void net_address(const char *iface, char *out, size_t size) {
 	out[0] = '\0';
@@ -554,11 +570,14 @@ static void net_sample(struct info_flyout *f) {
 	struct net_state *s = f->state;
 	if (!s) {
 		s = f->state = calloc(1, sizeof(*s));
+		char *boot_id = tw_read_first_line(TW_BOOT_ID_FILE);
+		s->ledger_path = tw_net_ledger_path();
+		tw_net_ledger_load(&s->ledger, s->ledger_path, boot_id);
+		free(boot_id);
 	}
 	double now = seconds_now(), elapsed = s->sampled > 0 ? now - s->sampled : 0;
 	DIR *dir = opendir("/sys/class/net");
 	struct dirent *entry;
-	unsigned long long all_rx = 0, all_tx = 0;
 	double down = 0, up = 0;
 	while (dir && (entry = readdir(dir))) {
 		if (entry->d_name[0] == '.' || strcmp(entry->d_name, "lo") == 0) {
@@ -600,13 +619,18 @@ static void net_sample(struct info_flyout *f) {
 		s->ifaces[index].tx = tx;
 		down += s->ifaces[index].down;
 		up += s->ifaces[index].up;
-		all_rx += rx;
-		all_tx += tx;
 	}
 	if (dir) {
 		closedir(dir);
 	}
 	s->sampled = now;
+	// every interface, also those down now: their counters still hold this boot's traffic
+	tw_net_ledger_scan(&s->ledger, TW_NET_DIR);
+	if (now - s->ledger_saved >= 60) {
+		net_save(s); // a restarted panel picks it up from here
+	}
+	unsigned long long all_rx, all_tx;
+	tw_net_ledger_totals(&s->ledger, &all_rx, &all_tx);
 	push_history(f, down, up);
 
 	char down_text[32], up_text[32], text[128], address[INET_ADDRSTRLEN];
@@ -637,7 +661,7 @@ static void net_sample(struct info_flyout *f) {
 	format_bytes(down_text, sizeof(down_text), all_rx);
 	format_bytes(up_text, sizeof(up_text), all_tx);
 	snprintf(text, sizeof(text), "%s in, %s out", down_text, up_text);
-	add_row(f, "Since the connections came up", text);
+	add_row(f, "Since the system started", text);
 	add_action(f, "Network settings", TW_NETWORK_SETTINGS, NULL);
 }
 
@@ -1038,7 +1062,7 @@ static void git_free(void *data) {
 static const struct info_source sources[] = {
 	{ "disk", 1000, disk_sample, free },
 	{ "gpu", 1000, gpu_sample, gpu_free },
-	{ "net", 1000, net_sample, free },
+	{ "net", 1000, net_sample, net_free },
 	{ "storage", 5000, storage_sample, free },
 	{ "power", 1000, power_sample, free },
 	{ "keyboard", 0, keyboard_sample, free },
