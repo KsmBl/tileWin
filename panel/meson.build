@@ -43,6 +43,7 @@ executable(
 		'identify.c',
 		'draw.c',
 		'flyouts.c',
+		'cputopology.c',
 		'ipc.c',
 		'jumplist.c',
 		'launcher.c',

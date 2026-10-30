@@ -49,6 +49,16 @@ test(
 )
 
 test(
+	'cpu-topology',
+	executable(
+		'test-cpu-topology',
+		['test_cputopology.c', '../panel/cputopology.c'],
+		include_directories: include_directories('../panel'),
+	),
+	suite: 'unit',
+)
+
+test(
 	'keyboards',
 	executable(
 		'test-keyboards',
