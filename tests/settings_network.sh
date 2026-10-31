@@ -2,7 +2,9 @@
 # Works the Network and DNS pages of the settings app against a NetworkManager
 # and a DNS helper made up for the test, and looks at what they were told:
 # showing the Wi-Fi password asks NetworkManager for the secret, a fixed
-# address is saved with its subnet and gateway, choosing how the servers for
+# address is saved with its subnet and gateway, the advanced settings go to
+# NetworkManager and to the helper of the limits (with the download limit
+# kept for the network shown), choosing how the servers for
 # all networks are asked writes the config of the DNS service, a name blocked
 # lately can be allowed from its log, a server of a single network, picked on
 # the DNS page, goes to NetworkManager, and when the service says the DNS of
@@ -60,7 +62,9 @@ case "$*" in
 *"connection show uuid aaaa-1111"*)
 	printf '%s\n' connection.type:802-11-wireless GENERAL.DEVICES:wlan0 ipv4.method:auto \
 		ipv4.addresses: ipv4.gateway: ipv4.dns: ipv4.ignore-auto-dns:no ipv6.dns: \
-		802-11-wireless-security.key-mgmt:wpa-psk 'IP4.ADDRESS[1]:192.168.1.129/24' \
+		802-11-wireless-security.key-mgmt:wpa-psk connection.autoconnect:yes \
+		connection.metered:unknown 802-11-wireless.cloned-mac-address: \
+		'IP4.ADDRESS[1]:192.168.1.129/24' \
 		IP4.GATEWAY:192.168.1.1 'IP4.DNS[1]:192.168.1.1' ;;
 esac
 exit 0
@@ -72,11 +76,20 @@ echo "$*" >> "$FAKE_DNS_LOG"
 [ "$1" = config ] && cat > "$TILEWIN_DNS_CONF"
 exit 0
 EOA
-chmod +x "$work/nmcli" "$work/apply"
+# the helper of the limits that would run as root
+cat > "$work/limits" <<'EOL'
+#!/bin/sh
+echo "$*" >> "$FAKE_LIMITS_LOG"
+exit 0
+EOL
+chmod +x "$work/nmcli" "$work/apply" "$work/limits"
+printf '%s\n' '# uuid reconnect_mb down_kbit up_kbit' 'aaaa-1111 0 20000 0' > "$work/network.conf"
 printf 'servers 1.1.1.1 9.9.9.9 8.8.8.8\nfastest 2\nprefetch_skip ads.test\n' > "$work/dns.conf"
 export TILEWIN_NMCLI=$work/nmcli TILEWIN_DNS_APPLY=$work/apply TILEWIN_DNS_CONF=$work/dns.conf \
 	TILEWIN_DNS_RUN=$work/run TILEWIN_NM_CONF_DIR=$work/nmconf \
-	FAKE_NM_LOG=$work/nm.log FAKE_DNS_LOG=$work/dns.log
+	FAKE_NM_LOG=$work/nm.log FAKE_DNS_LOG=$work/dns.log \
+	TILEWIN_NETWORK_HELPER=$work/limits TILEWIN_NETWORK_CONF=$work/network.conf \
+	FAKE_LIMITS_LOG=$work/limits.log
 : > "$work/nm.log"
 : > "$work/dns.log"
 
@@ -124,6 +137,20 @@ fail() {
 	failed=1
 }
 
+start network 1500
+# the advanced settings: one of NetworkManager's, and tileWin's limits
+click 1207 595 # Connect automatically: off
+grep -q 'connection modify uuid aaaa-1111 connection.autoconnect no' "$work/nm.log" ||
+	fail "turning off connecting automatically did not reach NetworkManager"
+# ("Saved" now shows under the network, the rows below are 24 pixels lower)
+click 1207 797 # Connect again after 1 GB: on, beside the download limit kept for it
+click 1194 975 # Apply
+sleep 1
+grep -q '^set aaaa-1111 1000 20000 0$' "$work/limits.log" ||
+	fail "the limits did not reach the helper as 1000 MB, 20000 kbit/s down and none up"
+# again, without the message above
+pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
+sleep 2
 start network 1500
 click 1116 489 # Show, beside the password
 grep -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||

@@ -73,7 +73,15 @@ The Bluetooth flyout (`panel bluetooth`, or the arrow of the Bluetooth button) t
 
 ## Networks and DNS
 
-The **Network** page of the settings shows each saved network of NetworkManager: get the address by DHCP or set a fixed one (address, subnet mask, gateway, filled in from the current lease), and show or change the Wi-Fi password. Every "Network settings" link of tileWin (the network flyout, the network usage flyout) opens it. All DNS is set on the **DNS** page.
+The **Network** page of the settings shows each saved network of NetworkManager: get the address by DHCP or set a fixed one (address, subnet mask, gateway, filled in from the current lease), and show or change the Wi-Fi password. Its **Advanced** settings:
+
+- **Connect automatically**, **Metered connection** (apps hold back big downloads such as updates on a metered network) and the **Hardware address** (the device's own, a new random one at every connection, or a random one kept for that network): NetworkManager's own settings, changed through nmcli.
+- **Connect again after** an amount of data (in GB, what went in and out since the network came up), for hotspots that give a set amount per connection; with a new random hardware address the hotspot sees a new device each time.
+- **Limit downloads to** and **Limit uploads to** a speed in Mbit/s. Uploads go through a token bucket on the network's device, downloads above the limit are dropped as they arrive so the sender slows down (traffic control of the kernel, `tc`).
+
+NetworkManager has no setting for the last three, so tileWin keeps them in `/etc/tileWin/network.conf` (`uuid reconnect_mb down_kbit up_kbit`, one network a line). The settings app changes it through `tilewin-network-root` with pkexec, which puts them in force at once on a connected network; NetworkManager's dispatcher runs it (`/usr/lib/NetworkManager/dispatcher.d/90-tilewin-network`) each time a network comes up or goes down, so they follow the network. The amount is watched by a unit of its own, `tilewin-reconnect-<device>`, which connects the network again once it is reached.
+
+Every "Network settings" link of tileWin (the network flyout, the network usage flyout) opens it. All DNS is set on the **DNS** page.
 
 The **DNS** page drives `tilewin-dnsd`, tileWin's own DNS service, which systemd-resolved hands every lookup to while it is on (one switch; it hands DNS back to NetworkManager when turned off):
 

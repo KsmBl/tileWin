@@ -12,7 +12,19 @@
  * goes through nmcli; changing a connection and reading its password take
  * polkit's yes, which NetworkManager gives administrators at the computer.
  * For tests TILEWIN_NMCLI is run instead of nmcli.
+ *
+ * Its advanced settings are NetworkManager's (connect automatically,
+ * metered, the hardware address), and three of tileWin's own that
+ * NetworkManager has no setting for: connect again after an amount of data
+ * and the speed limits. Those are kept in /etc/tileWin/network.conf by
+ * tilewin-network-root (pkexec), which NetworkManager's dispatcher runs as
+ * each network comes up. For tests TILEWIN_NETWORK_HELPER is run as it is,
+ * without pkexec, and TILEWIN_NETWORK_CONF is read instead.
  */
+
+#ifndef TILEWIN_LIBEXECDIR
+#define TILEWIN_LIBEXECDIR "/usr/local/libexec"
+#endif
 
 struct net_conn {
 	char *name, *uuid, *type, *device;
@@ -32,6 +44,9 @@ struct network_page {
 	GtkWidget *dns_now, *dns_dd, *dns_list, *dns_pick, *dns_entry_row, *dns_entry, *dns_note, *dns_empty;
 	GPtrArray *dns, *dns_rows, *dns_picks;
 	GtkWidget *wifi_group, *password, *show_button, *save_password, *password_sub;
+	GtkWidget *auto_switch, *metered_dd, *mac_dd, *mac_row;
+	GtkWidget *limit_switch[3], *limit_spin[3], *limits_apply, *limits_sub;
+	char *mac_key; // the setting of the hardware address of its kind of network
 	bool dns_syncing, was_fixed, shown;
 	char *now_address, *now_gateway; // the lease, to start a fixed address from
 };
@@ -187,6 +202,9 @@ static void sync_rows(struct network_page *p) {
 	g_free(global);
 }
 
+static void advanced_show(struct network_page *p, const char *type, const char *autoconnect,
+	const char *metered, const char *mac);
+
 static void details_loaded(struct network_page *p, bool ok, char *out, char *err, gpointer data) {
 	char *uuid = data;
 	p->loading = false;
@@ -200,7 +218,7 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 		return;
 	}
 	char *method = NULL, *addresses = NULL, *gateway = NULL, *dns4 = NULL, *dns6 = NULL;
-	char *ignore = NULL, *type = NULL;
+	char *ignore = NULL, *type = NULL, *autoconnect = NULL, *metered = NULL, *mac = NULL;
 	GString *now_dns = g_string_new(NULL);
 	g_clear_pointer(&p->now_address, g_free);
 	g_clear_pointer(&p->now_gateway, g_free);
@@ -228,6 +246,13 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 			ignore = g_strdup(value);
 		} else if (strcmp(key, "connection.type") == 0) {
 			type = g_strdup(value);
+		} else if (strcmp(key, "connection.autoconnect") == 0) {
+			autoconnect = g_strdup(value);
+		} else if (strcmp(key, "connection.metered") == 0) {
+			metered = g_strdup(value);
+		} else if ((strcmp(key, "802-11-wireless.cloned-mac-address") == 0 ||
+				strcmp(key, "802-3-ethernet.cloned-mac-address") == 0) && !mac) {
+			mac = g_strdup(value);
 		} else if (strcmp(key, "GENERAL.DEVICES") == 0 && *value) {
 			p->device = g_strdup(value);
 		} else if (strcmp(key, "802-11-wireless-security.key-mgmt") == 0) {
@@ -321,8 +346,14 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 			strcmp(p->key_mgmt, "wpa-eap") == 0 ?
 			"The password of your account on this network" : "Hidden until you show it");
 	}
+	if (p->auto_switch) {
+		advanced_show(p, type, autoconnect, metered, mac);
+	}
 	sync_rows(p);
 	gtk_widget_set_sensitive(p->details, true);
+	g_free(autoconnect);
+	g_free(metered);
+	g_free(mac);
 	g_free(method);
 	g_free(addresses);
 	g_free(gateway);
@@ -341,7 +372,8 @@ static void show_details(struct network_page *p) {
 	const char *argv[] = { "-t", "-f",
 		"connection.type,GENERAL.DEVICES,ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns,"
 		"ipv4.ignore-auto-dns,ipv6.dns,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.DNS,"
-		"802-11-wireless-security.key-mgmt",
+		"802-11-wireless-security.key-mgmt,connection.autoconnect,connection.metered,"
+		"802-11-wireless.cloned-mac-address,802-3-ethernet.cloned-mac-address",
 		"connection", "show", "uuid", p->uuid, NULL };
 	run(p, argv, details_loaded, g_strdup(p->uuid));
 }
@@ -818,6 +850,248 @@ static void on_save_password(GtkButton *button, gpointer data) {
 	run(p, argv, modified, GINT_TO_POINTER(1));
 }
 
+/* ---------- advanced ---------- */
+
+static const char *const metered_labels[] = { "Decided by NetworkManager", "Yes", "No", NULL };
+static const char *const metered_values[] = { "unknown", "yes", "no" };
+static const char *const mac_labels[] = { "The device's own",
+	"A new random one at every connection", "A random one kept for this network", NULL };
+static const char *const mac_values[] = { "permanent", "random", "stable" };
+
+enum { LIMIT_RECONNECT, LIMIT_DOWN, LIMIT_UP };
+
+static char *limits_conf_path(void) {
+	const char *test = g_getenv("TILEWIN_NETWORK_CONF");
+	return g_strdup(test && *test ? test : "/etc/tileWin/network.conf");
+}
+
+static char *limits_helper(void) {
+	const char *test = g_getenv("TILEWIN_NETWORK_HELPER");
+	return test && *test ? g_strdup(test) :
+		g_build_filename(TILEWIN_LIBEXECDIR, "tilewin-network-root", NULL);
+}
+
+/* The amounts kept for a network: megabytes, and kbit/s down and up; 0 is off. */
+static void limits_read(const char *uuid, guint64 values[3]) {
+	values[0] = values[1] = values[2] = 0;
+	char *path = limits_conf_path(), *text = NULL;
+	if (uuid && g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (int i = 0; lines[i]; i++) {
+			char **f = g_strsplit_set(g_strstrip(lines[i]), " \t", -1);
+			if (g_strv_length(f) >= 4 && strcmp(f[0], uuid) == 0) {
+				for (int k = 0; k < 3; k++) {
+					values[k] = g_ascii_strtoull(f[k + 1], NULL, 10);
+				}
+			}
+			g_strfreev(f);
+		}
+		g_strfreev(lines);
+	}
+	g_free(text);
+	g_free(path);
+}
+
+static void limits_sync(struct network_page *p) {
+	for (int k = 0; k < 3; k++) {
+		gtk_widget_set_sensitive(p->limit_spin[k],
+			gtk_switch_get_active(GTK_SWITCH(p->limit_switch[k])));
+	}
+}
+
+static void advanced_show(struct network_page *p, const char *type, const char *autoconnect,
+		const char *metered, const char *mac) {
+	bool was = p->updating;
+	p->updating = true; // shown, not changed
+	gtk_switch_set_active(GTK_SWITCH(p->auto_switch), g_strcmp0(autoconnect, "no") != 0);
+	guint m = 0;
+	for (guint i = 0; i < 3; i++) {
+		m = g_strcmp0(metered, metered_values[i]) == 0 ? i : m;
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->metered_dd), m);
+	g_clear_pointer(&p->mac_key, g_free);
+	if (g_strcmp0(type, "802-11-wireless") == 0) {
+		p->mac_key = g_strdup("802-11-wireless.cloned-mac-address");
+	} else if (g_strcmp0(type, "802-3-ethernet") == 0) {
+		p->mac_key = g_strdup("802-3-ethernet.cloned-mac-address");
+	}
+	gtk_widget_set_visible(p->mac_row, p->mac_key != NULL);
+	guint a = 0; // also "", "preserve" and an address typed in elsewhere
+	for (guint i = 1; i < 3; i++) {
+		a = g_strcmp0(mac, mac_values[i]) == 0 ? i : a;
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mac_dd), a);
+
+	guint64 v[3];
+	limits_read(p->uuid, v);
+	// megabytes as gigabytes, kbit/s as Mbit/s
+	double shown[3] = { v[0] / 1000.0, v[1] / 1000.0, v[2] / 1000.0 };
+	for (int k = 0; k < 3; k++) {
+		gtk_switch_set_active(GTK_SWITCH(p->limit_switch[k]), v[k] > 0);
+		if (v[k] > 0) {
+			gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->limit_spin[k]), shown[k]);
+		}
+	}
+	limits_sync(p);
+	p->updating = was;
+}
+
+static void modify_one(struct network_page *p, const char *key, const char *value) {
+	if (p->updating || !p->uuid) {
+		return;
+	}
+	const char *argv[] = { "connection", "modify", "uuid", p->uuid, key, value, NULL };
+	run(p, argv, changed_done, "Saved");
+}
+
+static void on_autoconnect(GObject *sw, GParamSpec *pspec, gpointer data) {
+	struct network_page *p = data;
+	modify_one(p, "connection.autoconnect",
+		gtk_switch_get_active(GTK_SWITCH(sw)) ? "yes" : "no");
+}
+
+static void on_metered(GObject *dd, GParamSpec *pspec, gpointer data) {
+	struct network_page *p = data;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+	if (sel < 3) {
+		modify_one(p, "connection.metered", metered_values[sel]);
+	}
+}
+
+static void on_mac(GObject *dd, GParamSpec *pspec, gpointer data) {
+	struct network_page *p = data;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+	if (sel < 3 && p->mac_key && !p->updating && p->uuid) {
+		// the device takes its new address when it connects again
+		const char *argv[] = { "connection", "modify", "uuid", p->uuid, p->mac_key,
+			mac_values[sel], NULL };
+		run(p, argv, changed_done, "Saved; used the next time it connects");
+	}
+}
+
+static void on_limit_switch(GObject *sw, GParamSpec *pspec, gpointer data) {
+	limits_sync(data);
+}
+
+static void limits_done(GObject *source, GAsyncResult *result, gpointer data) {
+	struct network_page *p = data;
+	char *out = NULL, *err = NULL;
+	bool ok = g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, &out, &err,
+		NULL) && g_subprocess_get_successful(G_SUBPROCESS(source));
+	gtk_widget_set_sensitive(p->limits_apply, true);
+	if (ok) {
+		set_message(p, "The limits are saved, and in force while it is connected", false);
+		settings_status(p->s, "Network limits saved");
+	} else {
+		int status = g_subprocess_get_if_exited(G_SUBPROCESS(source)) ?
+			g_subprocess_get_exit_status(G_SUBPROCESS(source)) : -1;
+		// 126/127: pkexec was refused or found no agent to ask
+		char *text = g_strdup_printf("Could not save the limits: %s",
+			err && *err ? g_strstrip(err) :
+			status == 126 || status == 127 ? "not authorized" : "the helper failed");
+		set_message(p, text, true);
+		g_free(text);
+	}
+	g_free(out);
+	g_free(err);
+}
+
+static void on_limits_apply(GtkButton *button, gpointer data) {
+	struct network_page *p = data;
+	if (!p->uuid) {
+		return;
+	}
+	char values[3][24];
+	for (int k = 0; k < 3; k++) {
+		double v = gtk_switch_get_active(GTK_SWITCH(p->limit_switch[k])) ?
+			gtk_spin_button_get_value(GTK_SPIN_BUTTON(p->limit_spin[k])) : 0;
+		// gigabytes to megabytes, Mbit/s to kbit/s
+		g_snprintf(values[k], sizeof(values[k]), "%.0f", v * 1000);
+	}
+	char *helper = limits_helper();
+	const char *test = g_getenv("TILEWIN_NETWORK_HELPER");
+	const char *argv[8];
+	int n = 0;
+	if (!test || !*test) {
+		argv[n++] = "pkexec";
+	}
+	argv[n++] = helper;
+	argv[n++] = "set";
+	argv[n++] = p->uuid;
+	for (int k = 0; k < 3; k++) {
+		argv[n++] = values[k];
+	}
+	argv[n] = NULL;
+	GError *error = NULL;
+	GSubprocess *proc = g_subprocess_newv(argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE |
+		G_SUBPROCESS_FLAGS_STDERR_PIPE, &error);
+	g_free(helper);
+	if (!proc) {
+		char *text = g_strdup_printf("Could not save the limits: %s", error->message);
+		set_message(p, text, true);
+		g_free(text);
+		g_error_free(error);
+		return;
+	}
+	gtk_widget_set_sensitive(p->limits_apply, false);
+	g_subprocess_communicate_utf8_async(proc, NULL, NULL, limits_done, p);
+	g_object_unref(proc);
+}
+
+/* A row with a switch and an amount beside it. */
+static void limit_row(struct network_page *p, GtkWidget *group, int k, const char *title,
+		const char *subtitle, double min, double max, double step, double value,
+		const char *unit) {
+	p->limit_switch[k] = gtk_switch_new();
+	g_signal_connect(p->limit_switch[k], "notify::active", G_CALLBACK(on_limit_switch), p);
+	p->limit_spin[k] = gtk_spin_button_new_with_range(min, max, step);
+	gtk_spin_button_set_digits(GTK_SPIN_BUTTON(p->limit_spin[k]), 1);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->limit_spin[k]), value);
+	GtkWidget *row = ui_row(group, title, subtitle, p->limit_spin[k]);
+	GtkWidget *label = gtk_label_new(unit);
+	gtk_widget_set_size_request(label, 52, -1);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_box_append(GTK_BOX(ui_row_box(row)), label);
+	gtk_widget_set_valign(p->limit_switch[k], GTK_ALIGN_CENTER);
+	gtk_box_append(GTK_BOX(ui_row_box(row)), p->limit_switch[k]);
+}
+
+static void add_advanced(struct network_page *p) {
+	GtkWidget *adv = ui_group(p->details, "Advanced", NULL);
+	p->auto_switch = gtk_switch_new();
+	g_signal_connect(p->auto_switch, "notify::active", G_CALLBACK(on_autoconnect), p);
+	ui_row(adv, "Connect automatically", "When it is in reach or plugged in", p->auto_switch);
+	p->metered_dd = gtk_drop_down_new_from_strings(metered_labels);
+	g_signal_connect(p->metered_dd, "notify::selected", G_CALLBACK(on_metered), p);
+	ui_row(adv, "Metered connection", "Apps hold back big downloads, like updates, on a "
+		"network that counts what goes over it", p->metered_dd);
+	p->mac_dd = gtk_drop_down_new_from_strings(mac_labels);
+	g_signal_connect(p->mac_dd, "notify::selected", G_CALLBACK(on_mac), p);
+	p->mac_row = ui_row(adv, "Hardware address", "What the network sees of this computer: "
+		"a new one makes it a new device to the network", p->mac_dd);
+
+	limit_row(p, adv, LIMIT_RECONNECT, "Connect again after",
+		"Each time this much went in and out since it connected, for hotspots that give a "
+		"set amount per connection", 0.1, 100000, 0.5, 1, "GB");
+	limit_row(p, adv, LIMIT_DOWN, "Limit downloads to", "Leaves the rest to other devices "
+		"of the network", 0.1, 100000, 1, 10, "Mbit/s");
+	limit_row(p, adv, LIMIT_UP, "Limit uploads to", "So a backup or an upload does not fill "
+		"the line", 0.1, 100000, 1, 5, "Mbit/s");
+	p->limits_apply = gtk_button_new_with_label("Apply");
+	gtk_widget_add_css_class(p->limits_apply, "suggested-action");
+	g_signal_connect(p->limits_apply, "clicked", G_CALLBACK(on_limits_apply), p);
+	char *helper = limits_helper();
+	bool installed = g_file_test(helper, G_FILE_TEST_EXISTS);
+	g_free(helper);
+	GtkWidget *row = ui_row(adv, NULL, installed ? "The amount and the limits take an "
+		"administrator's yes, and come into force at once on a connected network" :
+		"The amount and the limits need tileWin installed with install.sh",
+		p->limits_apply);
+	p->limits_sub = gtk_widget_get_last_child(gtk_widget_get_first_child(ui_row_box(row)));
+	gtk_widget_set_sensitive(p->limits_apply, installed);
+	limits_sync(p);
+}
+
 /* ---------- the page ---------- */
 
 static const char *const method_labels[] = { "Automatically (DHCP)", "Fixed address", NULL };
@@ -958,6 +1232,7 @@ GtkWidget *network_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(ui_row_box(row)), p->show_button);
 	gtk_box_append(GTK_BOX(ui_row_box(row)), p->save_password);
 
+	add_advanced(p);
 	sync_rows(p);
 	s->network_page = p;
 	load_conns(p);

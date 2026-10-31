@@ -1,0 +1,4 @@
+#!/bin/sh
+# NetworkManager runs this when a network comes up or goes down: the speed
+# limits and "connect again after" of the tileWin settings follow it.
+exec @libexecdir@/tilewin-network-root dispatch "$1" "$2"

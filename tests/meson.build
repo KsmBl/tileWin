@@ -553,6 +553,14 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'network-root',
+	find_program('network_root.sh'),
+	args: [meson.project_build_root()],
+	suite: 'unit',
+	timeout: 30,
+)
+
+test(
 	'settings-network',
 	find_program('settings_network.sh'),
 	args: [meson.project_build_root()],

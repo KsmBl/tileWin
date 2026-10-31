@@ -1,0 +1,199 @@
+#!/bin/bash
+# The advanced settings of a network that NetworkManager has no setting for,
+# from the Network page of the tileWin settings, which runs it with pkexec:
+#
+#   tilewin-network-root set UUID RECONNECT_MB DOWN_KBIT UP_KBIT
+#       keeps them for the network (0 is off) in /etc/tileWin/network.conf
+#       and puts them in force at once when it is connected
+#   tilewin-network-root dispatch IFACE ACTION
+#       what NetworkManager's dispatcher runs (90-tilewin-network) when a
+#       network comes up or goes down, with CONNECTION_UUID set
+#   tilewin-network-root watch IFACE UUID BYTES
+#       counts what goes in and out over IFACE and connects the network
+#       again once BYTES went over it; runs as a unit of its own
+#
+# Connect again after an amount is for hotspots that give a set amount per
+# connection: counting starts each time the network comes up. The speed
+# limits are traffic control of the kernel on the network's device: uploads
+# go through a token bucket (tbf), downloads above the limit are dropped as
+# they come in (a policer), which makes the sender slow down.
+#
+# For the tests: TILEWIN_NETWORK_ROOT puts /etc, /run and /sys below a folder
+# of its own, TILEWIN_NETWORK_INTERVAL is how many seconds watch waits
+# between looks.
+set -uo pipefail
+export PATH=${TILEWIN_NETWORK_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin}
+
+root=${TILEWIN_NETWORK_ROOT:-}
+conf=$root/etc/tileWin/network.conf
+state=$root/run/tilewin-network
+interval=${TILEWIN_NETWORK_INTERVAL:-5}
+self=$(readlink -f "$0")
+header='# written by the Network page of the tileWin settings: uuid reconnect_mb down_kbit up_kbit'
+
+die() { echo "$*" >&2; exit 1; }
+
+valid_uuid() { [[ $1 =~ ^[A-Za-z0-9-]{1,64}$ ]]; }
+valid_iface() { [[ $1 =~ ^[A-Za-z0-9._:@-]{1,15}$ ]]; }
+valid_number() { [[ $1 =~ ^[0-9]{1,10}$ ]]; }
+
+# The settings of a network: "reconnect_mb down_kbit up_kbit", or nothing.
+settings_of() { # uuid
+	[ -f "$conf" ] || return 0
+	awk -v u="$1" '$1 == u { print $2, $3, $4; exit }' "$conf"
+}
+
+unit_of() { echo "tilewin-reconnect-$1"; } # iface
+
+stop_watch() { # iface
+	local unit
+	unit=$(unit_of "$1")
+	if command -v systemctl >/dev/null 2>&1 && [ -d "$root/run/systemd/system" ]; then
+		systemctl stop "$unit" 2>/dev/null
+		systemctl reset-failed "$unit" 2>/dev/null
+	fi
+	if [ -f "$state/$1.watch" ]; then
+		kill "$(cat "$state/$1.watch")" 2>/dev/null
+		rm -f "$state/$1.watch"
+	fi
+	return 0
+}
+
+start_watch() { # iface uuid bytes
+	mkdir -p "$state"
+	if command -v systemd-run >/dev/null 2>&1 && [ -d "$root/run/systemd/system" ]; then
+		# a unit of its own: the dispatcher's processes end with it
+		systemd-run --quiet --collect --unit "$(unit_of "$1")" \
+			--description "Connects $2 again after an amount of data (tileWin)" \
+			"$self" watch "$1" "$2" "$3"
+	else
+		setsid bash "$self" watch "$1" "$2" "$3" </dev/null >/dev/null 2>&1 &
+		echo $! > "$state/$1.watch"
+	fi
+}
+
+# Takes away the limits tileWin put on a device, and nothing else.
+clear_limits() { # iface
+	if [ -f "$state/$1.up" ]; then
+		tc qdisc del dev "$1" root 2>/dev/null
+		rm -f "$state/$1.up"
+	fi
+	if [ -f "$state/$1.down" ]; then
+		tc qdisc del dev "$1" ingress 2>/dev/null
+		rm -f "$state/$1.down"
+	fi
+	return 0
+}
+
+apply() { # iface uuid
+	local iface=$1 reconnect=0 down=0 up=0 ok=0
+	read -r reconnect down up <<<"$(settings_of "$2")"
+	reconnect=${reconnect:-0} down=${down:-0} up=${up:-0}
+	clear_limits "$iface"
+	stop_watch "$iface"
+	mkdir -p "$state"
+	if [ "$up" -gt 0 ]; then
+		# a bucket of 40 ms at that speed, at least a few full packets
+		local burst=$((up * 125 / 25))
+		[ "$burst" -lt 15000 ] && burst=15000
+		if tc qdisc replace dev "$iface" root tbf rate "${up}kbit" burst "$burst" latency 70ms; then
+			echo "$up" > "$state/$iface.up"
+		else
+			echo "could not limit the uploads of $iface" >&2
+			ok=1
+		fi
+	fi
+	if [ "$down" -gt 0 ]; then
+		local burst=$((down * 125 / 10)) # 100 ms
+		[ "$burst" -lt 30000 ] && burst=30000
+		if tc qdisc replace dev "$iface" handle ffff: ingress &&
+				tc filter add dev "$iface" parent ffff: protocol all prio 49 u32 match u32 0 0 \
+					police rate "${down}kbit" burst "$burst" drop flowid :1; then
+			echo "$down" > "$state/$iface.down"
+		else
+			tc qdisc del dev "$iface" ingress 2>/dev/null
+			echo "could not limit the downloads of $iface" >&2
+			ok=1
+		fi
+	fi
+	if [ "$reconnect" -gt 0 ]; then
+		start_watch "$iface" "$2" $((reconnect * 1000 * 1000))
+	fi
+	return $ok
+}
+
+bytes_of() { # iface
+	local rx tx
+	read -r rx < "$root/sys/class/net/$1/statistics/rx_bytes" 2>/dev/null || return 1
+	read -r tx < "$root/sys/class/net/$1/statistics/tx_bytes" 2>/dev/null || return 1
+	echo $((rx + tx))
+}
+
+watch() { # iface uuid bytes
+	local start now
+	start=$(bytes_of "$1") || exit 0
+	while sleep "$interval"; do
+		now=$(bytes_of "$1") || exit 0 # the device went away
+		if [ "$now" -lt "$start" ]; then
+			start=0 # its counters started again
+		fi
+		if [ $((now - start)) -ge "$3" ]; then
+			echo "$1: $((now - start)) bytes since $2 came up, connecting it again"
+			# no waiting: the dispatcher stops this unit when the network goes down
+			nmcli --wait 0 connection up uuid "$2"
+			exit 0
+		fi
+	done
+}
+
+case ${1:-} in
+set)
+	[ $# -eq 5 ] || die "usage: set UUID RECONNECT_MB DOWN_KBIT UP_KBIT"
+	valid_uuid "$2" || die "not a network: $2"
+	for n in "$3" "$4" "$5"; do
+		valid_number "$n" || die "not a number: $n"
+	done
+	mkdir -p "$(dirname "$conf")"
+	{
+		echo "$header"
+		[ -f "$conf" ] && grep -v '^#' "$conf" | awk -v u="$2" 'NF && $1 != u'
+		# 10#: a leading 0 is no octal number
+		(( 10#$3 + 10#$4 + 10#$5 > 0 )) && echo "$2 $((10#$3)) $((10#$4)) $((10#$5))"
+	} > "$conf.new"
+	chmod 0644 "$conf.new"
+	mv "$conf.new" "$conf"
+	# in force at once on the devices the network is connected on
+	status=0
+	for iface in $(nmcli -g GENERAL.DEVICES connection show uuid "$2" 2>/dev/null | tr ',' ' '); do
+		valid_iface "$iface" && { apply "$iface" "$2" || status=1; }
+	done
+	exit $status
+	;;
+dispatch)
+	[ $# -eq 3 ] || die "usage: dispatch IFACE ACTION"
+	valid_iface "$2" || exit 0
+	case $3 in
+	up|reapply)
+		uuid=${CONNECTION_UUID:-}
+		valid_uuid "$uuid" || exit 0
+		if [ -n "$(settings_of "$uuid")" ] || [ -f "$state/$2.up" ] ||
+				[ -f "$state/$2.down" ]; then
+			apply "$2" "$uuid"
+		fi
+		;;
+	down|pre-down)
+		clear_limits "$2"
+		stop_watch "$2"
+		;;
+	esac
+	exit 0
+	;;
+watch)
+	[ $# -eq 4 ] && valid_iface "$2" && valid_uuid "$3" && valid_number "$4" ||
+		die "usage: watch IFACE UUID BYTES"
+	watch "$2" "$3" "$4"
+	;;
+*)
+	die "usage: tilewin-network-root set|dispatch|watch ..."
+	;;
+esac
