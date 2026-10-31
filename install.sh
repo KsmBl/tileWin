@@ -96,7 +96,41 @@ if [ "$UNINSTALL" -eq 1 ]; then
 fi
 
 # ---------------------------------------------------------------- dependencies
+# A screen with a backlight (a laptop) is dimmed with brightnessctl.
+wants_brightnessctl() {
+	[ -n "$(ls -A /sys/class/backlight 2>/dev/null)" ] && ! command -v brightnessctl >/dev/null 2>&1
+}
+
+# The taskbar's volume, the sound flyout and the mixer talk to a sound server
+# that speaks PulseAudio (pactl): PipeWire with its PulseAudio part, or
+# PulseAudio itself. Installed only when neither is there, so nothing is
+# swapped under a setup that works.
+wants_sound_server() {
+	! command -v pipewire-pulse >/dev/null 2>&1 && ! command -v pulseaudio >/dev/null 2>&1
+}
+
+# Package lists of the extras this computer needs: brightness, sound server.
+extras() { # brightness-package sound-packages...
+	local out=()
+	wants_brightnessctl && out+=("$1")
+	shift
+	wants_sound_server && out+=("$@")
+	echo "${out[*]}"
+}
+
+# A sound server installed just now runs from the next login on; it is
+# started for this one too.
+start_sound_server() {
+	command -v systemctl >/dev/null 2>&1 || return 0
+	if command -v pipewire-pulse >/dev/null 2>&1; then
+		systemctl --user enable --now pipewire.socket pipewire-pulse.socket wireplumber.service \
+			>/dev/null 2>&1 || warn "could not start PipeWire; it starts with your next login"
+	fi
+}
+
 install_deps() {
+	local sound_missing=0
+	wants_sound_server && sound_missing=1
 	if command -v pacman >/dev/null 2>&1; then
 		msg "Installing dependencies with pacman"
 		sudo pacman -S --needed --noconfirm base-devel meson ninja pkgconf \
@@ -105,8 +139,15 @@ install_deps() {
 			xcb-util-wm xorg-xwayland systemd-libs polkit \
 			grim slurp wl-clipboard xdg-utils
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal thunar xdg-desktop-portal-gtk \
-			tesseract tesseract-data-eng || \
+			tesseract tesseract-data-eng libpulse || \
 			warn "optional packages could not be installed"
+		local more
+		more=$(extras brightnessctl pipewire pipewire-pulse wireplumber)
+		if [ -n "$more" ]; then
+			msg "Installing $more"
+			# shellcheck disable=SC2086
+			sudo pacman -S --needed --noconfirm $more || warn "could not install $more"
+		fi
 	elif command -v apt-get >/dev/null 2>&1; then
 		msg "Installing dependencies with apt (best effort)"
 		sudo apt-get update
@@ -115,8 +156,15 @@ install_deps() {
 			libinput-dev libevdev-dev libpixman-1-dev libdrm-dev libcairo2-dev \
 			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libgtk-4-dev libjson-c-dev \
 			libpcre2-dev libxcb-icccm4-dev xwayland libsystemd-dev libpolkit-agent-1-dev \
-			grim slurp wl-clipboard xdg-utils || \
+			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
 			warn "some packages are missing; wlroots 0.20 may need to be built manually"
+		local more
+		more=$(extras brightnessctl pipewire-pulse wireplumber)
+		if [ -n "$more" ]; then
+			msg "Installing $more"
+			# shellcheck disable=SC2086
+			sudo apt-get install -y $more || warn "could not install $more"
+		fi
 	elif command -v dnf >/dev/null 2>&1; then
 		msg "Installing dependencies with dnf (best effort)"
 		sudo dnf install -y gcc meson ninja-build pkgconf-pkg-config wlroots-devel \
@@ -124,10 +172,20 @@ install_deps() {
 			libevdev-devel pixman-devel libdrm-devel cairo-devel pango-devel \
 			gdk-pixbuf2-devel librsvg2-devel gtk4-devel json-c-devel pcre2-devel \
 			xcb-util-wm-devel xorg-x11-server-Xwayland systemd-devel polkit-devel \
-			grim slurp wl-clipboard xdg-utils || \
+			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
 			warn "some packages are missing; tileWin needs wlroots 0.20"
+		local more
+		more=$(extras brightnessctl pipewire-pulseaudio wireplumber)
+		if [ -n "$more" ]; then
+			msg "Installing $more"
+			# shellcheck disable=SC2086
+			sudo dnf install -y $more || warn "could not install $more"
+		fi
 	else
 		warn "unknown distribution: install the dependencies listed in README.md manually"
+	fi
+	if [ "$sound_missing" -eq 1 ] && ! wants_sound_server; then
+		start_sound_server
 	fi
 }
 

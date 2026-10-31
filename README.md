@@ -69,6 +69,8 @@ cd tileWin
 ./install.sh              # installs dependencies (pacman/apt/dnf), builds and installs to /usr/local
 ```
 
+Besides the build dependencies it installs `brightnessctl` on a computer with a backlight and, when no sound server that speaks PulseAudio is there, PipeWire with its PulseAudio part and WirePlumber, and starts it.
+
 Options:
 
 | Option | Effect |
