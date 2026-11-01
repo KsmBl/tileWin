@@ -7,7 +7,8 @@ every name with an address, count what they were asked and take as long as
 they are told to. It checks forwarding and the cache with its shortest and
 longest times, picking the fastest servers, falling over from a failing one,
 answers too big for UDP, the block lists, the servers of single networks,
-and prefetching: the top names are asked again without anyone asking, and
+DNS over HTTPS (against a server with a certificate made for the test), and
+prefetching: the top names are asked again without anyone asking, and
 those prefetches are never counted as requests themselves.
 
 usage: dns_service.py <tilewin-dnsd>
@@ -168,9 +169,65 @@ class FakeServer:
             conn.close()
 
 
+class FakeDoh:
+    """A DNS over HTTPS server on 127.0.0.1 with a certificate for doh.test,
+    answering as a FakeServer does; it counts the connections it was given."""
+
+    def __init__(self, work):
+        import http.server
+        import ssl
+        self.cert = os.path.join(work, "doh.pem")
+        self.key = os.path.join(work, "doh.key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt",
+                        "ec_paramgen_curve:P-256", "-nodes", "-days", "2",
+                        "-subj", "/CN=doh.test", "-addext", "subjectAltName=DNS:doh.test",
+                        "-keyout", self.key, "-out", self.cert],
+                       check=True, capture_output=True)
+        self.dns = FakeServer()
+        self.connections = 0
+        self.posts = 0
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"  # connections are kept
+
+            def setup(self):
+                outer.connections += 1
+                super().setup()
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                outer.posts += 1
+                if self.path != "/dns-query" or \
+                        self.headers["Content-Type"] != "application/dns-message":
+                    self.send_response(400)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                out = outer.dns.answer(body, True)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/dns-message")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(self.cert, self.key)
+        self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def url(self, host="doh.test"):
+        return "https://%s:%d/dns-query" % (host, self.port)
+
+
 class Daemon:
     def __init__(self, config, stats=None, nm_devices=None, keyfiles=None, resolved=None,
-                 kept=None, probe_via=None):
+                 kept=None, probe_via=None, extra=None):
         self.work = tempfile.mkdtemp(prefix="tilewin-dns-")
         self.port = free_port()
         self.conf = os.path.join(self.work, "dns.conf")
@@ -205,7 +262,7 @@ class Daemon:
         self.proc = subprocess.Popen(
             [DAEMON, "-c", self.conf, "-s", self.state, "-r", self.run,
              "-l", "127.0.0.1:%d" % self.port, "-n", self.nm, "-k", self.keyfiles,
-             "-R", self.resolved] + probe,
+             "-R", self.resolved] + probe + (extra or []),
             stdout=self.log, stderr=subprocess.STDOUT)
         for _ in range(50):
             if os.path.exists(os.path.join(self.run, "status")):
@@ -616,11 +673,71 @@ def prefetching():
         d.cleanup()
 
 
+def dns_over_https():
+    work = tempfile.mkdtemp(prefix="tilewin-doh-")
+    doh = FakeDoh(work)
+    plain = FakeServer(address=b"\x0a\x00\x00\x09")
+    ca = ["-C", doh.cert]
+    # 127.0.0.1 has no plain DNS server: whatever is answered came over HTTPS
+    d = Daemon("servers 127.0.0.1\ndoh 127.0.0.1 %s\nfastest 0\nprefetch no\n" % doh.url(),
+               extra=ca)
+    try:
+        r = d.ask("https.test")
+        check(r is not None and r[0] == 0 and r[1] and r[1][0][2] == b"\x0a\x00\x00\x01",
+              "a server with an https:// address is asked over HTTPS")
+        tested = wait_until(lambda: "tested 0" not in d.status() and "tested" in d.status(), 6)
+        # the speed test asks three times at once, on as many connections
+        before = doh.connections
+        for i in range(5):
+            d.ask("again%d.test" % i)
+        check(doh.dns.count("again4.test") == 1 and doh.connections == before <= 3,
+              "the connections are kept for the next questions (%d, then %d for %d questions)"
+              % (before, doh.connections, doh.posts))
+        times = {line.split()[1]: int(line.split()[2]) for line in d.status().splitlines()
+                 if line.startswith("server ")}
+        check(tested and 0 <= times.get("127.0.0.1", -1) < 5000,
+              "it is timed over HTTPS too: %s" % times)
+    finally:
+        d.stop()
+        if failures:
+            d.show_log()
+        d.cleanup()
+    # a certificate for another name: no answer from it, and the plain server
+    # behind it takes over
+    d = Daemon("servers 127.0.0.1 %s\ndoh 127.0.0.1 %s\nfastest 0\nprefetch no\n"
+               % (plain.text, doh.url("other.test")), extra=ca)
+    try:
+        r = d.ask("wrongcert.test")
+        check(r is not None and r[0] == 0 and r[1] and r[1][0][2] == b"\x0a\x00\x00\x09",
+              "a server whose certificate is for another name is not believed; the next answers")
+        check(doh.dns.count("wrongcert.test") == 0, "nothing was asked over the wrong certificate")
+        check(wait_until(lambda: "doh_error 127.0.0.1 the certificate" in d.status(), 3),
+              "the status says why HTTPS failed: %s" %
+              [l for l in d.status().splitlines() if l.startswith("doh_error")])
+    finally:
+        d.stop()
+        if failures:
+            d.show_log()
+        d.cleanup()
+    # without the test's CA the certificate is not trusted at all
+    d = Daemon("servers 127.0.0.1\ndoh 127.0.0.1 %s\nfastest 0\nprefetch no\n" % doh.url())
+    try:
+        r = d.ask("untrusted.test")
+        check(r is not None and r[0] == 2 and doh.dns.count("untrusted.test") == 0,
+              "a certificate nobody vouches for fails the question (SERVFAIL)")
+    finally:
+        d.stop()
+        d.cleanup()
+        doh.httpd.shutdown()
+        shutil.rmtree(work, ignore_errors=True)
+
+
 checks = [
     ("forwarding and cache", forwarding_and_cache),
     ("cache off, big answers", cache_off_and_big_answers),
     ("fastest servers", fastest_servers),
     ("failover", failover),
+    ("DNS over HTTPS", dns_over_https),
     ("block lists", block_lists),
     ("downloaded lists", downloaded_lists),
     ("single networks", single_networks),

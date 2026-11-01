@@ -136,7 +136,7 @@ install_deps() {
 		sudo pacman -S --needed --noconfirm base-devel meson ninja pkgconf \
 			wlroots0.20 wayland wayland-protocols libxkbcommon libinput libevdev \
 			pixman libdrm cairo pango gdk-pixbuf2 librsvg gtk4 json-c pcre2 \
-			xcb-util-wm xorg-xwayland systemd-libs polkit \
+			xcb-util-wm xorg-xwayland systemd-libs polkit curl \
 			grim slurp wl-clipboard xdg-utils
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal thunar xdg-desktop-portal-gtk \
 			tesseract tesseract-data-eng libpulse || \
@@ -156,6 +156,7 @@ install_deps() {
 			libinput-dev libevdev-dev libpixman-1-dev libdrm-dev libcairo2-dev \
 			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libgtk-4-dev libjson-c-dev \
 			libpcre2-dev libxcb-icccm4-dev xwayland libsystemd-dev libpolkit-agent-1-dev \
+			libcurl4-openssl-dev \
 			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
 			warn "some packages are missing; wlroots 0.20 may need to be built manually"
 		local more
@@ -171,7 +172,7 @@ install_deps() {
 			wayland-devel wayland-protocols-devel libxkbcommon-devel libinput-devel \
 			libevdev-devel pixman-devel libdrm-devel cairo-devel pango-devel \
 			gdk-pixbuf2-devel librsvg2-devel gtk4-devel json-c-devel pcre2-devel \
-			xcb-util-wm-devel xorg-x11-server-Xwayland systemd-devel polkit-devel \
+			xcb-util-wm-devel xorg-x11-server-Xwayland systemd-devel polkit-devel libcurl-devel \
 			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
 			warn "some packages are missing; tileWin needs wlroots 0.20"
 		local more

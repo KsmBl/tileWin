@@ -238,6 +238,7 @@ The numbers are where the line down and the line across go, 0.1 to 0.9 of the sc
 
 ```
 servers 1.1.1.1 9.9.9.9 8.8.8.8   # for all networks; none: those of each network
+doh 1.1.1.1 https://cloudflare-dns.com/dns-query   # this one over HTTPS (DNS over HTTPS)
 fastest 2                         # ask the 2 fastest at once; 0: all in order
 test_interval 3600                # seconds between timing the servers
 
@@ -259,6 +260,8 @@ blocklist file:/var/lib/tilewin-dns/imported/mine.list
 block ads.example.com             # with the names below it
 allow good.example.com            # never blocked, with the names below it
 ```
+
+A server with a `doh` line is asked over HTTPS (RFC 8484, over HTTP/2 where the server speaks it) instead of plain DNS: the connection goes to the server's address as written, so no name is looked up first, and the certificate has to be valid for the host name of the https:// address, checked against the system's certificates. A server whose certificate does not fit is not asked; the next one is, and `doh_error <server> <why>` in the status says what went wrong. The connections are kept open between questions. The same `doh` line also applies where that address is a server of a single network.
 
 Which servers are asked: a network with DNS servers of its own (NetworkManager's `ipv4.dns` with `ignore-auto-dns`, set on the DNS page) uses them; else the `servers` above; else the servers the network hands out. Block lists may be hosts files (`0.0.0.0 name`), one name per line, `*.name` for a name and those below it, or adblock rules (`||name^`; exceptions and rules with paths are skipped). Only the questions of apps are counted for prefetching, kept per day in `/var/lib/tilewin-dns/stats`; the prefetches are not.
 

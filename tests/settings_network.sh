@@ -7,8 +7,9 @@
 # kept for the network shown), choosing how the servers for
 # all networks are asked writes the config of the DNS service, a name blocked
 # lately can be allowed from its log, a server of a single network, picked on
-# the DNS page, goes to NetworkManager, and when the service says the DNS of
-# the computer does not come to it, the page offers to send it through again.
+# the DNS page, goes to NetworkManager, when the service says the DNS of
+# the computer does not come to it, the page offers to send it through again,
+# and a well-known server is asked over HTTPS with its own https:// address.
 #
 # usage: settings_network.sh <build dir>
 set -u
@@ -209,7 +210,8 @@ grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
 pkill -f "^[^ ]*/tilewin -c $work/tw-dns.conf" 2>/dev/null
 sleep 2
 printf '%s\n' "pid $$" "source all-networks" "use 1.1.1.1" "today 0 0 0 0" "wired 0" \
-	> "$work/run/status"
+	"doh_error 9.9.9.9 the certificate is not for dns.quad9.net" > "$work/run/status"
+echo 'doh 9.9.9.9 https://dns.quad9.net/dns-query' >> "$work/dns.conf"
 printf '[main]\ndns=none\n' > "$work/nmconf/zz-tilewin-dns.conf" # it is on
 : > "$work/dns.log"
 height=900
@@ -219,6 +221,14 @@ click 1186 256 # Connect, beside "Send the DNS of this computer through it again
 sleep 1
 grep -q '^enable' "$work/dns.log" ||
 	fail "\"Connect\" did not send the DNS of the computer through the service again"
+# DNS over HTTPS for a server: a well-known one has its address at hand
+click 1160 492 # HTTPS, beside 1.1.1.1
+sleep 1
+[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/doh.png"
+grep -q '^doh 1.1.1.1 https://cloudflare-dns.com/dns-query$' "$work/dns.conf" ||
+	fail "turning on HTTPS for 1.1.1.1 did not give it Cloudflare's https:// address"
+grep -q '^doh 9.9.9.9 https://dns.quad9.net/dns-query$' "$work/dns.conf" ||
+	fail "the https:// address another server had was lost"
 
 if [ $failed -ne 0 ]; then
 	echo "--- nmcli was asked:"

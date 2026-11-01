@@ -7,9 +7,9 @@ lib_dns = static_library(
 
 tilewin_dnsd = executable(
 	'tilewin-dnsd',
-	'main.c',
+	['main.c', 'doh.c'],
 	link_with: [lib_dns],
-	dependencies: [dependency('threads')],
+	dependencies: [dependency('threads'), dependency('libcurl', version: '>=7.85')],
 	install: true,
 	install_dir: get_option('libexecdir'),
 )

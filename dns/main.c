@@ -22,6 +22,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include "doh.h"
 #include "domainset.h"
 #include "wire.h"
 
@@ -40,7 +41,9 @@
  *    Only the queries of apps are counted for that, never the prefetches, or
  *    the names it prefetches would keep themselves at the top;
  *  - block lists like Pi-hole's: hosts files, plain lists and adblock rules,
- *    downloaded once a day, with names allowed and blocked by hand.
+ *    downloaded once a day, with names allowed and blocked by hand;
+ *  - DNS over HTTPS for the servers that have an https:// address in the
+ *    config: their questions go encrypted, the others' as plain DNS.
  *
  * Its state is in /var/lib/tilewin-dns (the counts, the lists) and what it is
  * doing in /run/tilewin-dns (status, prefetch), which the settings app reads.
@@ -76,6 +79,11 @@ struct server {
 	struct sockaddr_storage addr;
 	socklen_t len;
 	int score; // ms, -1 untested
+	char doh[DOH_URL_MAX]; // asked over HTTPS at this address, "" for plain DNS
+};
+
+struct doh_entry {
+	char server[80], url[DOH_URL_MAX];
 };
 
 struct config {
@@ -89,6 +97,9 @@ struct config {
 	struct strv prefetch_add, prefetch_skip;
 	bool blocking, block_nxdomain;
 	struct strv lists, allow, block;
+	struct doh_entry doh[MAX_SERVERS];
+	int ndoh;
+	char doh_error[MAX_SERVERS][120]; // why the last question over HTTPS failed, per server
 };
 
 struct centry {
@@ -159,6 +170,9 @@ struct tcp_job {
 	struct server target;
 	uint8_t *query, *answer;
 	size_t qlen, alen;
+	int target_index; // over HTTPS: which target of the question
+	bool doh;
+	char error[120];
 };
 
 struct list_meta {
@@ -405,11 +419,29 @@ static bool is_loop(const struct server *s) {
 	return false;
 }
 
+/* The https:// address the config gives a server, if any. */
+static void attach_doh(struct server *s) {
+	s->doh[0] = '\0';
+	for (int i = 0; i < d.conf.ndoh; i++) {
+		struct sockaddr_storage addr;
+		socklen_t len;
+		if (strcmp(d.conf.doh[i].server, s->text) == 0 ||
+				(parse_address(d.conf.doh[i].server, 53, &addr, &len) &&
+				same_address(&addr, &s->addr))) {
+			snprintf(s->doh, sizeof(s->doh), "%s", d.conf.doh[i].url);
+		}
+	}
+}
+
 static bool make_server(const char *text, struct server *s) {
 	memset(s, 0, sizeof(*s));
 	snprintf(s->text, sizeof(s->text), "%s", text);
 	s->score = -1;
-	return parse_address(text, 53, &s->addr, &s->len) && !is_loop(s);
+	bool ok = parse_address(text, 53, &s->addr, &s->len) && !is_loop(s);
+	if (ok) {
+		attach_doh(s);
+	}
+	return ok;
 }
 
 /* ---------- the config ---------- */
@@ -505,6 +537,18 @@ static void load_config(void) {
 					logmsg("%s: server '%s' left out", d.conf_path, w);
 				}
 			}
+		} else if (strcmp(p, "doh") == 0) {
+			// doh SERVER URL: the server is asked over HTTPS at that address
+			char server[80], url[DOH_URL_MAX + 1];
+			if (sscanf(rest, "%79s %200s", server, url) == 2 && doh_url_valid(url) &&
+					c->ndoh < MAX_SERVERS) {
+				snprintf(c->doh[c->ndoh].server, sizeof(c->doh[0].server), "%s", server);
+				snprintf(c->doh[c->ndoh].url, sizeof(c->doh[0].url), "%s", url);
+				c->ndoh++;
+			} else {
+				logmsg("%s: 'doh %s' left out: a server and an https:// address", d.conf_path,
+					rest);
+			}
 		} else if (strcmp(p, "fastest") == 0) {
 			c->fastest = number(first_word, 0, MAX_TARGETS, 2);
 		} else if (strcmp(p, "test_interval") == 0) {
@@ -545,6 +589,9 @@ static void load_config(void) {
 	}
 	free(line);
 	fclose(f);
+	for (int i = 0; i < d.conf.nservers; i++) {
+		attach_doh(&d.conf.servers[i]); // its doh line may come after the servers
+	}
 	if (d.conf.cache_max && d.conf.cache_max < d.conf.cache_min) {
 		d.conf.cache_max = d.conf.cache_min;
 	}
@@ -1380,8 +1427,14 @@ static struct pending *new_pending(enum pkind kind, const struct dns_question *q
 	return p;
 }
 
+static void ask_over_doh(struct pending *p, int i);
+
 static void send_to_target(struct pending *p, int i) {
 	const struct server *s = &p->targets[i];
+	if (s->doh[0]) {
+		ask_over_doh(p, i);
+		return;
+	}
 	int *socks = s->addr.ss_family == AF_INET ? d.up4 : d.up6;
 	int fd = socks[random16() % UP_SOCKETS];
 	if (fd < 0 || sendto(fd, p->query, p->qlen, 0, (const struct sockaddr *)&s->addr,
@@ -1475,6 +1528,13 @@ static void finish(struct pending *p, uint8_t *msg, size_t len, bool good) {
 
 static void *tcp_worker(void *data) {
 	struct tcp_job *job = data;
+	if (job->doh) {
+		job->alen = doh_ask(&job->target.addr, job->target.len, job->target.doh, job->query,
+			job->qlen, &job->answer, job->error, sizeof(job->error));
+		ssize_t ignored = write(d.job_pipe[1], &job, sizeof(job));
+		(void)ignored;
+		return NULL;
+	}
 	int fd = socket(job->target.addr.ss_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	struct timeval tv = { 3, 0 };
 	if (fd >= 0) {
@@ -1499,6 +1559,35 @@ static void *tcp_worker(void *data) {
 	return NULL;
 }
 
+static bool start_job(struct tcp_job *job) {
+	pthread_t thread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	bool ok = pthread_create(&thread, &attr, tcp_worker, job) == 0;
+	pthread_attr_destroy(&attr);
+	return ok;
+}
+
+/* The question to a server over HTTPS, in a thread of its own: it waits for
+ * the TLS connection and the answer. */
+static void ask_over_doh(struct pending *p, int i) {
+	struct tcp_job *job = calloc(1, sizeof(*job));
+	job->id = p->id;
+	job->gen = p->gen;
+	job->target = p->targets[i];
+	job->target_index = i;
+	job->doh = true;
+	job->query = malloc(p->qlen);
+	memcpy(job->query, p->query, p->qlen);
+	job->qlen = p->qlen;
+	if (!start_job(job)) {
+		free(job->query);
+		free(job);
+		p->nfailed++;
+	}
+}
+
 /* The answer did not fit in UDP: the same question once more over TCP. */
 static void ask_over_tcp(struct pending *p, const struct server *target) {
 	struct tcp_job *job = calloc(1, sizeof(*job));
@@ -1510,16 +1599,29 @@ static void ask_over_tcp(struct pending *p, const struct server *target) {
 	job->qlen = p->qlen;
 	p->tcp_busy = true;
 	p->deadline = now_ms() + TIMEOUT_MS;
-	pthread_t thread;
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&thread, &attr, tcp_worker, job) != 0) {
+	if (!start_job(job)) {
 		free(job->query);
 		free(job);
 		p->tcp_busy = false;
 	}
-	pthread_attr_destroy(&attr);
+}
+
+static void got_answer(struct pending *p, int target, uint8_t *buf, size_t n);
+static void target_failed(struct pending *p);
+
+/* Why the last question over HTTPS to a server of the config failed, for the
+ * settings app; "" once one is answered again. */
+static void note_doh(const struct server *s, const char *error) {
+	for (int i = 0; i < d.conf.nservers; i++) {
+		if (strcmp(d.conf.servers[i].text, s->text) == 0 &&
+				strcmp(d.conf.doh_error[i], error) != 0) {
+			snprintf(d.conf.doh_error[i], sizeof(d.conf.doh_error[i]), "%s", error);
+			if (*error) {
+				logmsg("server %s over HTTPS: %s", s->text, error);
+			}
+			d.status_dirty = true;
+		}
+	}
 }
 
 static void tcp_job_done(void) {
@@ -1529,7 +1631,17 @@ static void tcp_job_done(void) {
 	}
 	struct pending *p = d.pend[job->id];
 	struct dns_question q;
-	if (p && p->gen == job->gen) {
+	if (job->doh) {
+		note_doh(&job->target, job->alen >= DNS_HEADER ? "" : job->error);
+		if (p && p->gen == job->gen) {
+			if (job->alen >= DNS_HEADER && dns_is_response(job->answer) &&
+					dns_u16(job->answer) == p->id) {
+				got_answer(p, job->target_index, job->answer, job->alen);
+			} else {
+				target_failed(p);
+			}
+		}
+	} else if (p && p->gen == job->gen) {
 		if (job->alen >= DNS_HEADER && dns_parse_question(job->answer, job->alen, &q) &&
 				dns_u16(job->answer) == p->id && strcmp(q.name, p->q.name) == 0 &&
 				q.type == p->q.type) {
@@ -1557,13 +1669,40 @@ static void on_upstream(int fd) {
 	}
 	int target = -1;
 	for (int i = 0; i < p->nsent; i++) {
-		if (same_address(&p->targets[i].addr, &from)) {
+		// one asked over HTTPS answers only that way
+		if (same_address(&p->targets[i].addr, &from) && !p->targets[i].doh[0]) {
 			target = i;
 		}
 	}
+	if (target >= 0) {
+		got_answer(p, target, buf, (size_t)n);
+	}
+}
+
+/* A target gave no answer at all (over HTTPS): as a SERVFAIL, the next one is
+ * asked, and when none is left the question fails. */
+static void target_failed(struct pending *p) {
+	if (p->kind == P_TEST) {
+		finish(p, NULL, 0, false);
+		return;
+	}
+	if (++p->nfailed < p->nsent) {
+		return;
+	}
+	if (p->nsent < p->ntargets) {
+		send_more(p, p->nsent + 1);
+		return;
+	}
+	finish(p, p->fail, p->fail_len, false);
+}
+
+static void got_answer(struct pending *p, int target, uint8_t *buf, size_t n) {
 	struct dns_question q;
-	if (target < 0 || !dns_parse_question(buf, n, &q) || strcmp(q.name, p->q.name) != 0 ||
+	if (!dns_parse_question(buf, n, &q) || strcmp(q.name, p->q.name) != 0 ||
 			q.type != p->q.type || q.qclass != p->q.qclass) {
+		if (p->targets[target].doh[0]) {
+			target_failed(p); // over HTTPS nobody else could have sent it
+		}
 		return; // not the answer to this question: spoofed, or very late
 	}
 	int rcode = dns_rcode(buf);
@@ -1586,7 +1725,7 @@ static void on_upstream(int fd) {
 		finish(p, buf, n, false);
 		return;
 	}
-	if (dns_truncated(buf) && p->kind != P_UDP) {
+	if (dns_truncated(buf) && p->kind != P_UDP && !p->targets[target].doh[0]) {
 		ask_over_tcp(p, &p->targets[target]);
 		return;
 	}
@@ -1887,6 +2026,9 @@ static void write_status(void) {
 	}
 	for (int i = 0; i < d.conf.nservers; i++) {
 		text_add(&t, "server %s %d\n", d.conf.servers[i].text, d.conf.servers[i].score);
+		if (d.conf.doh_error[i][0]) {
+			text_add(&t, "doh_error %s %s\n", d.conf.servers[i].text, d.conf.doh_error[i]);
+		}
 	}
 	text_add(&t, "tested %ld\n", (long)d.tested_at);
 	text_add(&t, "cache %d\n", d.ncache);
@@ -2051,7 +2193,9 @@ static void usage(const char *name) {
 		"usage: %s [-c config] [-s state dir] [-r run dir] [-l address:port]\n"
 		"          [-n NetworkManager run dir] [-k keyfile dirs, : separated]\n"
 		"          [-R resolved's resolv.conf] [-q: do not check that DNS comes here]\n"
-		"          [-p address:port: check by asking it, not the system]\n", name);
+		"          [-p address:port: check by asking it, not the system]\n"
+		"          [-C CA file: check servers over HTTPS against it, not the system's]\n",
+		name);
 }
 
 int main(int argc, char **argv) {
@@ -2065,7 +2209,7 @@ int main(int argc, char **argv) {
 	d.probing = true;
 	d.wired = -1;
 	int opt;
-	while ((opt = getopt(argc, argv, "c:s:r:l:n:k:R:qp:h")) != -1) {
+	while ((opt = getopt(argc, argv, "c:s:r:l:n:k:R:qp:C:h")) != -1) {
 		switch (opt) {
 		case 'c': d.conf_path = optarg; break;
 		case 's': d.state_dir = optarg; break;
@@ -2076,6 +2220,7 @@ int main(int argc, char **argv) {
 		case 'R': d.resolved_resolv = optarg; break;
 		case 'q': d.probing = false; break;
 		case 'p': d.probe_via = optarg; break;
+		case 'C': doh_set_ca_file(optarg); break;
 		default: usage(argv[0]); return opt == 'h' ? 0 : 2;
 		}
 	}
@@ -2100,6 +2245,7 @@ int main(int argc, char **argv) {
 		d.up4[i] = open_socket(AF_INET, SOCK_DGRAM, NULL, 0);
 		d.up6[i] = open_socket(AF_INET6, SOCK_DGRAM, NULL, 0);
 	}
+	doh_init();
 	sigset_t mask;
 	sigemptyset(&mask);
 	int signals[] = { SIGHUP, SIGUSR1, SIGUSR2, SIGTERM, SIGINT, SIGCHLD };

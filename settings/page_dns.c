@@ -46,6 +46,30 @@ const struct dns_preset dns_server_presets[] = {
 	{ NULL, NULL },
 };
 
+/* The DNS over HTTPS addresses of the well-known servers. */
+static const struct dns_preset doh_presets[] = {
+	{ "1.1.1.1", "https://cloudflare-dns.com/dns-query" },
+	{ "1.0.0.1", "https://cloudflare-dns.com/dns-query" },
+	{ "2606:4700:4700::1111", "https://cloudflare-dns.com/dns-query" },
+	{ "2606:4700:4700::1001", "https://cloudflare-dns.com/dns-query" },
+	{ "9.9.9.9", "https://dns.quad9.net/dns-query" },
+	{ "149.112.112.112", "https://dns.quad9.net/dns-query" },
+	{ "2620:fe::fe", "https://dns.quad9.net/dns-query" },
+	{ "2620:fe::9", "https://dns.quad9.net/dns-query" },
+	{ "8.8.8.8", "https://dns.google/dns-query" },
+	{ "8.8.4.4", "https://dns.google/dns-query" },
+	{ "2001:4860:4860::8888", "https://dns.google/dns-query" },
+	{ "2001:4860:4860::8844", "https://dns.google/dns-query" },
+	{ "208.67.222.222", "https://doh.opendns.com/dns-query" },
+	{ "208.67.220.220", "https://doh.opendns.com/dns-query" },
+	{ "94.140.14.14", "https://dns.adguard-dns.com/dns-query" },
+	{ "94.140.15.15", "https://dns.adguard-dns.com/dns-query" },
+	{ "194.242.2.2", "https://dns.mullvad.net/dns-query" },
+	{ "76.76.2.0", "https://freedns.controld.com/p0" },
+	{ "185.228.168.9", "https://doh.cleanbrowsing.org/doh/family-filter/" },
+	{ NULL, NULL },
+};
+
 static const struct dns_preset list_presets[] = {
 	{ "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
 		"StevenBlack's hosts, the default of Pi-hole" },
@@ -77,6 +101,7 @@ const char *dns_preset_name(const struct dns_preset *presets, const char *value)
 
 struct dnsconf {
 	GPtrArray *servers; // the servers for all networks, also while they are not used
+	GHashTable *doh;    // server -> its https:// address, for those asked over HTTPS
 	bool use_servers;
 	int fastest, test_interval;
 	bool cache;
@@ -107,6 +132,11 @@ static void conf_defaults(struct dnsconf *c) {
 		} else {
 			*arrays[i] = g_ptr_array_new_with_free_func(g_free);
 		}
+	}
+	if (c->doh) {
+		g_hash_table_remove_all(c->doh);
+	} else {
+		c->doh = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	}
 	c->use_servers = false;
 	c->fastest = 2;
@@ -147,8 +177,10 @@ static bool word_yes(char **words) {
 	return words[1] && (strcmp(words[1], "yes") == 0 || strcmp(words[1], "on") == 0);
 }
 
-/* The servers of a config that is not in use are kept in a comment. */
+/* The servers of a config that is not in use are kept in a comment, and so
+ * are their https:// addresses. */
 #define UNUSED_SERVERS "#unused-servers"
+#define UNUSED_DOH "#unused-doh"
 
 static void conf_read(struct dnsconf *c) {
 	conf_defaults(c);
@@ -178,6 +210,8 @@ static void conf_read(struct dnsconf *c) {
 			c->use_servers = c->servers->len > 0;
 		} else if (strcmp(key, UNUSED_SERVERS) == 0) {
 			add_words(c->servers, words);
+		} else if ((strcmp(key, "doh") == 0 || strcmp(key, UNUSED_DOH) == 0) && n >= 3) {
+			g_hash_table_insert(c->doh, g_strdup(words[1]), g_strdup(words[2]));
 		} else if (strcmp(key, "fastest") == 0) {
 			c->fastest = word_number(words, 2);
 		} else if (strcmp(key, "test_interval") == 0) {
@@ -232,6 +266,13 @@ static char *conf_text(const struct dnsconf *c) {
 			g_string_append_printf(out, " %s", (char *)c->servers->pdata[i]);
 		}
 		g_string_append_c(out, '\n');
+		for (guint i = 0; i < c->servers->len; i++) {
+			const char *url = g_hash_table_lookup(c->doh, c->servers->pdata[i]);
+			if (url) {
+				g_string_append_printf(out, "%s %s %s\n", c->use_servers ? "doh" : UNUSED_DOH,
+					(char *)c->servers->pdata[i], url);
+			}
+		}
 	}
 	g_string_append_printf(out, "fastest %d\ntest_interval %d\n\n", c->fastest,
 		c->test_interval);
@@ -396,6 +437,7 @@ struct word_list {
 	GPtrArray *picks;                  // the values behind the dropdown's items
 	bool (*valid)(const char *text);
 	void (*describe)(struct word_list *w, const char *value, char **title, char **subtitle);
+	GtkWidget *(*extra)(struct word_list *w, const char *value); // beside the remove button
 	const char *remove_tooltip;
 	GPtrArray *rows;
 	char *signature; // what the rows show, to leave them be when it is the same
@@ -421,6 +463,9 @@ struct dns_page {
 	struct word_list *servers, *lists, *always, *never, *allow, *block;
 	GHashTable *server_ms;  // server -> ms (-1 untested)
 	GHashTable *in_use;     // server -> "use" or "backup"
+	GHashTable *doh_error;  // server -> why its last question over HTTPS failed
+	GtkWidget *doh_row, *doh_entry, *doh_label; // the https:// address of a server to type
+	char *doh_server;       // the server it is typed for
 	GHashTable *list_info;  // url -> "count mtime state"
 	char *prefetch_mtime;
 	bool running;
@@ -575,7 +620,14 @@ static void word_list_sync(struct word_list *w) {
 		gtk_widget_set_tooltip_text(remove, w->remove_tooltip);
 		g_object_set_data_full(G_OBJECT(remove), "value", g_strdup(value), g_free);
 		g_signal_connect(remove, "clicked", G_CALLBACK(on_remove_word), w);
-		GtkWidget *row = ui_row(w->list, title, subtitle, remove);
+		GtkWidget *row = ui_row(w->list, title, subtitle, NULL);
+		if (w->extra) {
+			GtkWidget *extra = w->extra(w, value);
+			gtk_widget_set_valign(extra, GTK_ALIGN_CENTER);
+			gtk_box_append(GTK_BOX(ui_row_box(row)), extra);
+		}
+		gtk_widget_set_valign(remove, GTK_ALIGN_CENTER);
+		gtk_box_append(GTK_BOX(ui_row_box(row)), remove);
 		// in its place, above the rows to add more
 		g_object_ref(row);
 		gtk_list_box_remove(GTK_LIST_BOX(w->list), row);
@@ -676,6 +728,68 @@ static bool valid_url(const char *text) {
 		strlen(text) > 10 && !strpbrk(text, " \t");
 }
 
+static const char *doh_preset(const char *server) {
+	return dns_preset_name(doh_presets, server);
+}
+
+static gboolean on_doh_switch(GtkSwitch *sw, gboolean on, gpointer data) {
+	struct word_list *w = data;
+	struct dns_page *p = w->p;
+	const char *server = g_object_get_data(G_OBJECT(sw), "value");
+	if (!on) {
+		g_hash_table_remove(p->c.doh, server);
+	} else if (doh_preset(server)) {
+		g_hash_table_insert(p->c.doh, g_strdup(server), g_strdup(doh_preset(server)));
+	} else {
+		// its address is not known: typed in below the list first
+		g_free(p->doh_server);
+		p->doh_server = g_strdup(server);
+		char *text = g_strdup_printf("The HTTPS address of %s", server);
+		gtk_label_set_text(GTK_LABEL(p->doh_label), text);
+		g_free(text);
+		gtk_widget_set_visible(p->doh_row, true);
+		gtk_widget_grab_focus(p->doh_entry);
+		return TRUE; // stays off until it is saved
+	}
+	gtk_switch_set_state(sw, on);
+	word_list_sync(w);
+	changed(p);
+	return TRUE;
+}
+
+static GtkWidget *server_extra(struct word_list *w, const char *value) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *label = gtk_label_new("HTTPS");
+	gtk_widget_add_css_class(label, "dim-label");
+	GtkWidget *sw = gtk_switch_new();
+	gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
+	gtk_switch_set_active(GTK_SWITCH(sw), g_hash_table_contains(w->p->c.doh, value));
+	gtk_widget_set_tooltip_text(sw, "Ask this server over HTTPS (DNS over HTTPS): encrypted, so "
+		"the network in between cannot read or change the questions and answers");
+	g_object_set_data_full(G_OBJECT(sw), "value", g_strdup(value), g_free);
+	g_signal_connect(sw, "state-set", G_CALLBACK(on_doh_switch), w);
+	gtk_box_append(GTK_BOX(box), label);
+	gtk_box_append(GTK_BOX(box), sw);
+	return box;
+}
+
+static void on_doh_typed(GtkWidget *widget, gpointer data) {
+	struct dns_page *p = data;
+	char *url = g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(p->doh_entry))));
+	if (!g_str_has_prefix(url, "https://") || strlen(url) < 12 || strpbrk(url, " \t\"") ||
+			strlen(url) >= 200 || !p->doh_server) {
+		gtk_widget_add_css_class(p->doh_entry, "error");
+		g_free(url);
+		return;
+	}
+	gtk_widget_remove_css_class(p->doh_entry, "error");
+	g_hash_table_insert(p->c.doh, g_strdup(p->doh_server), url);
+	gtk_editable_set_text(GTK_EDITABLE(p->doh_entry), "");
+	gtk_widget_set_visible(p->doh_row, false);
+	word_list_sync(p->servers);
+	changed(p);
+}
+
 static void describe_server(struct word_list *w, const char *value, char **title,
 		char **subtitle) {
 	struct dns_page *p = w->p;
@@ -694,6 +808,12 @@ static void describe_server(struct word_list *w, const char *value, char **title
 	if (use && p->c.use_servers) {
 		g_string_append_printf(sub, "%s%s", sub->len ? " · " : "",
 			strcmp(use, "use") == 0 ? "asked now" : "asked when the others do not answer");
+	}
+	const char *url = g_hash_table_lookup(p->c.doh, value);
+	const char *error = p->doh_error && url ? g_hash_table_lookup(p->doh_error, value) : NULL;
+	if (url) {
+		g_string_append_printf(sub, "%s%s %s", sub->len ? "\n" : "",
+			error ? "Over HTTPS, failing:" : "Encrypted, over HTTPS:", error ? error : url);
 	}
 	*subtitle = sub->len ? g_string_free(sub, FALSE) : (g_string_free(sub, TRUE), NULL);
 }
@@ -1205,6 +1325,7 @@ static void refresh_status(struct dns_page *p) {
 	p->running = service_running(status);
 	g_hash_table_remove_all(p->server_ms);
 	g_hash_table_remove_all(p->in_use);
+	g_hash_table_remove_all(p->doh_error);
 	g_hash_table_remove_all(p->list_info);
 	unsigned long queries = 0, cached = 0, blocked = 0, prefetched = 0;
 	int wired = -1;
@@ -1216,6 +1337,8 @@ static void refresh_status(struct dns_page *p) {
 		int n;
 		if (sscanf(lines[i], "server %511s %d", a, &n) == 2) {
 			g_hash_table_insert(p->server_ms, g_strdup(a), g_strdup_printf("%d", n));
+		} else if (sscanf(lines[i], "doh_error %511s %n", a, &n) == 1) {
+			g_hash_table_insert(p->doh_error, g_strdup(a), g_strdup(lines[i] + n));
 		} else if (sscanf(lines[i], "use %511s", a) == 1) {
 			g_hash_table_insert(p->in_use, g_strdup(a), g_strdup("use"));
 			g_string_append_printf(asking, "%s%s", asking->len ? ", " : "", a);
@@ -1357,6 +1480,7 @@ GtkWidget *dns_page_new(struct settings *s) {
 	p->s = s;
 	p->server_ms = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	p->in_use = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	p->doh_error = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	p->list_info = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	p->prefetched_rows = g_ptr_array_new();
 	p->blocked_rows = g_ptr_array_new();
@@ -1414,6 +1538,22 @@ GtkWidget *dns_page_new(struct settings *s) {
 	p->servers = word_list_new(p, content, NULL, NULL, &p->c.servers, dns_server_presets,
 		"No servers yet: add some below", "An address, e.g. 192.168.1.1 or 2606:4700::1111",
 		"Remove this server", valid_address, describe_server);
+	p->servers->extra = server_extra;
+	// the https:// address of a server that is not a well-known one
+	p->doh_entry = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->doh_entry), "https://dns.example.net/dns-query");
+	gtk_widget_set_hexpand(p->doh_entry, TRUE);
+	g_signal_connect(p->doh_entry, "activate", G_CALLBACK(on_doh_typed), p);
+	GtkWidget *doh_save = gtk_button_new_with_label("Use");
+	g_signal_connect(doh_save, "clicked", G_CALLBACK(on_doh_typed), p);
+	p->doh_row = ui_row(p->servers->list, " ", NULL, NULL);
+	p->doh_label = gtk_widget_get_first_child(gtk_widget_get_first_child(ui_row_box(p->doh_row)));
+	gtk_widget_set_hexpand(gtk_widget_get_first_child(ui_row_box(p->doh_row)), FALSE);
+	gtk_box_append(GTK_BOX(ui_row_box(p->doh_row)), p->doh_entry);
+	gtk_box_append(GTK_BOX(ui_row_box(p->doh_row)), doh_save);
+	gtk_widget_set_visible(p->doh_row, false);
+	g_clear_pointer(&p->servers->signature, g_free); // its rows again, with the switch
+	word_list_sync(p->servers);
 	p->servers_box = gtk_widget_get_parent(p->servers->list);
 	network_dns_section_attach(s, content);
 
