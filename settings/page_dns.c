@@ -711,7 +711,10 @@ static struct word_list *word_list_new(struct dns_page *p, GtkWidget *content, c
 	w->rows = g_ptr_array_new();
 	w->picks = g_ptr_array_new_with_free_func(g_free);
 	w->list = ui_group(content, title, description);
-	w->empty_row = ui_empty_row(w->list, "view-list-symbolic", empty, NULL);
+	// one line: this page has many such lists, and most of them stay empty
+	w->empty_row = ui_row(w->list, empty, NULL, NULL);
+	gtk_widget_add_css_class(gtk_widget_get_first_child(gtk_widget_get_first_child(
+		ui_row_box(w->empty_row))), "dim-label");
 	if (presets) {
 		w->pick = gtk_drop_down_new(NULL, NULL);
 		g_signal_connect(w->pick, "notify::selected", G_CALLBACK(on_pick), w);
