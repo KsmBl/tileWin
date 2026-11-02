@@ -112,7 +112,8 @@ void dm_backend_finish(struct dm_backend *b) {
 void dm_backend_user_info(const char *user, char **home, char **shell) {
 	const char *fake = getenv("TW_DM_FAKE_HOME");
 	*home = strdup(fake ? fake : "/");
-	*shell = strdup("/bin/sh");
+	// as the real one: the user of the greeter may not log in, a person may
+	*shell = strdup(strcmp(user, "greeter") == 0 ? "/usr/bin/nologin" : "/bin/sh");
 }
 
 uid_t dm_backend_greeter_uid(void) {

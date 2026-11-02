@@ -409,7 +409,9 @@ static int run_in_session(struct dm_backend *backend, const char *user, const ch
 	if (!home) {
 		home = strdup("/");
 	}
-	if (!shell) {
+	// the greeter's user has no login shell, and must not have one: nologin refuses
+	if (!shell || greeter) {
+		free(shell);
 		shell = strdup("/bin/sh");
 	}
 	char **env = environment_for(backend, user, home, shell, greeter);
@@ -442,7 +444,7 @@ static int run_in_session(struct dm_backend *backend, const char *user, const ch
 		// a login shell, so that the profile of the user counts as ever
 		const char *base = strrchr(shell, '/');
 		char *argv0 = NULL;
-		if (asprintf(&argv0, "-%s", base ? base + 1 : shell) < 0) {
+		if (asprintf(&argv0, "%s%s", greeter ? "" : "-", base ? base + 1 : shell) < 0) {
 			_exit(127);
 		}
 		char *exec_line = NULL;

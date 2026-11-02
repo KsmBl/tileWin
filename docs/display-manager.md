@@ -18,10 +18,10 @@ That path is for `install.sh`. In the Arch package the helper is `/usr/lib/tilew
 Once tileWin is installed, it can run beside the display manager you use, on a terminal of its own, without changing anything for the next start:
 
 ```sh
-sudo tilewin-display-manager --vt 9 --once
+sudo systemd-run --unit=tilewin-dm-trial --collect tilewin-display-manager --vt 9 --once
 ```
 
-Log in, or press Ctrl+Alt+F<n> to get back to where you were. `--once` ends it after the first session. If the screen stays dark, Ctrl+Alt+F3 gets you to a text console.
+Log in, or press Ctrl+Alt+F<n> to get back to where you were. `--once` ends it after the first session. If the screen stays dark, Ctrl+Alt+F3 gets you to a text console, and `journalctl -u tilewin-dm-trial` says why. It runs as a unit because logind gives no session to a program started inside one of yours.
 
 **Preview** on the page, or `tilewin-dm-greeter --preview`, shows the screen in your running session. It checks nothing, and Esc ends it.
 
