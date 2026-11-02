@@ -36,6 +36,8 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `snap left\|right\|topleft\|topright\|bottomleft\|bottomright <fraction> [<fraction>]` | Snap a window into that part of a layout whose lines are at those fractions of the screen (`snap left 0.66`: two thirds) |
 | `snap_layouts enable\|disable` | Resting on the maximize button offers layouts to snap into (default enable) |
 | `battery_saver off\|<percent>` | On battery at or below that level (default 20, 100: always on battery) the animations, the pointer trail and the background charts of the taskbar widgets stop until the computer is plugged in; the taskbar says so in a notification |
+| `battery_warning off\|<percent>` | On battery at or below that level (default 10) a notification says the battery is low, and at half of it an urgent one, also with the battery saver off. |
+| `dark_schedule off\|<from> <to>` | Dark mode between two times, like `21:00 07:00`. A change by hand lasts until the next of them. |
 | `keep_awake on\|off\|toggle` | Keep awake, for a download or anything else that has to run on: until it is turned off again the idle timers rest (no dimming, no screen saver, the screen stays on and unlocked, the computer does not go to sleep) and the battery saver stays off however low the battery is. The switch "Keep awake" in the power flyout of the battery widget does the same. Not for the config file: it is kept in memory only, so a new session always starts without it. Closing the lid and the power key do what they always do. |
 | `arrange cascade\|vertical\|horizontal\|optimal` | Arrange the windows of the focused workspace. Tile mode uses the matching split layouts. |
 | `showdesktop` | Minimize all windows / restore them |
@@ -96,6 +98,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `lock_command <command>` | Lock screen used by `idle_timeout lock`, `lid_action ... lock`, `power_key_action lock` and `lock_on_sleep` (default `tilewin-lock -f`) |
 
 - `tilewinmsg -t get_tilewin` prints the current mode, theme, panel pid and main display.
+- `tilewinmsg -t get_bindings` prints the key bindings of the current mode.
 - IPC clients can subscribe to `["tilewin"]` events.
 - The `get_tree` output has `minimized` and `maximized` fields.
 

@@ -25,6 +25,14 @@ Tile mode is sway: the same layouts, the same config, with the theme's tile colo
 
 ![Tile mode](docs/screenshots/tile-mode.png)
 
+Search finds apps, settings, files and sums. `Super+/` lists the keys of the mode you are in, and a new user is greeted with a theme to pick:
+
+| Search | Keyboard shortcuts (Super+/) |
+|---|---|
+| ![Search in the start menu](docs/screenshots/search.png) | ![The list of keyboard shortcuts](docs/screenshots/shortcuts.png) |
+| **First start** | **Quick settings with the keyboard** |
+| ![The welcome window](docs/screenshots/welcome.png) | ![A ring on a button of the quick settings](docs/screenshots/flyout-keyboard.png) |
+
 Every theme brings its own title bars, taskbar, start menu and wallpaper:
 
 | Windows 1 | Windows 3 |
@@ -49,14 +57,17 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 
 - **Two modes, switched live** with Super+Shift+W: tile mode is sway, window mode is Windows. Your windows keep running.
 - **Window mode like Windows:** title bars with their buttons, snapping to edges and corners, Snap Layouts, Alt+Tab, Task view with virtual desktops, the window menu and animations.
-- **A taskbar** with a start menu, window previews, tray, clock and calendar, quick settings, notifications, and widgets from CPU and network charts to the weather of your own script.
+- **A taskbar** with a start menu, window previews, tray, clock and calendar, quick settings, notifications, and widgets from CPU and network charts to the weather of your own script. Its flyouts work from the keyboard, and it stays sharp on screens at 125% or 150%.
+- **Search** in the start menu and the launcher: apps, settings pages (`dark mode`, `wifi`), files and folders in your home, and sums (`6*7`).
+- **Help when you need it:** a welcome at the first start, `Super+/` for the keys of the current mode, and a word on how to get back after switching the mode.
 - **A desktop** with icons, and widgets as clocks, charts and gauges.
-- **12 themes**, Windows 1 to Windows 11 and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, the accent color taken from the wallpaper if you like.
+- **12 themes**, Windows 1 to Windows 11 and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
 - **Little helpers:** clipboard history, a snipping tool that also reads text, an emoji picker, sticky notes, screen savers, night light and a lock screen.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
 - **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.
-- **A settings app** for all of it, so no config file has to be touched.
+- **A settings app** for all of it, so no config file has to be touched. What fails says so in a banner, with a way to try again.
+- **Updates** in one step: `tilewin-update` or the About page bring in the newest release or build the newest source, then restart tileWin with your windows open.
 - **Light:** written in C, no CPU use while nothing happens.
 
 Every feature in detail: [docs/features.md](docs/features.md).
@@ -91,16 +102,18 @@ Start tileWin:
 - run `tilewin-session` from a text console.
 
 **Dependencies:**
-- **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja.
+- **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja. `tilewin-update` also uses curl, and git for the source.
 - **Optional:** pam (the lock screen is skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 To update:
 
 ```sh
-git pull && ./install.sh --no-deps && tilewinmsg restart
+tilewin-update           # asks which way
+tilewin-update release   # the newest release from GitHub
+tilewin-update source    # the newest source, built in a temporary folder that is deleted afterwards
 ```
 
-The restart keeps your windows open; an updated compositor itself starts with your next login (or now, with `tilewinmsg restart relaunch-apps`).
+The Updates group of the About page in the settings does the same. tileWin is restarted after a good update. The restart keeps your windows open; an updated compositor itself starts with your next login (or now, with `tilewinmsg restart relaunch-apps`).
 
 ## Shortcuts of window mode
 
@@ -129,6 +142,7 @@ The restart keeps your windows open; an updated compositor itself starts with yo
 | Super+Shift+← / → / ↑ / ↓ | Move window to the monitor beside, above or below |
 | Print | Screenshot of all screens to the clipboard and ~/Pictures/Screenshots |
 | Win+Shift+S | Snipping tool: rectangle, window or full screen to the clipboard, or **Text**: the text in a rectangle, read with tesseract (in English and the session's language when its data is installed) |
+| Super+/, Super+F1 | The keyboard shortcuts of this mode |
 | Super+Shift+W | Switch to tile mode |
 | Super+Shift+C | Reload config |
 | Super+Shift+Ctrl+R | Restart tileWin |
@@ -143,7 +157,7 @@ The restart keeps your windows open; an updated compositor itself starts with yo
 | Swipe in from the left / right edge of a touchscreen | Task view / notifications |
 | Tap / hold a finger still on a touchscreen | Click / right-click (in menus and lists, a finger moved up or down scrolls) |
 
-Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode, `Super+Shift+Ctrl+R` to restart, the three finger swipes (up: task view, left / right: workspaces) and the touchscreen edge swipes.
+Tile mode uses sway's default bindings (`$mod` = Super, `$mod+d` opens the launcher) plus `Super+Shift+W` to switch mode, `Super+/` for the list of keys, `Super+Shift+Ctrl+R` to restart, the three finger swipes (up: task view, left / right: workspaces) and the touchscreen edge swipes.
 
 ## Themes
 

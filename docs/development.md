@@ -101,5 +101,34 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   throw, is still going a second later, and does neither when it was put down
   gently or when gravity mode is off.
 
+- types into the start menu and the launcher and checks that settings pages,
+  sums and files are found and open, with quotes and marks in a file name, and
+  that a word with no app still runs as a command in the launcher;
+- reads the bindings back, opens the list of keyboard shortcuts with its keys,
+  and checks a switch of the mode tells how to get back three times and no more;
+- walks quick settings and the network and power flyouts with the keyboard, and
+  changes a slider and connects to a network with stand-ins for pactl and nmcli;
+- goes through the welcome of a new user and checks it stays away afterwards, and
+  from someone who was here before it came in;
+- draws the cards of the Theme page and looks for the title bars of the themes;
+- has a helper refuse on the DNS page and checks the banner, Try again and ×;
+- compares the sharpness of the taskbar at 150% with and without
+  `fractional-scale-v1`, and clicks its start button there;
+- runs on a clock of its own and checks dark mode by the schedule, and that a
+  change by hand lasts until the next start or end;
+- presses the buttons of the Updates group with a stand-in for `tilewin-update`.
+
+`tests/update.sh` in the unit suite runs `tilewin-update` itself with stand-ins
+for GitHub, git and the password: the temporary folder goes in every case, there
+is a restart only after a good update, and a wrong checksum installs nothing.
+
+## Making a release
+
+Set the version in `meson.build`, commit and tag, then
+`tools/make-release-archive.sh <dir>` makes the ready-made archive and
+`SHA256SUMS` for the release, which `tilewin-update release` looks for. An archive
+runs where the libraries it was built against are there; elsewhere the update
+builds the source of the tag.
+
 It needs `grim`, `wl-copy`, `python3` and `dbus-run-session`, and skips itself
 where it cannot run.

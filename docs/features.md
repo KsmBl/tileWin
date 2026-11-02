@@ -101,3 +101,13 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
 - **Low resource use:**
   - Decorations are drawn once and cached.
   - The panel is event-driven, redraws only on change and polls system information only for widgets that are visible.
+- **Search beyond apps:** the start menu and the launcher find settings pages by the words people look for, files and folders in the home folder, and work out sums. See [usage.md](usage.md#search).
+- **Keyboard shortcuts on screen:** `Super+/` or `Super+F1` lists the real keys of the current mode, and the first three switches of the mode say how to get back.
+- **Flyouts with the keyboard:** Tab, the arrows, Enter and Space in quick settings and the network, volume, battery, Bluetooth and notification flyouts.
+- **A welcome for new users:** a theme, dark mode, the mode, the keys worth knowing and a way to restore a backup.
+- **Theme cards** with a small window and taskbar in the colors of each theme.
+- **Problems say so:** a banner over the settings page with the next step, and empty lists that say what to do.
+- **Sharp on 125% and 150%:** the taskbar, its menus and flyouts draw for the real scale of the screen.
+- **Low battery warning** at 10% and an urgent one at 5%, on their own beside the battery saver.
+- **Dark mode on a schedule**, and a change by hand lasts until the next start or end.
+- **Updates in one step:** `tilewin-update` and the About page bring in the newest release or build the newest source in a temporary folder, then restart tileWin.

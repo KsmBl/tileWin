@@ -266,6 +266,7 @@ if get_option('fish-completions')
 		'completions/fish/tilewinmsg.fish',
 		'completions/fish/tilewin-panel.fish',
 		'completions/fish/tilewin-theme.fish',
+		'completions/fish/tilewin-update.fish',
 		'completions/fish/tilewin-settings.fish',
 		'completions/fish/tilewin-media.fish',
 		'completions/fish/tilewin-app-icons.fish',
