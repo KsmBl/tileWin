@@ -74,6 +74,14 @@ Every feature in detail: [docs/features.md](docs/features.md).
 
 ## Installation
 
+On Arch Linux, from the AUR:
+
+```sh
+yay -S tilewin
+```
+
+Everywhere else:
+
 ```sh
 git clone https://github.com/KsmBl/tileWin.git
 cd tileWin
@@ -113,7 +121,7 @@ tilewin-update release   # the newest release from GitHub
 tilewin-update source    # the newest source, built in a temporary folder that is deleted afterwards
 ```
 
-The Updates group of the About page in the settings does the same. tileWin is restarted after a good update. The restart keeps your windows open; an updated compositor itself starts with your next login (or now, with `tilewinmsg restart relaunch-apps`).
+The Updates group of the About page in the settings does the same. tileWin is restarted after a good update. The AUR package is updated with your package manager instead. The restart keeps your windows open; an updated compositor itself starts with your next login (or now, with `tilewinmsg restart relaunch-apps`).
 
 ## Shortcuts of window mode
 

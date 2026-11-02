@@ -6,3 +6,4 @@ option('man-pages', type: 'feature', value: 'disabled', description: 'Generate a
 option('sd-bus-provider', type: 'combo', choices: ['auto', 'libsystemd', 'libelogind', 'basu'], value: 'auto', description: 'Provider of the sd-bus library')
 option('fish-completions', type: 'boolean', value: true, description: 'Install fish shell completions')
 option('settings', type: 'feature', value: 'auto', description: 'Build the tilewin-settings GTK4 app')
+option('self-update', type: 'boolean', value: true, description: 'tilewin-update may replace the installation; off when a package manager owns the files')

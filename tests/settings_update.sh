@@ -2,7 +2,8 @@
 # The Updates group of the About page, with a stand-in for tilewin-update:
 #  - it says what the newest release is when the page is shown;
 #  - Build runs "source", Update runs "release";
-#  - a failure shows in the banner, and Try again runs the same way once more.
+#  - a failure shows in the banner, and Try again runs the same way once more;
+#  - with a package manager owning the files neither button is there.
 #
 # usage: settings_update.sh <build dir> <source dir>
 set -u
@@ -45,7 +46,12 @@ cat > "$work/update" <<EOS
 #!/bin/sh
 echo "\$1" >> "$work/calls"
 case \$1 in
-check) echo "installed 0.0"; echo "release 99.0"; echo "archive yes" ;;
+check)
+	echo "installed 0.0"
+	[ ! -e "$work/managed" ] || echo "managed yes"
+	echo "release 99.0"
+	echo "archive yes"
+	;;
 *)
 	echo "==> working"
 	if [ -e "$work/refuse" ]; then
@@ -143,6 +149,23 @@ banner_up && fail "the banner stayed after it worked"
 sleep 1.5
 grep -q '^release$' "$work/calls" || fail "Update did not run the release way: $(cat "$work/calls")"
 banner_up && fail "a good update shows a banner"
+
+# owned by a package manager: nothing to press
+touch "$work/managed"
+ipc '[title="tileWin Settings"] kill' >/dev/null
+sleep 0.5
+"$settings" --page=about >/dev/null 2>&1 &
+sleep 3
+ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
+sleep 2
+: > "$work/calls"
+"$pointer" 1280 800 click "$release_x" "$release_y"
+sleep 0.5
+"$pointer" 1280 800 click "$build_x" "$build_y"
+sleep 1
+if grep -qE '^(source|release)$' "$work/calls"; then
+	fail "with a package manager a button still ran: $(cat "$work/calls")"
+fi
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

@@ -12,7 +12,8 @@
 #  - an archive with a wrong sum installs nothing;
 #  - an archive this system lacks libraries for, and a release with no archive,
 #    are built from the source of that tag;
-#  check says what is installed and the newest release.
+#  check says what is installed and the newest release;
+#  built for a package manager it refuses both ways, and check still works.
 #
 # usage: update.sh <build dir> <source dir>
 set -u
@@ -198,6 +199,22 @@ make_release v99.0 no-archive
 : > "$work/log"
 run release || fail "a release without an archive failed: $(cat "$work/out")"
 grep -q "^git clone .*--branch v99.0 " "$work/log" || fail "without an archive it did not build the tag: $(cat "$work/log")"
+
+# owned by a package manager: it says so, touches nothing, and check still works
+sed "s/^MANAGED=.*/MANAGED='yes'/" "$update" > "$work/update-managed"
+chmod +x "$work/update-managed"
+for way in release source; do
+	: > "$work/log"; rm -rf "$work/root"
+	if "$work/update-managed" "$way" </dev/null > "$work/out" 2>&1; then
+		fail "a packaged install took the $way way"
+	fi
+	grep -q "package manager" "$work/out" || fail "it does not name the package manager: $(cat "$work/out")"
+	[ ! -s "$work/log" ] || fail "a packaged install ran something: $(cat "$work/log")"
+	[ -e "$work/root" ] && fail "a packaged install was overwritten"
+done
+"$work/update-managed" check </dev/null > "$work/out" 2>&1
+grep -q "^managed yes$" "$work/out" && grep -q "^release 99.0$" "$work/out" ||
+	fail "check of a packaged install says: $(cat "$work/out")"
 
 # nonsense
 if "$update" nonsense </dev/null >/dev/null 2>&1; then

@@ -130,5 +130,20 @@ Set the version in `meson.build`, commit and tag, then
 runs where the libraries it was built against are there; elsewhere the update
 builds the source of the tag.
 
+The AUR package is in `packaging/aur`. After a release, set `pkgver` there and:
+
+```sh
+git clone ssh://aur@aur.archlinux.org/tilewin.git aur-tilewin
+cp packaging/aur/PKGBUILD packaging/aur/tilewin.install aur-tilewin/
+cd aur-tilewin
+makepkg --printsrcinfo > .SRCINFO
+git add PKGBUILD tilewin.install .SRCINFO
+git commit -m "Version x.y"
+git push
+```
+
+It builds with `-Dself-update=false`, so `tilewin-update` and the About page
+leave the updating to pacman rather than write over its files.
+
 It needs `grim`, `wl-copy`, `python3` and `dbus-run-session`, and skips itself
 where it cannot run.

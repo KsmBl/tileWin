@@ -222,6 +222,7 @@ scripts_conf.set('datadir', tilewin_datadir)
 scripts_conf.set('bindir', join_paths(prefix, get_option('bindir')))
 scripts_conf.set('version', meson.project_version())
 scripts_conf.set('prefix', prefix)
+scripts_conf.set('managed', get_option('self-update') ? '' : 'yes')
 foreach script : ['tilewin-session', 'tilewin-theme', 'tilewin-color-scheme', 'tilewin-app-icons', 'tilewin-update']
 	configure_file(
 		input: 'scripts' / script + '.in',

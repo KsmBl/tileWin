@@ -1,0 +1,53 @@
+# Maintainer: KsmBl <katzen.sind.lecker69@gmail.com>
+pkgname=tilewin
+pkgver=1.0.1
+pkgrel=1
+pkgdesc='Wayland compositor with a tile mode like sway and a window mode like Windows, with taskbar, themes and settings app'
+arch=('x86_64')
+url='https://github.com/KsmBl/tileWin'
+license=('MIT')
+depends=(
+	'cairo' 'curl' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk4' 'json-c' 'libcap' 'libdrm' 'libevdev'
+	'libinput' 'librsvg' 'libxcb' 'libxkbcommon' 'pam' 'pango' 'pcre2' 'pixman' 'polkit'
+	'systemd-libs' 'wayland' 'wlroots0.20' 'xcb-util-wm' 'xdg-utils' 'xorg-xwayland'
+)
+makedepends=('git' 'meson' 'ninja' 'pkgconf' 'wayland-protocols')
+optdepends=(
+	'brightnessctl: brightness keys and sliders on a laptop'
+	'bluez: the Bluetooth flyout and page'
+	'grim: screenshots and the snipping tool'
+	'slurp: picking a part of the screen in the snipping tool'
+	'wl-clipboard: screenshots to the clipboard, and copying the value of a sum'
+	'libpulse: the volume widget and flyout (pactl)'
+	'pavucontrol: the volume mixer'
+	'pipewire-pulse: a sound server for the volume widget'
+	'networkmanager: the network flyout and page'
+	'playerctl: media keys and buttons'
+	'tesseract: copying text from the screen'
+	'tesseract-data-eng: the English language data for tesseract'
+	'xfce4-terminal: the terminal of the default config'
+	'thunar: the file manager of the default config'
+	'xdg-desktop-portal-gtk: file dialogs and dark mode for apps'
+)
+backup=('etc/pam.d/tilewin-lock')
+install=tilewin.install
+source=("tileWin::git+https://github.com/KsmBl/tileWin.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+build() {
+	# the helpers that run as root go in a folder of their own, and pacman
+	# does the updating: tilewin-update only says so
+	arch-meson tileWin build \
+		--libexecdir lib/tilewin \
+		-Dman-pages=disabled \
+		-Dsd-bus-provider=libsystemd \
+		-Dwerror=false \
+		-Dself-update=false
+	meson compile -C build
+}
+
+package() {
+	meson install -C build --destdir "$pkgdir" --no-rebuild
+	install -Dm644 tileWin/data/tilewin-lock.pam "$pkgdir/etc/pam.d/tilewin-lock"
+	install -Dm644 tileWin/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -15,10 +15,14 @@
 # tileWin is restarted with "tilewinmsg restart" after a good update, which keeps
 # the windows open. Without a terminal to ask a password in (the settings app),
 # pkexec asks instead of sudo.
+#
+# Built with -Dself-update=false a package manager owns the files, and this only
+# says what the newest release is.
 set -euo pipefail
 
 VERSION='@version@'
 PREFIX=${TILEWIN_UPDATE_PREFIX:-'@prefix@'}
+MANAGED='@managed@'
 REPO=${TILEWIN_UPDATE_REPO:-KsmBl/tileWin}
 API=${TILEWIN_UPDATE_API:-https://api.github.com/repos/$REPO/releases/latest}
 GIT_URL=${TILEWIN_UPDATE_GIT:-https://github.com/$REPO.git}
@@ -145,6 +149,10 @@ from_archive() {
 		die "could not install; if the password was refused, nothing changed"
 }
 
+if [ -n "$MANAGED" ] && [ "$action" != check ]; then
+	die "tileWin $VERSION was installed by your package manager: update it there (yay -Syu on Arch Linux)"
+fi
+
 if [ -z "$action" ]; then
 	[ -t 0 ] || die "say which way: tilewin-update release or tilewin-update source"
 	echo "tileWin $VERSION is installed. How do you want to update?"
@@ -161,6 +169,7 @@ fi
 case $action in
 check)
 	echo "installed $VERSION"
+	[ -z "$MANAGED" ] || echo "managed yes"
 	read_release
 	echo "release ${tag#v}"
 	echo "archive ${archive:+yes}"

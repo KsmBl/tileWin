@@ -10,7 +10,7 @@
  */
 struct updates {
 	struct settings *s;
-	GtkWidget *release_row, *release_button, *source_button, *spinner, *line, *expander, *log;
+	GtkWidget *release_row, *source_row, *release_button, *source_button, *spinner, *line, *expander, *log;
 	GDataInputStream *reader;
 	GSubprocess *proc;
 	char *last_line;
@@ -36,10 +36,13 @@ static void check_done(GObject *source, GAsyncResult *result, gpointer data) {
 	gboolean ok = g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, &out, NULL,
 		NULL) && g_subprocess_get_successful(G_SUBPROCESS(source));
 	char *release = NULL, *installed = NULL;
+	bool managed = false;
 	char **lines = g_strsplit(out ? out : "", "\n", -1);
 	for (int i = 0; lines[i]; i++) {
 		if (g_str_has_prefix(lines[i], "release ")) {
 			release = g_strdup(lines[i] + 8);
+		} else if (strcmp(lines[i], "managed yes") == 0) {
+			managed = true;
 		} else if (g_str_has_prefix(lines[i], "installed ")) {
 			installed = g_strdup(lines[i] + 10);
 		}
@@ -52,6 +55,14 @@ static void check_done(GObject *source, GAsyncResult *result, gpointer data) {
 		text = g_strdup_printf("%s: this is what you have", release);
 	} else {
 		text = g_strdup_printf("%s is out; you have %s", release, installed ? installed : "another");
+	}
+	// also when GitHub did not answer: the line came before it was asked
+	if (managed) {
+		char *more = g_strdup_printf("%s. Your package manager updates tileWin here.", text);
+		g_free(text);
+		text = more;
+		gtk_widget_set_visible(u->release_button, FALSE);
+		gtk_widget_set_visible(u->source_row, FALSE);
 	}
 	set_subtitle(u->release_row, text);
 	g_free(text);
@@ -201,7 +212,7 @@ void updates_group_new(struct settings *s, GtkWidget *content) {
 
 	u->source_button = gtk_button_new_with_label("Build");
 	g_signal_connect(u->source_button, "clicked", G_CALLBACK(on_source), u);
-	ui_row(group, "Newest source",
+	u->source_row = ui_row(group, "Newest source",
 		"Pulls the repository into a temporary folder, builds it there, and deletes the "
 		"folder afterwards. Takes a few minutes.", u->source_button);
 

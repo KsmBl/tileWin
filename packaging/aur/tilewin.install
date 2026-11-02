@@ -1,0 +1,39 @@
+give_capability() {
+	# Lowering the nice value of the focused window's process (focus_priority)
+	# takes CAP_SYS_NICE, and each new binary has to be given it again.
+	setcap cap_sys_nice=ep usr/bin/tilewin ||
+		echo "could not give tileWin CAP_SYS_NICE: focus_priority will do nothing"
+}
+
+warn_local_install() {
+	if [ -e usr/local/bin/tilewin ]; then
+		echo "==> A copy of tileWin in /usr/local comes first in PATH and hides this package."
+		echo "    In the clone it was built in: ./install.sh --uninstall"
+	fi
+}
+
+post_install() {
+	give_capability
+	warn_local_install
+	echo "==> Choose tileWin in your display manager, or run tilewin-session from a console."
+}
+
+post_upgrade() {
+	give_capability
+	warn_local_install
+	# the DNS service, if it is in use, takes over the new files
+	if systemctl is-active --quiet tilewin-dnsd.service 2>/dev/null; then
+		systemctl restart tilewin-dnsd.service
+		usr/lib/tilewin/tilewin-dns-apply enable ||
+			echo "could not send the DNS of this computer through the service"
+	fi
+	echo "==> tilewinmsg restart brings the update in with your windows open."
+}
+
+pre_remove() {
+	# with the DNS service gone, DNS has to go back to NetworkManager first
+	if systemctl is-enabled --quiet tilewin-dnsd.service 2>/dev/null; then
+		usr/lib/tilewin/tilewin-dns-apply disable ||
+			echo "could not hand DNS back to NetworkManager"
+	fi
+}
