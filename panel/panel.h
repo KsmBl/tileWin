@@ -17,6 +17,7 @@
 #include "tw_theme.h"
 #include "twconf.h"
 #include "viewporter-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
 #include "virtual-keyboard-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
@@ -70,9 +71,11 @@ struct psurface {
 	struct wl_surface *surface;
 	struct zwlr_layer_surface_v1 *layer_surface;
 	struct wp_viewport *viewport;
+	struct wp_fractional_scale_v1 *fractional;
 	int width, height; // logical size configured by the compositor
 	int req_width, req_height;
-	int scale;
+	int scale;         // whole, for sizes of icons: the next whole number above the real one
+	double exact;      // what the compositor prefers (1.5), 0 until it has said
 	struct pool_buffer buffers[2];
 	struct pool_buffer *shown; // the one last committed, to compare the next with
 	bool configured, dirty, frame_pending, catcher;
@@ -385,6 +388,7 @@ struct panel {
 	struct zxdg_output_manager_v1 *xdg_output_manager;
 	struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
 	struct wp_viewporter *viewporter;
+	struct wp_fractional_scale_manager_v1 *fractional_scale;
 	struct ext_foreign_toplevel_list_v1 *toplevel_list;
 	struct ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture;
 	struct ext_image_copy_capture_manager_v1 *copy_capture;

@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -36,6 +37,25 @@ static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 	.closed = layer_surface_closed,
 };
 
+/*
+ * On a screen at 125% or 150% the compositor says so here, in 120ths. The surface
+ * is then drawn for exactly the pixels it covers, and text and lines stay sharp,
+ * where a buffer of the next whole scale would be shrunk and go soft.
+ */
+static void fractional_preferred(void *data, struct wp_fractional_scale_v1 *fractional,
+		uint32_t scale) {
+	struct psurface *s = data;
+	double exact = scale / 120.0;
+	if (exact != s->exact) {
+		s->exact = exact;
+		psurface_set_dirty(s);
+	}
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_listener = {
+	.preferred_scale = fractional_preferred,
+};
+
 static struct psurface *create(struct panel *panel, struct panel_output *output,
 		const struct psurface_impl *impl, void *data,
 		enum zwlr_layer_shell_v1_layer layer, const char *name_space) {
@@ -52,6 +72,12 @@ static struct psurface *create(struct panel *panel, struct panel_output *output,
 		s->surface, output ? output->wl_output : NULL, layer, name_space);
 	zwlr_layer_surface_v1_add_listener(s->layer_surface, &layer_surface_listener, s);
 	wl_list_insert(panel->surfaces.prev, &s->link);
+	if (panel->viewporter && panel->fractional_scale) {
+		s->viewport = wp_viewporter_get_viewport(panel->viewporter, s->surface);
+		s->fractional = wp_fractional_scale_manager_v1_get_fractional_scale(
+			panel->fractional_scale, s->surface);
+		wp_fractional_scale_v1_add_listener(s->fractional, &fractional_listener, s);
+	}
 	return s;
 }
 
@@ -66,7 +92,7 @@ struct psurface *psurface_create_catcher(struct panel *panel,
 	struct psurface *s = create(panel, output, impl, data,
 		ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "tilewin-popup-catcher");
 	s->catcher = true;
-	if (panel->viewporter) {
+	if (panel->viewporter && !s->viewport) {
 		s->viewport = wp_viewporter_get_viewport(panel->viewporter, s->surface);
 	}
 	zwlr_layer_surface_v1_set_anchor(s->layer_surface,
@@ -110,6 +136,9 @@ void psurface_destroy(struct psurface *s) {
 	}
 	psurface_clear_hotspots(s);
 	list_free(s->hotspots);
+	if (s->fractional) {
+		wp_fractional_scale_v1_destroy(s->fractional);
+	}
 	if (s->viewport) {
 		wp_viewport_destroy(s->viewport);
 	}
@@ -232,14 +261,21 @@ void psurface_render(struct psurface *s) {
 		return;
 	}
 	s->scale = s->output ? s->output->scale : 1;
+	bool exact = s->exact > 0 && s->viewport;
+	double factor = s->scale;
+	if (exact) {
+		factor = s->exact;
+		s->scale = (int)ceil(factor);
+	}
+	int buffer_w = exact ? (int)lround(s->width * factor) : s->width * s->scale;
+	int buffer_h = exact ? (int)lround(s->height * factor) : s->height * s->scale;
 	// into the other buffer, so the one shown still holds the last frame
 	struct pool_buffer *other = s->shown == &s->buffers[0] ? &s->buffers[1] : &s->buffers[0];
 	bool keep = s->shown && !other->busy && !s->shown->busy;
 	if (keep) {
 		s->shown->busy = true;
 	}
-	struct pool_buffer *buffer = get_next_buffer(s->panel->shm, s->buffers,
-		s->width * s->scale, s->height * s->scale);
+	struct pool_buffer *buffer = get_next_buffer(s->panel->shm, s->buffers, buffer_w, buffer_h);
 	if (keep) {
 		s->shown->busy = false;
 	}
@@ -253,7 +289,7 @@ void psurface_render(struct psurface *s) {
 	cairo_restore(cr);
 
 	cairo_save(cr);
-	cairo_scale(cr, s->scale, s->scale);
+	cairo_scale(cr, factor, factor);
 	cairo_font_options_t *fo = cairo_font_options_create();
 	cairo_font_options_set_antialias(fo, CAIRO_ANTIALIAS_GRAY);
 	cairo_font_options_set_hint_style(fo, CAIRO_HINT_STYLE_SLIGHT);
@@ -275,7 +311,12 @@ void psurface_render(struct psurface *s) {
 		s->dirty = false;
 		return;
 	}
-	wl_surface_set_buffer_scale(s->surface, s->scale);
+	if (exact) {
+		wl_surface_set_buffer_scale(s->surface, 1);
+		wp_viewport_set_destination(s->viewport, s->width, s->height);
+	} else {
+		wl_surface_set_buffer_scale(s->surface, s->scale);
+	}
 	wl_surface_attach(s->surface, buffer->buffer, 0, 0);
 	wl_surface_damage_buffer(s->surface, damage.x, damage.y, damage.width, damage.height);
 	s->shown = buffer;

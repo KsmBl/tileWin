@@ -1336,7 +1336,7 @@ void desktop_create(struct panel_output *output) {
 	// clicking the desktop gives it the keyboard, for Delete, F2 and Escape
 	zwlr_layer_surface_v1_set_keyboard_interactivity(bg->layer_surface,
 		ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
-	if (panel->viewporter) {
+	if (panel->viewporter && !bg->viewport) {
 		bg->viewport = wp_viewporter_get_viewport(panel->viewporter, bg->surface);
 	}
 	zwlr_layer_surface_v1_set_anchor(bg->layer_surface,

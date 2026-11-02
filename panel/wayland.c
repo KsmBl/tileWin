@@ -729,6 +729,10 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 			&ext_image_copy_capture_manager_v1_interface, 1);
 	} else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
 		panel->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
+	} else if (strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0 &&
+			!getenv("TILEWIN_NO_FRACTIONAL_SCALE")) {
+		panel->fractional_scale = wl_registry_bind(registry, name,
+			&wp_fractional_scale_manager_v1_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		struct panel_seat *seat = calloc(1, sizeof(*seat));
 		seat->panel = panel;

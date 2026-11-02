@@ -35,6 +35,10 @@ It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for t
 
 The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
 
+## Screens at 125% or 150%
+
+The taskbar, its menus and flyouts, the desktop icons and the notifications ask the compositor for the real scale of the screen (`fractional-scale-v1`) and draw for exactly the pixels they cover, so text and lines stay sharp on a screen with `scale 1.5`. Where the protocol is missing they draw at the next whole scale, which is shrunk to fit.
+
 ## First start
 
 A new user is greeted by **Welcome to tileWin** (`tilewin-settings --welcome`): a theme and dark mode, window or tile mode, the keys worth knowing, and a way to restore a backup from another computer. Everything applies at once and *Skip* ends it. It comes once (`welcomed` in `~/.local/state/tileWin`); someone with a session behind them does not get it after an update.
