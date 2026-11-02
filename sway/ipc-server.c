@@ -839,6 +839,37 @@ void ipc_client_handle_command(struct ipc_client *client, uint32_t payload_lengt
 		goto exit_cleanup;
 	}
 
+	case IPC_GET_BINDINGS:
+	{
+		json_object *bindings = json_object_new_array();
+		list_t *list = config->current_mode->keysym_bindings;
+		for (int i = 0; i < list->length; i++) {
+			struct sway_binding *binding = list->items[i];
+			char keys[256] = "";
+			size_t used = 0;
+			const char *names[10];
+			int count = get_modifier_names(names, binding->modifiers);
+			for (int j = 0; j < count; j++) {
+				used += snprintf(keys + used, sizeof(keys) - used, "%s+", names[j]);
+			}
+			for (int j = 0; j < binding->keys->length && used < sizeof(keys) - 1; j++) {
+				char name[64];
+				uint32_t key = *(uint32_t *)binding->keys->items[j];
+				if (xkb_keysym_get_name(key, name, sizeof(name)) >= 0) {
+					used += snprintf(keys + used, sizeof(keys) - used, "%s%s", j ? "+" : "", name);
+				}
+			}
+			json_object *item = json_object_new_object();
+			json_object_object_add(item, "keys", json_object_new_string(keys));
+			json_object_object_add(item, "command", json_object_new_string(binding->command));
+			json_object_array_add(bindings, item);
+		}
+		const char *json_string = json_object_to_json_string(bindings);
+		ipc_send_reply(client, payload_type, json_string, (uint32_t)strlen(json_string));
+		json_object_put(bindings);
+		goto exit_cleanup;
+	}
+
 	case IPC_GET_TREE:
 	{
 		json_object *tree = ipc_json_describe_node_recursive(&root->node);

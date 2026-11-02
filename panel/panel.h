@@ -461,6 +461,8 @@ bool ipc_panel_init(struct panel *panel);
 void ipc_panel_fini(struct panel *panel);
 void ipc_panel_readable(struct panel *panel);
 bool ipc_panel_command(struct panel *panel, const char *command);
+/* A request answered at once; the answer is the caller's, NULL without one. */
+struct json_object *ipc_request(struct panel *panel, uint32_t type, const char *payload);
 bool ipc_panel_commandf(struct panel *panel, const char *fmt, ...);
 void ipc_panel_refresh_tree(struct panel *panel);
 void ipc_panel_refresh_workspaces(struct panel *panel);
@@ -505,6 +507,7 @@ enum popup_kind {
 	POPUP_INFO,
 	POPUP_HUNG,
 	POPUP_SNAPLAYOUTS,
+	POPUP_SHORTCUTS,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -852,6 +855,10 @@ const list_t *search_extras_below(struct search_extras *x);
 /* The n-th of top and below together, and the n of an entry, or -1. */
 struct tw_desktop_entry *search_extras_at(struct search_extras *x, int n);
 int search_extras_index(struct search_extras *x, const struct tw_desktop_entry *e);
+
+/* shortcuts.c: the list of keyboard shortcuts, and the word after a switch of the mode */
+void shortcuts_toggle(struct panel *panel, struct panel_output *output);
+void shortcuts_mode_hint(struct panel *panel, const char *mode);
 
 /* minicons.c: minimized windows as icons on the desktop (Windows 3) */
 void minicons_update(struct panel *panel);

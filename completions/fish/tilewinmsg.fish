@@ -38,7 +38,7 @@ end
 
 set -l types command get_workspaces get_inputs get_outputs get_tree get_marks \
     get_bar_config get_version get_binding_modes get_binding_state get_config \
-    get_seats send_tick subscribe get_tilewin
+    get_seats send_tick subscribe get_tilewin get_bindings
 
 complete -c tilewinmsg -f
 complete -c tilewinmsg -s h -l help -d 'Show help'

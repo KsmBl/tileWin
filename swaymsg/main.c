@@ -532,6 +532,9 @@ int main(int argc, char **argv) {
 	} else if (strcasecmp(cmdtype, "get_tilewin") == 0) {
 		type = IPC_GET_TILEWIN;
 		raw = true;
+	} else if (strcasecmp(cmdtype, "get_bindings") == 0) {
+		type = IPC_GET_BINDINGS;
+		raw = true;
 	} else if (strcasecmp(cmdtype, "get_workspaces") == 0) {
 		type = IPC_GET_WORKSPACES;
 	} else if (strcasecmp(cmdtype, "get_seats") == 0) {

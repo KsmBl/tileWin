@@ -679,6 +679,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		clipboard_toggle(panel, output);
 	} else if (strcmp(cmd, "emoji") == 0) {
 		emojipicker_toggle(panel, output);
+	} else if (strcmp(cmd, "shortcuts") == 0) {
+		shortcuts_toggle(panel, output);
 	} else if (strcmp(cmd, "snip") == 0) {
 		snip_toolbar_toggle(panel, output);
 	} else if (strcmp(cmd, "bluetooth") == 0 && output) {

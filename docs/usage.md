@@ -29,6 +29,12 @@ tilewin-media help             # all examples
 
 It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
 
+## Keyboard shortcuts
+
+`Super+/` or `Super+F1` (or `tilewinmsg panel shortcuts`) lists the keyboard shortcuts of the current mode. They are read from the compositor as the list opens (`tilewinmsg -t get_bindings`), so keys you changed are shown as they are now, and a command the list has no words for is shown as it is under *Other*.
+
+The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
+
 ## Search
 
 The search box of the start menu (just start typing) and the launcher (`Super+S`) find more than apps:

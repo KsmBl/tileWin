@@ -7,7 +7,7 @@
  * where a step is one of
  *   text <word>            types the word (lowercase letters and digits)
  *   key <mods> <name>      presses one key with those modifiers held, where
- *                          mods is ctrl, shift, alt, any of them joined with
+ *                          mods is ctrl, shift, alt, super, any of them joined with
  *                          "+", or none, and name is a letter, a digit,
  *                          "return", "tab", "escape", "f4" or an arrow: "up",
  *                          "down", "left", "right"
@@ -32,6 +32,7 @@
 #define MOD_SHIFT (1 << 0)
 #define MOD_CTRL (1 << 2)
 #define MOD_ALT (1 << 3)
+#define MOD_SUPER (1 << 6) // Mod4 of the keymap
 
 static struct zwp_virtual_keyboard_manager_v1 *manager;
 static struct wl_seat *seat;
@@ -79,7 +80,7 @@ static const struct {
 	{ "9", KEY_9 }, { "return", KEY_ENTER }, { "tab", KEY_TAB }, { "escape", KEY_ESC },
 	{ "up", KEY_UP }, { "down", KEY_DOWN }, { "left", KEY_LEFT }, { "right", KEY_RIGHT },
 	{ "minus", KEY_MINUS }, { "slash", KEY_SLASH }, { "space", KEY_SPACE },
-	{ "f4", KEY_F4 },
+	{ "f4", KEY_F4 }, { "f1", KEY_F1 }, { "period", KEY_DOT },
 };
 
 static bool code_of(const char *name, uint32_t *code) {
@@ -195,6 +196,9 @@ int main(int argc, char **argv) {
 			}
 			if (strstr(argv[i + 1], "alt")) {
 				mods |= MOD_ALT;
+			}
+			if (strstr(argv[i + 1], "super")) {
+				mods |= MOD_SUPER;
 			}
 			uint32_t code;
 			if (!code_of(argv[i + 2], &code)) {

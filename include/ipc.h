@@ -25,6 +25,8 @@ enum ipc_command_type {
 
 	// tileWin-specific command types
 	IPC_GET_TILEWIN = 150,
+	// the key bindings of the current mode, for the list of shortcuts
+	IPC_GET_BINDINGS = 151,
 
 	// Events sent from sway to clients. Events have the highest bits set.
 	IPC_EVENT_WORKSPACE = ((1<<31) | 0),

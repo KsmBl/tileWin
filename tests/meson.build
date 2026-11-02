@@ -38,6 +38,16 @@ test(
 )
 
 test(
+	'shortcuts-text',
+	executable(
+		'test-shortcuts-text',
+		['test_shortcuts_text.c', '../panel/shortcuts_text.c'],
+		include_directories: include_directories('../panel'),
+	),
+	suite: 'unit',
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
@@ -912,6 +922,17 @@ test(
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 180,
+)
+
+test(
+	'shortcuts-list',
+	find_program('shortcuts_list.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [keyboard_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
 )
 
 test(

@@ -161,6 +161,10 @@ static json_object *request(struct panel *panel, uint32_t type, const char *payl
 	return obj;
 }
 
+struct json_object *ipc_request(struct panel *panel, uint32_t type, const char *payload) {
+	return request(panel, type, payload);
+}
+
 static void notify_widgets(struct panel *panel) {
 	if (!panel->config) {
 		return;
@@ -475,6 +479,7 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 	}
 	if (strcmp(change, "mode") == 0) {
 		const char *mode = jstr(event, "mode");
+		bool changed = mode && panel->state.mode && strcmp(mode, panel->state.mode) != 0;
 		free(panel->state.mode);
 		panel->state.mode = strdup(mode ? mode : "window");
 		enum layout_index layout = mode && strcmp(mode, "tile") == 0 ?
@@ -485,6 +490,9 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 			panel_outputs_update_bars(panel);
 		}
 		schedule_tree_refresh(panel);
+		if (changed) {
+			shortcuts_mode_hint(panel, mode);
+		}
 	} else if (strcmp(change, "settings") == 0) {
 		int64_t ms = jint(event, "double_click_time");
 		panel->state.double_click_ms = ms > 0 ? (int)ms : 0;

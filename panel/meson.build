@@ -34,6 +34,8 @@ executable(
 		'bluetooth.c',
 		'scheduler.c',
 		'searchextras.c',
+		'shortcuts.c',
+		'shortcuts_text.c',
 		'clipboard.c',
 		'config.c',
 		'desktop.c',

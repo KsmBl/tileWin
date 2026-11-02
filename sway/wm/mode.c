@@ -384,6 +384,22 @@ void tw_add_default_bindings(struct sway_config *cfg) {
 	if (tw_mode == TW_MODE_WINDOW && !snip_bound) {
 		free_cmd_results(config_command("bindsym --no-warn Mod4+Shift+s panel snip", NULL));
 	}
+	// the list of keyboard shortcuts, in both modes
+	static const char *const list_keys[] = { "slash", "F1" };
+	for (size_t i = 0; i < sizeof(list_keys) / sizeof(list_keys[0]); i++) {
+		xkb_keysym_t sym = xkb_keysym_from_name(list_keys[i], XKB_KEYSYM_NO_FLAGS);
+		bool bound = false;
+		for (int j = 0; j < mode->keysym_bindings->length && !bound; j++) {
+			struct sway_binding *binding = mode->keysym_bindings->items[j];
+			bound = binding->modifiers == WLR_MODIFIER_LOGO && binding->keys->length == 1 &&
+				*(xkb_keysym_t *)binding->keys->items[0] == sym;
+		}
+		if (!bound) {
+			char *cmd = format_str("bindsym --no-warn Mod4+%s panel shortcuts", list_keys[i]);
+			free_cmd_results(config_command(cmd, NULL));
+			free(cmd);
+		}
+	}
 	// three finger touchpad swipes, unless the config binds one itself
 	bool swipe_bound = false;
 	for (int j = 0; j < mode->gesture_bindings->length && !swipe_bound; j++) {
