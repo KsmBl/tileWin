@@ -1,4 +1,4 @@
-# tileWin
+////# tileWin
 
 tileWin is a Wayland compositor with two modes you can switch between at any time:
 
@@ -75,7 +75,7 @@ Every feature in detail: [docs/features.md](docs/features.md).
 ## Installation
 
 ```sh
-git clone <this repository> tileWin
+git clone https://github.com/KsmBl/tileWin.git
 cd tileWin
 ./install.sh              # installs dependencies (pacman/apt/dnf), builds and installs to /usr/local
 ```
