@@ -718,6 +718,7 @@ static void build_window(struct settings *s) {
 		{ "account", account_page_new, 5 },
 		{ "backup", backup_page_new, 5 },
 		{ "kernel", kernel_page_new, 6 },
+		{ "login", login_page_new, 5 },
 		{ "about", about_page_new, 5 },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
@@ -854,7 +855,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, about)\n", page);
+				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, login, about)\n", page);
 		}
 	}
 	if (g_variant_dict_contains(options, "welcome")) {
@@ -941,7 +942,7 @@ int main(int argc, char **argv) {
 	s->app = gtk_application_new("org.tilewin.Settings",
 		G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_NON_UNIQUE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, backup, kernel, devices or about", "PAGE");
+		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, login, backup, kernel, devices or about", "PAGE");
 	g_application_add_main_option(G_APPLICATION(s->app), "welcome", 0, 0, G_OPTION_ARG_NONE,
 		"Show the first-run window: a theme, a mode and the keys worth knowing", NULL);
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);

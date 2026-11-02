@@ -16,11 +16,6 @@ RuntimeDirectory=tilewin-dm
 RuntimeDirectoryPreserve=restart
 StateDirectory=tilewin-dm
 IgnoreSIGPIPE=no
-UtmpIdentifier=tty1
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
 
 [Install]
 Alias=display-manager.service

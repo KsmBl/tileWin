@@ -62,10 +62,18 @@ if [ "$prefix" != /usr ]; then
 	chmod 644 /usr/share/wayland-sessions/tilewin.desktop
 fi
 
-# The lock screen checks passwords with its own PAM service.
-if [ -d /etc/pam.d ] && [ ! -e /etc/pam.d/tilewin-lock ]; then
-	echo "Installing the PAM service of the lock screen"
-	install -m644 "$source_dir/data/tilewin-lock.pam" /etc/pam.d/tilewin-lock
+# The lock screen and the display manager have PAM services of their own. Nothing
+# here turns the display manager on: that is a choice on the Login screen page.
+if [ -d /etc/pam.d ]; then
+	for service in tilewin-lock tilewin-dm tilewin-dm-greeter tilewin-dm-autologin; do
+		if [ ! -e "/etc/pam.d/$service" ] && [ -e "$source_dir/data/$service.pam" ]; then
+			echo "Installing the PAM service $service"
+			install -m644 "$source_dir/data/$service.pam" "/etc/pam.d/$service"
+		fi
+	done
+fi
+if command -v systemd-sysusers >/dev/null 2>&1 && [ -e /usr/lib/sysusers.d/tilewin-dm.conf ]; then
+	systemd-sysusers tilewin-dm.conf || echo "could not make the user of the login screen" >&2
 fi
 
 # Lowering the nice value of the focused window's process (focus_priority), and

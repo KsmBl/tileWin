@@ -29,7 +29,12 @@ optdepends=(
 	'thunar: the file manager of the default config'
 	'xdg-desktop-portal-gtk: file dialogs and dark mode for apps'
 )
-backup=('etc/pam.d/tilewin-lock')
+backup=(
+	'etc/pam.d/tilewin-lock'
+	'etc/pam.d/tilewin-dm'
+	'etc/pam.d/tilewin-dm-greeter'
+	'etc/pam.d/tilewin-dm-autologin'
+)
 install=tilewin.install
 source=("tileWin::git+https://github.com/KsmBl/tileWin.git#tag=v$pkgver")
 sha256sums=('SKIP')
@@ -53,6 +58,9 @@ build() {
 
 package() {
 	meson install -C build --destdir "$pkgdir" --no-rebuild
-	install -Dm644 tileWin/data/tilewin-lock.pam "$pkgdir/etc/pam.d/tilewin-lock"
+	local service
+	for service in tilewin-lock tilewin-dm tilewin-dm-greeter tilewin-dm-autologin; do
+		install -Dm644 "tileWin/data/$service.pam" "$pkgdir/etc/pam.d/$service"
+	done
 	install -Dm644 tileWin/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

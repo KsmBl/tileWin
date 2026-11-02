@@ -137,7 +137,7 @@ make_release() { # <tag> [no-archive]
 	mkdir -p "$tree/tilewin/stage/usr/local/bin" "$tree/tilewin/data"
 	printf '#!/bin/sh\necho new\n' > "$tree/tilewin/stage/usr/local/bin/tilewin"
 	chmod +x "$tree/tilewin/stage/usr/local/bin/tilewin"
-	cp "$source_dir/data/tilewin.desktop" "$source_dir/data/tilewin-lock.pam" "$tree/tilewin/data/"
+	cp "$source_dir/data/tilewin.desktop" "$source_dir/data/"*.pam "$tree/tilewin/data/"
 	cp "$source_dir/scripts/tilewin-system-setup" "$tree/tilewin/"
 	tar -C "$tree" -czf "$work/net/$archive_name" tilewin
 	(cd "$work/net" && sha256sum "$archive_name" > SHA256SUMS)

@@ -15,7 +15,7 @@ trap 'rm -rf "$work"' EXIT
 
 mkdir -p "$work/tilewin/data"
 ./install.sh --no-deps --no-user-config --prefix /usr/local --destdir "$work/tilewin/stage" >/dev/null
-cp data/tilewin.desktop data/tilewin-lock.pam "$work/tilewin/data/"
+cp data/tilewin.desktop data/*.pam "$work/tilewin/data/"
 cp scripts/tilewin-system-setup "$work/tilewin/"
 tar -C "$work" -czf "$out/$name" tilewin
 (cd "$out" && sha256sum "$name" > SHA256SUMS)
