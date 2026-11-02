@@ -150,7 +150,7 @@ from_archive() {
 }
 
 if [ -n "$MANAGED" ] && [ "$action" != check ]; then
-	die "tileWin $VERSION was installed by your package manager: update it there (yay -Syu on Arch Linux)"
+	die "tileWin $VERSION was installed by your package manager: update it there"
 fi
 
 if [ -z "$action" ]; then
