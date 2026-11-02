@@ -67,6 +67,7 @@ struct startmenu {
 	int selected;
 	bool scroll_to_selected; // the keyboard moved the selection
 	list_t *hits; // borrowed entries in display order
+	struct search_extras *extras;
 	bool inside;
 	double px, py;
 	int group; // the open program group of the Program Manager, -1 for none
@@ -211,6 +212,10 @@ static int match_score(const struct tw_desktop_entry *e, const char *q) {
 
 static list_t *search_results(struct startmenu *sm) {
 	list_t *results = create_list();
+	const list_t *top = search_extras_top(sm->extras);
+	for (int i = 0; i < top->length; i++) {
+		list_add(results, top->items[i]);
+	}
 	for (int score = 4; score >= 1; score--) {
 		for (int i = 0; i < sm->apps->length; i++) {
 			struct tw_desktop_entry *e = sm->apps->items[i];
@@ -219,7 +224,29 @@ static list_t *search_results(struct startmenu *sm) {
 			}
 		}
 	}
+	const list_t *below = search_extras_below(sm->extras);
+	for (int i = 0; i < below->length; i++) {
+		list_add(results, below->items[i]);
+	}
 	return results;
+}
+
+/* What a hotspot of a row calls it: extras count on after the apps. */
+static int entry_id(struct startmenu *sm, struct tw_desktop_entry *e) {
+	int index = list_find(sm->apps, e);
+	if (index >= 0) {
+		return index;
+	}
+	index = search_extras_index(sm->extras, e);
+	return index < 0 ? -1 : sm->apps->length + index;
+}
+
+static struct tw_desktop_entry *entry_at(struct startmenu *sm, int id) {
+	if (id < 0) {
+		return NULL;
+	}
+	return id < sm->apps->length ? sm->apps->items[id] :
+		search_extras_at(sm->extras, id - sm->apps->length);
 }
 
 static char *app_command(struct panel *panel, const struct tw_desktop_entry *e) {
@@ -478,7 +505,7 @@ static void add_hit(struct sm_ctx *c, struct tw_desktop_entry *e) {
 static void draw_app_row(struct sm_ctx *c, struct tw_desktop_entry *e, double x, double y,
 		double w, double h, int icon_size, const char *font, uint32_t fg, uint32_t hl_bg,
 		uint32_t hl_fg, double radius, const char *subtitle, uint32_t sub_fg) {
-	int index = list_find(c->sm->apps, e);
+	int index = entry_id(c->sm, e);
 	int hit_index = c->sm->hits->length;
 	add_hit(c, e);
 	bool sel = hovered(c, x, y, w, h) || hit_index == c->sm->selected;
@@ -930,7 +957,7 @@ static void render_twocolumn(struct popup *p, cairo_t *cr) {
 				smc(t, "startmenu.search_fg",
 					tw_theme_color(t, "menu.field_fg", 0x000000ff)),
 				smc(t, "startmenu.search_border", 0x7f9db9ff), 0,
-				"Type to search programs");
+				"Type to search");
 			top += 32;
 		}
 		pd_text(cr, bold, "Programs", col_x + 6, top, col_w, 22, xp ? dim : 0x1e395bff, PD_LEFT);
@@ -1144,7 +1171,7 @@ static void render_centered(struct popup *p, cairo_t *cr) {
 			pd_icon(cr, icon, cx + (cw - 32) / 2, cy + 14, 32);
 			pd_text(cr, bar_font(panel), e->name, cx + 6, cy + 52, cw - 12, 24, fg, PD_CENTER);
 			psurface_add_hotspot(p->surface, cx + 4, cy, cw - 8, ch - 8, NULL, HS_APP,
-				list_find(sm->apps, e), NULL);
+				entry_id(sm, e), NULL);
 		}
 	}
 
@@ -1320,7 +1347,7 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 	if (sm->search[0]) {
 		list_t *results = search_results(sm);
 		if (results->length == 0) {
-			pd_text(cr, bar_font(panel), "No apps match your search", left, content_y, 400,
+			pd_text(cr, bar_font(panel), "Nothing matches your search", left, content_y, 400,
 				APPS_ROW, fg, PD_LEFT);
 		}
 		content_w = draw_app_columns(&c, results, false, left, content_y, content_h, W, fg,
@@ -1354,7 +1381,7 @@ static void render_tiles(struct popup *p, cairo_t *cr) {
 			pd_text(cr, bar_font(panel), e->name, x + 8, y + TILE - 28, TILE - 14, 22,
 				0xffffffff, PD_LEFT);
 			psurface_add_hotspot(p->surface, x, y, TILE, TILE, NULL, HS_APP,
-				list_find(sm->apps, e), NULL);
+				entry_id(sm, e), NULL);
 		}
 		content_w = ((sm->pinned->length + rows - 1) / rows) * cell;
 		if (sm->pinned->length == 0) {
@@ -1514,7 +1541,7 @@ static void pm_icons(struct sm_ctx *c, list_t *apps, double x, double y, double 
 		pd_text(cr, bar_font(c->panel), e->name, lx + 2, cy + 42, tw, 16, on ? hl_fg : fg,
 			PD_LEFT);
 		psurface_add_hotspot(c->p->surface, cx, cy, PM_CELL_W, PM_CELL_H, NULL, HS_APP,
-			list_find(c->sm->apps, e), NULL);
+			entry_id(c->sm, e), NULL);
 	}
 	cairo_restore(cr);
 }
@@ -1585,7 +1612,7 @@ static void render_progman(struct popup *p, cairo_t *cr) {
 		double cx = gx + 4, cy = gy + 4 + PM_TITLE + 1, cw = gw - 8, ch = gh - PM_TITLE - 9;
 		pd_rect(cr, cx, cy, cw, ch, bg);
 		if (apps->length == 0) {
-			pd_text(cr, bar_font(panel), sm->search[0] ? "No program matches" :
+			pd_text(cr, bar_font(panel), sm->search[0] ? "Nothing matches" :
 				"This group is empty", cx + 12, cy + 8, cw - 24, 20, fg, PD_LEFT);
 		}
 		pm_icons(&c, apps, cx + 4, cy + 4, cw - 8, ch - 8, fg, hl_bg, hl_fg);
@@ -1623,8 +1650,13 @@ static void render_progman(struct popup *p, cairo_t *cr) {
 
 /* ---------- input ---------- */
 
+static void extras_updated(void *data) {
+	popup_set_dirty(data);
+}
+
 static void sm_render(struct popup *p, cairo_t *cr) {
 	struct startmenu *sm = p->data;
+	search_extras_set_listener(sm->extras, extras_updated, p);
 	switch (sm->layout) {
 	case SM_TWOCOLUMN:
 		render_twocolumn(p, cr);
@@ -1693,8 +1725,8 @@ static void sm_button(struct popup *p, double x, double y, uint32_t button, bool
 	}
 	switch (hs->kind) {
 	case HS_APP:
-		if (hs->id >= 0 && hs->id < sm->apps->length) {
-			launch(p, sm->apps->items[hs->id]);
+		if (entry_at(sm, hs->id)) {
+			launch(p, entry_at(sm, hs->id));
 		}
 		break;
 	case HS_PLACE:
@@ -1764,6 +1796,7 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 	case XKB_KEY_Escape:
 		if (sm->search[0]) {
 			sm->search[0] = '\0';
+			search_extras_set_query(sm->extras, sm->search);
 			sm->scroll = 0;
 		} else if (sm->all_apps) {
 			sm->all_apps = false;
@@ -1774,7 +1807,15 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 		break;
 	case XKB_KEY_Return:
 	case XKB_KEY_KP_Enter:
-		if (sm->hits->length > 0) {
+		if (sm->search[0]) {
+			// what is found now, typing can be ahead of the drawing
+			list_t *results = search_results(sm);
+			int index = sm->selected >= 0 ? sm->selected : 0;
+			if (index < results->length) {
+				launch(p, results->items[index]);
+			}
+			list_free(results);
+		} else if (sm->hits->length > 0) {
 			int index = sm->selected >= 0 ? sm->selected : 0;
 			launch(p, sm->hits->items[index]);
 		}
@@ -1796,6 +1837,7 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 		case TEXT_KEY_IGNORED:
 			return;
 		case TEXT_KEY_CHANGED:
+			search_extras_set_query(sm->extras, sm->search);
 			sm->selected = 0;
 			sm->scroll = 0;
 			sm->show_search = true;
@@ -1810,6 +1852,7 @@ static void sm_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t
 
 static void sm_destroy(struct popup *p) {
 	struct startmenu *sm = p->data;
+	search_extras_free(sm->extras);
 	list_free(sm->pinned);
 	list_free(sm->hits);
 	for (int i = 0; i < sm->places->length; i++) {
@@ -1874,6 +1917,7 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	sm->layout = layout;
 	sm->apps = load_apps();
 	sm->hits = create_list();
+	sm->extras = search_extras_new(panel, NULL, NULL);
 	sm->selected = -1;
 	sm->group = -1;
 	sm->show_search = search;

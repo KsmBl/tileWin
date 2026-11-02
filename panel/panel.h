@@ -833,6 +833,26 @@ void notes_fini(void);
 /* A button of that window was pressed: the layouts close at once. */
 void snaplayouts_close(struct panel *panel, int64_t con_id);
 
+/*
+ * searchextras.c: what a search finds besides apps. Built with desktop entries
+ * so every style of start menu draws them as it draws apps. "top" comes before
+ * the apps (the value of a sum), "below" after them (settings pages, then
+ * files, which a shell looks for in the background; on_update says when they
+ * came in).
+ */
+struct search_extras;
+struct search_extras *search_extras_new(struct panel *panel, void (*on_update)(void *data),
+	void *data);
+void search_extras_set_listener(struct search_extras *x, void (*on_update)(void *data),
+	void *data);
+void search_extras_free(struct search_extras *x);
+void search_extras_set_query(struct search_extras *x, const char *query);
+const list_t *search_extras_top(struct search_extras *x);
+const list_t *search_extras_below(struct search_extras *x);
+/* The n-th of top and below together, and the n of an entry, or -1. */
+struct tw_desktop_entry *search_extras_at(struct search_extras *x, int n);
+int search_extras_index(struct search_extras *x, const struct tw_desktop_entry *e);
+
 /* minicons.c: minimized windows as icons on the desktop (Windows 3) */
 void minicons_update(struct panel *panel);
 void minicons_output_removed(struct panel_output *output);

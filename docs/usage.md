@@ -29,6 +29,16 @@ tilewin-media help             # all examples
 
 It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
 
+## Search
+
+The search box of the start menu (just start typing) and the launcher (`Super+S`) find more than apps:
+
+- **Settings:** the pages of the settings app by the words people look for, so `dark mode` or `wifi` opens the right page.
+- **Sums:** `6*7`, `200*10%`, `(1+2)^3`, `1,5+2`, or `=` before a lone number. The value is the first row, Enter copies it (with `wl-copy`).
+- **Files and folders** in the home folder by a part of their name, up to six folders deep, without hidden folders. `find` looks for them in the background a moment after the last key, and is stopped by the next key.
+
+In the launcher, a word that no app has gets a **Run** row first, so Enter runs a command as ever, even when a setting or a file has that name.
+
 ## Notifications and the Action Center
 
 The taskbar is the notification service of the desktop (`org.freedesktop.Notifications`), so `notify-send` and apps show their notifications on it. They pop up above the notification area as toasts (Windows 10 and 11) or balloons (95, XP and 7) and then go to the Action Center: the bell button next to the clock, `Win+N` or `tilewinmsg panel notifications`.

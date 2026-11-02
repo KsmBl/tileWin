@@ -33,6 +33,7 @@ executable(
 		'bar.c',
 		'bluetooth.c',
 		'scheduler.c',
+		'searchextras.c',
 		'clipboard.c',
 		'config.c',
 		'desktop.c',

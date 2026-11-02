@@ -26,6 +26,18 @@ test(
 )
 
 test(
+	'search',
+	executable(
+		'test-search',
+		'test_search.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
@@ -886,6 +898,17 @@ test(
 	find_program('startmenu_styles.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 180,
+)
+
+test(
+	'start-search',
+	find_program('start_search.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [keyboard_tool],
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 180,

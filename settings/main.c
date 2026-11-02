@@ -3,6 +3,7 @@
 #include <string.h>
 #include "devices.h"
 #include "settings.h"
+#include "tw_search.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
 
@@ -328,6 +329,17 @@ struct lazy_page {
 
 static GPtrArray *lazy_pages;
 
+/* The words of a page, which the search of the start menu knows too. */
+static const struct tw_settings_page *page_info(const char *name) {
+	for (size_t i = 0; i < tw_settings_page_count; i++) {
+		if (strcmp(tw_settings_pages[i].name, name) == 0) {
+			return &tw_settings_pages[i];
+		}
+	}
+	g_error("no words for the settings page %s", name);
+	return NULL;
+}
+
 static void lazy_build(struct lazy_page *lp) {
 	if (lp->built) {
 		return;
@@ -599,73 +611,47 @@ static void build_window(struct settings *s) {
 		{ "System", "preferences-system-symbolic" },
 	};
 	static const struct {
-		const char *name, *title, *keywords;
+		const char *name;
 		GtkWidget *(*create)(struct settings *s);
 		int folder;
-		const char *icon;
 	} pages[] = {
-		{ "theme", "Theme", "appearance look style dark light colors mode", theme_page_new, 0, "preferences-desktop-appearance-symbolic" },
-		{ "wallpaper", "Wallpaper", "background desktop picture", wallpaper_page_new, 0, "preferences-desktop-wallpaper-symbolic" },
-		{ "desktop", "Desktop", "icons grid cells widgets gadgets clock analog binary digital "
-			"chart gauge ring bar cpu memory power", desktop_page_new, 0, "user-desktop-symbolic" },
-		{ "animations", "Animations", "effects motion speed fade zoom slide minimize maximize "
-			"open close desktop switch", animations_page_new, 0, "media-playlist-repeat-symbolic" },
-		{ "windows", "Window behavior", "snap stick drag move together group modifier stretch "
-			"double click focus follows mouse attention activation priority nice cpu fast", window_page_new, 1, "focus-windows-symbolic" },
-		{ "appwindows", "App windows", "not responding hang hung frozen freeze end task kill "
-			"minimized pause stop suspend battery efficiency sound remember position place size "
-			"open where rules for_window always on top maximized desktop workspace",
-			appwin_page_new, 1, "application-x-executable-symbolic" },
-		{ "screen", "Screen", "display monitor resolution refresh scale rotation brightness "
-			"night light sleep lock lid power", screen_page_new, 3, "video-display-symbolic" },
-		{ "screensaver", "Screen saver", "screensaver bubbles mystify ribbons 3d text photos "
-			"slideshow starfield pipes maze flying windows aurora word clock tiling diggers miners "
-			"doomsday end of the world apocalypse hellfire fire burn thunderstorm storm rain "
-			"lightning blizzard snow ice frost icicles winter decay time dust age cracks ruin "
-			"jungle plants vines leaves flowers moss butterflies gravity privacy falling matrix "
-			"microslop copilot ad commercial idle lock fps frames per second cpu usage source code "
-			"password resume", screensaver_page_new, 0, "preferences-desktop-screensaver-symbolic" },
-		{ "sound", "Sound", "volume audio speakers headphones microphone mute", sound_page_new, 3, "audio-speakers-symbolic" },
-		{ "datetime", "Date & time", "clock calendar time zone timezone ntp hour format "
-			"12 24 seconds automatic", datetime_page_new, 5, "preferences-system-time-symbolic" },
-		{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
-			bluetooth_page_new, 3, "bluetooth-symbolic" },
-		{ "network", "Network", "wifi wi-fi wlan ethernet cable ip address dhcp fixed static "
-			"gateway subnet mask router password key dns servers", network_page_new, 4,
-			"network-wireless-symbolic" },
-		{ "dns", "DNS", "dns servers name resolver cache prefetch fastest block lists pihole "
-			"pi-hole ads adblock trackers hosts allow", dns_page_new, 4, "network-server-symbolic" },
-		{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications clipboard "
-			"history right click context menu", taskbar_page_new, 2, "view-continuous-symbolic" },
-		{ "startmenu", "Start menu", "start pinned apps places power tiles layout", startmenu_page_new, 2, "start-here-symbolic" },
-		{ "launcher", "Launcher & apps", "run search applications", launcher_page_new, 2, "system-search-symbolic" },
-		{ "devices", "Device manager", "device manager devmgmt hardware drivers driver "
-			"missing firmware pci usb disable enable restart unknown other devices properties "
-			"display adapters network adapters disk drives sound processors",
-			devices_page_new, 3, "preferences-system-devices-symbolic" },
-		{ "keyboard", "Keyboard", "shortcuts keys bindings layout hotkeys", keyboard_page_new, 3, "input-keyboard-symbolic" },
-		{ "mouse", "Mouse & touchpad", "pointer cursor touchpad scrolling tap magnifier zoom "
-			"magnify enlarge", mouse_page_new, 3, "input-mouse-symbolic" },
-		{ "apps", "Apps", "default browser email startup autostart programs", apps_page_new, 5, "applications-system-symbolic" },
-		{ "account", "Account", "user picture photo avatar profile name", account_page_new, 5, "avatar-default-symbolic" },
-		{ "backup", "Backup", "restore save export import copy settings file another computer",
-			backup_page_new, 5, "document-save-symbolic" },
-		{ "kernel", "Kernel", "linux kernel build compile version latest longterm live patching "
-			"livepatch kpatch kexec load boot grub uki efi modules drivers compression zstd xz lz4 "
-			"gzip lzo localmodconfig", kernel_page_new, 5, "applications-engineering-symbolic" },
-		{ "about", "About", "system info fetch version kernel cpu memory logo uwu", about_page_new, 5, "help-about-symbolic" },
+		{ "theme", theme_page_new, 0 },
+		{ "wallpaper", wallpaper_page_new, 0 },
+		{ "desktop", desktop_page_new, 0 },
+		{ "animations", animations_page_new, 0 },
+		{ "windows", window_page_new, 1 },
+		{ "appwindows", appwin_page_new, 1 },
+		{ "screen", screen_page_new, 3 },
+		{ "screensaver", screensaver_page_new, 0 },
+		{ "sound", sound_page_new, 3 },
+		{ "datetime", datetime_page_new, 5 },
+		{ "bluetooth", bluetooth_page_new, 3 },
+		{ "network", network_page_new, 4 },
+		{ "dns", dns_page_new, 4 },
+		{ "taskbar", taskbar_page_new, 2 },
+		{ "startmenu", startmenu_page_new, 2 },
+		{ "launcher", launcher_page_new, 2 },
+		{ "devices", devices_page_new, 3 },
+		{ "keyboard", keyboard_page_new, 3 },
+		{ "mouse", mouse_page_new, 3 },
+		{ "apps", apps_page_new, 5 },
+		{ "account", account_page_new, 5 },
+		{ "backup", backup_page_new, 5 },
+		{ "kernel", kernel_page_new, 5 },
+		{ "about", about_page_new, 5 },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
 	for (size_t i = 0; i < G_N_ELEMENTS(pages); i++) {
 		struct lazy_page *lp = g_new0(struct lazy_page, 1);
 		lp->s = s;
 		lp->name = pages[i].name;
-		lp->title = pages[i].title;
-		lp->keywords = pages[i].keywords;
+		const struct tw_settings_page *info = page_info(pages[i].name);
+		lp->title = info->title;
+		lp->keywords = info->keywords;
 		lp->create = pages[i].create;
 		lp->holder = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 		gtk_widget_set_vexpand(lp->holder, TRUE);
-		gtk_stack_add_titled(s->stack, lp->holder, pages[i].name, pages[i].title);
+		gtk_stack_add_titled(s->stack, lp->holder, pages[i].name, info->title);
 		g_ptr_array_add(lazy_pages, lp);
 	}
 	// the one that is shown first, the rest once the window is really on screen
@@ -698,7 +684,7 @@ static void build_window(struct settings *s) {
 			}
 			GtkWidget *row = gtk_list_box_row_new();
 			gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row),
-				side_row_box(pages[j].icon, pages[j].title, false));
+				side_row_box(page_info(pages[j].name)->icon, page_info(pages[j].name)->title, false));
 			g_object_set_data(G_OBJECT(row), "page", (gpointer)pages[j].name);
 			gtk_list_box_append(GTK_LIST_BOX(side_list), row);
 			g_ptr_array_add(f->pages, row);

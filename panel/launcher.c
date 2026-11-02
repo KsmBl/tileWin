@@ -27,6 +27,8 @@ enum {
 struct launcher {
 	list_t *apps;    // struct tw_desktop_entry *, owned
 	list_t *results; // borrowed from apps
+	struct search_extras *extras;
+	struct tw_desktop_entry *run; // the row that runs what is typed
 	char query[256];
 	struct text_cursor tc;
 	int selected;
@@ -41,8 +43,18 @@ static int entry_name_cmp(const void *a, const void *b) {
 	return strcasecmp(ea->name, eb->name);
 }
 
-static void update_results(struct launcher *l) {
+/*
+ * The sum first, then the apps; with no app "Run" comes next, so that Enter
+ * runs a command as ever even when a setting or a file has that name.
+ */
+static void update_results(struct launcher *l, bool typed) {
+	int selected = l->selected, scroll = l->scroll;
 	l->results->length = 0;
+	const list_t *top = search_extras_top(l->extras);
+	for (int i = 0; i < top->length; i++) {
+		list_add(l->results, top->items[i]);
+	}
+	int before_apps = l->results->length;
 	// best matches first; an empty query scores every app 1 (alphabetical)
 	for (int score = 5; score >= 1; score--) {
 		for (int i = 0; i < l->apps->length; i++) {
@@ -52,8 +64,29 @@ static void update_results(struct launcher *l) {
 			}
 		}
 	}
-	l->selected = 0;
-	l->scroll = 0;
+	if (l->query[0] && l->results->length == before_apps) {
+		free(l->run->name);
+		l->run->name = format_str("Run \"%s\"", l->query);
+		list_add(l->results, l->run);
+	}
+	const list_t *below = search_extras_below(l->extras);
+	for (int i = 0; i < below->length; i++) {
+		list_add(l->results, below->items[i]);
+	}
+	if (typed) {
+		l->selected = 0;
+		l->scroll = 0;
+	} else {
+		// files came in while the list is looked at: nothing moves
+		l->selected = selected < l->results->length ? selected : 0;
+		l->scroll = scroll;
+	}
+}
+
+static void extras_updated(void *data) {
+	struct popup *p = data;
+	update_results(p->data, false);
+	popup_set_dirty(p);
 }
 
 static void launcher_render(struct popup *p, cairo_t *cr) {
@@ -93,7 +126,7 @@ static void launcher_render(struct popup *p, cairo_t *cr) {
 	}
 	pd_glyph_search(cr, sx + 12, sy + (sh - 18) / 2, 18, field_fg);
 	if (!l->query[0]) {
-		pd_text(cr, font, "Type to search apps, or enter a command", sx + 42, sy, sw - 52, sh,
+		pd_text(cr, font, "Search apps, settings and files, work out a sum, or enter a command", sx + 42, sy, sw - 52, sh,
 			dim, PD_LEFT);
 	}
 	struct text_style ts = { .font = font, .fg = field_fg, .caret = true };
@@ -160,7 +193,7 @@ static void run_later(void *data) {
 static void activate(struct popup *p, int index) {
 	struct launcher *l = p->data;
 	struct panel *panel = p->panel;
-	if (index >= 0 && index < l->results->length) {
+	if (index >= 0 && index < l->results->length && l->results->items[index] != l->run) {
 		apps_launch(panel, l->results->items[index]);
 	} else if (l->query[0]) {
 		struct deferred_exec *d = calloc(1, sizeof(*d));
@@ -244,7 +277,8 @@ static void launcher_key(struct popup *p, xkb_keysym_t sym, const char *utf8, ui
 		case TEXT_KEY_IGNORED:
 			return;
 		case TEXT_KEY_CHANGED:
-			update_results(l);
+			search_extras_set_query(l->extras, l->query);
+			update_results(l, true);
 			break;
 		case TEXT_KEY_MOVED:
 			break;
@@ -256,6 +290,8 @@ static void launcher_key(struct popup *p, xkb_keysym_t sym, const char *utf8, ui
 
 static void launcher_destroy(struct popup *p) {
 	struct launcher *l = p->data;
+	search_extras_free(l->extras);
+	tw_desktop_entry_free(l->run);
 	list_free(l->results);
 	tw_desktop_list_free(l->apps);
 	free(l);
@@ -290,7 +326,12 @@ void launcher_toggle(struct panel *panel, struct panel_output *output) {
 	list_free(all);
 	list_qsort(l->apps, entry_name_cmp);
 	l->results = create_list();
-	update_results(l);
+	l->run = calloc(1, sizeof(*l->run));
+	l->run->name = strdup("Run");
+	l->run->icon = strdup("system-run");
+	l->run->generic_name = strdup("Run this as a command");
+	l->extras = search_extras_new(panel, NULL, NULL);
+	update_results(l, true);
 
 	int M = popup_shadow_margin(panel);
 	int width = LAUNCHER_WIDTH + 2 * M;
@@ -300,6 +341,9 @@ void launcher_toggle(struct panel *panel, struct panel_output *output) {
 	if (y + height > output->height) {
 		y = output->height - height;
 	}
-	popup_create(panel, POPUP_LAUNCHER, NULL, output, x, y, width, height,
+	struct popup *p = popup_create(panel, POPUP_LAUNCHER, NULL, output, x, y, width, height,
 		&launcher_vtable, l);
+	if (p) {
+		search_extras_set_listener(l->extras, extras_updated, p);
+	}
 }
