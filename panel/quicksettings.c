@@ -474,6 +474,22 @@ static void draw_tile(struct qs *q, cairo_t *cr, const struct fly_style *st, enu
 		ts.enabled ? st->fg : st->dim, PD_CENTER);
 }
 
+enum {
+	QH_TILE = 1,
+	QH_MORE,
+	QH_MUTE,
+	QH_VOLUME,
+	QH_VOLUME_MORE,
+	QH_BRIGHTNESS,
+	QH_BATTERY,
+	QH_SETTINGS,
+};
+
+/* Only for the keyboard to walk: the clicks go by the boxes. */
+static void qs_stop(struct popup *p, struct pbox b, int kind, int id) {
+	psurface_add_hotspot(p->surface, b.x, b.y, b.width, b.height, NULL, kind, id, NULL);
+}
+
 static int qs_height(struct qs *q) {
 	return PAD + 2 * (TILE_H + LABEL_H) + TILE_GAP + 8 + SLIDER_ROW +
 		(q->backlight ? SLIDER_ROW : 0) + 8 + FOOTER_H;
@@ -494,6 +510,16 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 		struct pbox b = { x0 + col * (tw + TILE_GAP), y + row * (TILE_H + LABEL_H + TILE_GAP),
 			tw, TILE_H };
 		draw_tile(q, cr, &st, t, b);
+		struct tile_state ts;
+		tile_state(q, t, &ts);
+		if (ts.enabled) {
+			struct pbox main = b;
+			main.width -= q->more[t].width;
+			qs_stop(p, main, QH_TILE, t);
+			if (q->more[t].width) {
+				qs_stop(p, q->more[t], QH_MORE, t);
+			}
+		}
 	}
 	y += 2 * (TILE_H + LABEL_H) + TILE_GAP + 8;
 
@@ -513,6 +539,10 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 			fill_hover(cr, &st, q->volume_more);
 		}
 		draw_chevron(cr, q->volume_more.x + 14, y + SLIDER_ROW / 2.0, 12, st.fg);
+		qs_stop(p, q->volume_icon, QH_MUTE, 0);
+		qs_stop(p, q->volume_slider, QH_VOLUME, 0);
+		psurface_hotspot_is_slider(p->surface);
+		qs_stop(p, q->volume_more, QH_VOLUME_MORE, 0);
 	} else {
 		ti_speaker(p->panel, cr, x0, y + (SLIDER_ROW - 20) / 2.0, 20, 0, true, st.dim);
 		pd_text(cr, st.font, "No sound device", x0 + 40, y, cw - 40, SLIDER_ROW, st.dim,
@@ -527,6 +557,8 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 		q->brightness_slider = (struct pbox){ x0 + 32, y, cw - 32 - 34, SLIDER_ROW };
 		draw_slider(cr, &st, q->brightness_slider,
 			q->drag == QD_BRIGHTNESS ? q->drag_value : q->brightness);
+		qs_stop(p, q->brightness_slider, QH_BRIGHTNESS, 0);
+		psurface_hotspot_is_slider(p->surface);
 		y += SLIDER_ROW;
 	}
 
@@ -547,12 +579,14 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 		ti_battery(p->panel, cr, x0, fy + (FOOTER_H - 20) / 2.0, 20, q->capacity, q->charging,
 			st.fg);
 		pd_text(cr, st.font, text, x0 + 28, fy, tw2 + 4, FOOTER_H, st.fg, PD_LEFT);
+		qs_stop(p, q->battery_box, QH_BATTERY, 0);
 	}
 	q->settings_box = (struct pbox){ x0 + cw - 32, fy + 8, 36, FOOTER_H - 16 };
 	if (qs_hovered(q, q->settings_box)) {
 		fill_hover(cr, &st, q->settings_box);
 	}
 	draw_gear(cr, q->settings_box.x + 18, fy + FOOTER_H / 2.0, 8, st.fg);
+	qs_stop(p, q->settings_box, QH_SETTINGS, 0);
 }
 
 /* ---------- input ---------- */
@@ -785,6 +819,7 @@ static void qs_destroy(struct popup *p) {
 }
 
 static const struct popup_vtable qs_vtable = {
+	.keyboard_walk = true,
 	.render = qs_render,
 	.motion = qs_motion,
 	.leave = qs_leave,

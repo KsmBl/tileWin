@@ -45,6 +45,7 @@ struct hotspot {
 	int kind;
 	int64_t id;
 	char *str;
+	bool slider; // Left and Right change it, Enter does not click it
 };
 
 struct psurface_impl {
@@ -95,6 +96,8 @@ void psurface_add_hotspot(struct psurface *s, int x, int y, int width, int heigh
 	struct widget *widget, int kind, int64_t id, const char *str);
 struct hotspot *psurface_hotspot_at(struct psurface *s, double x, double y);
 void psurface_clear_hotspots(struct psurface *s);
+/* The hotspot added last is a slider. */
+void psurface_hotspot_is_slider(struct psurface *s);
 
 /* ---------- outputs and seats ---------- */
 

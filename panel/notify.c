@@ -1549,6 +1549,13 @@ static void center_render(struct popup *p, cairo_t *cr) {
 	}
 	pd_text(cr, st.font, "Do not disturb", x, bottom, w - 56, CENTER_FOOTER, st.fg, PD_LEFT);
 	draw_switch(cr, &st, x + w - 40, bottom + (CENTER_FOOTER - 20) / 2, nt.dnd);
+	// only for the keyboard to walk: the clicks go by the boxes
+	if (c->clear_all.width) {
+		psurface_add_hotspot(p->surface, c->clear_all.x, c->clear_all.y, c->clear_all.width,
+			c->clear_all.height, NULL, 1, 0, NULL);
+	}
+	psurface_add_hotspot(p->surface, c->dnd.x, c->dnd.y, c->dnd.width, c->dnd.height, NULL, 2, 0,
+		NULL);
 }
 
 static void center_changed(void) {
@@ -1662,6 +1669,7 @@ static void center_destroy(struct popup *p) {
 }
 
 static const struct popup_vtable center_vtable = {
+	.keyboard_walk = true,
 	.render = center_render,
 	.motion = center_motion,
 	.leave = center_leave,

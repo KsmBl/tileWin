@@ -34,10 +34,189 @@ static struct popup *popup_from_surface(struct psurface *s) {
 	return s->data;
 }
 
+/* ---------- walking a popup with the keyboard ---------- */
+
+static struct hotspot *ring_hotspot(struct popup *p) {
+	list_t *spots = p->surface->hotspots;
+	for (int i = 0; p->ring && i < spots->length; i++) {
+		struct hotspot *hs = spots->items[i];
+		if (hs->kind == p->ring_kind && hs->id == p->ring_id) {
+			return hs;
+		}
+	}
+	return NULL;
+}
+
+/* What is drawn first on a row, and higher up, comes first. */
+static int hotspot_before(const struct hotspot *a, const struct hotspot *b) {
+	int ay = a->box.y + a->box.height / 2, by = b->box.y + b->box.height / 2;
+	if (abs(ay - by) > (a->box.height < b->box.height ? a->box.height : b->box.height) / 2) {
+		return ay - by;
+	}
+	return a->box.x - b->box.x;
+}
+
+static void ring_set(struct popup *p, struct hotspot *hs) {
+	p->ring = true;
+	p->ring_kind = hs->kind;
+	p->ring_id = hs->id;
+	p->ring_box = hs->box;
+	// what lights up under the pointer lights up here too
+	if (p->vtable->motion) {
+		p->vtable->motion(p, hs->box.x + hs->box.width / 2.0, hs->box.y + hs->box.height / 2.0);
+	}
+	popup_set_dirty(p);
+}
+
+/* The next or the previous in reading order, round and round. */
+static void ring_step(struct popup *p, bool forward) {
+	list_t *spots = p->surface->hotspots;
+	struct hotspot *now = ring_hotspot(p), *best = NULL, *end = NULL;
+	for (int i = 0; i < spots->length; i++) {
+		struct hotspot *hs = spots->items[i];
+		if (!end || (forward ? hotspot_before(hs, end) < 0 : hotspot_before(hs, end) > 0)) {
+			end = hs;
+		}
+		if (!now || hs == now) {
+			continue;
+		}
+		int order = hotspot_before(hs, now);
+		if ((forward ? order > 0 : order < 0) &&
+				(!best || (forward ? hotspot_before(hs, best) < 0 : hotspot_before(hs, best) > 0))) {
+			best = hs;
+		}
+	}
+	if (best || end) {
+		ring_set(p, best ? best : end);
+	}
+}
+
+/* The nearest one that way; a false return says there is none. */
+static bool ring_go(struct popup *p, int dx, int dy) {
+	struct hotspot *now = ring_hotspot(p);
+	if (!now) {
+		ring_step(p, dx > 0 || dy > 0);
+		return true;
+	}
+	list_t *spots = p->surface->hotspots;
+	struct hotspot *best = NULL;
+	double best_cost = 0;
+	double nx = now->box.x + now->box.width / 2.0, ny = now->box.y + now->box.height / 2.0;
+	for (int i = 0; i < spots->length; i++) {
+		struct hotspot *hs = spots->items[i];
+		if (hs == now) {
+			continue;
+		}
+		double hx = hs->box.x + hs->box.width / 2.0, hy = hs->box.y + hs->box.height / 2.0;
+		double along = dx ? (hx - nx) * dx : (hy - ny) * dy;
+		double across = dx ? fabs(hy - ny) : fabs(hx - nx);
+		bool overlaps = dx ? hs->box.y < now->box.y + now->box.height &&
+			now->box.y < hs->box.y + hs->box.height :
+			hs->box.x < now->box.x + now->box.width && now->box.x < hs->box.x + hs->box.width;
+		if (along <= 1 || (dx && !overlaps)) {
+			continue; // sideways stays on the row
+		}
+		double cost = along + across * (overlaps ? 0.5 : 2);
+		if (!best || cost < best_cost) {
+			best = hs;
+			best_cost = cost;
+		}
+	}
+	if (best) {
+		ring_set(p, best);
+		return true;
+	}
+	return false;
+}
+
+static void ring_click(struct popup *p) {
+	struct hotspot *hs = ring_hotspot(p);
+	if (!hs || hs->slider || !p->vtable->button) {
+		return;
+	}
+	double x = hs->box.x + hs->box.width / 2.0, y = hs->box.y + hs->box.height / 2.0;
+	p->vtable->button(p, x, y, BTN_LEFT, true);
+	p->vtable->button(p, x, y, BTN_LEFT, false);
+}
+
+/* True when the key was for walking. */
+static bool walk_key(struct popup *p, xkb_keysym_t sym) {
+	if (!p->vtable->keyboard_walk || (p->vtable->typing && p->vtable->typing(p))) {
+		return false;
+	}
+	struct hotspot *now = ring_hotspot(p);
+	switch (sym) {
+	case XKB_KEY_Tab:
+		ring_step(p, true);
+		return true;
+	case XKB_KEY_ISO_Left_Tab:
+		ring_step(p, false);
+		return true;
+	case XKB_KEY_Return:
+	case XKB_KEY_KP_Enter:
+	case XKB_KEY_space:
+		if (!now) {
+			return false;
+		}
+		ring_click(p);
+		return true;
+	case XKB_KEY_Left:
+	case XKB_KEY_Right:
+		if (!now && p->vtable->key && !p->vtable->walk_scrolls && p->kind == POPUP_VOLUME) {
+			return false; // the arrows of the volume flyout change the volume
+		}
+		if (now && now->slider) {
+			if (p->vtable->axis) {
+				p->vtable->axis(p, now->box.x + now->box.width / 2.0,
+					now->box.y + now->box.height / 2.0, sym == XKB_KEY_Right ? -1 : 1);
+			}
+			return true;
+		}
+		ring_go(p, sym == XKB_KEY_Right ? 1 : -1, 0);
+		return true;
+	case XKB_KEY_Up:
+	case XKB_KEY_Down: {
+		if (!now && p->kind == POPUP_VOLUME) {
+			return false;
+		}
+		int dy = sym == XKB_KEY_Down ? 1 : -1;
+		if (!ring_go(p, 0, dy) && p->vtable->walk_scrolls && p->vtable->axis) {
+			p->vtable->axis(p, 0, 0, dy);
+		}
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+static void ring_draw(struct popup *p, cairo_t *cr) {
+	struct hotspot *hs = ring_hotspot(p);
+	if (!hs) {
+		if (p->ring && p->surface->hotspots->length > 0) {
+			// what was in the ring has gone: the nearest takes over at the next key
+			p->ring = false;
+		}
+		return;
+	}
+	p->ring_box = hs->box;
+	uint32_t color = tw_theme_color(p->panel->theme, "taskbar.indicator", 0x0078d4ff);
+	cairo_save(cr);
+	cairo_new_path(cr);
+	pd_rounded(cr, hs->box.x + 1, hs->box.y + 1, hs->box.width - 2, hs->box.height - 2, 3);
+	pd_color(cr, color | 0xff);
+	cairo_set_line_width(cr, 2);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
 static void ps_render(struct psurface *s, cairo_t *cr) {
 	struct popup *p = popup_from_surface(s);
 	if (p && p->vtable->render) {
 		p->vtable->render(p, cr);
+		if (p->vtable->keyboard_walk) {
+			ring_draw(p, cr);
+		}
 	}
 }
 
@@ -78,6 +257,9 @@ static void ps_key(struct psurface *s, xkb_keysym_t sym, const char *utf8, uint3
 	// keys go to the innermost popup
 	while (p->child) {
 		p = p->child;
+	}
+	if (walk_key(p, sym)) {
+		return;
 	}
 	if (p->vtable->key) {
 		p->vtable->key(p, sym, utf8, mods);

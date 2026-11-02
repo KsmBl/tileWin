@@ -297,6 +297,13 @@ void psurface_add_hotspot(struct psurface *s, int x, int y, int width, int heigh
 	list_add(s->hotspots, hs);
 }
 
+void psurface_hotspot_is_slider(struct psurface *s) {
+	if (s->hotspots->length > 0) {
+		struct hotspot *hs = s->hotspots->items[s->hotspots->length - 1];
+		hs->slider = true;
+	}
+}
+
 struct hotspot *psurface_hotspot_at(struct psurface *s, double x, double y) {
 	for (int i = s->hotspots->length - 1; i >= 0; i--) {
 		struct hotspot *hs = s->hotspots->items[i];

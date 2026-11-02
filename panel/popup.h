@@ -12,6 +12,16 @@ struct popup_vtable {
 	void (*axis)(struct popup *p, double x, double y, int direction);
 	void (*key)(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods);
 	void (*destroy)(struct popup *p);
+	/*
+	 * The keyboard walks its hotspots: Tab and the arrows move a ring between
+	 * them, Enter and Space click the one in the ring, Left and Right change a
+	 * slider. Other keys go to key as ever.
+	 */
+	bool keyboard_walk;
+	/* The list inside scrolls by axis when the ring is at its end. */
+	bool walk_scrolls;
+	/* Typing goes on: every key goes to key, the ring stays away. */
+	bool (*typing)(struct popup *p);
 };
 
 struct popup {
@@ -23,6 +33,12 @@ struct popup {
 	const struct popup_vtable *vtable;
 	void *data;
 	int x, y, width, height;
+	// the hotspot in the ring of keyboard_walk, known by what it is since
+	// drawing makes the hotspots anew
+	bool ring;
+	int ring_kind;
+	int64_t ring_id;
+	struct pbox ring_box;
 };
 
 struct popup *popup_create(struct panel *panel, enum popup_kind kind,

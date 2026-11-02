@@ -1665,7 +1665,15 @@ static void net_destroy(struct popup *p) {
 	free(f);
 }
 
+static bool net_typing(struct popup *p) {
+	struct net_flyout *f = p->data;
+	return f->asking_password;
+}
+
 static const struct popup_vtable net_vtable = {
+	.keyboard_walk = true,
+	.walk_scrolls = true,
+	.typing = net_typing,
 	.render = net_render,
 	.motion = flyout_motion,
 	.leave = flyout_leave,
@@ -1995,6 +2003,7 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 		draw_slider(cr, &st, slider, volume);
 		psurface_add_hotspot(p->surface, slider.x, slider.y, slider.width, slider.height, NULL,
 			VOL_HS_SLIDER, -1, NULL);
+		psurface_hotspot_is_slider(p->surface);
 		draw_percent(cr, &st, x0 + cw - 40, y + 14, 36, volume);
 		y += VOL_MASTER;
 
@@ -2054,6 +2063,7 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 				draw_slider(cr, &st, app_slider, value);
 				psurface_add_hotspot(p->surface, app_slider.x, app_slider.y, app_slider.width,
 					app_slider.height, NULL, VOL_HS_SLIDER, s->index, NULL);
+				psurface_hotspot_is_slider(p->surface);
 				draw_percent(cr, &st, x0 + cw - 40, y + 16, 32, value);
 				y += VOL_APP;
 			}
@@ -2155,7 +2165,19 @@ static void vol_axis(struct popup *p, double x, double y, int direction) {
 		return;
 	}
 	f->drag_id = -1;
-	f->drag_value = s->volume + (direction < 0 ? 5 : -5);
+	int current = s->volume;
+	// the wheel changes the master volume, the keyboard the slider in its ring
+	struct hotspot *hs = x > 0 ? psurface_hotspot_at(p->surface, x, y) : NULL;
+	if (hs && hs->slider && hs->id >= 0) {
+		for (int i = 0; i < f->streams->length; i++) {
+			struct stream *stream = f->streams->items[i];
+			if (stream->index == hs->id) {
+				f->drag_id = hs->id;
+				current = stream->volume;
+			}
+		}
+	}
+	f->drag_value = current + (direction < 0 ? 5 : -5);
 	f->drag_value = f->drag_value < 0 ? 0 : f->drag_value > 100 ? 100 : f->drag_value;
 	vol_apply_drag(f, false);
 	vol_query_later(f);
@@ -2192,6 +2214,7 @@ static void vol_destroy(struct popup *p) {
 }
 
 static const struct popup_vtable vol_vtable = {
+	.keyboard_walk = true,
 	.render = vol_render,
 	.motion = vol_motion,
 	.leave = flyout_leave,
@@ -2460,6 +2483,7 @@ static void power_render(struct popup *p, cairo_t *cr) {
 		draw_slider(cr, &st, slider, value);
 		psurface_add_hotspot(p->surface, slider.x, slider.y, slider.width, slider.height, NULL,
 			POWER_HS_BRIGHTNESS, 0, NULL);
+		psurface_hotspot_is_slider(p->surface);
 		draw_percent(cr, &st, x0 + cw - 40, y + 10, 36, value);
 		y += POWER_BRIGHTNESS;
 	}
@@ -2585,6 +2609,7 @@ static void power_destroy(struct popup *p) {
 }
 
 static const struct popup_vtable power_vtable = {
+	.keyboard_walk = true,
 	.render = power_render,
 	.motion = power_motion,
 	.leave = flyout_leave,
@@ -3947,6 +3972,13 @@ static void bt_rows_clear(struct bt_flyout *f) {
 	f->row_count = 0;
 }
 
+enum {
+	BT_HS_POWER = 1,
+	BT_HS_ACTION,
+	BT_HS_FORGET,
+	BT_HS_LINK,
+};
+
 static void bt_render(struct popup *p, cairo_t *cr) {
 	struct bt_flyout *f = p->data;
 	struct fly_style st;
@@ -4026,6 +4058,13 @@ static void bt_render(struct popup *p, cairo_t *cr) {
 				d->paired ? "Connect" : "Pair";
 			draw_button(cr, &st, r->action, label, !d->paired && !d->busy,
 				hovered(&f->base, r->action));
+			// only for the keyboard: the clicks go by the boxes
+			psurface_add_hotspot(p->surface, r->action.x, r->action.y, r->action.width,
+				r->action.height, NULL, BT_HS_ACTION, i, NULL);
+			if (r->forget.width) {
+				psurface_add_hotspot(p->surface, r->forget.x, r->forget.y, r->forget.width,
+					r->forget.height, NULL, BT_HS_FORGET, i, NULL);
+			}
 			y += BT_ROW;
 		}
 		y += 4;
@@ -4038,6 +4077,12 @@ static void bt_render(struct popup *p, cairo_t *cr) {
 	draw_line(cr, &st, p, fy);
 	f->link = (struct pbox){ x0, fy + 1, cw, FOOTER - 1 };
 	draw_link(cr, &st, &f->base, f->link, "Bluetooth settings", PD_LEFT);
+	psurface_add_hotspot(p->surface, f->link.x, f->link.y, f->link.width / 2, f->link.height, NULL,
+		BT_HS_LINK, 0, NULL);
+	if (f->power_switch.width) {
+		psurface_add_hotspot(p->surface, f->power_switch.x, f->power_switch.y,
+			f->power_switch.width, f->power_switch.height, NULL, BT_HS_POWER, 0, NULL);
+	}
 }
 
 static void bt_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
@@ -4111,6 +4156,8 @@ static void bt_destroy(struct popup *p) {
 }
 
 static const struct popup_vtable bt_vtable = {
+	.keyboard_walk = true,
+	.walk_scrolls = true,
 	.render = bt_render,
 	.motion = flyout_motion,
 	.leave = flyout_leave,
