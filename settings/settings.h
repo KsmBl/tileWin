@@ -132,6 +132,8 @@ struct ui_search_entry {
 void ui_index_page(const char *name, const char *title, const char *keywords);
 /* Entries matching every word of the query, best first. Borrowed, free the array. */
 GPtrArray *ui_search(const char *query);
+/* The Updates group of the About page. */
+void updates_group_new(struct settings *s, GtkWidget *content);
 /* The first-run window (tilewin-settings --welcome). */
 void welcome_show(struct settings *s);
 /* A card of a theme for a GtkFlowBox: data "theme" and "title" say which. */

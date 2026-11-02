@@ -5,8 +5,17 @@ The parts of the desktop in more detail: keys, flyouts, the settings app, the th
 ## Updating
 
 ```sh
-git pull && ./install.sh --no-deps && tilewinmsg restart
+tilewin-update           # asks which way
+tilewin-update release   # the newest release
+tilewin-update source    # the newest source
 ```
+
+The **Updates** group of the About page in the settings does the same with two buttons. There are two ways:
+
+- **The newest release** from GitHub: its ready-made archive, checked against the `SHA256SUMS` of the release, when this computer has the libraries it needs and tileWin lives in `/usr/local`. Otherwise the source of that release is built instead. Nothing happens when you have it already (`--force` goes on anyway).
+- **The newest source:** the repository is pulled into a temporary folder and built there. The folder is deleted afterwards, also when the build failed.
+
+Either way tileWin is restarted after a good update with `tilewinmsg restart` (`--no-restart` leaves that out), and the password is asked for once: by sudo in a terminal, by pkexec from the settings. By hand it is still `git pull && ./install.sh --no-deps && tilewinmsg restart` in a clone of your own.
 
 `restart` keeps your windows open, always: the config, the theme, the taskbar and the other programs of tileWin start afresh while the windows stay where they are. The helpers that run all session (`tilewin-nightlight`, `tilewin-clipboard`, `tilewin-polkit`) are started again when the update replaced them, so their fixes come in too; the clipboard history then keeps only its pinned entries. At its end install.sh says which of this applies: what a restart brings in, and whether the compositor itself changed. A Wayland app has no way to survive the compositor it is talking to (the display socket goes with it and no toolkit knows how to reconnect), so when an update replaced the compositor itself, the new one starts with your next login, and a notification says so. To start it at once: `tilewinmsg restart relaunch-apps` starts your apps again and puts them back where they were, `tilewinmsg restart session` only ends the session. If only the taskbar changed, `tilewinmsg restart panel` is enough.
 

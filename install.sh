@@ -27,7 +27,7 @@ Usage: ./install.sh [options]
   --uninstall         Remove an installation made with this script
   -h, --help          Show this help
 
-After an update:  git pull && ./install.sh --no-deps && tilewinmsg restart
+To update later:  tilewin-update
 EOF
 }
 
@@ -62,8 +62,8 @@ needs_root() {
 	[ ! -w "$dir" ]
 }
 if [ -z "$DESTDIR" ] && needs_root "$PREFIX" && [ "$(id -u)" -ne 0 ]; then
-	command -v sudo >/dev/null 2>&1 || die "writing to $PREFIX needs root and sudo is not installed"
-	SUDO=sudo
+	SUDO=${TILEWIN_SUDO:-sudo}
+	command -v "$SUDO" >/dev/null 2>&1 || die "writing to $PREFIX needs root and $SUDO is not installed"
 fi
 
 SESSION_DIR=/usr/share/wayland-sessions
@@ -71,6 +71,8 @@ SESSION_DIR=/usr/share/wayland-sessions
 # ---------------------------------------------------------------- uninstall
 if [ "$UNINSTALL" -eq 1 ]; then
 	log="$BUILD_DIR/meson-logs/install-log.txt"
+	# installed by tilewin-update the build is gone, and the list stays with the files
+	[ -f "$log" ] || log="$DESTDIR$PREFIX/share/tileWin/install-log.txt"
 	[ -f "$log" ] || die "no install log found ($log); cannot uninstall"
 	if [ -z "$DESTDIR" ] && command -v tilewin-app-icons >/dev/null 2>&1; then
 		msg "Giving apps your own icon theme back"
@@ -233,51 +235,15 @@ msg "Installing"
 if [ -n "$DESTDIR" ]; then
 	"$MESON" install -C "$BUILD_DIR" --destdir "$DESTDIR" --no-rebuild >/dev/null
 else
-	# --no-rebuild: everything is built above, root must not write build files
-	$SUDO "$MESON" install -C "$BUILD_DIR" --no-rebuild >/dev/null
-	if [ -n "$SUDO" ] && [ -e "$BUILD_DIR/meson-logs/install-log.txt" ]; then
-		$SUDO chown "$(id -u):$(id -g)" "$BUILD_DIR/meson-logs/install-log.txt"
+	# all that takes root in one go, so a password is asked for once. It also
+	# needs root with a prefix of your own, for the session and the lock screen.
+	ROOT=$SUDO
+	if [ -z "$ROOT" ] && [ "$(id -u)" -ne 0 ]; then
+		ROOT=${TILEWIN_SUDO:-sudo}
 	fi
-fi
-
-# systemd learns of the DNS service; if it runs, the new one takes over.
-if [ -z "$DESTDIR" ] && command -v systemctl >/dev/null 2>&1; then
-	$SUDO systemctl daemon-reload || true
-	if systemctl is-active --quiet tilewin-dnsd.service 2>/dev/null; then
-		msg "Restarting the DNS service"
-		$SUDO systemctl restart tilewin-dnsd.service || warn "could not restart the DNS service"
-		# sent through it again the way this version does it
-		$SUDO "$PREFIX/libexec/tilewin-dns-apply" enable ||
-			warn "could not send the DNS of this computer through the service"
-	fi
-fi
-
-# Display managers only look in /usr/share/wayland-sessions.
-if [ -z "$DESTDIR" ] && [ "$PREFIX" != /usr ]; then
-	msg "Registering the tileWin session in $SESSION_DIR"
-	tmp=$(mktemp)
-	sed "s|^Exec=.*|Exec=$PREFIX/bin/tilewin-session|" data/tilewin.desktop > "$tmp"
-	sudo install -Dm644 "$tmp" "$SESSION_DIR/tilewin.desktop"
-	rm -f "$tmp"
-fi
-
-# The lock screen checks passwords with its own PAM service.
-if [ -z "$DESTDIR" ] && [ -d /etc/pam.d ] && [ ! -e /etc/pam.d/tilewin-lock ]; then
-	msg "Installing the PAM service of the lock screen"
-	sudo install -Dm644 data/tilewin-lock.pam /etc/pam.d/tilewin-lock
-fi
-
-# Lowering the nice value of the focused window's process (focus_priority), and
-# giving tileWin itself the round-robin scheduling sway uses when it may, takes
-# CAP_SYS_NICE. Installing the binary again drops it, so it is given each time.
-if [ -z "$DESTDIR" ]; then
-	if command -v setcap >/dev/null 2>&1; then
-		msg "Letting tileWin raise the focused window's priority (CAP_SYS_NICE)"
-		$SUDO setcap cap_sys_nice=ep "$PREFIX/bin/tilewin" ||
-			warn "could not give tileWin CAP_SYS_NICE: focus_priority will do nothing"
-	else
-		warn "setcap not found (package libcap): focus_priority will do nothing"
-	fi
+	# --no-rebuild in there: everything is built above, root must not write build files
+	$ROOT sh "$PWD/scripts/tilewin-system-setup" "$PREFIX" "$PWD" "$(id -u):$(id -g)" build \
+		"$(readlink -f "$BUILD_DIR")" "$(command -v "$MESON")"
 fi
 
 # ---------------------------------------------------------------- user config
@@ -302,7 +268,7 @@ tileWin is installed.
   Switch theme:    tilewin-theme list / tilewin-theme set win95
   Switch mode:     Super+Shift+W  or  tilewinmsg mode toggle
   Configuration:   ~/.config/tileWin/{common,tilemode,windowmode,taskbar}.conf
-  Update later:    git pull && ./install.sh --no-deps && tilewinmsg restart
+  Update later:    tilewin-update (the newest release or the newest source)
 EOF
 
 # In a running session: what a restart brings in, and what only a new login does.

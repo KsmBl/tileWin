@@ -74,7 +74,7 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"livepatch kpatch kexec load boot grub uki efi modules drivers "
 		"compression zstd xz lz4 gzip lzo localmodconfig",
 		"applications-engineering-symbolic" },
-	{ "about", "About", "system info fetch version kernel cpu memory logo uwu",
+	{ "about", "About", "system info fetch version update upgrade release welcome kernel cpu memory logo uwu",
 		"help-about-symbolic" },
 };
 

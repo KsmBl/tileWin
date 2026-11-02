@@ -1,0 +1,80 @@
+#!/bin/sh
+# The part of an installation that takes root, in one go so that a password is
+# asked for once: the files themselves, the session for display managers, the
+# PAM service of the lock screen, the capability of the compositor and the DNS
+# service taking over the new files.
+#
+#   tilewin-system-setup <prefix> <source dir> <owner> build <build dir> <meson>
+#   tilewin-system-setup <prefix> <source dir> <owner> stage <stage dir> [<root>]
+#
+# <owner> gets the install log back, as uid:gid. <source dir> holds data/.
+set -eu
+
+prefix=$1 source_dir=$2 owner=$3 kind=$4 from=$5
+root=/
+log=
+case $kind in
+build)
+	meson=$6
+	"$meson" install -C "$from" --no-rebuild >/dev/null
+	log=$from/meson-logs/install-log.txt
+	;;
+stage)
+	root=${6:-/}
+	mkdir -p "$root"
+	tar -C "$from" -cf - . | tar -C "$root" --no-same-owner -xf -
+	;;
+*)
+	echo "unknown kind of install: $kind" >&2
+	exit 2
+	;;
+esac
+
+# what was installed, for ./install.sh --uninstall, also when the build is gone
+shared=$root/$prefix/share/tileWin
+mkdir -p "$shared"
+if [ "$kind" = stage ]; then
+	(cd "$from" && find . -type f -o -type l | sed 's|^\./|/|') > "$shared/install-log.txt"
+elif [ -e "$log" ]; then
+	cp "$log" "$shared/install-log.txt"
+	chown "$owner" "$log" 2>/dev/null || true
+fi
+
+# nothing below belongs to a trial install somewhere else
+[ "$root" = / ] || exit 0
+
+if command -v systemctl >/dev/null 2>&1; then
+	systemctl daemon-reload || true
+	if systemctl is-active --quiet tilewin-dnsd.service 2>/dev/null; then
+		echo "Restarting the DNS service"
+		systemctl restart tilewin-dnsd.service || echo "could not restart the DNS service" >&2
+		"$prefix/libexec/tilewin-dns-apply" enable ||
+			echo "could not send the DNS of this computer through the service" >&2
+	fi
+fi
+
+# Display managers only look in /usr/share/wayland-sessions.
+if [ "$prefix" != /usr ]; then
+	echo "Registering the tileWin session in /usr/share/wayland-sessions"
+	mkdir -p /usr/share/wayland-sessions
+	sed "s|^Exec=.*|Exec=$prefix/bin/tilewin-session|" "$source_dir/data/tilewin.desktop" \
+		> /usr/share/wayland-sessions/tilewin.desktop
+	chmod 644 /usr/share/wayland-sessions/tilewin.desktop
+fi
+
+# The lock screen checks passwords with its own PAM service.
+if [ -d /etc/pam.d ] && [ ! -e /etc/pam.d/tilewin-lock ]; then
+	echo "Installing the PAM service of the lock screen"
+	install -m644 "$source_dir/data/tilewin-lock.pam" /etc/pam.d/tilewin-lock
+fi
+
+# Lowering the nice value of the focused window's process (focus_priority), and
+# giving tileWin itself the round-robin scheduling sway uses when it may, takes
+# CAP_SYS_NICE. Installing the binary again drops it, so it is given each time.
+if command -v setcap >/dev/null 2>&1; then
+	echo "Letting tileWin raise the focused window's priority (CAP_SYS_NICE)"
+	setcap cap_sys_nice=ep "$prefix/bin/tilewin" ||
+		echo "could not give tileWin CAP_SYS_NICE: focus_priority will do nothing" >&2
+else
+	echo "setcap not found (package libcap): focus_priority will do nothing" >&2
+fi

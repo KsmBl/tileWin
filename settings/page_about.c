@@ -524,6 +524,8 @@ GtkWidget *about_page_new(struct settings *s) {
 	g_string_append_printf(p->as_text, "%s\n%s\ntileWin %s\n\n", who,
 		pretty ? pretty : "Linux", SWAY_VERSION);
 
+	updates_group_new(s, content);
+
 	struct utsname un;
 	bool have_uname = uname(&un) == 0;
 

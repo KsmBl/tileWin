@@ -48,6 +48,14 @@ test(
 )
 
 test(
+	'update',
+	find_program('update.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'unit',
+	timeout: 60,
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
@@ -997,6 +1005,17 @@ test(
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 90,
+)
+
+test(
+	'settings-update',
+	find_program('settings_update.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
 )
 
 test(
