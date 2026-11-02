@@ -106,7 +106,7 @@ void settings_problem_clear(struct settings *s);
  * one on view? What goes wrong on any other is not for the banner, it would be
  * said over a page it has nothing to do with.
  */
-bool settings_page_on_view(GtkWidget *widget);
+bool settings_page_on_view(struct settings *s, GtkWidget *widget);
 /* The same with a text that is made up as it is said, without an action. */
 void problem_text(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 void settings_status(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);

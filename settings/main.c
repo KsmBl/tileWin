@@ -42,9 +42,9 @@ void settings_status(struct settings *s, const char *fmt, ...) {
 	g_free(msg);
 }
 
-bool settings_page_on_view(GtkWidget *widget) {
-	GtkWidget *parent = gtk_widget_get_parent(widget);
-	return parent && gtk_widget_get_mapped(parent);
+bool settings_page_on_view(struct settings *s, GtkWidget *widget) {
+	GtkWidget *page = gtk_stack_get_visible_child(s->stack);
+	return page && gtk_widget_is_ancestor(widget, page);
 }
 
 void settings_problem_clear(struct settings *s) {

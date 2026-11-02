@@ -1,8 +1,8 @@
 #!/bin/sh
 # When something fails the settings say so in a banner over the page, with the
 # next step. On the DNS page, with a helper that refuses the first time:
-#  - the Network page, built in the background, fails with NetworkManager gone
-#    and says nothing over this page;
+#  - with the About page on view, the Network page fails in the background with
+#    NetworkManager gone, and that is not said over the About page;
 #  - turning the service off fails and the banner shows;
 #  - Try again runs the same thing once more, and the banner goes;
 #  - after another failure × closes it without running anything.
@@ -42,6 +42,7 @@ export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=mem
 export TILEWIN_DNS_CONF=$work/dns.conf TILEWIN_DNS_APPLY=$work/helper TILEWIN_DNS_RUN=$work/run
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$work/run"
 echo light > "$XDG_CONFIG_HOME/tileWin/color-scheme"
+echo win95 > "$XDG_CONFIG_HOME/tileWin/current-theme"
 printf 'servers 1.1.1.1 8.8.8.8\nfastest 2\ntest_interval 3600\n' > "$work/dns.conf"
 
 cat > "$work/helper" <<EOS
@@ -54,14 +55,20 @@ exit 1
 EOS
 chmod +x "$work/helper"
 touch "$work/refuse"
+# NetworkManager answers as ever, but cannot tell about the network
 mkdir "$work/bin"
+real_nmcli=$(command -v nmcli || echo true)
 cat > "$work/bin/nmcli" <<EOS
 #!/bin/sh
 case "\$*" in
-*"connection show"*uuid*) echo "NetworkManager is not running" >&2; exit 1 ;;
-*"connection show"*) echo "aaaa-1111:Home:802-11-wireless:wlan0" ;;
+*"connection show uuid"*)
+	if [ ! -e "$work/nm-back" ]; then
+		echo "NetworkManager is not running" >&2
+		exit 1
+	fi
+	;;
 esac
-exit 0
+exec "$real_nmcli" "\$@"
 EOS
 chmod +x "$work/bin/nmcli"
 export PATH=$work/bin:$PATH
@@ -86,7 +93,7 @@ session_restore no
 panel_command none
 animations off
 output HEADLESS-1 mode --custom 1280x800 pos 0 0
-exec $settings --page=dns
+exec $settings --page=about
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 EOC
 
@@ -111,7 +118,7 @@ while ! ipc -t get_tree | grep -q '"name": "tileWin Settings"' && [ $attempt -lt
 	sleep 0.2
 	attempt=$((attempt + 1))
 done
-sleep 3
+sleep 4
 ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
 sleep 1.5
 
@@ -125,13 +132,26 @@ sys.exit(0 if r > 170 and g < 80 and b < 60 else 1)'
 calls() { grep -c "" "$work/calls" 2>/dev/null || echo 0; }
 : > "$work/calls"
 
+banner_up && fail "what failed on a page in the background shows over another"
+
+# now the DNS page, with NetworkManager back
+touch "$work/nm-back"
+ipc '[title="tileWin Settings"] kill' >/dev/null
+sleep 0.5
+"$settings" --page=dns >/dev/null 2>&1 &
+sleep 4
+ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
+sleep 1.5
 banner_up && fail "a banner shows before anything failed"
-"$pointer" 1280 800 click 1208 198
+# the window is new: the pointer has to come in before a click counts
+"$pointer" 1280 800 move 640 400
+sleep 1
+"$pointer" 1280 800 click 1211 175
 sleep 1
 banner_up || fail "a refused helper shows no banner"
 [ "$(grep -c disable "$work/calls")" = 1 ] || fail "the helper was not asked once: $(cat "$work/calls")"
 
-"$pointer" 1280 800 click 1177 24
+"$pointer" 1280 800 click 1190 24
 sleep 1
 banner_up && fail "the banner stayed after it worked"
 [ "$(grep -c disable "$work/calls")" = 2 ] || fail "Try again did not ask the helper again: $(cat "$work/calls")"
@@ -139,7 +159,7 @@ banner_up && fail "the banner stayed after it worked"
 touch "$work/refuse"
 : > "$work/calls"
 # with the banner gone and the service off the page is back where it was
-"$pointer" 1280 800 click 1208 198
+"$pointer" 1280 800 click 1211 175
 sleep 1
 banner_up || fail "the second refusal shows no banner"
 before=$(calls)

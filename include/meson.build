@@ -12,7 +12,7 @@ tilewin_version_h = vcs_tag(
 	output: 'tilewin-version.h',
 	command: git.found() ? [
 		'sh', '-c', 'c=$(git -C "$1" rev-parse --short HEAD 2>/dev/null) && ' +
-			'b=$(git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null) && printf -- "-%s on %s" "$c" "$b"',
+			'b=$(git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null) && printf -- "-%s on %s" "$c" "$b"; true',
 		'sh', meson.project_source_root(),
 	] : ['true'],
 	fallback: '',
