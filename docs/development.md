@@ -118,6 +118,11 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   change by hand lasts until the next start or end;
 - presses the buttons of the Updates group with a stand-in for `tilewin-update`.
 
+- starts the display manager with the real greeter and compositor, and a stand-in
+  for PAM in a test program that is not installed: a wrong and a right password, a
+  further question, a session that is gone, root, automatic login and what is
+  remembered;
+
 `tests/update.sh` in the unit suite runs `tilewin-update` itself with stand-ins
 for GitHub, git and the password: the temporary folder goes in every case, there
 is a restart only after a good update, and a wrong checksum installs nothing.

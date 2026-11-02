@@ -267,7 +267,7 @@ static gboolean on_service_switch(GtkSwitch *widget, gboolean active, gpointer d
 	gtk_alert_dialog_set_detail(dialog, active ?
 		"It takes over from your current one at the next start of the computer. If it should "
 		"not come up, Ctrl+Alt+F2 gets you to a text console, where "
-		"\"sudo tilewin-dm-apply disable\" puts the old one back." :
+		"\"sudo " TILEWIN_LIBEXECDIR "/tilewin-dm-apply disable\" puts the old one back." :
 		"The display manager used before comes back at the next start of the computer.");
 	gtk_alert_dialog_set_buttons(dialog, (const char *const[]){ "Cancel",
 		active ? "Use it" : "Stop using it", NULL });

@@ -111,3 +111,4 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
 - **Low battery warning** at 10% and an urgent one at 5%, on their own beside the battery saver.
 - **Dark mode on a schedule**, and a change by hand lasts until the next start or end.
 - **Updates in one step:** `tilewin-update` and the About page bring in the newest release or build the newest source in a temporary folder, then restart tileWin.
+- **A display manager** of its own, off until you turn it on: the login screen in the look of your theme, with the settings on the Login screen page. See [display-manager.md](display-manager.md).

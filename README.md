@@ -1,4 +1,4 @@
-////# tileWin
+# tileWin
 
 tileWin is a Wayland compositor with two modes you can switch between at any time:
 
@@ -30,8 +30,10 @@ Search finds apps, settings, files and sums. `Super+/` lists the keys of the mod
 | Search | Keyboard shortcuts (Super+/) |
 |---|---|
 | ![Search in the start menu](docs/screenshots/search.png) | ![The list of keyboard shortcuts](docs/screenshots/shortcuts.png) |
-| **First start** | **Quick settings with the keyboard** |
-| ![The welcome window](docs/screenshots/welcome.png) | ![A ring on a button of the quick settings](docs/screenshots/flyout-keyboard.png) |
+| **First start** | **The login screen** |
+| ![The welcome window](docs/screenshots/welcome.png) | ![The login screen of the display manager](docs/screenshots/login.png) |
+| **Quick settings with the keyboard** | |
+| ![A ring on a button of the quick settings](docs/screenshots/flyout-keyboard.png) | |
 
 Every theme brings its own title bars, taskbar, start menu and wallpaper:
 
@@ -67,6 +69,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
 - **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.
 - **A settings app** for all of it, so no config file has to be touched. What fails says so in a banner, with a way to try again.
+- **A display manager** of its own, `tilewin-display-manager`: the login screen in the look of your theme, up in a blink, with about fifty settings. It stays off until you turn it on: [docs/display-manager.md](docs/display-manager.md).
 - **Updates** in one step: `tilewin-update` or the About page bring in the newest release or build the newest source, then restart tileWin with your windows open.
 - **Light:** written in C, no CPU use while nothing happens.
 
@@ -113,7 +116,7 @@ Start tileWin:
 
 **Dependencies:**
 - **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja. `tilewin-update` also uses curl, and git for the source.
-- **Optional:** pam (the lock screen is skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+- **Optional:** pam (the lock screen and the display manager are skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 To update:
 
@@ -184,6 +187,7 @@ Window mode and tile mode each remember their own theme.
 
 - [docs/features.md](docs/features.md): everything tileWin does
 - [docs/usage.md](docs/usage.md): keys, flyouts, the settings app, the themes and the screen savers in detail
+- [docs/display-manager.md](docs/display-manager.md): the login screen, its settings and how to try it
 - [docs/configuration.md](docs/configuration.md): every config file and setting, and how to make a theme of your own
 - [docs/development.md](docs/development.md): the tests
 
