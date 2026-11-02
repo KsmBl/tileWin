@@ -35,6 +35,10 @@ It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for t
 
 The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
 
+## First start
+
+A new user is greeted by **Welcome to tileWin** (`tilewin-settings --welcome`): a theme and dark mode, window or tile mode, the keys worth knowing, and a way to restore a backup from another computer. Everything applies at once and *Skip* ends it. It comes once (`welcomed` in `~/.local/state/tileWin`); someone with a session behind them does not get it after an update.
+
 ## Theme cards
 
 The cards of the **Theme** page show each theme's wallpaper with a small window and taskbar over it, drawn in the colors of that theme.

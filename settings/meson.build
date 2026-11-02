@@ -35,6 +35,7 @@ tilewin_settings = executable(
 		'reorder.c',
 		'snaplayouts.c',
 		'ui.c',
+		'welcome.c',
 		'widgets.c',
 		tilewin_version_h,
 	],

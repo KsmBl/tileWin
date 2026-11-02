@@ -23,6 +23,35 @@ static volatile sig_atomic_t signal_flags = 0;
 #define SIGNAL_STOP 1
 #define SIGNAL_RELOAD 2
 
+/*
+ * Once, for someone new: the settings app greets them. Whoever has a session
+ * behind them is left alone, also after an update that brings this in. Tests
+ * start with an empty state too, and have to ask for it.
+ */
+static void welcome_new_user(struct panel *panel) {
+	if (getenv("TILEWIN_NO_APP_TWEAKS") && !getenv("TILEWIN_WELCOME")) {
+		return;
+	}
+	char *dir = tw_state_dir();
+	if (!dir) {
+		return;
+	}
+	char *path = format_str("%s/welcomed", dir);
+	bool again = access(path, F_OK) == 0;
+	static const char *const signs[] = { "last-session", "window-places", "mode" };
+	bool known = false;
+	for (size_t i = 0; i < sizeof(signs) / sizeof(signs[0]); i++) {
+		char *sign = format_str("%s/%s", dir, signs[i]);
+		known = known || access(sign, F_OK) == 0;
+		free(sign);
+	}
+	if (!again && tw_write_string(path, "yes\n") && !known) {
+		ipc_panel_command(panel, "exec tilewin-settings --welcome");
+	}
+	free(path);
+	free(dir);
+}
+
 static void handle_signal(int sig) {
 	if (sig == SIGUSR1) {
 		signal_flags |= SIGNAL_RELOAD;
@@ -369,6 +398,7 @@ int main(int argc, char **argv) {
 	bt_init(&panel);
 	scheduler_init(&panel);
 	clipboard_init(&panel);
+	welcome_new_user(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	watch_files(&panel);

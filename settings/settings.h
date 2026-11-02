@@ -119,6 +119,8 @@ struct ui_search_entry {
 void ui_index_page(const char *name, const char *title, const char *keywords);
 /* Entries matching every word of the query, best first. Borrowed, free the array. */
 GPtrArray *ui_search(const char *query);
+/* The first-run window (tilewin-settings --welcome). */
+void welcome_show(struct settings *s);
 /* A card of a theme for a GtkFlowBox: data "theme" and "title" say which. */
 GtkWidget *theme_card_new(const char *name, const char *title);
 GtkWidget *ui_page(const char *title, const char *description, GtkWidget **content);

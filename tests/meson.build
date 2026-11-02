@@ -957,6 +957,17 @@ test(
 )
 
 test(
+	'welcome',
+	find_program('welcome.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool, keyboard_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
 	'emoji-picker',
 	find_program('emoji_picker.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
