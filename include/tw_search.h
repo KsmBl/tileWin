@@ -34,4 +34,9 @@ void tw_calc_format(double value, char *buf, size_t size);
 /* The text in single quotes for a shell. Newly allocated. */
 char *tw_shell_quote(const char *text);
 
+/* "21:30" as minutes after midnight. */
+bool tw_time_parse(const char *text, int *minutes);
+/* Is it between the two now, also across midnight? The end itself is not. */
+bool tw_time_between(int now, int from, int to);
+
 #endif

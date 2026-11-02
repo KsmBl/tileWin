@@ -16,6 +16,7 @@ struct theme_page {
 	GtkWidget *dark_switch;
 	GtkWidget *icons_switch;
 	GtkWidget *accent_switch;
+	GtkWidget *schedule_switch, *schedule_from, *schedule_to;
 };
 
 static const char *target_mode(struct theme_page *p) {
@@ -98,6 +99,80 @@ static gboolean on_dark_switch(GtkSwitch *widget, gboolean active, gpointer data
 	settings_apply_color_scheme(active);
 	settings_apply_theme(); // the dark or light colours of the theme
 	return FALSE;
+}
+
+/* ---------- dark mode by the clock ---------- */
+
+static const char *schedule_labels[49];
+
+static void schedule_labels_init(void) {
+	for (int i = 0; i < 48; i++) {
+		if (!schedule_labels[i]) {
+			schedule_labels[i] = g_strdup_printf("%02d:%02d", i / 2, i % 2 ? 30 : 0);
+		}
+	}
+}
+
+static void schedule_sensitive(struct theme_page *p) {
+	bool on = gtk_switch_get_active(GTK_SWITCH(p->schedule_switch));
+	gtk_widget_set_sensitive(p->schedule_from, on);
+	gtk_widget_set_sensitive(p->schedule_to, on);
+}
+
+static void schedule_save(struct theme_page *p) {
+	schedule_sensitive(p);
+	struct confdoc *d = p->s->common;
+	bool on = gtk_switch_get_active(GTK_SWITCH(p->schedule_switch));
+	guint from = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->schedule_from));
+	guint to = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->schedule_to));
+	if (on && from == to) {
+		settings_problem(p->s, "Dark mode cannot start and end at the same time", NULL, NULL, NULL);
+		return;
+	}
+	char *value = on ? g_strdup_printf("%s %s", schedule_labels[from], schedule_labels[to]) : NULL;
+	confdoc_set(d, d->root, "dark_schedule", NULL, value);
+	settings_common_changed(p->s, false);
+	// turning dark reloads the config: it has to say this already
+	settings_flush(p->s);
+	settings_command(p->s, "dark_schedule %s", on ? value : "off");
+	g_free(value);
+}
+
+static gboolean on_schedule_switch(GtkSwitch *widget, gboolean active, gpointer data) {
+	struct theme_page *p = data;
+	gtk_switch_set_state(widget, active);
+	if (!p->updating) {
+		schedule_save(p);
+	}
+	return TRUE;
+}
+
+static void on_schedule_time(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct theme_page *p = data;
+	if (!p->updating) {
+		schedule_save(p);
+	}
+}
+
+static guint schedule_index(const char *text, guint fallback) {
+	for (guint i = 0; text && i < 48; i++) {
+		if (strcmp(text, schedule_labels[i]) == 0) {
+			return i;
+		}
+	}
+	return fallback;
+}
+
+/* The config, in step with what is shown; only called while p->updating. */
+static void schedule_refresh(struct theme_page *p) {
+	struct confdoc *d = p->s->common;
+	struct cstmt *line = confdoc_child(d->root, "dark_schedule", NULL);
+	const char *from = cstmt_arg(line, 0), *to = cstmt_arg(line, 1);
+	bool on = from && to && strcmp(from, "off") != 0;
+	gtk_switch_set_active(GTK_SWITCH(p->schedule_switch), on);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->schedule_from), schedule_index(on ? from : NULL, 42));
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->schedule_to), schedule_index(on ? to : NULL, 14));
+	schedule_sensitive(p);
 }
 
 static char *app_icons_path(void) {
@@ -230,6 +305,7 @@ void theme_page_refresh(struct settings *s) {
 	gtk_switch_set_active(GTK_SWITCH(p->dark_switch),
 		scheme ? strcmp(scheme, "dark") == 0 : tw_color_scheme_is_dark());
 	g_free(scheme);
+	schedule_refresh(p);
 	gtk_switch_set_active(GTK_SWITCH(p->icons_switch), app_icons_enabled());
 	tw_accent_reload();
 	gtk_switch_set_active(GTK_SWITCH(p->accent_switch), tw_accent_from_wallpaper());
@@ -277,6 +353,18 @@ GtkWidget *theme_page_new(struct settings *s) {
 	ui_row(group, "Dark mode",
 		"Dark title bars, taskbar menus and flyouts. GTK, GNOME and KDE apps switch too.",
 		p->dark_switch);
+	schedule_labels_init();
+	p->schedule_switch = gtk_switch_new();
+	g_signal_connect(p->schedule_switch, "state-set", G_CALLBACK(on_schedule_switch), p);
+	ui_row(group, "Dark mode on a schedule",
+		"Switches at these times. A change by hand lasts until the next of them.",
+		p->schedule_switch);
+	p->schedule_from = gtk_drop_down_new_from_strings(schedule_labels);
+	g_signal_connect(p->schedule_from, "notify::selected", G_CALLBACK(on_schedule_time), p);
+	ui_row(group, "Dark from", NULL, p->schedule_from);
+	p->schedule_to = gtk_drop_down_new_from_strings(schedule_labels);
+	g_signal_connect(p->schedule_to, "notify::selected", G_CALLBACK(on_schedule_time), p);
+	ui_row(group, "Until", NULL, p->schedule_to);
 	p->icons_switch = gtk_switch_new();
 	g_signal_connect(p->icons_switch, "state-set", G_CALLBACK(on_icons_switch), p);
 	ui_row(group, "Theme icons in apps",

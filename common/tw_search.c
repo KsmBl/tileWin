@@ -283,3 +283,20 @@ char *tw_shell_quote(const char *text) {
 	*o = '\0';
 	return out;
 }
+
+bool tw_time_parse(const char *text, int *minutes) {
+	int h, m;
+	char end;
+	if (!text || sscanf(text, "%d:%d%c", &h, &m, &end) != 2 || h < 0 || h > 23 || m < 0 || m > 59) {
+		return false;
+	}
+	*minutes = h * 60 + m;
+	return true;
+}
+
+bool tw_time_between(int now, int from, int to) {
+	if (from == to) {
+		return false;
+	}
+	return from < to ? now >= from && now < to : now >= from || now < to;
+}

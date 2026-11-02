@@ -35,6 +35,10 @@ It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for t
 
 The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
 
+## Dark mode on a schedule
+
+The Theme page turns dark mode on and off by the clock (`dark_schedule 21:00 07:00` in common.conf, `off` for never). It takes effect at once and when the session starts, and acts again only when the time passes a start or an end, as the night light does, so a change by hand lasts until the next of them.
+
 ## Low battery
 
 On battery at 10% a notification says the battery is low, and at 5% an urgent one says it is almost empty, which also comes through do not disturb. This does not depend on the battery saver or keep awake. Being plugged in starts it over. The Battery saver group of the Screen page sets the level (`battery_warning 10`, half of it is the urgent one, `battery_warning off` for never).

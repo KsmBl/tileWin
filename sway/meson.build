@@ -19,6 +19,7 @@ sway_sources = files(
 	'wm/animate.c',
 	'wm/autostart.c',
 	'wm/batterysaver.c',
+	'wm/darkschedule.c',
 
 	'wm/taskview.c',
 	'wm/buffer.c',

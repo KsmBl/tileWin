@@ -3,6 +3,7 @@
 #include <string.h>
 #include <strings.h>
 #include "sway/commands.h"
+#include "tw_search.h"
 #include "sway/config.h"
 #include "sway/input/input-manager.h"
 #include "sway/input/keyboard.h"
@@ -664,6 +665,25 @@ struct cmd_results *cmd_battery_saver(int argc, char **argv) {
 	}
 	if (!config->reading) {
 		tw_battery_saver_check();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
+struct cmd_results *cmd_dark_schedule(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "dark_schedule", EXPECTED_AT_LEAST, 1))) {
+		return error;
+	}
+	// dark_schedule off | <from> <to>: dark mode between the two, like 21:00 07:00
+	int from = -1, to = -1;
+	if (!(argc == 1 && strcasecmp(argv[0], "off") == 0) && (argc != 2 ||
+			!tw_time_parse(argv[0], &from) || !tw_time_parse(argv[1], &to) || from == to)) {
+		return cmd_results_new(CMD_INVALID, "Expected 'dark_schedule off|<from> <to>'");
+	}
+	config->tw_dark_from = from;
+	config->tw_dark_to = to;
+	if (!config->reading) {
+		tw_dark_schedule_check();
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }

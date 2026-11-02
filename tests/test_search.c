@@ -101,6 +101,34 @@ int main(void) {
 		}
 	}
 
+	int minutes = -1;
+	if (!tw_time_parse("21:30", &minutes) || minutes != 21 * 60 + 30) {
+		fprintf(stderr, "FAIL: 21:30 reads %d\n", minutes);
+		failures++;
+	}
+	if (tw_time_parse("24:00", &minutes) || tw_time_parse("9", &minutes) ||
+			tw_time_parse("12:30x", &minutes) || tw_time_parse("12:60", &minutes)) {
+		fprintf(stderr, "FAIL: a time that is none was taken\n");
+		failures++;
+	}
+	static const struct {
+		int now, from, to;
+		bool want;
+	} spans[] = {
+		{ 22 * 60, 21 * 60, 7 * 60, true }, { 3 * 60, 21 * 60, 7 * 60, true },
+		{ 21 * 60, 21 * 60, 7 * 60, true }, { 7 * 60, 21 * 60, 7 * 60, false },
+		{ 12 * 60, 21 * 60, 7 * 60, false }, { 10 * 60, 9 * 60, 17 * 60, true },
+		{ 17 * 60, 9 * 60, 17 * 60, false }, { 8 * 60, 9 * 60, 17 * 60, false },
+		{ 8 * 60, 9 * 60, 9 * 60, false },
+	};
+	for (size_t i = 0; i < sizeof(spans) / sizeof(spans[0]); i++) {
+		if (tw_time_between(spans[i].now, spans[i].from, spans[i].to) != spans[i].want) {
+			fprintf(stderr, "FAIL: %d between %d and %d\n", spans[i].now, spans[i].from,
+				spans[i].to);
+			failures++;
+		}
+	}
+
 	char *quoted = tw_shell_quote("it's");
 	if (strcmp(quoted, "'it'\\''s'") != 0) {
 		fprintf(stderr, "FAIL: it's quoted as %s\n", quoted);

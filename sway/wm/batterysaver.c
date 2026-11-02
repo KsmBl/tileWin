@@ -150,6 +150,7 @@ void tw_battery_saver_check(void) {
 
 static int handle_timer(void *data) {
 	tw_battery_saver_check();
+	tw_dark_schedule_check();
 	const char *poll = getenv("TILEWIN_BATTERY_POLL_MS");
 	wl_event_source_timer_update(bs.timer, poll && atoi(poll) > 0 ? atoi(poll) : POLL_MS);
 	return 0;

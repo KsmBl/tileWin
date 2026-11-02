@@ -262,6 +262,8 @@ bool tw_snap(struct sway_container *con, const char *direction, char **error);
 void tw_battery_saver_init(void);
 void tw_battery_saver_fini(void);
 void tw_battery_saver_check(void);
+/* Dark mode by the clock (dark_schedule), looked at once a minute. */
+void tw_dark_schedule_check(void);
 bool tw_battery_saver_active(void);
 /* Snaps into that slot with the lines between the slots at those fractions. */
 bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double fy,
