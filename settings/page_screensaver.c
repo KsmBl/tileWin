@@ -543,7 +543,7 @@ static void on_preview(GtkButton *button, gpointer data) {
 	GError *error = NULL;
 	if (!g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL,
 			&error)) {
-		settings_status(p->s, "Could not start the screen saver: %s", error->message);
+		problem_text(p->s, "Could not start the screen saver: %s", error->message);
 		g_clear_error(&error);
 	}
 }

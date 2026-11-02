@@ -187,6 +187,36 @@ GtkWidget *ui_group(GtkWidget *content, const char *title, const char *descripti
 	return list;
 }
 
+GtkWidget *ui_empty_row(GtkWidget *group, const char *icon, const char *title,
+		const char *detail) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	gtk_widget_set_margin_top(box, 18);
+	gtk_widget_set_margin_bottom(box, 18);
+	gtk_widget_set_margin_start(box, 12);
+	gtk_widget_set_margin_end(box, 12);
+	GtkWidget *image = gtk_image_new_from_icon_name(icon);
+	gtk_image_set_pixel_size(GTK_IMAGE(image), 32);
+	gtk_widget_add_css_class(image, "dim-label");
+	gtk_box_append(GTK_BOX(box), image);
+	GtkWidget *label = gtk_label_new(title);
+	gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+	gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+	gtk_widget_add_css_class(label, "tw-heading");
+	gtk_box_append(GTK_BOX(box), label);
+	if (detail) {
+		GtkWidget *more = gtk_label_new(detail);
+		gtk_label_set_wrap(GTK_LABEL(more), TRUE);
+		gtk_label_set_justify(GTK_LABEL(more), GTK_JUSTIFY_CENTER);
+		gtk_widget_add_css_class(more, "dim-label");
+		gtk_box_append(GTK_BOX(box), more);
+	}
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+	gtk_list_box_append(GTK_LIST_BOX(group), row);
+	return row;
+}
+
 GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 		GtkWidget *control) {
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);

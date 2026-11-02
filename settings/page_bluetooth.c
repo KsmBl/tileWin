@@ -507,7 +507,8 @@ GtkWidget *bluetooth_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(p->groups), p->status);
 
 	p->paired_group = ui_group(p->groups, "Your devices", NULL);
-	p->paired_empty = ui_row(p->paired_group, "No paired devices yet", NULL, NULL);
+	p->paired_empty = ui_empty_row(p->paired_group, "bluetooth-symbolic",
+		"No paired devices yet", "Put a device into pairing mode and pick it below.");
 
 	p->nearby_group = ui_group(p->groups, "Add a device", NULL);
 	p->search_button = gtk_button_new_with_label("Search");

@@ -354,11 +354,34 @@ struct dns_page;
 
 struct helper_call {
 	struct dns_page *p;
-	char *what;
+	char *what, *input, *arg1, *arg2;
 	void (*done)(struct dns_page *p, bool ok, const char *output);
 };
 
-static void set_message(struct dns_page *p, const char *text);
+static void run_helper(struct dns_page *p, const char *what, const char *input,
+	void (*done)(struct dns_page *, bool, const char *), const char *arg1, const char *arg2);
+
+/* The call that failed, for the Try again of the banner. */
+static struct helper_call *failed_call;
+
+static void helper_call_free(struct helper_call *call) {
+	g_free(call->what);
+	g_free(call->input);
+	g_free(call->arg1);
+	g_free(call->arg2);
+	g_free(call);
+}
+
+static void retry_helper(gpointer data) {
+	struct helper_call *call = failed_call;
+	failed_call = NULL;
+	if (call) {
+		run_helper(call->p, call->what, call->input, call->done, call->arg1, call->arg2);
+		helper_call_free(call);
+	}
+}
+
+static struct settings *page_settings(struct dns_page *p);
 static void refresh_status(struct dns_page *p);
 
 static void helper_finished(GObject *source, GAsyncResult *result, gpointer data) {
@@ -374,7 +397,15 @@ static void helper_finished(GObject *source, GAsyncResult *result, gpointer data
 		char *text = g_strdup_printf("Could not %s: %s", call->what,
 			error ? error->message : err && *err ? g_strstrip(err) :
 			status == 126 || status == 127 ? "not authorized" : "the helper failed");
-		set_message(call->p, text);
+		if (failed_call) {
+			helper_call_free(failed_call);
+		}
+		failed_call = g_memdup2(call, sizeof(*call));
+		failed_call->what = g_strdup(call->what);
+		failed_call->input = g_strdup(call->input);
+		failed_call->arg1 = g_strdup(call->arg1);
+		failed_call->arg2 = g_strdup(call->arg2);
+		settings_problem(page_settings(call->p), text, "Try again", retry_helper, NULL);
 		g_free(text);
 	}
 	if (call->done) {
@@ -384,8 +415,7 @@ static void helper_finished(GObject *source, GAsyncResult *result, gpointer data
 	g_clear_error(&error);
 	g_free(out);
 	g_free(err);
-	g_free(call->what);
-	g_free(call);
+	helper_call_free(call);
 }
 
 /* Runs the helper with args (and input on stdin); what is said when it fails. */
@@ -410,7 +440,7 @@ static void run_helper(struct dns_page *p, const char *what, const char *input,
 	g_free(helper);
 	if (!proc) {
 		char *text = g_strdup_printf("Could not %s: %s", what, error->message);
-		set_message(p, text);
+		settings_problem(page_settings(p), text, NULL, NULL, NULL);
 		g_free(text);
 		g_error_free(error);
 		if (done) {
@@ -421,6 +451,9 @@ static void run_helper(struct dns_page *p, const char *what, const char *input,
 	struct helper_call *call = g_new0(struct helper_call, 1);
 	call->p = p;
 	call->what = g_strdup(what);
+	call->input = g_strdup(input);
+	call->arg1 = g_strdup(arg1);
+	call->arg2 = g_strdup(arg2);
 	call->done = done;
 	g_subprocess_communicate_utf8_async(proc, input ? input : "", NULL, helper_finished, call);
 	g_object_unref(proc);
@@ -471,9 +504,8 @@ struct dns_page {
 	bool running;
 };
 
-static void set_message(struct dns_page *p, const char *text) {
-	gtk_label_set_text(GTK_LABEL(p->message), text ? text : "");
-	gtk_widget_set_visible(p->message, text && *text);
+static struct settings *page_settings(struct dns_page *p) {
+	return p->s;
 }
 
 static GtkWidget *subtitle_of(GtkWidget *row) {
@@ -679,9 +711,7 @@ static struct word_list *word_list_new(struct dns_page *p, GtkWidget *content, c
 	w->rows = g_ptr_array_new();
 	w->picks = g_ptr_array_new_with_free_func(g_free);
 	w->list = ui_group(content, title, description);
-	w->empty_row = ui_row(w->list, empty, NULL, NULL);
-	gtk_widget_add_css_class(gtk_widget_get_first_child(gtk_widget_get_first_child(
-		ui_row_box(w->empty_row))), "dim-label");
+	w->empty_row = ui_empty_row(w->list, "view-list-symbolic", empty, NULL);
 	if (presets) {
 		w->pick = gtk_drop_down_new(NULL, NULL);
 		g_signal_connect(w->pick, "notify::selected", G_CALLBACK(on_pick), w);
@@ -1000,7 +1030,7 @@ static gboolean on_service_switch(GtkSwitch *sw, gboolean on, gpointer data) {
 	}
 	p->busy = true;
 	gtk_widget_set_sensitive(p->service_switch, false);
-	set_message(p, NULL);
+	settings_problem_clear(p->s);
 	if (on) {
 		// the settings first, so the service starts with them
 		if (p->save_timer) {
@@ -1028,6 +1058,11 @@ static void on_rewire(GtkButton *button, gpointer data) {
 
 static void on_test(GtkButton *button, gpointer data) {
 	struct dns_page *p = data;
+	if (p->c.servers->len == 0) {
+		settings_problem(p->s, "There are no servers to time yet. Add some under "
+			"Servers for all networks first.", NULL, NULL, NULL);
+		return;
+	}
 	run_helper(p, "time the servers", NULL, NULL, "test", NULL);
 	settings_status(p->s, "Timing the servers…");
 }
@@ -1065,7 +1100,7 @@ static void on_import_picked(GObject *source, GAsyncResult *result, gpointer dat
 	gsize len = 0;
 	GError *error = NULL;
 	if (!g_file_load_contents(file, NULL, &contents, &len, NULL, &error)) {
-		set_message(p, error->message);
+		settings_problem(p->s, error->message, NULL, NULL, NULL);
 		g_error_free(error);
 		g_object_unref(file);
 		return;
@@ -1084,7 +1119,8 @@ static void on_import_picked(GObject *source, GAsyncResult *result, gpointer dat
 		base[strlen(base) - 5] = '\0';
 	}
 	if (!g_utf8_validate(contents, len, NULL)) {
-		set_message(p, "That file is no text: a block list has one name per line");
+		settings_problem(p->s, "That file is no text: a block list has one name per line", NULL,
+			NULL, NULL);
 	} else {
 		run_helper(p, "import the block list", contents, imported, "import", base);
 	}
@@ -1507,13 +1543,6 @@ GtkWidget *dns_page_new(struct settings *s) {
 	gtk_widget_set_margin_start(p->today_label, 12);
 	gtk_widget_set_margin_top(p->today_label, 4);
 	gtk_box_append(GTK_BOX(gtk_widget_get_parent(service)), p->today_label);
-	p->message = gtk_label_new(NULL);
-	gtk_label_set_xalign(GTK_LABEL(p->message), 0);
-	gtk_label_set_wrap(GTK_LABEL(p->message), TRUE);
-	gtk_widget_add_css_class(p->message, "error");
-	gtk_widget_set_margin_start(p->message, 12);
-	gtk_box_append(GTK_BOX(gtk_widget_get_parent(service)), p->message);
-	gtk_widget_set_visible(p->message, false);
 	p->nm_note = gtk_label_new(NULL);
 	gtk_label_set_xalign(GTK_LABEL(p->nm_note), 0);
 	gtk_label_set_wrap(GTK_LABEL(p->nm_note), TRUE);

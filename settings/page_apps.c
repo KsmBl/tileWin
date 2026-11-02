@@ -515,7 +515,8 @@ GtkWidget *apps_page_new(struct settings *s) {
 
 	p->startup_group = ui_group(content, "Startup apps",
 		"Apps that start when you log in (XDG autostart).");
-	p->startup_empty = ui_row(p->startup_group, "No startup apps", NULL, NULL);
+	p->startup_empty = ui_empty_row(p->startup_group, "application-x-executable-symbolic",
+		"No startup apps", "Apps added below start when you log in.");
 	GtkWidget *add_group = ui_group(content, NULL, NULL);
 	ui_row(add_group, "Add a startup app", NULL,
 		ui_app_picker("Add…", on_startup_add, p));

@@ -10,6 +10,8 @@
 static const char css[] =
 	".tw-title { font-size: 1.8em; font-weight: 800; }\n"
 	".tw-heading { font-weight: bold; }\n"
+	".tw-problem { background-color: #c42b1c; color: #ffffff; padding: 8px 12px; }\n"
+	".tw-problem button { color: #ffffff; background: rgba(255,255,255,0.18); border: none; }\n"
 	".tw-caption { font-size: 0.9em; }\n"
 	"list.tw-group { border: 1px solid alpha(currentColor, 0.15); border-radius: 8px; }\n"
 	"list.tw-group > row:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }\n"
@@ -40,6 +42,72 @@ void settings_status(struct settings *s, const char *fmt, ...) {
 	g_free(msg);
 }
 
+void settings_problem_clear(struct settings *s) {
+	if (s->problem) {
+		gtk_widget_set_visible(s->problem, FALSE);
+	}
+	s->problem_callback = NULL;
+}
+
+void settings_problem(struct settings *s, const char *text, const char *action,
+		void (*callback)(gpointer data), gpointer data) {
+	if (!s->problem) {
+		g_printerr("%s\n", text);
+		return;
+	}
+	gtk_label_set_text(GTK_LABEL(s->problem_label), text);
+	gtk_widget_set_visible(s->problem_action, action != NULL);
+	if (action) {
+		gtk_button_set_label(GTK_BUTTON(s->problem_action), action);
+	}
+	s->problem_callback = callback;
+	s->problem_data = data;
+	gtk_widget_set_visible(s->problem, TRUE);
+}
+
+void problem_text(struct settings *s, const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	char *text = g_strdup_vprintf(fmt, args);
+	va_end(args);
+	settings_problem(s, text, NULL, NULL, NULL);
+	g_free(text);
+}
+
+static void on_problem_action(GtkButton *button, gpointer data) {
+	struct settings *s = data;
+	void (*callback)(gpointer) = s->problem_callback;
+	gpointer arg = s->problem_data;
+	settings_problem_clear(s);
+	if (callback) {
+		callback(arg);
+	}
+}
+
+static void on_problem_close(GtkButton *button, gpointer data) {
+	settings_problem_clear(data);
+}
+
+static GtkWidget *problem_banner(struct settings *s) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_add_css_class(box, "tw-problem");
+	s->problem_label = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(s->problem_label), 0);
+	gtk_label_set_wrap(GTK_LABEL(s->problem_label), TRUE);
+	gtk_widget_set_hexpand(s->problem_label, TRUE);
+	gtk_box_append(GTK_BOX(box), s->problem_label);
+	s->problem_action = gtk_button_new_with_label("Try again");
+	g_signal_connect(s->problem_action, "clicked", G_CALLBACK(on_problem_action), s);
+	gtk_box_append(GTK_BOX(box), s->problem_action);
+	GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+	gtk_widget_set_tooltip_text(close, "Close");
+	g_signal_connect(close, "clicked", G_CALLBACK(on_problem_close), s);
+	gtk_box_append(GTK_BOX(box), close);
+	gtk_widget_set_visible(box, FALSE);
+	s->problem = box;
+	return box;
+}
+
 bool settings_command(struct settings *s, const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
@@ -48,7 +116,10 @@ bool settings_command(struct settings *s, const char *fmt, ...) {
 	char *error = NULL;
 	bool ok = tw_ipc_command(command, &error);
 	if (!ok && tw_ipc_available()) {
-		settings_status(s, "tileWin rejected \"%s\": %s", command, error ? error : "unknown error");
+		char *text = g_strdup_printf("tileWin rejected \"%s\": %s", command,
+			error ? error : "unknown error");
+		settings_problem(s, text, NULL, NULL, NULL);
+		g_free(text);
 	}
 	g_free(error);
 	g_free(command);
@@ -478,6 +549,7 @@ static GtkWidget *side_row_box(const char *icon, const char *title, bool folder)
 }
 
 static void on_visible_page(GObject *stack, GParamSpec *pspec, gpointer data) {
+	settings_problem_clear(data); // it was about the page before
 	lazy_build_named(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
 	side_sync(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
 }
@@ -589,6 +661,7 @@ static void build_window(struct settings *s) {
 	gtk_widget_set_vexpand(stack, TRUE);
 
 	GtkWidget *right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(right), problem_banner(s));
 	gtk_box_append(GTK_BOX(right), stack);
 	gtk_box_append(GTK_BOX(right), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
 	GtkWidget *status = gtk_label_new("");

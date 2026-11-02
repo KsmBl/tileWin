@@ -57,6 +57,11 @@ static const char *nmcli(void) {
 }
 
 static void set_message(struct network_page *p, const char *text, bool error) {
+	if (error && text) {
+		settings_problem(p->s, text, NULL, NULL, NULL);
+		text = NULL;
+		error = false;
+	}
 	gtk_label_set_text(GTK_LABEL(p->message), text ? text : "");
 	gtk_widget_set_visible(p->message, text && *text);
 	if (error) {
@@ -205,6 +210,12 @@ static void sync_rows(struct network_page *p) {
 static void advanced_show(struct network_page *p, const char *type, const char *autoconnect,
 	const char *metered, const char *mac);
 
+static void show_details(struct network_page *p);
+
+static void retry_details(gpointer data) {
+	show_details(data);
+}
+
 static void details_loaded(struct network_page *p, bool ok, char *out, char *err, gpointer data) {
 	char *uuid = data;
 	p->loading = false;
@@ -214,7 +225,8 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 	}
 	g_free(uuid);
 	if (!ok) {
-		set_message(p, err && *err ? g_strstrip(err) : "NetworkManager did not answer", true);
+		settings_problem(p->s, err && *err ? g_strstrip(err) : "NetworkManager did not answer",
+			"Try again", retry_details, p);
 		return;
 	}
 	char *method = NULL, *addresses = NULL, *gateway = NULL, *dns4 = NULL, *dns6 = NULL;

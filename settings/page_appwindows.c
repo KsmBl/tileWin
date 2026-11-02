@@ -253,7 +253,8 @@ static void rebuild_rules(struct appwin_page *p) {
 		g_free(sub);
 	}
 	if (rules->len == 0) {
-		ui_row(p->rules, NULL, "No rules yet", NULL);
+		ui_empty_row(p->rules, "application-x-executable-symbolic", "No rules yet",
+			"A rule opens the windows of an app always in the same way.");
 	}
 	g_ptr_array_free(rules, TRUE);
 }

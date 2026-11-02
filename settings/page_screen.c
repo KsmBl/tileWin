@@ -255,8 +255,7 @@ static void save_displays(struct screen_page *p) {
 	free(dir);
 	GError *error = NULL;
 	if (!path || !g_file_set_contents(path, text->str, -1, &error)) {
-		settings_status(p->s, "Could not save the display settings: %s",
-			error ? error->message : "no config directory");
+		problem_text(p->s, "Could not save the display settings: %s", error ? error->message : "no config directory");
 		g_clear_error(&error);
 	} else {
 		struct confdoc *common = p->s->common;
@@ -1362,7 +1361,7 @@ static gboolean apply_brightness(gpointer data) {
 	const char *argv[] = { "brightnessctl", "-q", "set", value, NULL };
 	GError *error = NULL;
 	if (!g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
-		settings_status(p->s, "Could not change the brightness: %s", error->message);
+		problem_text(p->s, "Could not change the brightness: %s", error->message);
 		g_clear_error(&error);
 	}
 	return G_SOURCE_REMOVE;
@@ -1800,7 +1799,7 @@ static gboolean night_save(gpointer data) {
 		night_time_labels[gtk_drop_down_get_selected(GTK_DROP_DOWN(p->night_to)) % 48]);
 	char *path = night_path(false);
 	if (!path || !tw_write_string(path, text)) {
-		settings_status(p->s, "Could not save the night light settings");
+		settings_problem(p->s, "Could not save the night light settings", NULL, NULL, NULL);
 	}
 	g_free(path);
 	g_free(text);

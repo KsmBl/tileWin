@@ -33,6 +33,9 @@ struct settings {
 	GtkWindow *window;
 	GtkStack *stack;
 	GtkLabel *status;
+	GtkWidget *problem, *problem_label, *problem_action;
+	void (*problem_callback)(gpointer data);
+	gpointer problem_data;
 	struct confdoc *common;  // ~/.config/tileWin/common.conf (sway syntax)
 	struct confdoc *taskbar; // ~/.config/tileWin/taskbar.conf
 	struct confdoc *windowmode, *tilemode; // key bindings
@@ -90,6 +93,16 @@ struct tw_open_app {
 GPtrArray *tw_ipc_open_apps(void);
 
 /* main.c */
+/*
+ * Something went wrong: a banner over the page says what, until the page changes
+ * or it is closed. With an action its button offers the next step, usually
+ * "Try again".
+ */
+void settings_problem(struct settings *s, const char *text, const char *action,
+	void (*callback)(gpointer data), gpointer data);
+void settings_problem_clear(struct settings *s);
+/* The same with a text that is made up as it is said, without an action. */
+void problem_text(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 void settings_status(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 /* Runs a compositor command if tileWin is running and reports failures. */
 bool settings_command(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
@@ -129,6 +142,9 @@ GtkWidget *ui_group(GtkWidget *content, const char *title, const char *descripti
 GtkWidget *ui_row(GtkWidget *group, const char *title, const char *subtitle,
 		GtkWidget *control);
 GtkWidget *ui_row_box(GtkWidget *row);
+/* A row that says there is nothing here yet, and what to do about it. */
+GtkWidget *ui_empty_row(GtkWidget *group, const char *icon, const char *title,
+	const char *detail);
 /*
  * Gives a dropdown these strings, in its own string list where it has one:
  * replacing the model of a dropdown whose list is open (or just closing)
