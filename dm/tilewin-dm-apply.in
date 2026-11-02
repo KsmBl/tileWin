@@ -1,0 +1,57 @@
+#!/bin/sh
+# tilewin-dm-apply: what the Login screen page of the settings does as root.
+#
+#   tilewin-dm-apply write     takes a config on stdin, and checks it before it counts
+#   tilewin-dm-apply enable    makes tileWin's the display manager, from the next start
+#   tilewin-dm-apply disable   turns it off again, and the one before it back on
+#   tilewin-dm-apply status    says whether it is the display manager
+set -eu
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+conf=${TILEWIN_DM_CONF:-/etc/tileWin/display-manager.conf}
+state=${TILEWIN_DM_STATE_DIR:-/var/lib/tilewin-dm}
+daemon=${TILEWIN_DM_DAEMON:-@bindir@/tilewin-display-manager}
+unit=tilewin-display-manager.service
+
+case ${1:-} in
+write)
+	mkdir -p "$(dirname "$conf")"
+	new=$(mktemp "$conf.XXXXXX")
+	trap 'rm -f "$new"' EXIT
+	head -c 65536 > "$new"
+	if ! problems=$("$daemon" --check-config "$new"); then
+		echo "$problems" >&2
+		exit 1
+	fi
+	chmod 644 "$new"
+	mv -f "$new" "$conf"
+	trap - EXIT
+	;;
+enable)
+	systemd-sysusers tilewin-dm.conf
+	# so that disable can put back what was there
+	before=$(systemctl show -P Id display-manager.service 2>/dev/null || true)
+	mkdir -p "$state"
+	if [ -n "$before" ] && [ "$before" != "$unit" ] && [ "$before" != display-manager.service ]; then
+		echo "$before" > "$state/previous-display-manager"
+	fi
+	systemctl enable --force "$unit"
+	;;
+disable)
+	systemctl disable "$unit"
+	if [ -s "$state/previous-display-manager" ]; then
+		systemctl enable --force "$(cat "$state/previous-display-manager")"
+	fi
+	;;
+status)
+	if [ "$(systemctl show -P Id display-manager.service 2>/dev/null || true)" = "$unit" ]; then
+		echo enabled
+	else
+		echo disabled
+	fi
+	;;
+*)
+	echo "usage: tilewin-dm-apply write|enable|disable|status" >&2
+	exit 2
+	;;
+esac

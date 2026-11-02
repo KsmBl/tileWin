@@ -1,0 +1,7 @@
+#%PAM-1.0
+# autologin_user of the display manager of tileWin. Only the daemon starts this,
+# and only for the user in its config, which only root can change.
+auth      required  pam_permit.so
+account   include   system-login
+password  required  pam_deny.so
+session   include   system-login

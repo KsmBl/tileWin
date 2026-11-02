@@ -1,0 +1,26 @@
+[Unit]
+Description=tileWin display manager
+Documentation=file:///usr/share/doc/tileWin/usage.md
+Conflicts=getty@tty1.service
+After=getty@tty1.service systemd-user-sessions.service plymouth-quit.service systemd-logind.service
+Wants=systemd-logind.service
+
+[Service]
+ExecStart=@bindir@/tilewin-display-manager
+Restart=always
+RestartSec=1
+# the sessions run under it: they are told, and do not get forever to end
+KillMode=mixed
+TimeoutStopSec=5
+RuntimeDirectory=tilewin-dm
+RuntimeDirectoryPreserve=restart
+StateDirectory=tilewin-dm
+IgnoreSIGPIPE=no
+UtmpIdentifier=tty1
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+Alias=display-manager.service

@@ -1,0 +1,8 @@
+#%PAM-1.0
+# The login screen itself, as its own user. Nothing to check: only the daemon,
+# as root, can start this, and it needs a logind session to have the screen.
+auth      required  pam_permit.so
+account   required  pam_permit.so
+password  required  pam_deny.so
+session   required  pam_unix.so
+-session  optional  pam_systemd.so

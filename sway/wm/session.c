@@ -120,7 +120,8 @@ static int handle_panel_exit(int fd, uint32_t mask, void *data) {
 }
 
 void tw_nightlight_start(void) {
-	if (!tw_in_path("tilewin-nightlight")) {
+	// under the login screen there is no one to keep the evening for
+	if (getenv("TILEWIN_DM_STATE") || !tw_in_path("tilewin-nightlight")) {
 		return;
 	}
 	// double fork: the helper is not our child and needs no reaping

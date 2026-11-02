@@ -196,6 +196,7 @@ if get_option('swaynag')
 endif
 subdir('panel')
 subdir('lock')
+subdir('dm')
 subdir('nightlight')
 subdir('polkit')
 subdir('clipboard')

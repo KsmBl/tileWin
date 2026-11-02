@@ -56,6 +56,16 @@ test(
 )
 
 test(
+	'dm-config',
+	executable(
+		'test-dm-config',
+		['test_dm_config.c', '../dm/config.c', '../dm/sessions.c'],
+		include_directories: include_directories('../dm'),
+	),
+	suite: 'unit',
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
@@ -1016,6 +1026,24 @@ test(
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 120,
+)
+
+# The daemon with the stand-in for PAM: built here only, and never installed.
+dm_fake = executable(
+	'tilewin-display-manager-test',
+	['../dm/main.c', '../dm/config.c', '../dm/sessions.c', 'dm_fake_backend.c'],
+	include_directories: include_directories('../dm'),
+)
+
+test(
+	'display-manager',
+	find_program('display_manager.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [dm_fake, keyboard_tool, pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 180,
 )
 
 test(
