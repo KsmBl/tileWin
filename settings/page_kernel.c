@@ -213,7 +213,7 @@ static void set_subtitle(GtkWidget *row, const char *text) {
 
 /* What went wrong, or (as a note, without the colour) what is being done. */
 static void show_message(struct kernel_page *p, const char *text, bool error) {
-	if (error && text && *text) {
+	if (error && text && *text && settings_page_on_view(p->message)) {
 		settings_problem(p->s, text, NULL, NULL, NULL);
 		gtk_widget_set_visible(p->message, FALSE);
 		return;

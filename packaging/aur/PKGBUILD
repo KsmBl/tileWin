@@ -34,6 +34,11 @@ install=tilewin.install
 source=("tileWin::git+https://github.com/KsmBl/tileWin.git#tag=v$pkgver")
 sha256sums=('SKIP')
 
+prepare() {
+	# or the version reads with the commit and the branch of makepkg's own clone
+	rm -rf tileWin/.git
+}
+
 build() {
 	# the helpers that run as root go in a folder of their own, and pacman
 	# does the updating: tilewin-update only says so

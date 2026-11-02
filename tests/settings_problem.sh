@@ -1,6 +1,8 @@
 #!/bin/sh
 # When something fails the settings say so in a banner over the page, with the
 # next step. On the DNS page, with a helper that refuses the first time:
+#  - the Network page, built in the background, fails with NetworkManager gone
+#    and says nothing over this page;
 #  - turning the service off fails and the banner shows;
 #  - Try again runs the same thing once more, and the banner goes;
 #  - after another failure × closes it without running anything.
@@ -52,6 +54,17 @@ exit 1
 EOS
 chmod +x "$work/helper"
 touch "$work/refuse"
+mkdir "$work/bin"
+cat > "$work/bin/nmcli" <<EOS
+#!/bin/sh
+case "\$*" in
+*"connection show"*uuid*) echo "NetworkManager is not running" >&2; exit 1 ;;
+*"connection show"*) echo "aaaa-1111:Home:802-11-wireless:wlan0" ;;
+esac
+exit 0
+EOS
+chmod +x "$work/bin/nmcli"
+export PATH=$work/bin:$PATH
 
 failures=0
 fail() {
@@ -98,7 +111,7 @@ while ! ipc -t get_tree | grep -q '"name": "tileWin Settings"' && [ $attempt -lt
 	sleep 0.2
 	attempt=$((attempt + 1))
 done
-sleep 1.5
+sleep 3
 ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
 sleep 1.5
 

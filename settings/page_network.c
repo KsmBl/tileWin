@@ -57,7 +57,7 @@ static const char *nmcli(void) {
 }
 
 static void set_message(struct network_page *p, const char *text, bool error) {
-	if (error && text) {
+	if (error && text && settings_page_on_view(p->message)) {
 		settings_problem(p->s, text, NULL, NULL, NULL);
 		text = NULL;
 		error = false;
@@ -225,8 +225,12 @@ static void details_loaded(struct network_page *p, bool ok, char *out, char *err
 	}
 	g_free(uuid);
 	if (!ok) {
-		settings_problem(p->s, err && *err ? g_strstrip(err) : "NetworkManager did not answer",
-			"Try again", retry_details, p);
+		const char *why = err && *err ? g_strstrip(err) : "NetworkManager did not answer";
+		if (settings_page_on_view(p->message)) {
+			settings_problem(p->s, why, "Try again", retry_details, p);
+		} else {
+			set_message(p, why, true); // for when the page is opened
+		}
 		return;
 	}
 	char *method = NULL, *addresses = NULL, *gateway = NULL, *dns4 = NULL, *dns6 = NULL;

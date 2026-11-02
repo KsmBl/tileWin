@@ -101,6 +101,12 @@ GPtrArray *tw_ipc_open_apps(void);
 void settings_problem(struct settings *s, const char *text, const char *action,
 	void (*callback)(gpointer data), gpointer data);
 void settings_problem_clear(struct settings *s);
+/*
+ * Pages are built and read in the background: is this one, by a widget of it, the
+ * one on view? What goes wrong on any other is not for the banner, it would be
+ * said over a page it has nothing to do with.
+ */
+bool settings_page_on_view(GtkWidget *widget);
 /* The same with a text that is made up as it is said, without an action. */
 void problem_text(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 void settings_status(struct settings *s, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
