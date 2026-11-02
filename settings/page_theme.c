@@ -243,27 +243,7 @@ void theme_page_refresh(struct settings *s) {
 		free(error);
 		const char *title = theme && theme->title ? theme->title : name;
 
-		GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-		GtkWidget *picture = gtk_picture_new();
-		ui_wallpaper_picture_fill(picture, NULL, name, 240, 150);
-		gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_COVER);
-		gtk_widget_set_size_request(picture, 240, 150);
-		gtk_widget_set_overflow(picture, GTK_OVERFLOW_HIDDEN);
-		gtk_widget_add_css_class(picture, "tw-thumb");
-		gtk_box_append(GTK_BOX(card), picture);
-		GtkWidget *label = gtk_label_new(title);
-		gtk_widget_add_css_class(label, "tw-heading");
-		gtk_box_append(GTK_BOX(card), label);
-		GtkWidget *sub = gtk_label_new(name);
-		gtk_widget_add_css_class(sub, "dim-label");
-		gtk_widget_add_css_class(sub, "tw-caption");
-		gtk_box_append(GTK_BOX(card), sub);
-
-		GtkWidget *child = gtk_flow_box_child_new();
-		gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child), card);
-		gtk_widget_add_css_class(child, "tw-card");
-		g_object_set_data_full(G_OBJECT(child), "theme", g_strdup(name), g_free);
-		g_object_set_data_full(G_OBJECT(child), "title", g_strdup(title), g_free);
+		GtkWidget *child = theme_card_new(name, title);
 		gtk_flow_box_append(GTK_FLOW_BOX(p->flow), child);
 		if (theme) {
 			tw_theme_free(theme);

@@ -6,6 +6,7 @@ tilewin_settings = executable(
 		'ipc.c',
 		'main.c',
 		'themecss.c',
+		'theme_cards.c',
 		'page_about.c',
 		'page_account.c',
 		'page_animations.c',

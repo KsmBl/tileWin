@@ -35,6 +35,10 @@ It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for t
 
 The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
 
+## Theme cards
+
+The cards of the **Theme** page show each theme's wallpaper with a small window and taskbar over it, drawn in the colors of that theme.
+
 ## Flyouts with the keyboard
 
 Quick settings and the network, volume, battery, Bluetooth and notification flyouts work without a mouse. Tab and Shift+Tab walk through what can be clicked, the arrow keys go the way they point, a ring shows where you are, and Enter or Space click it. Left and Right change a slider. Esc closes the flyout. No ring shows until you press one of these keys, and while a password is being typed every key goes to the field.
