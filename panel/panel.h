@@ -675,6 +675,9 @@ void notify_theme_changed(struct panel *panel);
 /* A notification of the taskbar itself (not over D-Bus). */
 void notify_local(struct panel *panel, const char *app_name, const char *icon,
 	const char *summary, const char *body);
+/* The same that also comes through do not disturb. */
+void notify_local_urgent(struct panel *panel, const char *app_name, const char *icon,
+	const char *summary, const char *body);
 void notify_handle_command(struct panel *panel, int argc, char **argv);
 bool notify_dnd(void);
 void notify_set_dnd(struct panel *panel, bool on);

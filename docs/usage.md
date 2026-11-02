@@ -35,6 +35,10 @@ It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for t
 
 The first three times the mode is switched, a notification says which keys go back: someone who lands in tile mode by accident has other keys there and no way of guessing them.
 
+## Low battery
+
+On battery at 10% a notification says the battery is low, and at 5% an urgent one says it is almost empty, which also comes through do not disturb. This does not depend on the battery saver or keep awake. Being plugged in starts it over. The Battery saver group of the Screen page sets the level (`battery_warning 10`, half of it is the urgent one, `battery_warning off` for never).
+
 ## Screens at 125% or 150%
 
 The taskbar, its menus and flyouts, the desktop icons and the notifications ask the compositor for the real scale of the screen (`fractional-scale-v1`) and draw for exactly the pixels they cover, so text and lines stay sharp on a screen with `scale 1.5`. Where the protocol is missing they draw at the next whole scale, which is shrunk to fit.

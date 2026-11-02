@@ -8,6 +8,10 @@
 #  - "battery_saver off" keeps it off however low the battery is, and a level
 #    that is no number is refused.
 #
+# The warning goes its own way, with the battery saver off too: "The battery is
+# low" once at 10%, "almost empty" at 5%, urgently, and after being plugged in
+# again from the start; "battery_warning off" keeps both away.
+#
 # usage: battery_saver.sh <build dir> <source dir>
 set -u
 
@@ -118,6 +122,44 @@ sleep 1
 [ "$(saver)" = on ] || fail "battery_saver 10 does not turn it on at 5%"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
+# ---- the warning, with the battery saver out of the way
+ipc battery_saver off >/dev/null
+notes=$XDG_STATE_HOME/tileWin/notifications.json
+count() { python3 -c '
+import sys
+try:
+	print(open(sys.argv[1]).read().count(sys.argv[2]))
+except OSError:
+	print(0)' "$notes" "$1"; }
+battery 50 Discharging 0
+sleep 1
+low0=$(count "The battery is low")
+empty0=$(count "almost empty")
+battery 10 Discharging 0
+sleep 3.5
+[ "$(count "The battery is low")" = $((low0 + 1)) ] || fail "no single warning at 10%"
+sleep 1.5
+[ "$(count "The battery is low")" = $((low0 + 1)) ] || fail "the warning repeats while nothing changes"
+battery 5 Discharging 0
+sleep 3.5
+[ "$(count "almost empty")" = $((empty0 + 1)) ] || fail "no urgent warning at 5%"
+python3 -c '
+import json, sys
+notes = json.load(open(sys.argv[1]))
+sys.exit(0 if any("almost empty" in n["summary"] and n["urgency"] == 2 for n in notes) else 1)' "$notes" ||
+	fail "the warning at 5% is not urgent"
+battery 5 Charging 1
+sleep 1
+battery 10 Discharging 0
+sleep 3.5
+[ "$(count "The battery is low")" = $((low0 + 2)) ] || fail "plugged in and out again, no new warning"
+battery 50 Discharging 0
+sleep 1
+ipc battery_warning off >/dev/null
+battery 3 Discharging 0
+sleep 3.5
+[ "$(count "almost empty")" = $((empty0 + 1)) ] || fail "battery_warning off still warns"
+
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"
 	exit 1

@@ -668,6 +668,28 @@ struct cmd_results *cmd_battery_saver(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_battery_warning(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "battery_warning", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	// battery_warning off|<percent>: says so at that level, and urgently at half of it
+	if (strcasecmp(argv[0], "off") == 0 || strcasecmp(argv[0], "never") == 0) {
+		config->tw_battery_warning = 0;
+	} else {
+		char *end = NULL;
+		long level = strtol(argv[0], &end, 10);
+		if (!end || (*end && strcmp(end, "%") != 0) || level < 1 || level > 100) {
+			return cmd_results_new(CMD_INVALID, "Expected 'battery_warning off|<percent>'");
+		}
+		config->tw_battery_warning = (int)level;
+	}
+	if (!config->reading) {
+		tw_battery_saver_check();
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_keep_awake(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "keep_awake", EXPECTED_EQUAL_TO, 1))) {

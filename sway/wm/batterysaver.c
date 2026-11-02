@@ -20,6 +20,11 @@
  * the tilewin event "battery_saver"). Plugging in, or charging past the level,
  * brings them back. Keep awake (power.c) keeps it off.
  *
+ * The warning goes its own way, also with the battery saver off or keep awake
+ * on: on battery at or below battery_warning (10 by default) the taskbar is told
+ * once with the tilewin event "battery_low", and again as "critical" at half of
+ * that. Being plugged in or charging past the level starts it over.
+ *
  * The batteries are read from /sys/class/power_supply once a minute, which
  * costs next to nothing; TILEWIN_SYS_POWER points elsewhere and
  * TILEWIN_BATTERY_POLL_MS reads more often, for the tests.
@@ -31,6 +36,7 @@ static struct {
 	bool active;
 	int percent; // of the batteries, -1 for none
 	bool on_battery;
+	int warned; // 0 not yet, 1 low, 2 critical
 	struct wl_event_source *timer;
 } bs = { .percent = -1 };
 
@@ -107,8 +113,26 @@ static void announce(void) {
 	ipc_event_tilewin("battery_saver", data);
 }
 
+static void check_warning(void) {
+	int level = config ? config->tw_battery_warning : 0;
+	int now = 0;
+	if (level > 0 && bs.on_battery && bs.percent >= 0) {
+		int critical = level / 2 > 0 ? level / 2 : 1;
+		now = bs.percent <= critical ? 2 : bs.percent <= level ? 1 : 0;
+	}
+	if (now > bs.warned) {
+		json_object *data = json_object_new_object();
+		json_object_object_add(data, "percent", json_object_new_int(bs.percent));
+		json_object_object_add(data, "critical", json_object_new_boolean(now == 2));
+		ipc_event_tilewin("battery_low", data);
+		sway_log(SWAY_INFO, "The battery is %s: %d%%", now == 2 ? "critical" : "low", bs.percent);
+	}
+	bs.warned = now;
+}
+
 void tw_battery_saver_check(void) {
 	read_power(&bs.percent, &bs.on_battery);
+	check_warning();
 	int level = config ? config->tw_battery_saver : 0;
 	bool want = level > 0 && bs.on_battery && bs.percent >= 0 && bs.percent <= level &&
 		!tw_keep_awake();

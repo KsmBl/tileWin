@@ -356,6 +356,7 @@ static void config_defaults(struct sway_config *config) {
 	config->tw_stretch = true;
 	config->tw_snap_layouts = true;
 	config->tw_battery_saver = 20;
+	config->tw_battery_warning = 10;
 	config->tw_stretch_both = true;
 	config->tw_touch_edge_swipe = true;
 	config->tw_polkit_agent = true;

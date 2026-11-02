@@ -518,6 +518,18 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 				"taskbar widgets are off until the computer is plugged in.");
 		}
 		panel->state.battery_saver = active;
+	} else if (strcmp(change, "battery_low") == 0) {
+		char body[128];
+		int percent = (int)jint(event, "percent");
+		if (jbool(event, "critical")) {
+			snprintf(body, sizeof(body), "%d%% left. Plug the computer in now, or save your "
+				"work: it will turn off soon.", percent);
+			notify_local_urgent(panel, "Battery", "battery-empty", "The battery is almost empty",
+				body);
+		} else {
+			snprintf(body, sizeof(body), "%d%% left. Plug the computer in soon.", percent);
+			notify_local(panel, "Battery", "battery-caution", "The battery is low", body);
+		}
 	} else if (strcmp(change, "keep_awake") == 0) {
 		panel->state.keep_awake = jbool(event, "active");
 		if (popup_is_open(panel, POPUP_POWER)) {

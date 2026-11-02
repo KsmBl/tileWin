@@ -580,6 +580,7 @@ struct sway_config {
 	bool tw_stretch; // double-clicking a frame side stretches the window
 	bool tw_snap_layouts; // resting on the maximize button offers layouts to snap to
 	int tw_battery_saver; // battery level (percent) at which the battery saver starts, 0 never
+	int tw_battery_warning; // level of the warning that the battery is low, 0 never
 	bool tw_stretch_both; // it grows both ways, not only towards the clicked side
 	bool tw_touch_edge_swipe; // swiping in from a screen edge: Task view, notifications
 	bool tw_polkit_agent; // tilewin-polkit asks for the password polkit wants

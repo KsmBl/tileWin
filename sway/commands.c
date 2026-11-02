@@ -49,6 +49,7 @@ static const struct cmd_handler handlers[] = {
 	{ "assign", cmd_assign },
 	{ "bar", cmd_bar },
 	{ "battery_saver", cmd_battery_saver },
+	{ "battery_warning", cmd_battery_warning },
 	{ "bindcode", cmd_bindcode },
 	{ "bindgesture", cmd_bindgesture },
 	{ "bindswitch", cmd_bindswitch },

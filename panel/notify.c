@@ -1074,8 +1074,8 @@ static uint32_t add_notification(uint32_t replaces, struct notification *fields)
 	return id;
 }
 
-void notify_local(struct panel *panel, const char *app_name, const char *icon,
-		const char *summary, const char *body) {
+static void local_notification(const char *app_name, const char *icon, const char *summary,
+		const char *body, int urgency) {
 	if (!nt.items) {
 		return;
 	}
@@ -1083,7 +1083,7 @@ void notify_local(struct panel *panel, const char *app_name, const char *icon,
 	if (!n) {
 		return;
 	}
-	n->urgency = 1;
+	n->urgency = urgency;
 	n->timeout = -1;
 	n->app_name = app_name ? strdup(app_name) : NULL;
 	n->app_icon = icon ? strdup(icon) : NULL;
@@ -1091,6 +1091,16 @@ void notify_local(struct panel *panel, const char *app_name, const char *icon,
 	n->body = strdup(body ? body : "");
 	n->actions = create_list();
 	add_notification(0, n);
+}
+
+void notify_local(struct panel *panel, const char *app_name, const char *icon,
+		const char *summary, const char *body) {
+	local_notification(app_name, icon, summary, body, 1);
+}
+
+void notify_local_urgent(struct panel *panel, const char *app_name, const char *icon,
+		const char *summary, const char *body) {
+	local_notification(app_name, icon, summary, body, 2);
 }
 
 #if HAVE_TRAY

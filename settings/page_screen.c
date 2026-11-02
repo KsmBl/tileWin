@@ -76,6 +76,7 @@ struct screen_page {
 	GtkWidget *lock_entry;
 	GtkWidget *lock_on_sleep_switch;
 	GtkWidget *battery_saver_dd;
+	GtkWidget *battery_warning_dd;
 	guint lock_timer;
 
 	// "Align with a grid": a grid over every screen, moved until it runs on straight
@@ -1717,6 +1718,26 @@ static void on_battery_saver(GObject *dropdown, GParamSpec *pspec, gpointer data
 	settings_command(p->s, "battery_saver %s", saver_values[sel]);
 }
 
+/* The level of the warning that the battery is low; 10 is the default. */
+static const char *const warning_values[] = { "10", "off", "5", "15", "20", "30", NULL };
+static const char *const warning_labels[] = { "At 10% (default)", "Never", "At 5%", "At 15%",
+	"At 20%", "At 30%", NULL };
+
+static void on_battery_warning(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct screen_page *p = data;
+	if (p->updating) {
+		return;
+	}
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	if (sel >= G_N_ELEMENTS(warning_values) - 1) {
+		return;
+	}
+	struct confdoc *d = p->s->common;
+	confdoc_set(d, d->root, "battery_warning", NULL, sel == 0 ? NULL : warning_values[sel]);
+	settings_common_changed(p->s, false);
+	settings_command(p->s, "battery_warning %s", warning_values[sel]);
+}
+
 static gboolean on_lock_on_sleep(GtkSwitch *widget, gboolean active, gpointer data) {
 	struct screen_page *p = data;
 	if (p->updating) {
@@ -1966,6 +1987,15 @@ void screen_page_refresh(struct settings *s) {
 		}
 	}
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->battery_saver_dd), saver_sel);
+	const char *warning = cstmt_arg(confdoc_child(d->root, "battery_warning", NULL), 0);
+	guint warning_sel = 0;
+	for (guint k = 1; warning && warning_values[k]; k++) {
+		if (strcmp(warning, warning_values[k]) == 0 ||
+				(k == 1 && strcmp(warning, "never") == 0)) {
+			warning_sel = k;
+		}
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->battery_warning_dd), warning_sel);
 	struct cstmt *on_sleep = confdoc_child(d->root, "lock_on_sleep", NULL);
 	const char *on_sleep_value = cstmt_arg(on_sleep, 0);
 	gtk_switch_set_active(GTK_SWITCH(p->lock_on_sleep_switch), !on_sleep_value ||
@@ -2122,6 +2152,10 @@ GtkWidget *screen_page_new(struct settings *s) {
 	p->battery_saver_dd = gtk_drop_down_new_from_strings(saver_labels);
 	g_signal_connect(p->battery_saver_dd, "notify::selected", G_CALLBACK(on_battery_saver), p);
 	ui_row(battery, "Turn on", "When the battery is down to that level", p->battery_saver_dd);
+	p->battery_warning_dd = gtk_drop_down_new_from_strings(warning_labels);
+	g_signal_connect(p->battery_warning_dd, "notify::selected", G_CALLBACK(on_battery_warning), p);
+	ui_row(battery, "Warn that the battery is low",
+		"A notification at that level, and an urgent one at half of it", p->battery_warning_dd);
 
 	GtkWidget *lock = ui_group(content, "Lock screen", NULL);
 	p->lock_entry = gtk_entry_new();
