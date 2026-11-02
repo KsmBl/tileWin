@@ -23,6 +23,7 @@ tilewin_settings = executable(
 		'page_launcher.c',
 		'page_login.c',
 		'../dm/config.c',
+		'../dm/sessions.c',
 		'page_menus.c',
 		'page_mouse.c',
 		'page_network.c',

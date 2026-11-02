@@ -282,6 +282,11 @@ static void on_mode_changed(GObject *dropdown, GParamSpec *pspec, gpointer data)
 	free(dir);
 }
 
+static void on_login_screen(GtkButton *button, gpointer data) {
+	struct theme_page *p = data;
+	gtk_stack_set_visible_child_name(p->s->stack, "login");
+}
+
 static void on_target_changed(GObject *dropdown, GParamSpec *pspec, gpointer data) {
 	struct theme_page *p = data;
 	if (p->updating) {
@@ -388,6 +393,10 @@ GtkWidget *theme_page_new(struct settings *s) {
 		"Window mode and tile mode each have their own theme. Pick a mode, then a theme below.",
 		p->target_dd);
 	g_signal_connect(p->target_dd, "notify::selected", G_CALLBACK(on_target_changed), p);
+
+	GtkWidget *login = gtk_button_new_with_label("Login screen…");
+	g_signal_connect(login, "clicked", G_CALLBACK(on_login_screen), p);
+	ui_row(group, "Where you log in", "It wears your theme too, and has settings of its own", login);
 
 	GtkWidget *heading = gtk_label_new("Themes");
 	gtk_label_set_xalign(GTK_LABEL(heading), 0);

@@ -4,7 +4,7 @@
 
 ## Turning it on
 
-The **Login screen** page of the settings has the switch, or:
+The **Login screen** page of the settings (under Personalize, or the button on the Theme page) has the switch, or:
 
 ```sh
 sudo /usr/local/libexec/tilewin-dm-apply enable    # takes over at the next start of the computer
@@ -23,7 +23,7 @@ sudo systemd-run --unit=tilewin-dm-trial --collect tilewin-display-manager --vt 
 
 Log in, or press Ctrl+Alt+F<n> to get back to where you were. `--once` ends it after the first session. If the screen stays dark, Ctrl+Alt+F3 gets you to a text console, and `journalctl -u tilewin-dm-trial` says why. It runs as a unit because logind gives no session to a program started inside one of yours.
 
-**Preview** on the page, or `tilewin-dm-greeter --preview`, shows the screen in your running session. It checks nothing, and Esc ends it.
+The page has a picture of the login screen that follows every change. **Try it on the whole screen**, or `tilewin-dm-greeter --preview`, shows the real thing in your running session; it checks nothing, and Esc ends it. Changes only count after **Save**, in a bar that shows when there is something to save.
 
 ## How it works
 
@@ -50,7 +50,7 @@ The PAM services are `tilewin-dm` (logging in), `tilewin-dm-autologin` and `tile
 
 ## Settings
 
-`/etc/tileWin/display-manager.conf` holds `key value` lines, `#` for comments, and quotes around a value with spaces at its ends. The Login screen page writes it, which also drops your comments. `tilewin-display-manager --check-config <file>` says what is wrong with a file. A line that makes no sense is left out and the default counts, so a mistake in here cannot keep anyone from logging in.
+`/etc/tileWin/display-manager.conf` holds `key value` lines, `#` for comments, and quotes around a value with spaces at its ends. The Login screen page writes it, which drops your comments. `tilewin-display-manager --check-config <file>` says what is wrong with a file. A line that makes no sense is left out and the default counts, so a mistake in here cannot keep anyone from logging in.
 
 `env KEY=value` lines, as many as you like, set the environment of the sessions.
 

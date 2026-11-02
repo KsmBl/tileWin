@@ -10,6 +10,7 @@
 static const char css[] =
 	".tw-title { font-size: 1.8em; font-weight: 800; }\n"
 	".tw-heading { font-weight: bold; }\n"
+	"row.tw-warning label { color: #c42b1c; }\n"
 	".tw-problem { background-color: #c42b1c; color: #ffffff; padding: 8px 12px; }\n"
 	".tw-problem button { color: #ffffff; background: rgba(255,255,255,0.18); border: none; }\n"
 	".tw-caption { font-size: 0.9em; }\n"
@@ -570,6 +571,13 @@ static void show_entry(struct settings *s, struct ui_search_entry *e) {
 	lazy_build_named(e->page);
 	gtk_stack_set_visible_child_name(s->stack, e->page);
 	if (e->widget) {
+		// on a page with tabs, the tab it is on comes in front first
+		for (GtkWidget *w = e->widget; w; w = gtk_widget_get_parent(w)) {
+			GtkWidget *parent = gtk_widget_get_parent(w);
+			if (parent && GTK_IS_STACK(parent) && parent != GTK_WIDGET(s->stack)) {
+				gtk_stack_set_visible_child(GTK_STACK(parent), w);
+			}
+		}
 		GtkWidget **widget = g_new(GtkWidget *, 1);
 		*widget = e->widget;
 		g_object_add_weak_pointer(G_OBJECT(*widget), (gpointer *)widget);
@@ -703,6 +711,7 @@ static void build_window(struct settings *s) {
 		{ "appwindows", appwin_page_new, 1 },
 		{ "screen", screen_page_new, 3 },
 		{ "screensaver", screensaver_page_new, 0 },
+		{ "login", login_page_new, 0 },
 		{ "sound", sound_page_new, 3 },
 		{ "datetime", datetime_page_new, 5 },
 		{ "bluetooth", bluetooth_page_new, 3 },
@@ -718,7 +727,6 @@ static void build_window(struct settings *s) {
 		{ "account", account_page_new, 5 },
 		{ "backup", backup_page_new, 5 },
 		{ "kernel", kernel_page_new, 6 },
-		{ "login", login_page_new, 5 },
 		{ "about", about_page_new, 5 },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
