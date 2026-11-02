@@ -55,6 +55,19 @@ enum area {
 	AREA_LAYOUT,
 	AREA_LOGIN,
 	AREA_POWER,
+	AREA_CANCEL,
+};
+
+enum look {
+	LOOK_CARD, // a card, as card_style says, on any theme
+	LOOK_WIN10,
+	LOOK_WIN11,
+	LOOK_WIN8,
+	LOOK_AERO,
+	LOOK_XP,
+	LOOK_DIALOG,
+	LOOK_OLD,
+	LOOK_SWAY,
 };
 
 enum stage {
@@ -117,6 +130,7 @@ static struct {
 	const char *font, *bold;
 	const char *gradient;
 	bool classic, gradient_sideways;
+	enum look look;
 	double radius;
 
 	struct user users[MAX_USERS];
@@ -316,6 +330,32 @@ static void read_theme(void) {
 	g.font = strcmp(font, "theme") != 0 ? font :
 		tw_theme_str(t, "menu.font", tw_theme_str(t, "panel.font", "Noto Sans 10"));
 	g.bold = tw_theme_str(t, "panel.bold_font", g.font);
+
+	// as that Windows looked when it asked who you are, unless asked for a card
+	const char *theme_name = t && t->name ? t->name : "";
+	g.look = strcmp(dm_config_str(g.config, "card_style"), "theme") != 0 ? LOOK_CARD :
+		strcmp(theme_name, "sway") == 0 ? LOOK_SWAY :
+		strcmp(style, "win11") == 0 ? LOOK_WIN11 : strcmp(style, "win10") == 0 ? LOOK_WIN10 :
+		strcmp(style, "win8") == 0 ? LOOK_WIN8 : strcmp(style, "win7") == 0 ? LOOK_AERO :
+		strcmp(style, "winxp") == 0 ? LOOK_XP :
+		strcmp(style, "win1") == 0 || strcmp(style, "win3") == 0 ? LOOK_OLD :
+		strcmp(style, "win95") == 0 ? LOOK_DIALOG : LOOK_CARD;
+	// white fields on all that have them, whatever the menus of the theme say
+	if (g.look != LOOK_CARD && g.look != LOOK_DIALOG && g.look != LOOK_SWAY) {
+		g.field_bg = 0xffffffff;
+		g.field_fg = 0x000000ff;
+	}
+	if (g.look == LOOK_OLD) {
+		g.card_bg = 0xffffffff;
+		g.fg = 0x000000ff;
+		g.accent = 0x000000ff;
+		g.field_bg = 0xffffffff;
+		g.field_fg = 0x000000ff;
+	}
+	if (g.look == LOOK_SWAY) {
+		g.field_bg = 0x313244ff;
+		g.field_fg = 0xcdd6f4ff;
+	}
 }
 
 /* ---------- wallpaper ---------- */
@@ -783,6 +823,10 @@ static void draw_power(struct output *o, cairo_t *cr, double W, double H) {
 
 static void draw_clock(cairo_t *cr, double W, double H) {
 	const char *place = dm_config_str(g.config, "clock");
+	if (strcmp(place, "theme") == 0) {
+		// the real ones only had a clock before asking; Windows 11 has it on top
+		place = g.look == LOOK_CARD || g.look == LOOK_WIN11 || g.look == LOOK_SWAY ? "top" : "none";
+	}
 	if (strcmp(place, "none") == 0) {
 		return;
 	}
@@ -806,6 +850,44 @@ static void draw_clock(cairo_t *cr, double W, double H) {
 	text_on_wallpaper(cr, font, clock_text, x, y, w, size * 1.7, align);
 	snprintf(font, sizeof(font), "Segoe UI, Noto Sans, Sans %d", (int)(size / 3.2));
 	text_on_wallpaper(cr, font, date_text, x, y + size * 1.7, w, size * 0.7, align);
+}
+
+#include "looks.inc"
+
+/* What is on a screen, in pixels of a scale of 1. */
+static void draw_scene(struct output *o, cairo_t *cr, double W, double H) {
+	o->hit_count = 0;
+	// these lay white words on any picture, and the real ones dim it for that
+	if (g.look == LOOK_WIN10 || g.look == LOOK_WIN11 || g.look == LOOK_WIN8) {
+		cairo_set_source_rgba(cr, 0, 0, 0, 0.28);
+		cairo_paint(cr);
+	}
+	draw_clock(cr, W, H);
+	if (o->first || dm_config_bool(g.config, "card_on_all_screens")) {
+		draw_login(o, cr, W, H);
+	}
+}
+
+/* One frame into a picture, without a screen: what the settings show. */
+static int render_to_file(const char *path, int w, int h) {
+	struct output o = { .first = true };
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+	cairo_t *cr = cairo_create(surface);
+	cairo_surface_t *background = render_background(w, h, true);
+	cairo_set_source_surface(cr, background, 0, 0);
+	cairo_paint(cr);
+	cairo_surface_destroy(background);
+	double virtual_w = 1280, scale = w / virtual_w;
+	cairo_scale(cr, scale, scale);
+	snprintf(g.password, sizeof(g.password), "secret");
+	g.password_len = 6;
+	g.focus = AREA_PASSWORD;
+	draw_scene(&o, cr, virtual_w, h / scale);
+	cairo_destroy(cr);
+	cairo_status_t status = cairo_surface_write_to_png(surface, path);
+	cairo_surface_destroy(surface);
+	clear_secret();
+	return status == CAIRO_STATUS_SUCCESS ? 0 : 1;
 }
 
 static void render_output(struct output *o) {
@@ -834,13 +916,7 @@ static void render_output(struct output *o) {
 	cairo_paint(cr);
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	cairo_scale(cr, o->scale, o->scale);
-	o->hit_count = 0;
-	double W = o->width, H = o->height;
-	draw_clock(cr, W, H);
-	if (o->first || dm_config_bool(g.config, "card_on_all_screens")) {
-		draw_card(o, cr, W, H);
-		draw_power(o, cr, W, H);
-	}
+	draw_scene(o, cr, o->width, o->height);
 	cairo_restore(cr);
 	wl_surface_set_buffer_scale(o->surface, o->scale);
 	wl_surface_attach(o->surface, buffer->buffer, 0, 0);
@@ -1093,6 +1169,14 @@ static void click(struct output *o, double x, double y) {
 			break;
 		case AREA_POWER:
 			power_button(h->index);
+			break;
+		case AREA_CANCEL:
+			if (g.stage == STAGE_PROMPT) {
+				send_text("cancel");
+				g.stage = STAGE_CHECKING;
+			}
+			clear_secret();
+			g.message[0] = '\0';
 			break;
 		case AREA_NONE:
 			break;
@@ -1591,10 +1675,13 @@ int main(int argc, char **argv) {
 		{ "socket", required_argument, NULL, 's' },
 		{ "config", required_argument, NULL, 'c' },
 		{ "preview", no_argument, NULL, 'p' },
+		{ "render", required_argument, NULL, 'r' },
+		{ "size", required_argument, NULL, 'S' },
 		{ "help", no_argument, NULL, 'h' },
 		{ 0 },
 	};
-	const char *socket_path = NULL, *config_path = DM_CONFIG_PATH;
+	const char *socket_path = NULL, *config_path = DM_CONFIG_PATH, *render_path = NULL;
+	int render_w = 1280, render_h = 720;
 	int c;
 	while ((c = getopt_long(argc, argv, "h", options, NULL)) != -1) {
 		switch (c) {
@@ -1607,10 +1694,18 @@ int main(int argc, char **argv) {
 		case 'p':
 			g.preview = true;
 			break;
+		case 'r':
+			render_path = optarg;
+			g.preview = true;
+			break;
+		case 'S':
+			sscanf(optarg, "%dx%d", &render_w, &render_h);
+			break;
 		case 'h':
 		default:
 			printf("Usage: tilewin-dm-greeter --socket <file> [--config <file>]\n"
-				"       tilewin-dm-greeter --preview [--config <file>]\n");
+				"       tilewin-dm-greeter --preview [--config <file>]\n"
+				"       tilewin-dm-greeter --render <png> [--size <w>x<h>] [--config <file>]\n");
 			return c == 'h' ? 0 : 2;
 		}
 	}
@@ -1629,6 +1724,9 @@ int main(int argc, char **argv) {
 	read_theme();
 	read_sessions();
 	read_users();
+	if (render_path) {
+		return render_to_file(render_path, render_w, render_h);
+	}
 	if (!g.preview && !connect_daemon(socket_path)) {
 		return 1;
 	}

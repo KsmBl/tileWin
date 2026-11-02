@@ -1065,6 +1065,14 @@ test(
 )
 
 test(
+	'dm-looks',
+	find_program('dm_looks.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'unit',
+	timeout: 60,
+)
+
+test(
 	'emoji-picker',
 	find_program('emoji_picker.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

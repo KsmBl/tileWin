@@ -6,9 +6,9 @@
 #include "config.h"
 
 static const char *const color_schemes[] = { "follow", "light", "dark", NULL };
-static const char *const card_styles[] = { "window", "plain", NULL };
+static const char *const card_styles[] = { "theme", "window", "plain", NULL };
 static const char *const positions[] = { "center", "left", "right", NULL };
-static const char *const clock_places[] = { "top", "bottom-left", "bottom-right", "none", NULL };
+static const char *const clock_places[] = { "theme", "top", "bottom-left", "bottom-right", "none", NULL };
 static const char *const password_styles[] = { "dots", "stars", "hidden", NULL };
 
 #define BOOL(k, g, l, h, d) { k, DM_BOOL, g, l, h, d, 0, 0, NULL }
@@ -46,11 +46,12 @@ const struct dm_option dm_options[] = {
 		"Follow takes it from whoever logged in last", "follow", color_schemes),
 	TEXT("wallpaper", "Look", "Wallpaper",
 		"theme, a picture every user can read, or a color like #204070", "theme"),
-	INT("dim", "Look", "Darken the wallpaper", "In percent", "30", 0, 90),
+	INT("dim", "Look", "Darken the wallpaper", "In percent", "0", 0, 90),
 	TEXT("accent", "Look", "Accent color", "theme or a color like #0078d4", "theme"),
 	TEXT("font", "Look", "Font", "theme or a font like Noto Sans 11", "theme"),
-	CHOICE("card_style", "Look", "Login card",
-		"window has the title bar of the theme", "window", card_styles),
+	CHOICE("card_style", "Look", "Login screen",
+		"theme looks as that Windows did; window and plain are a card, on any theme", "theme",
+		card_styles),
 	CHOICE("card_position", "Look", "Place of the login card", NULL, "center", positions),
 	INT("card_width", "Look", "Width of the login card", "In pixels", "420", 280, 900),
 	TEXT("card_title", "Look", "Title of the login card", "%h is the name of the computer",
@@ -59,7 +60,8 @@ const struct dm_option dm_options[] = {
 		"Turned off, only on the first", "yes"),
 
 	// ---- what is shown
-	CHOICE("clock", "Shown", "Clock", NULL, "top", clock_places),
+	CHOICE("clock", "Shown", "Clock", "theme only has one where the real one did", "theme",
+		clock_places),
 	TEXT("clock_format", "Shown", "Format of the clock", "As strftime", "%H:%M"),
 	TEXT("date_format", "Shown", "Format of the date", "As strftime; empty for no date",
 		"%A, %e %B"),

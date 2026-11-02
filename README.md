@@ -31,7 +31,7 @@ Search finds apps, settings, files and sums. `Super+/` lists the keys of the mod
 |---|---|
 | ![Search in the start menu](docs/screenshots/search.png) | ![The list of keyboard shortcuts](docs/screenshots/shortcuts.png) |
 | **First start** | **The login screen** |
-| ![The welcome window](docs/screenshots/welcome.png) | ![The login screen of the display manager](docs/screenshots/login.png) |
+| ![The welcome window](docs/screenshots/welcome.png) | ![The login screen of the display manager](docs/screenshots/login-themes.png) |
 | **Quick settings with the keyboard** | |
 | ![A ring on a button of the quick settings](docs/screenshots/flyout-keyboard.png) | |
 
@@ -69,7 +69,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
 - **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.
 - **A settings app** for all of it, so no config file has to be touched. What fails says so in a banner, with a way to try again.
-- **A display manager** of its own, `tilewin-display-manager`: the login screen in the look of your theme, up in a blink, with about fifty settings. It stays off until you turn it on: [docs/display-manager.md](docs/display-manager.md).
+- **A display manager** of its own, `tilewin-display-manager`: a login screen that looks as that Windows did for each theme, up in a blink, with about fifty settings. It stays off until you turn it on: [docs/display-manager.md](docs/display-manager.md).
 - **Updates** in one step: `tilewin-update` or the About page bring in the newest release or build the newest source, then restart tileWin with your windows open.
 - **Light:** written in C, no CPU use while nothing happens.
 

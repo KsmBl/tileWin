@@ -22,8 +22,9 @@ compositor=$build/sway/tilewin
 greeter=$build/dm/tilewin-dm-greeter
 msg=$build/swaymsg/tilewinmsg
 keys=$build/tests/keyboard-tool
+pointer=$build/tests/pointer-tool
 
-for needed in "$daemon" "$compositor" "$greeter" "$msg" "$keys"; do
+for needed in "$daemon" "$compositor" "$greeter" "$msg" "$keys" "$pointer"; do
 	if [ ! -x "$needed" ]; then
 		echo "$needed was not built: skipping"
 		exit 77
@@ -199,8 +200,13 @@ sleep 1.2
 
 # ---- the session of the file is gone: the daemon refuses
 mv "$work/sessions/fake.desktop" "$work/fake.away"
-# the name is there from last time: the keys go to the password
-type_into_greeter text rightword key none return
+# the name is there from last time: the keys go to the password. By now this is
+# the dialog of Windows 95, the theme of who logged in, and its OK button works
+type_into_greeter text rightword
+sleep 0.3
+WAYLAND_DISPLAY=$(cat "$work/display") "$pointer" 1280 720 move 300 300
+sleep 0.3
+WAYLAND_DISPLAY=$(cat "$work/display") "$pointer" 1280 720 click 550 412
 sleep 1.5
 [ ! -s "$work/session.env" ] || fail "a session that is gone was started"
 grep -q "authenticated" "$work/backend.log" || fail "the login did not go through at all"

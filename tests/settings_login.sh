@@ -40,6 +40,7 @@ export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
 export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
 export TILEWIN_DM_APPLY=$work/helper TILEWIN_DM_CONF=$work/display-manager.conf
 export TILEWIN_DM_STATE=$work/no-state
+export PATH=$build/dm:$PATH
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 echo light > "$XDG_CONFIG_HOME/tileWin/color-scheme"
 echo win10 > "$XDG_CONFIG_HOME/tileWin/current-theme"

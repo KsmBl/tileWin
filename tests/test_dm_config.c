@@ -70,7 +70,7 @@ int main(void) {
 	expect(dm_config_int(c, "vt") == 1, "a terminal out of range");
 	expect(dm_config_bool(c, "show_users"), "a word that is no yes or no");
 	expect(strcmp(dm_config_str(c, "card_position"), "center") == 0, "a choice that is none");
-	expect(dm_config_int(c, "dim") == 30, "a negative number");
+	expect(dm_config_int(c, "dim") == 0, "a negative number");
 	expect(c->env_count == 0, "a bad env line");
 	dm_config_free(c);
 	reports = 0;

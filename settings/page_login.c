@@ -44,10 +44,10 @@ struct login_page {
 	GPtrArray *user_rows; // GtkSwitch *, with data "user"
 	char *saved;
 	bool updating, enabled;
-	// what the picture is drawn from
-	struct tw_theme *theme;
-	char *theme_key, *wall_key;
-	cairo_surface_t *wall;
+	char *render_file;
+	cairo_surface_t *shot;
+	guint render_timer;
+	bool rendering, render_again;
 };
 
 static const char *conf_path(void) {
@@ -107,13 +107,6 @@ static char *value_of(struct login_page *p, const char *key) {
 		value = g_strdup("theme");
 	}
 	return value;
-}
-
-static bool is_on(struct login_page *p, const char *key) {
-	char *value = value_of(p, key);
-	bool on = strcmp(value, "yes") == 0;
-	g_free(value);
-	return on;
 }
 
 /* The file as it would be: what differs from the defaults, and the env lines. */
@@ -221,291 +214,84 @@ static char *write_look_folder(struct login_page *p) {
 	return dir;
 }
 
-/* The theme with that scheme, by looking from that folder for a moment. */
-static void refresh_look(struct login_page *p) {
-	char *theme = effective_theme(p), *scheme = effective_scheme(p);
-	char *key = g_strdup_printf("%s/%s", theme, scheme);
-	if (g_strcmp0(key, p->theme_key) != 0) {
-		g_free(p->theme_key);
-		p->theme_key = key;
-		key = NULL;
-		if (p->theme) {
-			tw_theme_free(p->theme);
-		}
-		char *dir = write_look_folder(p);
-		char *before = g_strdup(g_getenv("XDG_CONFIG_HOME"));
-		g_setenv("XDG_CONFIG_HOME", dir, TRUE);
-		char *error = NULL;
-		p->theme = tw_theme_load(theme, &error);
-		free(error);
-		if (!p->theme) {
-			p->theme = tw_theme_load(TW_DEFAULT_THEME, &error);
-			free(error);
-		}
-		if (before) {
-			g_setenv("XDG_CONFIG_HOME", before, TRUE);
-		} else {
-			g_unsetenv("XDG_CONFIG_HOME");
-		}
-		g_free(before);
-		g_free(dir);
-		g_clear_pointer(&p->wall_key, g_free); // the wallpaper may be the theme's
-	}
-	g_free(key);
-	g_free(theme);
-	g_free(scheme);
-}
-
-static void source(cairo_t *cr, uint32_t c) {
-	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
-		(c >> 8 & 0xff) / 255.0, (c & 0xff) / 255.0);
-}
-
-static void refresh_wall(struct login_page *p, int w, int h) {
-	char *setting = value_of(p, "wallpaper");
-	char *key = g_strdup_printf("%s %d %d %s", p->theme_key, w, h, setting);
-	if (p->wall && g_strcmp0(key, p->wall_key) == 0) {
-		g_free(key);
-		g_free(setting);
-		return;
-	}
-	g_free(p->wall_key);
-	p->wall_key = key;
-	if (p->wall) {
-		cairo_surface_destroy(p->wall);
-	}
-	p->wall = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
-	cairo_t *cr = cairo_create(p->wall);
-	const struct tw_theme *t = p->theme;
-	uint32_t c1 = tw_theme_color(t, "wallpaper.color", 0x1c3a6eff);
-	uint32_t c2 = tw_theme_color(t, "wallpaper.color2", c1);
-	char *image = NULL;
-	if (setting[0] == '#') {
-		tw_parse_color(setting, &c1);
-		c2 = c1;
-	} else if (strcmp(setting, "theme") != 0) {
-		image = g_strdup(setting);
-	} else if (t) {
-		const char *name = tw_theme_str(t, "wallpaper.image", NULL);
-		if (name && g_ascii_strcasecmp(tw_theme_str(t, "wallpaper.type", ""), "image") == 0 &&
-				name[0] != '~') {
-			char *file = name[0] == '/' ? strdup(name) : tw_theme_file(t, name);
-			image = g_strdup(file);
-			free(file);
-		}
-	}
-	cairo_pattern_t *gradient = cairo_pattern_create_linear(0, 0, 0, h);
-	cairo_pattern_add_color_stop_rgb(gradient, 0, (c1 >> 24 & 0xff) / 255.0,
-		(c1 >> 16 & 0xff) / 255.0, (c1 >> 8 & 0xff) / 255.0);
-	cairo_pattern_add_color_stop_rgb(gradient, 1, (c2 >> 24 & 0xff) / 255.0,
-		(c2 >> 16 & 0xff) / 255.0, (c2 >> 8 & 0xff) / 255.0);
-	cairo_set_source(cr, gradient);
-	cairo_paint(cr);
-	cairo_pattern_destroy(gradient);
-	cairo_surface_t *picture = image ? tw_image_render_cover(image, w, h) : NULL;
-	if (picture) {
-		cairo_set_source_surface(cr, picture, 0, 0);
-		cairo_paint(cr);
-		cairo_surface_destroy(picture);
-	}
-	g_free(image);
-	g_free(setting);
-	cairo_destroy(cr);
-}
-
 /* ---------- the picture of the login screen ---------- */
 
-static void small_text(cairo_t *cr, const char *text, double x, double y, double w, double h,
-		double size, bool bold, double align) {
-	PangoLayout *layout = pango_cairo_create_layout(cr);
-	PangoFontDescription *desc = pango_font_description_from_string("Sans");
-	pango_font_description_set_absolute_size(desc, size * PANGO_SCALE);
-	pango_font_description_set_weight(desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
-	pango_layout_set_font_description(layout, desc);
-	pango_font_description_free(desc);
-	pango_layout_set_text(layout, text, -1);
-	pango_layout_set_width(layout, (int)(w * PANGO_SCALE));
-	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-	pango_layout_set_alignment(layout, align > 0.75 ? PANGO_ALIGN_RIGHT :
-		align > 0.25 ? PANGO_ALIGN_CENTER : PANGO_ALIGN_LEFT);
-	int tw, th;
-	pango_layout_get_pixel_size(layout, &tw, &th);
-	cairo_move_to(cr, x, y + (h - th) / 2);
-	pango_cairo_show_layout(cr, layout);
-	g_object_unref(layout);
+/*
+ * The greeter itself draws it, without a screen, so the picture is the real thing
+ * and not a likeness. A change only asks for it a moment later, and what comes in
+ * during a drawing is drawn right after it.
+ */
+static void render_start(struct login_page *p);
+
+static void render_done(GObject *source, GAsyncResult *result, gpointer data) {
+	struct login_page *p = data;
+	g_subprocess_wait_check_finish(G_SUBPROCESS(source), result, NULL);
+	g_object_unref(source);
+	p->rendering = false;
+	cairo_surface_t *shot = cairo_image_surface_create_from_png(p->render_file);
+	if (cairo_surface_status(shot) == CAIRO_STATUS_SUCCESS) {
+		if (p->shot) {
+			cairo_surface_destroy(p->shot);
+		}
+		p->shot = shot;
+		gtk_widget_queue_draw(p->preview);
+	} else {
+		cairo_surface_destroy(shot);
+	}
+	if (p->render_again) {
+		p->render_again = false;
+		render_start(p);
+	}
 }
 
-/* The same layout as the greeter, in the small: one pixel here is 4.2 on a real one. */
-static void draw_preview(GtkDrawingArea *area, cairo_t *cr, int W, int H, gpointer data) {
+static void render_start(struct login_page *p) {
+	if (p->rendering) {
+		p->render_again = true;
+		return;
+	}
+	char *text = config_text(p);
+	char *conf = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-render.conf", NULL);
+	if (!p->render_file) {
+		p->render_file = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-render.png", NULL);
+	}
+	g_file_set_contents(conf, text, -1, NULL);
+	char *look = write_look_folder(p);
+	char size[32];
+	snprintf(size, sizeof(size), "%dx%d", THUMB_W * 2, THUMB_H * 2);
+	GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+	g_subprocess_launcher_setenv(launcher, "XDG_CONFIG_HOME", look, TRUE);
+	GSubprocess *proc = g_subprocess_launcher_spawn(launcher, NULL, "tilewin-dm-greeter", "--render",
+		p->render_file, "--size", size, "--config", conf, NULL);
+	if (proc) {
+		p->rendering = true;
+		g_subprocess_wait_check_async(proc, NULL, render_done, p);
+	}
+	g_object_unref(launcher);
+	g_free(look);
+	g_free(conf);
+	g_free(text);
+}
+
+/* A fixed size whatever the picture is, or the page would move with it. */
+static void draw_preview(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data) {
 	struct login_page *p = data;
-	refresh_look(p);
-	refresh_wall(p, W, H);
-	cairo_set_source_surface(cr, p->wall, 0, 0);
+	if (!p->shot) {
+		cairo_set_source_rgb(cr, 0.1, 0.1, 0.12);
+		cairo_paint(cr);
+		return;
+	}
+	cairo_scale(cr, (double)w / cairo_image_surface_get_width(p->shot),
+		(double)h / cairo_image_surface_get_height(p->shot));
+	cairo_set_source_surface(cr, p->shot, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
 	cairo_paint(cr);
-	char *dim = value_of(p, "dim");
-	cairo_set_source_rgba(cr, 0, 0, 0, atoi(dim) / 100.0);
-	cairo_paint(cr);
-	g_free(dim);
+}
 
-	const struct tw_theme *t = p->theme;
-	double s = W / 1280.0;
-
-	char *place = value_of(p, "clock");
-	if (strcmp(place, "none") != 0) {
-		time_t now = time(NULL);
-		struct tm tm;
-		localtime_r(&now, &tm);
-		char clock[64] = "", date[128] = "";
-		char *format = value_of(p, "clock_format");
-		strftime(clock, sizeof(clock), format, &tm);
-		g_free(format);
-		format = value_of(p, "date_format");
-		strftime(date, sizeof(date), format, &tm);
-		g_free(format);
-		bool top = strcmp(place, "top") == 0;
-		double align = top ? 0.5 : strcmp(place, "bottom-right") == 0 ? 1 : 0;
-		double y = top ? H * 0.04 : H * 0.72;
-		cairo_set_source_rgb(cr, 1, 1, 1);
-		small_text(cr, clock, W * 0.03, y, W * 0.94, 24, 19, false, align);
-		small_text(cr, date, W * 0.03, y + 22, W * 0.94, 10, 7, false, align);
-	}
-	g_free(place);
-
-	const char *style = t && t->style ? t->style : "";
-	double radius = strcmp(style, "win11") == 0 || strcmp(style, "sway") == 0 ? 3 : 0;
-	uint32_t card = tw_theme_color(t, "menu.bg", 0xf2f2f2ff);
-	uint32_t fg = tw_theme_color(t, "menu.fg", 0x000000ff);
-	uint32_t field = tw_theme_color(t, "menu.field_bg", 0xffffffff);
-	uint32_t highlight = tw_theme_color(t, "menu.hl_bg", 0);
-	uint32_t accent = tw_theme_color(t, "accent.color", (highlight & 0xff) == 0xff ? highlight :
-		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
-	char *chosen = value_of(p, "accent");
-	if (strcmp(chosen, "theme") != 0) {
-		tw_parse_color(chosen, &accent);
-	}
-	g_free(chosen);
-
-	char *width = value_of(p, "card_width");
-	double cw = atoi(width) * s;
-	g_free(width);
-	char *position = value_of(p, "card_position");
-	double cx = strcmp(position, "left") == 0 ? W * 0.07 :
-		strcmp(position, "right") == 0 ? W * 0.93 - cw : (W - cw) / 2;
-	g_free(position);
-	char *greeting = value_of(p, "greeting");
-	char *card_style = value_of(p, "card_style");
-	bool window = strcmp(card_style, "window") == 0;
-	g_free(card_style);
-	bool users = is_on(p, "show_users"), sessions = is_on(p, "show_sessions");
-	double title_h = window ? 8 : 0;
-	double ch = title_h + 8 + (*greeting ? 7 : 0) + (users ? 22 : 11) + 11 + (sessions ? 8 : 0) + 11 + 8;
-	double cy = (H - ch) / 2 + 6;
-
-	cairo_new_path(cr);
-	cairo_rectangle(cr, cx + 1, cy + 1, cw, ch);
-	cairo_set_source_rgba(cr, 0, 0, 0, 0.3);
-	cairo_fill(cr);
-	cairo_save(cr);
-	cairo_new_path(cr);
-	if (radius > 0) {
-		cairo_arc(cr, cx + cw - radius, cy + radius, radius, -M_PI / 2, 0);
-		cairo_arc(cr, cx + cw - radius, cy + ch - radius, radius, 0, M_PI / 2);
-		cairo_arc(cr, cx + radius, cy + ch - radius, radius, M_PI / 2, M_PI);
-		cairo_arc(cr, cx + radius, cy + radius, radius, M_PI, 1.5 * M_PI);
-		cairo_close_path(cr);
-	} else {
-		cairo_rectangle(cr, cx, cy, cw, ch);
-	}
-	source(cr, card);
-	cairo_fill_preserve(cr);
-	cairo_clip(cr);
-	char *title = value_of(p, "card_title");
-	if (window) {
-		const char *gradient = tw_theme_str(t, "decoration.active.title_gradient", NULL);
-		uint32_t bar = tw_theme_color(t, "decoration.active.title_bg", accent);
-		uint32_t first = bar;
-		if (gradient && strchr(gradient, '#')) {
-			tw_parse_color(strndupa(strchr(gradient, '#'), 7), &first);
-		}
-		source(cr, gradient ? first : bar);
-		cairo_rectangle(cr, cx, cy, cw, title_h);
-		cairo_fill(cr);
-		source(cr, tw_theme_color(t, "decoration.active.title_fg", 0xffffffff));
-		char *pct = strstr(title, "%h");
-		if (pct) {
-			pct[0] = '\0';
-		}
-		small_text(cr, title, cx + 3, cy, cw - 6, title_h, 5, true, 0);
-	}
-	g_free(title);
-	cairo_restore(cr);
-
-	double x = cx + 5, w = cw - 10, y = cy + title_h + 4;
-	if (*greeting) {
-		source(cr, fg);
-		small_text(cr, greeting, x, y, w, 6, 4.5, false, 0);
-		y += 7;
-	}
-	g_free(greeting);
-	if (users) {
-		cairo_rectangle(cr, x - 1, y, w + 2, 10);
-		source(cr, (accent & 0xffffff00) | 0x40);
-		cairo_fill(cr);
-		for (int i = 0; i < 2; i++) {
-			source(cr, accent);
-			cairo_new_path(cr);
-			cairo_arc(cr, x + 4, y + 5 + i * 11, 3.5, 0, 2 * M_PI);
-			cairo_fill(cr);
-			source(cr, (fg & 0xffffff00) | 0xb0);
-			cairo_rectangle(cr, x + 10, y + 4 + i * 11, i ? w * 0.28 : w * 0.2, 2);
-			cairo_fill(cr);
-		}
-		y += 22;
-	} else {
-		cairo_rectangle(cr, x, y, w, 9);
-		source(cr, field);
-		cairo_fill(cr);
-		y += 11;
-	}
-	cairo_rectangle(cr, x, y, w, 9);
-	source(cr, field);
-	cairo_fill(cr);
-	cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, 8);
-	source(cr, accent);
-	cairo_set_line_width(cr, 1);
-	cairo_stroke(cr);
-	source(cr, tw_theme_color(t, "menu.field_fg", 0x000000ff));
-	for (int i = 0; i < 6; i++) {
-		cairo_new_path(cr);
-		cairo_arc(cr, x + 4 + i * 3.4, y + 4.5, 1, 0, 2 * M_PI);
-		cairo_fill(cr);
-	}
-	y += 11;
-	if (sessions) {
-		source(cr, (fg & 0xffffff00) | 0xb0);
-		cairo_rectangle(cr, x + w * 0.4, y + 2, w * 0.2, 2);
-		cairo_fill(cr);
-		y += 8;
-	}
-	cairo_rectangle(cr, x, y, w, 9);
-	source(cr, accent);
-	cairo_fill(cr);
-	cairo_set_source_rgb(cr, 1, 1, 1);
-	small_text(cr, "Log in", x, y, w, 9, 4.5, true, 0.5);
-
-	if (is_on(p, "show_power")) {
-		static const char *const allow[] = { "allow_poweroff", "allow_reboot", "allow_suspend",
-			"allow_hibernate" };
-		double bx = W - 4;
-		for (int i = 0; i < 4; i++) {
-			if (is_on(p, allow[i])) {
-				bx -= 15;
-				cairo_rectangle(cr, bx, H - 11, 13, 7);
-				cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
-				cairo_fill(cr);
-			}
-		}
-	}
+static gboolean render_later(gpointer data) {
+	struct login_page *p = data;
+	p->render_timer = 0;
+	render_start(p);
+	return G_SOURCE_REMOVE;
 }
 
 /* ---------- saving ---------- */
@@ -514,7 +300,10 @@ static void update_page(struct login_page *p) {
 	if (p->updating) {
 		return;
 	}
-	gtk_widget_queue_draw(p->preview);
+	if (p->render_timer) {
+		g_source_remove(p->render_timer);
+	}
+	p->render_timer = g_timeout_add(90, render_later, p);
 	char *text = config_text(p);
 	gtk_revealer_set_reveal_child(GTK_REVEALER(p->bar), g_strcmp0(text, p->saved) != 0);
 	g_free(text);
@@ -1186,11 +975,11 @@ static void build_look(struct login_page *p, GtkWidget *tab) {
 	GtkWidget *font = store_new(p, option_index("font"));
 	row_for(p, group, "font", ui_font_field(font));
 
-	group = ui_group(tab, "Login card", NULL);
+	group = ui_group(tab, "The login screen itself", NULL);
 	row_for(p, group, "card_position", segments_new(p, option_index("card_position"),
 		(const char *const[]){ "Center", "Left", "Right", NULL }));
 	row_for(p, group, "card_style", segments_new(p, option_index("card_style"),
-		(const char *const[]){ "A window", "Plain", NULL }));
+		(const char *const[]){ "As the theme", "A window", "Plain", NULL }));
 	add_scale(p, group, "card_width");
 	add_text(p, group, "card_title");
 	add_text(p, group, "greeting");
@@ -1237,7 +1026,7 @@ static void build_login(struct login_page *p, GtkWidget *tab) {
 static void build_shown(struct login_page *p, GtkWidget *tab) {
 	GtkWidget *group = ui_group(tab, "Clock", NULL);
 	row_for(p, group, "clock", segments_new(p, option_index("clock"),
-		(const char *const[]){ "Top", "Bottom left", "Bottom right", "None", NULL }));
+		(const char *const[]){ "As the theme", "Top", "Left", "Right", "None", NULL }));
 	add_time_formats(p, group, "clock_format", (const char *const[]){ "%H:%M", "%H:%M:%S",
 		"%I:%M %p", NULL });
 	add_time_formats(p, group, "date_format", (const char *const[]){ "%A, %e %B", "%e %B %Y",

@@ -25,6 +25,23 @@ Log in, or press Ctrl+Alt+F<n> to get back to where you were. `--once` ends it a
 
 The page has a picture of the login screen that follows every change. **Try it on the whole screen**, or `tilewin-dm-greeter --preview`, shows the real thing in your running session; it checks nothing, and Esc ends it. Changes only count after **Save**, in a bar that shows when there is something to save.
 
+## How it looks
+
+Each theme looks as that Windows did when it asked who you are, drawn from scratch without Microsoft's logos or pictures:
+
+| Theme | The login screen |
+|---|---|
+| Windows 10, 11 | The user in the middle over the picture, other users bottom left, power icons bottom right |
+| Windows 8 | The user beside the field, flat |
+| Windows 7, Vista | A framed picture, a round glass arrow, the red power button |
+| Windows XP | The blue Welcome screen with a tile for each user |
+| Windows 95 | A dialog with keys on the wallpaper |
+| Windows 2000 | The same dialog with a banner on top |
+| Windows 1, 3 | A plain dialog in the frame of those days |
+| sway | The ring of swaylock |
+
+`card_style window` or `plain` is a card instead, on any theme.
+
 ## How it works
 
 - **`tilewin-display-manager`** runs as root and is small: no toolkit, no drawing. Each login is a child process holding PAM from the first prompt to the end of the session, so a stuck PAM module cannot take the daemon with it.
@@ -78,10 +95,10 @@ The PAM services are `tilewin-dm` (logging in), `tilewin-dm-autologin` and `tile
 | `theme` | `follow` | Theme. The name of a tileWin theme, or follow for the theme of whoever logged in last |
 | `color_scheme` | `follow` | Color scheme. Follow takes it from whoever logged in last (follow, light, dark) |
 | `wallpaper` | `theme` | Wallpaper. theme, a picture every user can read, or a color like #204070 |
-| `dim` | `30` | Darken the wallpaper. In percent (0 to 90) |
+| `dim` | `0` | Darken the wallpaper. In percent (0 to 90) |
 | `accent` | `theme` | Accent color. theme or a color like #0078d4 |
 | `font` | `theme` | Font. theme or a font like Noto Sans 11 |
-| `card_style` | `window` | Login card. window has the title bar of the theme (window, plain) |
+| `card_style` | `theme` | Login screen. theme looks as that Windows did; window and plain are a card, on any theme (theme, window, plain) |
 | `card_position` | `center` | Place of the login card (center, left, right) |
 | `card_width` | `420` | Width of the login card. In pixels (280 to 900) |
 | `card_title` | `Log in to %h` | Title of the login card. %h is the name of the computer |
@@ -91,7 +108,7 @@ The PAM services are `tilewin-dm` (logging in), `tilewin-dm-autologin` and `tile
 
 | Setting | Default | What it does |
 |---|---|---|
-| `clock` | `top` | Clock (top, bottom-left, bottom-right, none) |
+| `clock` | `theme` | Clock. theme only has one where the real one did (theme, top, bottom-left, bottom-right, none) |
 | `clock_format` | `%H:%M` | Format of the clock. As strftime |
 | `date_format` | `%A, %e %B` | Format of the date. As strftime; empty for no date |
 | `greeting` | empty | Message. A line under the title, e.g. who to call for help |
