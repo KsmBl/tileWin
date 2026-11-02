@@ -609,6 +609,8 @@ static void build_window(struct settings *s) {
 		{ "Devices", "computer-symbolic" },
 		{ "Network & internet", "network-workgroup-symbolic" },
 		{ "System", "preferences-system-symbolic" },
+		// the pages few people need; the search finds them all the same
+		{ "Advanced", "applications-engineering-symbolic" },
 	};
 	static const struct {
 		const char *name;
@@ -627,17 +629,17 @@ static void build_window(struct settings *s) {
 		{ "datetime", datetime_page_new, 5 },
 		{ "bluetooth", bluetooth_page_new, 3 },
 		{ "network", network_page_new, 4 },
-		{ "dns", dns_page_new, 4 },
+		{ "dns", dns_page_new, 6 },
 		{ "taskbar", taskbar_page_new, 2 },
 		{ "startmenu", startmenu_page_new, 2 },
 		{ "launcher", launcher_page_new, 2 },
-		{ "devices", devices_page_new, 3 },
+		{ "devices", devices_page_new, 6 },
 		{ "keyboard", keyboard_page_new, 3 },
 		{ "mouse", mouse_page_new, 3 },
 		{ "apps", apps_page_new, 5 },
 		{ "account", account_page_new, 5 },
 		{ "backup", backup_page_new, 5 },
-		{ "kernel", kernel_page_new, 5 },
+		{ "kernel", kernel_page_new, 6 },
 		{ "about", about_page_new, 5 },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);
