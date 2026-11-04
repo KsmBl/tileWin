@@ -17,6 +17,9 @@
  *       handle-lid-switch inhibitor lock and does all lid handling itself.
  *   power_key_action <action>
  *       the same for the power key, with logind's handle-power-key lock.
+ *       The press that wakes the computer arrives here after the wake-up, so
+ *       the key does nothing from the moment the computer goes to sleep until
+ *       a few seconds after it woke; else it would go straight back to sleep.
  *   lock_on_sleep yes|no
  *       lock the session before the computer sleeps or hibernates, however
  *       that was asked for (the power key, the lid, a menu, systemctl): a
@@ -66,6 +69,8 @@ static const char *const action_names[] = { "default", "nothing", "sleep", "hibe
 #define SLEEP_LOCK_TIMEOUT_MS 3000
 // after the lock is up, so the lock screen is drawn before the picture freezes
 #define SLEEP_LOCK_SETTLE_MS 300
+// how long the power key does nothing after waking up or after asking for a sleep
+#define POWER_KEY_REST_MS 5000
 
 static struct {
 	struct wl_event_source *timer;
@@ -85,6 +90,8 @@ static struct {
 	struct timespec saver_started;
 	bool saver_by_hand; // "screensaver start": the keys of that do not end it
 	int key_inhibit_fd;
+	bool sleeping; // logind announced a sleep and has not announced the end of it
+	struct timespec key_rest; // the power key rests for POWER_KEY_REST_MS from here
 	int sleep_inhibit_fd; // delay lock, held while awake with lock_on_sleep
 	struct wl_event_source *sleep_timer; // waits for the lock screen
 	int sleep_waited_ms;
@@ -585,6 +592,20 @@ void tw_power_lid(bool closed) {
 
 /* ---------- power key ---------- */
 
+static bool power_key_resting(void) {
+	if (power.sleeping) {
+		return true;
+	}
+	if (power.key_rest.tv_sec == 0 && power.key_rest.tv_nsec == 0) {
+		return false;
+	}
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	long since = (now.tv_sec - power.key_rest.tv_sec) * 1000 +
+		(now.tv_nsec - power.key_rest.tv_nsec) / 1000000;
+	return since < POWER_KEY_REST_MS;
+}
+
 bool tw_power_key(bool pressed) {
 	if (!config || power.key_inhibit_fd < 0) {
 		return false; // logind does it
@@ -592,8 +613,18 @@ bool tw_power_key(bool pressed) {
 	if (!pressed) {
 		return true;
 	}
+	if (power_key_resting()) {
+		sway_log(SWAY_DEBUG, "Power key: ignored, just woke up or going to sleep");
+		return true;
+	}
 	enum tw_power_action action = config->tw_power_key_action;
 	sway_log(SWAY_DEBUG, "Power key: %s", action_names[action]);
+	if (action == TW_POWER_SLEEP || action == TW_POWER_HIBERNATE ||
+			action == TW_POWER_HYBRID_SLEEP) {
+		// logind announces the sleep a moment later; a second press before
+		// that would ask again, be refused and fall back to suspending
+		clock_gettime(CLOCK_MONOTONIC, &power.key_rest);
+	}
 	if (!run_action(action)) {
 		// screen_off: like idling, the next input turns the screens on again
 		power.idle_screen_off = true;
@@ -644,7 +675,9 @@ static int handle_prepare_for_sleep(sd_bus_message *msg, void *data, sd_bus_erro
 	if (sd_bus_message_read(msg, "b", &start) < 0) {
 		return 0;
 	}
+	power.sleeping = start;
 	if (!start) {
+		clock_gettime(CLOCK_MONOTONIC, &power.key_rest);
 		// woke up, or the sleep was called off: hold logind back again for the next time
 		release_sleep_inhibitor();
 		update_sleep_inhibitor();
@@ -674,7 +707,8 @@ static int handle_prepare_for_sleep(sd_bus_message *msg, void *data, sd_bus_erro
 static void update_sleep_inhibitor(void) {
 	bool want = config && config->tw_lock_on_sleep;
 #if HAVE_LIBSYSTEMD || HAVE_LIBELOGIND || HAVE_BASU
-	if (want && !power.sleep_slot && system_bus()) {
+	// also without lock_on_sleep: the power key needs to know about sleeping
+	if (!power.sleep_slot && system_bus()) {
 		if (sd_bus_match_signal(power.bus, &power.sleep_slot, "org.freedesktop.login1",
 				"/org/freedesktop/login1", "org.freedesktop.login1.Manager",
 				"PrepareForSleep", handle_prepare_for_sleep, NULL) < 0) {
