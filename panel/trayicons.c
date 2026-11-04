@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "draw.h"
+#include "flyout.h"
 #include "panel.h"
 #include "tw_desktop.h"
 
@@ -58,6 +59,33 @@ void ti_network(struct panel *panel, cairo_t *cr, double x, double y, double siz
 	if (!draw_theme_icon(panel, cr, name, x, y, size, color)) {
 		pd_glyph_network(cr, x, y, size, bars, wireless, connected, color);
 	}
+}
+
+void ti_bluetooth(struct panel *panel, cairo_t *cr, double x, double y, double size,
+		bool powered, bool connected, uint32_t color) {
+	const char *name = !powered ? "tray-bluetooth-off" :
+		connected ? "tray-bluetooth-connected" : "tray-bluetooth";
+	if (draw_theme_icon(panel, cr, name, x, y, size, color)) {
+		return;
+	}
+	cairo_save(cr);
+	draw_bluetooth_glyph(cr, x, y, size, powered ? color : (color & 0xffffff00) | 0x50);
+	if (powered && connected) {
+		pd_color(cr, color);
+		cairo_arc(cr, x + size * 0.1, y + size * 0.5, size * 0.07, 0, 2 * M_PI);
+		cairo_fill(cr);
+		cairo_arc(cr, x + size * 0.9, y + size * 0.5, size * 0.07, 0, 2 * M_PI);
+		cairo_fill(cr);
+	} else if (!powered) {
+		cairo_set_source_rgba(cr, 0xe8 / 255.0, 0x11 / 255.0, 0x23 / 255.0, 1);
+		cairo_set_line_width(cr, size * 0.09);
+		cairo_move_to(cr, x + size * 0.62, y + size * 0.62);
+		cairo_line_to(cr, x + size * 0.9, y + size * 0.9);
+		cairo_move_to(cr, x + size * 0.9, y + size * 0.62);
+		cairo_line_to(cr, x + size * 0.62, y + size * 0.9);
+		cairo_stroke(cr);
+	}
+	cairo_restore(cr);
 }
 
 void ti_battery(struct panel *panel, cairo_t *cr, double x, double y, double size,

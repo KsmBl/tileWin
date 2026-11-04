@@ -16,13 +16,13 @@ static const char default_config[] =
 	"layout window {\n"
 	"  position bottom\n"
 	"  left start search taskbar\n"
-	"  right tray keyboard volume network battery clock notifications showdesktop\n"
+	"  right tray keyboard volume network bluetooth battery clock notifications showdesktop\n"
 	"}\n"
 	"layout tile {\n"
 	"  position top\n"
 	"  height 26\n"
 	"  left workspaces title\n"
-	"  right tray cpu memory volume battery clock modeswitch\n"
+	"  right tray cpu memory volume bluetooth battery clock modeswitch\n"
 	"}\n"
 	"menu taskbar {\n"
 	"  item \"Cascade windows\" arrange cascade\n"
@@ -565,7 +565,7 @@ void panel_config_free(struct panel_config *config) {
 static const struct widget_impl *impls[] = {
 	&widget_start, &widget_taskbar, &widget_quicklaunch, &widget_workspaces,
 	&widget_title, &widget_tray, &widget_clock, &widget_volume, &widget_battery,
-	&widget_network, &widget_cpu, &widget_memory, &widget_disk, &widget_gpu,
+	&widget_network, &widget_bluetooth, &widget_cpu, &widget_memory, &widget_disk, &widget_gpu,
 	&widget_net, &widget_storage, &widget_power, &widget_brightness,
 	&widget_keyboard, &widget_modeswitch, &widget_showdesktop, &widget_search,
 	&widget_separator, &widget_spacer, &widget_custom, &widget_notifications,

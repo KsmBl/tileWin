@@ -146,7 +146,7 @@ static char *format_text(const char *format, const char **values) {
 	return out;
 }
 
-/* Windows 11: the network, volume and battery icons open quick settings. */
+/* Windows 11: the network, Bluetooth, volume and battery icons open quick settings. */
 static bool opens_quick_settings(struct widget *w) {
 	return widget_conf_bool(w, "quick_settings",
 		tw_theme_bool(w->panel->theme, "panel.quick_settings", false));
@@ -1704,6 +1704,142 @@ const struct widget_impl widget_network = {
 	.tooltip = network_tooltip,
 	.set_active = poll_set_active,
 	.sample = network_sample,
+};
+
+/* ================= bluetooth ================= */
+
+/*
+ * What BlueZ says, kept by bluetooth.c, which draws the bars again when that
+ * changes: nothing to poll here. Like the network icon without a network
+ * device, the icon takes no room while there is no adapter or no bluetoothd.
+ */
+
+/* The number of connected devices; *name is the first one's, or NULL. */
+static int bluetooth_connected(const char **name) {
+	int count = 0;
+	*name = NULL;
+	list_t *devices = bt_devices();
+	for (int i = 0; devices && i < devices->length; i++) {
+		struct bt_device *d = devices->items[i];
+		if (d->connected) {
+			if (!*name) {
+				*name = d->name ? d->name : d->address;
+			}
+			count++;
+		}
+	}
+	return count;
+}
+
+static char *bluetooth_text(struct widget *w, bool *icons_in_text) {
+	const char *device;
+	int connected = bluetooth_connected(&device);
+	const char *format = NULL;
+	if (!bt_powered()) {
+		format = widget_conf(w, "format_off", NULL);
+	} else if (connected > 0) {
+		format = widget_conf(w, "format_connected", NULL);
+	}
+	if (!format) {
+		format = widget_conf(w, "format", NULL);
+	}
+	*icons_in_text = text_icons(w, format);
+	if (!format) {
+		return NULL;
+	}
+	char count[16], icon[64];
+	snprintf(count, sizeof(count), "%d", connected);
+	// the list goes off, on, connected
+	level_icon(w, !bt_powered() ? 0 : connected > 0 ? 100 : 50, icon, sizeof(icon));
+	const char *values[] = { "count", count, "device", device ? device : "", "icon", icon, NULL };
+	return format_text(format, values);
+}
+
+static int bluetooth_measure(struct widget *w, struct render_ctx *ctx) {
+	if (!bt_available()) {
+		return 0;
+	}
+	bool icons_in_text;
+	char *text = bluetooth_text(w, &icons_in_text);
+	int width = text_item_measure(ctx, text, !icons_in_text);
+	free(text);
+	return width;
+}
+
+static void bluetooth_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
+	const char *device;
+	int connected = bluetooth_connected(&device);
+	double x = render_item_start(ctx, b);
+	uint32_t fg = widget_fg(ctx->panel, "bluetooth");
+	bool icons_in_text;
+	char *text = bluetooth_text(w, &icons_in_text);
+	if (!icons_in_text) {
+		int g = glyph_size(ctx);
+		ti_bluetooth(ctx->panel, ctx->cairo, x, b.y + (b.height - g) / 2.0, g, bt_powered(),
+			connected > 0, fg);
+		x += g + 4;
+	}
+	if (text) {
+		pd_text(ctx->cairo, bar_font(ctx->panel), text, x, b.y, b.x + b.width - x, b.height,
+			fg, PD_LEFT);
+		free(text);
+	}
+	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+}
+
+static bool bluetooth_sample(struct widget *w, struct widget_sample *out) {
+	if (!bt_available()) {
+		return false;
+	}
+	const char *device;
+	int connected = bluetooth_connected(&device);
+	snprintf(out->value, sizeof(out->value), "%s", !bt_powered() ? "Off" :
+		connected > 0 ? "Connected" : "On");
+	if (bt_powered() && connected > 1) {
+		snprintf(out->detail, sizeof(out->detail), "%d devices", connected);
+	} else if (bt_powered() && device) {
+		snprintf(out->detail, sizeof(out->detail), "%s", device);
+	}
+	return true;
+}
+
+static char *bluetooth_tooltip(struct widget *w, struct hotspot *hs) {
+	const char *device;
+	int connected = bluetooth_connected(&device);
+	if (!bt_powered()) {
+		return strdup("Bluetooth: off");
+	}
+	if (connected > 1) {
+		return format_str("Bluetooth: %d devices connected", connected);
+	}
+	if (connected == 1 && device) {
+		return format_str("Bluetooth: connected to %s", device);
+	}
+	return strdup("Bluetooth: on");
+}
+
+static bool bluetooth_click(struct widget *w, struct psurface *s, struct hotspot *hs,
+		uint32_t button, double x, double y) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	if (opens_quick_settings(w)) {
+		quicksettings_toggle(w->panel, anchor);
+		return true;
+	}
+	flyout_bluetooth_toggle(w->panel, anchor);
+	return true;
+}
+
+const struct widget_impl widget_bluetooth = {
+	.type = "bluetooth",
+	.measure = bluetooth_measure,
+	.render = bluetooth_render,
+	.click = bluetooth_click,
+	.tooltip = bluetooth_tooltip,
+	.sample = bluetooth_sample,
 };
 
 /* ================= brightness ================= */

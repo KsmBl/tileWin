@@ -117,6 +117,7 @@ static const struct {
 		{ "80%", "(icon) 80%", "BAT 80%" } },
 	{ "network", "format", { "{essid}", "{essid} {quality}%", "{ifname}" },
 		{ "HomeWifi", "HomeWifi 70%", "wlan0" } },
+	{ "bluetooth", "format", { "{device}", "{count}" }, { "Headphones", "1" } },
 	{ "volume", "format", { "{volume}%", "{icon} {volume}%", "VOL {volume}%" },
 		{ "60%", "(icon) 60%", "VOL 60%" } },
 	{ "volume", "format_muted", { "muted", "{icon} muted" }, { "muted", "(icon) muted" } },

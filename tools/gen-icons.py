@@ -1272,6 +1272,27 @@ def tray_brightness(ic):
     ic.circle(24, 24, 8.5, color, flat=ic.t in SYMBOLIC, outline=ic.t not in SYMBOLIC)
 
 
+def tray_bluetooth(ic, state):
+    """state: 'on', 'connected' (a dot on each side of the rune) or 'off'."""
+    off = state == 'off'
+    if ic.t in SYMBOLIC:
+        rune = [(13, 15), (35, 33), (24, 43), (24, 5), (35, 15), (13, 33)]
+        ic.line(rune, WHITE, 3.8, opacity=.35 if off else 1)
+        if state == 'connected':
+            ic.circle(6, 24, 3.2, WHITE, outline=False, flat=True)
+            ic.circle(42, 24, 3.2, WHITE, outline=False, flat=True)
+    else:
+        color = (pick(ic, win95='#808080', winxp='#a9bfdf', win7='#6f7c8a') if off else
+                 pick(ic, win95='#0000c0', winxp='#2a62d0', win7='#2f74c9'))
+        ic.rect(11, 3, 26, 42, color, r=pick(ic, win95=0, default=9))
+        ic.line([(17, 16), (31, 31), (24, 39), (24, 9), (31, 17), (17, 32)], WHITE, 3.2)
+        if state == 'connected':
+            ic.circle(5, 24, 4, T(ic, GREEN))
+            ic.circle(43, 24, 4, T(ic, GREEN))
+    if off:
+        badge_off(ic, 37, 36, 10)
+
+
 TRAY_ICONS = {
     'tray-volume-muted': lambda ic: tray_speaker(ic, 0, True),
     'tray-volume-off': lambda ic: tray_speaker(ic, 0, False),
@@ -1281,6 +1302,9 @@ TRAY_ICONS = {
     'tray-network-wireless-offline': lambda ic: tray_wireless(ic, 0, True),
     'tray-network-wired': lambda ic: tray_wired(ic),
     'tray-network-wired-offline': lambda ic: tray_wired(ic, True),
+    'tray-bluetooth': lambda ic: tray_bluetooth(ic, 'on'),
+    'tray-bluetooth-connected': lambda ic: tray_bluetooth(ic, 'connected'),
+    'tray-bluetooth-off': lambda ic: tray_bluetooth(ic, 'off'),
     'tray-brightness': tray_brightness,
 }
 for _level in range(5):

@@ -157,6 +157,17 @@ static const struct tw_widget_option opts_network[] = {
 		NULL },
 	{ 0 },
 };
+static const struct tw_widget_option opts_bluetooth[] = {
+	{ "format", "Format", "{device} is the first connected device, {count} how many are connected; "
+		"empty shows only the icon", NULL },
+	{ "format_connected", "Format when connected", "Used instead of Format while a device is connected",
+		NULL },
+	{ "format_off", "Format when off", "Used instead of Format while Bluetooth is off", NULL },
+	{ "icons", "Icons", "Characters for {icon}: off, on, connected", NULL },
+	{ "quick_settings", "Click opens quick settings", "The Windows 11 flyout instead of the Bluetooth flyout",
+		choice_yes_no },
+	{ 0 },
+};
 static const struct tw_widget_option opts_volume[] = {
 	{ "mixer", "Mixer command", "Runs on click, default exec pavucontrol", NULL },
 	{ "step", "Scroll step", "Percent, default 5", NULL },
@@ -300,6 +311,8 @@ const struct tw_widget_info tw_widgets[] = {
 		STATUS, opts_none, styles_plain },
 	{ "volume", "Volume", "Speaker volume", STATUS, opts_volume, styles_level },
 	{ "network", "Network", "Connection status", STATUS, opts_network, styles_level },
+	{ "bluetooth", "Bluetooth", "On or off and what is connected; shows only with an adapter",
+		STATUS, opts_bluetooth, styles_plain },
 	{ "battery", "Battery", "Charge level", STATUS, opts_battery, styles_level },
 	{ "brightness", "Brightness", "Screen brightness", STATUS, opts_brightness, styles_level },
 	{ "cpu", "CPU usage", "Processor load", STATUS, opts_cpu, styles_meter },

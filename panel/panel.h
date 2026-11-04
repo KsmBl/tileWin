@@ -358,6 +358,7 @@ extern const struct widget_impl widget_clock;
 extern const struct widget_impl widget_volume;
 extern const struct widget_impl widget_battery;
 extern const struct widget_impl widget_network;
+extern const struct widget_impl widget_bluetooth;
 extern const struct widget_impl widget_cpu;
 extern const struct widget_impl widget_memory;
 extern const struct widget_impl widget_disk;
@@ -780,6 +781,8 @@ void ti_speaker(struct panel *panel, cairo_t *cr, double x, double y, double siz
 	int volume, bool muted, uint32_t color);
 void ti_network(struct panel *panel, cairo_t *cr, double x, double y, double size,
 	int bars, bool wireless, bool connected, uint32_t color);
+void ti_bluetooth(struct panel *panel, cairo_t *cr, double x, double y, double size,
+	bool powered, bool connected, uint32_t color);
 void ti_battery(struct panel *panel, cairo_t *cr, double x, double y, double size,
 	int percent, bool charging, uint32_t color);
 void ti_brightness(struct panel *panel, cairo_t *cr, double x, double y, double size,

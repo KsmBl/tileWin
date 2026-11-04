@@ -1193,6 +1193,17 @@ if gdk_pixbuf.found()
 	)
 
 	test(
+		'bluetooth-widget',
+		find_program('bluetooth_widget.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [count_content, pointer_tool],
+		env: saver_gui_env,
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 60,
+	)
+
+	test(
 		'notification-area',
 		find_program('notification_area.sh'),
 		args: [meson.project_build_root(), meson.project_source_root()],
