@@ -415,8 +415,9 @@ static void schedule_rebuild(struct bluetooth_page *p) {
 	}
 }
 
-static void on_manager_changed(GDBusObjectManager *manager, gpointer data) {
-	schedule_rebuild(data);
+/* Connected swapped, so the page comes first; what changed is not looked at. */
+static void on_manager_changed(struct bluetooth_page *p) {
+	schedule_rebuild(p);
 }
 
 static void on_properties_changed(GDBusObjectManagerClient *manager, GDBusObjectProxy *object,
