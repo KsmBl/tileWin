@@ -218,7 +218,7 @@ command -v ninja >/dev/null 2>&1 || die "ninja not found"
 
 # Without wlroots 0.20 on the system (Debian 13 has 0.18), it is built from
 # subprojects/ along with what it needs newer than the distribution has:
-# wayland, wayland-protocols, libdrm and libxkbcommon. They are linked in
+# wayland, wayland-protocols, libdrm, libxkbcommon and pixman. They are linked in
 # statically and not installed, so nothing of the system is replaced.
 command -v pkg-config >/dev/null 2>&1 || die "pkg-config not found"
 # Once downloaded, meson.build takes wlroots from there even when the system
@@ -227,7 +227,7 @@ BUNDLED_WLROOTS=0
 if ! pkg-config --exists 'wlroots-0.20 >= 0.20.0' || [ -n "$(ls -d subprojects/wlroots-*/ 2>/dev/null)" ]; then
 	BUNDLED_WLROOTS=1
 	msg "wlroots 0.20 is built along with tileWin, from subprojects/"
-	"$MESON" subprojects download wlroots wayland wayland-protocols libdrm libxkbcommon >/dev/null ||
+	"$MESON" subprojects download wlroots wayland wayland-protocols libdrm libxkbcommon pixman >/dev/null ||
 		die "could not download wlroots and its libraries into subprojects/"
 fi
 
@@ -250,7 +250,12 @@ if [ "$BUNDLED_WLROOTS" -eq 1 ]; then
 	xkb_root=$(pkg-config --variable=xkb_base xkeyboard-config 2>/dev/null || true)
 	setup_args+=(--default-library=static
 		"-Dlibxkbcommon:xkb-config-root=${xkb_root:-/usr/share/X11/xkb}"
-		-Dlibxkbcommon:x-locale-root=/usr/share/X11/locale)
+		-Dlibxkbcommon:x-locale-root=/usr/share/X11/locale
+		-Dpixman:tests=disabled -Dpixman:demos=disabled
+		# wlroots asks for pixman 0.43 with a fallback, and for 0.46 in its
+		# pixman renderer without one: the system's 0.44 (Debian 13) would
+		# pass the first and fail the second
+		--force-fallback-for=pixman-1)
 fi
 # Set up again only when the options changed: meson notices changed build files
 # itself, and a needless reconfigure costs time on every update.

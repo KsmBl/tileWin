@@ -142,7 +142,7 @@ take them over the system's libraries:
 ```sh
 meson subprojects download
 meson setup build-bundled -Dwerror=false --default-library=static \
-	--force-fallback-for=wlroots-0.20,wayland-server,wayland-client,wayland-cursor,wayland-protocols,libdrm,xkbcommon
+	--force-fallback-for=wlroots-0.20,wayland-server,wayland-client,wayland-cursor,wayland-protocols,libdrm,xkbcommon,pixman-1
 ```
 
 Delete the folders of the subprojects again afterwards (the `.wrap` files stay):

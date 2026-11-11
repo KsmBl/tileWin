@@ -93,11 +93,13 @@ check "  libwlroots-0.20-dev is not asked for" bash -c "! grep -q libwlroots-0.2
 check "  what building wlroots takes is installed" \
 	grep -q "^apt-get install -y libseat-dev libdisplay-info-dev libliftoff-dev hwdata .* bison$" "$log"
 check "  wlroots and its newer libraries are downloaded into subprojects/" \
-	grep -qx "meson subprojects download wlroots wayland wayland-protocols libdrm libxkbcommon" "$log"
+	grep -qx "meson subprojects download wlroots wayland wayland-protocols libdrm libxkbcommon pixman" "$log"
 setup=$(grep "^meson setup" "$log")
 check "  and linked in statically" bash -c "[[ '$setup' == *' --default-library=static '* ]]"
 check "  libxkbcommon finds the layouts of the system" \
 	bash -c "[[ '$setup' == *' -Dlibxkbcommon:xkb-config-root=/usr/share/X11/xkb '* ]]"
+check "  pixman comes from subprojects/ from the start, the system's is too old for wlroots" \
+	bash -c "[[ '$setup' == *' --force-fallback-for=pixman-1'* ]]"
 check "  and its locales" bash -c "[[ '$setup' == *' -Dlibxkbcommon:x-locale-root=/usr/share/X11/locale'* ]]"
 check "  the files of the subprojects are not installed" grep -q "^meson install .*--skip-subprojects" "$log"
 

@@ -1,0 +1,8 @@
+[wrap-file]
+directory = pixman-0.46.4
+source_url = https://www.cairographics.org/releases/pixman-0.46.4.tar.xz
+source_filename = pixman-0.46.4.tar.xz
+source_hash = a098c33924754ad43f981b740f6d576c70f9ed1006e12221b1845431ebce1239
+
+[provide]
+dependency_names = pixman-1

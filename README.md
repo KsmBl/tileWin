@@ -93,7 +93,7 @@ cd tileWin
 ./install.sh              # installs dependencies (pacman/apt/dnf), builds and installs to /usr/local
 ```
 
-On Debian 13, which has wlroots 0.18, `./install.sh` builds wlroots 0.20 along with tileWin, with the newer wayland, wayland-protocols, libdrm and libxkbcommon it needs, from `subprojects/` (downloaded on the first run). They are linked into tileWin's programs and not installed, so nothing of the system is replaced. The lock screen and the login screen get PAM services that include Debian's `common-auth` and the other `common-*`.
+On Debian 13, which has wlroots 0.18, `./install.sh` builds wlroots 0.20 along with tileWin, with the newer wayland, wayland-protocols, libdrm, libxkbcommon and pixman it needs, from `subprojects/` (downloaded on the first run). They are linked into tileWin's programs and not installed, so nothing of the system is replaced. The lock screen and the login screen get PAM services that include Debian's `common-auth` and the other `common-*`.
 
 Besides the build dependencies it installs `brightnessctl` on a computer with a backlight and, when no sound server that speaks PulseAudio is there, PipeWire with its PulseAudio part and WirePlumber, and starts it.
 
