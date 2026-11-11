@@ -27,7 +27,8 @@ set -u
 tool=$1
 root_tool=$2
 source_dir=$3
-for needed in python3 xz tar sha256sum flock; do
+# lsdiff: patchutils, for the live fixes
+for needed in python3 xz tar sha256sum flock lsdiff; do
 	if ! command -v "$needed" >/dev/null 2>&1; then
 		echo "$needed is not installed: skipping"
 		exit 77

@@ -845,6 +845,8 @@ security_build() { # kver
 	valid_kver "$kver" || die "not a kernel name: $kver"
 	local d=$data/$kver tree
 	[[ $(cat "$d/state" 2>/dev/null) == built ]] || die "$kver is not built"
+	# which files the fixes change lsdiff says
+	command -v lsdiff >/dev/null 2>&1 || die "Live fixes need patchutils, which is not installed"
 	tree=$(klp_tree "$kver") || exit 1
 	local version release series z
 	version=$(sed -n 's/^version=//p' "$d/info")
