@@ -64,6 +64,13 @@ test(
 )
 
 test(
+	'pam-setup',
+	find_program('pam_setup.sh'),
+	args: [meson.project_source_root()],
+	suite: 'unit',
+)
+
+test(
 	'dm-config',
 	executable(
 		'test-dm-config',

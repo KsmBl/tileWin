@@ -66,14 +66,9 @@ fi
 
 # The lock screen and the display manager have PAM services of their own. Nothing
 # here turns the display manager on: that is a choice on the Login screen page.
-if [ -d /etc/pam.d ]; then
-	for service in tilewin-lock tilewin-dm tilewin-dm-greeter tilewin-dm-autologin; do
-		if [ ! -e "/etc/pam.d/$service" ] && [ -e "$source_dir/data/$service.pam" ]; then
-			echo "Installing the PAM service $service"
-			install -m644 "$source_dir/data/$service.pam" "/etc/pam.d/$service"
-		fi
-	done
-fi
+# Which ones fit this system (Arch's or Debian's) tilewin-pam-setup knows.
+sh "$(dirname "$0")/tilewin-pam-setup" "$source_dir/data" ||
+	echo "could not install the PAM services of the lock screen and the login screen" >&2
 if command -v systemd-sysusers >/dev/null 2>&1 && [ -e /usr/lib/sysusers.d/tilewin-dm.conf ]; then
 	systemd-sysusers tilewin-dm.conf || echo "could not make the user of the login screen" >&2
 fi

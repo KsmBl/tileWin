@@ -1,0 +1,5 @@
+#%PAM-1.0
+# PAM service of tilewin-lock, the tileWin lock screen, on Debian and the
+# systems made from it: checks the user's password like logging in does.
+@include common-auth
+@include common-account

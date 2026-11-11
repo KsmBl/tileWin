@@ -1,0 +1,52 @@
+#!/bin/sh
+# Puts the PAM services of the lock screen and the display manager into
+# /etc/pam.d, as root, for tilewin-system-setup.
+#
+#   tilewin-pam-setup <data dir> [<pam dir>]
+#
+# Arch and the systems like it have system-login and system-local-login to
+# include; Debian and the systems made from it have common-auth and the other
+# common-* instead, and its services are in <data dir>/pam-debian. A service
+# that is there already stays as it is, unless it includes what this system
+# does not have: then nobody could log in or unlock with it, and it is put
+# there anew.
+set -eu
+
+data=$1
+pam=${2:-/etc/pam.d}
+[ -d "$pam" ] || exit 0
+
+flavor=
+if [ ! -e "$pam/system-login" ] && [ -e "$pam/common-auth" ]; then
+	flavor=pam-debian
+fi
+
+# true when a service includes one this system does not have
+broken() { # file
+	sed -n -e 's/^[[:space:]]*-\{0,1\}[a-z]*[[:space:]][[:space:]]*\(include\|substack\)[[:space:]][[:space:]]*\([^[:space:]]*\).*/\2/p' \
+		-e 's/^[[:space:]]*@include[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' "$1" |
+	while read -r included; do
+		case $included in
+		/*) [ -e "$included" ] || exit 1 ;;
+		*) [ -e "$pam/$included" ] || exit 1 ;;
+		esac
+	done && return 1
+	return 0
+}
+
+for service in tilewin-lock tilewin-dm tilewin-dm-greeter tilewin-dm-autologin; do
+	src=$data/$service.pam
+	if [ -n "$flavor" ] && [ -e "$data/$flavor/$service.pam" ]; then
+		src=$data/$flavor/$service.pam
+	fi
+	[ -e "$src" ] || continue
+	dest=$pam/$service
+	if [ ! -e "$dest" ]; then
+		echo "Installing the PAM service $service"
+	elif broken "$dest"; then
+		echo "Installing the PAM service $service again: it includes what this system does not have"
+	else
+		continue
+	fi
+	install -m644 "$src" "$dest"
+done

@@ -1,0 +1,13 @@
+#%PAM-1.0
+# autologin_user of the display manager of tileWin, on Debian and the systems
+# made from it. Only the daemon starts this, and only for the user in its
+# config, which only root can change.
+auth      required  pam_permit.so
+@include common-account
+password  required  pam_deny.so
+session   required  pam_limits.so
+session   required  pam_loginuid.so
+session   optional  pam_keyinit.so force revoke
+@include common-session
+session   required  pam_env.so readenv=1
+session   required  pam_env.so readenv=1 envfile=/etc/default/locale
