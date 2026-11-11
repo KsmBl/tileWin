@@ -52,7 +52,7 @@ Each theme looks as that Windows did when it asked who you are, drawn from scrat
 - **Sessions** are the files in `/usr/share/wayland-sessions` and `/usr/local/share/wayland-sessions`. X11 sessions are not offered.
 - **What a session prints** goes to `~/.cache/tilewin-dm-session.log`.
 
-The PAM services are `tilewin-dm` (logging in), `tilewin-dm-autologin` and `tilewin-dm-greeter`, in `/etc/pam.d`.
+The PAM services are `tilewin-dm` (logging in), `tilewin-dm-autologin` and `tilewin-dm-greeter`, in `/etc/pam.d`. On Debian and the systems made from it, which have no `system-login`, the installation puts in the ones of `data/pam-debian`, which include `common-auth` and the other `common-*`.
 
 ## Keys
 

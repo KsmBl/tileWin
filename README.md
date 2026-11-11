@@ -93,6 +93,8 @@ cd tileWin
 ./install.sh              # installs dependencies (pacman/apt/dnf), builds and installs to /usr/local
 ```
 
+On Debian 13, which has wlroots 0.18, `./install.sh` builds wlroots 0.20 along with tileWin, with the newer wayland, wayland-protocols, libdrm and libxkbcommon it needs, from `subprojects/` (downloaded on the first run). They are linked into tileWin's programs and not installed, so nothing of the system is replaced. The lock screen and the login screen get PAM services that include Debian's `common-auth` and the other `common-*`.
+
 Besides the build dependencies it installs `brightnessctl` on a computer with a backlight and, when no sound server that speaks PulseAudio is there, PipeWire with its PulseAudio part and WirePlumber, and starts it.
 
 Options:
@@ -115,7 +117,7 @@ Start tileWin:
 - run `tilewin-session` from a text console.
 
 **Dependencies:**
-- **Required:** wlroots 0.20, wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja. `tilewin-update` also uses curl, and git for the source.
+- **Required:** wlroots 0.20 (built along with tileWin where the system has none), wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja. `tilewin-update` also uses curl, and git for the source.
 - **Optional:** pam (the lock screen and the display manager are skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
 
 To update:

@@ -127,6 +127,27 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
 for GitHub, git and the password: the temporary folder goes in every case, there
 is a restart only after a good update, and a wrong checksum installs nothing.
 
+Debian has no pacman to check against, so two more tests of the unit suite play
+it: `tests/install_debian.sh` runs `install.sh` with stand-ins for apt,
+pkg-config and meson, as on Debian 13 (no wlroots 0.20: it is downloaded into
+`subprojects/`, linked in statically and not installed) and on a Debian that has
+it; `tests/pam_setup.sh` puts the PAM services into a `/etc/pam.d` of Arch and
+one of Debian, and replaces one of Arch found on Debian. `tests/kernel_tools.sh`
+does the Kernel page on Debian too: initramfs-tools and ukify, apt with the
+Debian names of the build tools, and dpkg for the package of a driver.
+
+To try the build of Debian 13 on Arch, download the subprojects and make meson
+take them over the system's libraries:
+
+```sh
+meson subprojects download
+meson setup build-bundled -Dwerror=false --default-library=static \
+	--force-fallback-for=wlroots-0.20,wayland-server,wayland-client,wayland-cursor,wayland-protocols,libdrm,xkbcommon
+```
+
+Delete the folders of the subprojects again afterwards (the `.wrap` files stay):
+while they are there, every build of the source tree takes wlroots from them.
+
 ## Making a release
 
 Set the version in `meson.build`, commit and tag, then
