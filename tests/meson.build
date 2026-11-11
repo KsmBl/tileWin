@@ -56,6 +56,14 @@ test(
 )
 
 test(
+	'install-debian',
+	find_program('install_debian.sh'),
+	args: [meson.project_source_root()],
+	suite: 'unit',
+	timeout: 60,
+)
+
+test(
 	'dm-config',
 	executable(
 		'test-dm-config',

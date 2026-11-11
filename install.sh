@@ -151,16 +151,33 @@ install_deps() {
 			sudo pacman -S --needed --noconfirm $more || warn "could not install $more"
 		fi
 	elif command -v apt-get >/dev/null 2>&1; then
-		msg "Installing dependencies with apt (best effort)"
+		msg "Installing dependencies with apt"
 		sudo apt-get update
+		# apt installs nothing of a list with one unknown name in it: this
+		# list holds only what Debian 13 has, wlroots 0.20 comes below
 		sudo apt-get install -y build-essential meson ninja-build pkg-config \
-			libwlroots-0.20-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-			libinput-dev libevdev-dev libpixman-1-dev libdrm-dev libcairo2-dev \
-			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libgtk-4-dev libjson-c-dev \
-			libpcre2-dev libxcb-icccm4-dev xwayland libsystemd-dev libpolkit-agent-1-dev \
-			libcurl4-openssl-dev \
+			libwayland-dev wayland-protocols libxkbcommon-dev xkb-data \
+			libinput-dev libevdev-dev libudev-dev libpixman-1-dev libdrm-dev libcairo2-dev \
+			libpango1.0-dev libgdk-pixbuf-2.0-dev librsvg2-dev libgtk-4-dev libglib2.0-dev \
+			libjson-c-dev libpcre2-dev libxcb1-dev libxcb-icccm4-dev xwayland libsystemd-dev \
+			libpam0g-dev libpolkit-agent-1-dev polkitd pkexec libcurl4-openssl-dev curl \
+			libcap2-bin python3 \
 			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
-			warn "some packages are missing; wlroots 0.20 may need to be built manually"
+			warn "some packages could not be installed"
+		# Debian 13 has wlroots 0.18 only: 0.20 is built along with tileWin then
+		if apt-cache show libwlroots-0.20-dev >/dev/null 2>&1; then
+			sudo apt-get install -y libwlroots-0.20-dev || warn "could not install libwlroots-0.20-dev"
+		else
+			msg "Installing what building wlroots 0.20 takes"
+			sudo apt-get install -y libseat-dev libdisplay-info-dev libliftoff-dev hwdata \
+				libgbm-dev libegl-dev libgles-dev libvulkan-dev glslang-tools liblcms2-dev \
+				libxcb-composite0-dev libxcb-ewmh-dev libxcb-res0-dev libxcb-render0-dev \
+				libxcb-xfixes0-dev libxcb-errors-dev libffi-dev libexpat1-dev libxml2-dev bison || \
+				warn "some packages wlroots needs could not be installed"
+		fi
+		sudo apt-get install -y scdoc pavucontrol xfce4-terminal thunar xdg-desktop-portal-gtk \
+			tesseract-ocr tesseract-ocr-eng libpulse-dev || \
+			warn "optional packages could not be installed"
 		local more
 		more=$(extras brightnessctl pipewire-pulse wireplumber)
 		if [ -n "$more" ]; then
@@ -198,7 +215,21 @@ fi
 
 command -v "$MESON" >/dev/null 2>&1 || die "meson not found (install it, e.g. 'sudo pacman -S meson')"
 command -v ninja >/dev/null 2>&1 || die "ninja not found"
-pkg-config --exists wlroots-0.20 || die "wlroots 0.20 development files not found"
+
+# Without wlroots 0.20 on the system (Debian 13 has 0.18), it is built from
+# subprojects/ along with what it needs newer than the distribution has:
+# wayland, wayland-protocols, libdrm and libxkbcommon. They are linked in
+# statically and not installed, so nothing of the system is replaced.
+command -v pkg-config >/dev/null 2>&1 || die "pkg-config not found"
+# Once downloaded, meson.build takes wlroots from there even when the system
+# has it by now, so it stays static then too.
+BUNDLED_WLROOTS=0
+if ! pkg-config --exists 'wlroots-0.20 >= 0.20.0' || [ -n "$(ls -d subprojects/wlroots-*/ 2>/dev/null)" ]; then
+	BUNDLED_WLROOTS=1
+	msg "wlroots 0.20 is built along with tileWin, from subprojects/"
+	"$MESON" subprojects download wlroots wayland wayland-protocols libdrm libxkbcommon >/dev/null ||
+		die "could not download wlroots and its libraries into subprojects/"
+fi
 
 # ---------------------------------------------------------------- build
 # Older versions of this script let "sudo meson install" rebuild, which left
@@ -212,6 +243,14 @@ msg "Configuring ($BUILDTYPE build, prefix $PREFIX)"
 setup_args=(--prefix "$PREFIX" --buildtype "$BUILDTYPE" -Dman-pages=disabled -Dwerror=false)
 if [ "$BUILDTYPE" = release ]; then
 	setup_args+=(-Db_lto=true)
+fi
+if [ "$BUNDLED_WLROOTS" -eq 1 ]; then
+	# static: the libraries built here end up inside the programs. libxkbcommon
+	# looks for the keyboard layouts where the system has them, not below $PREFIX
+	xkb_root=$(pkg-config --variable=xkb_base xkeyboard-config 2>/dev/null || true)
+	setup_args+=(--default-library=static
+		"-Dlibxkbcommon:xkb-config-root=${xkb_root:-/usr/share/X11/xkb}"
+		-Dlibxkbcommon:x-locale-root=/usr/share/X11/locale)
 fi
 # Set up again only when the options changed: meson notices changed build files
 # itself, and a needless reconfigure costs time on every update.
@@ -233,7 +272,7 @@ msg "Building"
 # ---------------------------------------------------------------- install
 msg "Installing"
 if [ -n "$DESTDIR" ]; then
-	"$MESON" install -C "$BUILD_DIR" --destdir "$DESTDIR" --no-rebuild >/dev/null
+	"$MESON" install -C "$BUILD_DIR" --destdir "$DESTDIR" --no-rebuild --skip-subprojects >/dev/null
 else
 	# all that takes root in one go, so a password is asked for once. It also
 	# needs root with a prefix of your own, for the session and the lock screen.

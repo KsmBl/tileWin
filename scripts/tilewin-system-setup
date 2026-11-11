@@ -16,7 +16,9 @@ log=
 case $kind in
 build)
 	meson=$6
-	"$meson" install -C "$from" --no-rebuild >/dev/null
+	# a wlroots built in subprojects/ is inside the programs: its own files
+	# (headers, wayland-scanner) stay out of the system
+	"$meson" install -C "$from" --no-rebuild --skip-subprojects >/dev/null
 	log=$from/meson-logs/install-log.txt
 	;;
 stage)
