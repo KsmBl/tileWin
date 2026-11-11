@@ -86,7 +86,15 @@ jobs=${TILEWIN_KERNEL_JOBS:-$(nproc)}
 fragments=${TILEWIN_KERNEL_FRAGMENTS:-@datadir@/kernel}
 seen_file=${XDG_DATA_HOME:-$HOME/.local/share}/tileWin/kernel-modules-seen
 system_modules=${TILEWIN_KERNEL_MODULES:-/usr/lib/modules}
-ccache_dir=${TILEWIN_KERNEL_CCACHE-/usr/lib/ccache/bin}
+# the folder of ccache's compiler links: Arch's, Debian's or Fedora's
+if [[ -v TILEWIN_KERNEL_CCACHE ]]; then
+	ccache_dir=$TILEWIN_KERNEL_CCACHE
+else
+	ccache_dir=
+	for d in /usr/lib/ccache/bin /usr/lib/ccache /usr/lib64/ccache; do
+		[[ -x $d/gcc ]] && { ccache_dir=$d; break; }
+	done
+fi
 
 die() { echo "$*" >&2; exit 1; }
 
@@ -989,6 +997,17 @@ livepatches() { # kver
 	done
 }
 
+# The package a file came with, as pacman or dpkg knows it. dpkg may have it
+# below /lib, from before /usr was merged.
+package_of() { # path
+	if command -v pacman >/dev/null 2>&1; then
+		pacman -Qqo "$1" 2>/dev/null | head -n 1
+	elif command -v dpkg-query >/dev/null 2>&1; then
+		{ dpkg-query -S "$1" 2>/dev/null || dpkg-query -S "${1#/usr}" 2>/dev/null; } |
+			head -n 1 | cut -d: -f1
+	fi
+}
+
 # Out-of-tree modules (taint O) that came with a package for the distribution's
 # kernel. DKMS builds its own for every kernel, so those are not named.
 foreign() {
@@ -998,7 +1017,7 @@ foreign() {
 		name=$(basename "$(dirname "$m")")
 		path=$(modinfo -n "$name" 2>/dev/null) || continue
 		[[ $path == */updates/dkms/* ]] && continue
-		pkg=$(pacman -Qqo "$path" 2>/dev/null | head -n 1)
+		pkg=$(package_of "$path")
 		printf '%s\t%s\n' "$name" "$pkg"
 	done
 }

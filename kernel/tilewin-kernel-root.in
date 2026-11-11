@@ -136,13 +136,18 @@ method() {
 	fi
 }
 
+# mkinitcpio (Arch), dracut (Fedora, and Debian when chosen) or initramfs-tools
+# (Debian and Ubuntu)
 initramfs_tool() {
 	if command -v mkinitcpio >/dev/null 2>&1; then
 		echo mkinitcpio
 	elif command -v dracut >/dev/null 2>&1; then
 		echo dracut
+	elif command -v mkinitramfs >/dev/null 2>&1; then
+		echo mkinitramfs
 	fi
 }
+no_initramfs_tool="None of mkinitcpio, dracut and initramfs-tools is installed"
 
 # The command line the kernel of the distribution gets, as mkinitcpio finds it.
 cmdline() {
@@ -236,7 +241,21 @@ make_images() { # kver work compression uki
 				die "dracut could not make the boot image"
 		fi
 		;;
-	*) die "Neither mkinitcpio nor dracut is installed" ;;
+	mkinitramfs)
+		mkinitramfs -c "$z" -o "$work/initramfs.img" "$kver" >&2 ||
+			die "mkinitramfs could not make the initramfs"
+		# initramfs-tools makes no UKI by itself: ukify puts the kernel, the
+		# initramfs and the command line together
+		if [[ $uki == yes ]]; then
+			command -v ukify >/dev/null 2>&1 ||
+				die "A unified kernel image needs ukify: install systemd-ukify and systemd-boot-efi"
+			os_release "$kver" "$work/os-release"
+			ukify build --linux="$modules/$kver/vmlinuz" --initrd="$work/initramfs.img" \
+				--cmdline="$(cmdline)" --os-release="@$work/os-release" --uname="$kver" \
+				--output="$work/kernel.efi" >&2 || die "ukify could not make the boot image"
+		fi
+		;;
+	*) die "$no_initramfs_tool" ;;
 	esac
 }
 
@@ -279,7 +298,7 @@ install_kernel() { # kver store
 	local m how
 	read -r m how <<<"$(method)"
 	[[ $m != none ]] || die "No boot loader was found that tileWin can add a kernel to"
-	[[ -n $(initramfs_tool) ]] || die "Neither mkinitcpio nor dracut is installed"
+	[[ -n $(initramfs_tool) ]] || die "$no_initramfs_tool"
 	local comp
 	comp=$(sed -n 's/^compression=//p' "$src/info")
 	lock
@@ -636,13 +655,46 @@ scheduler_default() { # scheduler mode
 	note "$sched starts with the computer"
 }
 
+# The packages of Debian for the names of Arch, which tilewin-kernel check uses;
+# nothing for what Debian does not have.
+debian_packages() { # arch name
+	case $1 in
+	xz) echo xz-utils ;;
+	python) echo python3 ;;
+	pahole) echo dwarves ;;
+	libelf) echo libelf-dev ;;
+	openssl) echo openssl libssl-dev ;;
+	base-devel) echo build-essential ;;
+	rust) echo rustc ;;
+	rust-bindgen) echo bindgen ;;
+	scx-scheds|scx-tools) ;;
+	*) echo "$1" ;;
+	esac
+}
+
 tools() {
-	command -v pacman >/dev/null 2>&1 || die "Install these with the package manager: $*"
 	local p
 	for p in "$@"; do
 		[[ $allowed_tools == *" $p "* ]] || die "not a build tool: $p"
 	done
-	pacman -S --needed --noconfirm "$@"
+	if command -v pacman >/dev/null 2>&1; then
+		pacman -S --needed --noconfirm "$@"
+	elif command -v apt-get >/dev/null 2>&1; then
+		local debian=() names
+		for p in "$@"; do
+			names=$(debian_packages "$p")
+			[[ -n $names ]] || die "Debian has no package of $p: install it from its own source"
+			read -ra names <<<"$names"
+			debian+=("${names[@]}")
+		done
+		export DEBIAN_FRONTEND=noninteractive
+		# the lists of the packages may be too old for what is to be installed
+		apt-get install -y "${debian[@]}" >&2 ||
+			{ apt-get update >&2 && apt-get install -y "${debian[@]}" >&2; } ||
+			die "apt-get could not install ${debian[*]}"
+	else
+		die "Install these with the package manager: $*"
+	fi
 }
 
 case ${1:-} in

@@ -251,6 +251,22 @@ got=$(TILEWIN_KERNEL_SYS=$work/sys K foreign | tr '\t\n' ': ')
 	fail "the drivers a new kernel will not have should be nvidia of nvidia-open, are \"$got\""
 rm "$work/bin/modinfo" "$work/bin/pacman"
 
+# the programs of this computer as Debian has them: no pacman, mkinitcpio or
+# dracut, and stand-ins for what Debian has in their place
+mkdir -p "$work/debian-usr" "$work/debian-bin"
+find /usr/bin /usr/sbin -maxdepth 1 ! -type d ! -name pacman ! -name mkinitcpio ! -name dracut \
+	! -name mkinitramfs ! -name ukify ! -name apt-get ! -name dpkg-query -print0 2>/dev/null |
+	xargs -0 ln -sft "$work/debian-usr" 2>/dev/null
+printf '#!/bin/sh\necho /usr/lib/modules/x/updates/nvidia-current.ko.xz\n' > "$work/debian-bin/modinfo"
+# dpkg lists the file below /lib, from before /usr was merged
+printf '#!/bin/sh\ncase $2 in /lib/*) echo "nvidia-kernel-support:amd64: $2" ;; *) exit 1 ;; esac\n' \
+	> "$work/debian-bin/dpkg-query"
+chmod +x "$work/debian-bin"/*
+got=$(PATH="$work/debian-bin:$work/debian-usr" TILEWIN_KERNEL_SYS=$work/sys K foreign | sed -n 1p | tr '\t' ':')
+[ "$got" = "nvidia:nvidia-kernel-support" ] && ok "on Debian dpkg names the package of a driver: $got" ||
+	fail "on Debian the package of nvidia should be nvidia-kernel-support, is \"$got\""
+rm "$work/debian-bin"/*
+
 # ---------- the modules this computer used ----------
 
 printf 'Module Size Used by\ndm_crypt 1 0\nusb_storage 1 0\n' > "$work/lsmod"
@@ -667,6 +683,70 @@ loaderinfo "systemd-boot 258" > "$sb/sys/firmware/efi/efivars/LoaderInfo-4a67b08
 R boot $k1 "$store" > "$work/out" 2>&1
 check "systemd-boot: a UKI and its one-shot entry" grep -qx "bootctl set-oneshot tilewin-$k1.efi" "$calls"
 check "  no firmware entry" bash -c "! grep -q '=tileWin $k1$' '$nvram'"
+
+# ---------- Debian: initramfs-tools, ukify and apt ----------
+
+R remove $k1 > /dev/null 2>&1
+deb_path=$work/debian-bin:$work/debian-usr
+find "$work/rbin" -maxdepth 1 -type f ! -name mkinitcpio -print0 | xargs -0 ln -sft "$work/debian-bin"
+cat > "$work/debian-bin/mkinitramfs" <<EOF
+#!/bin/bash
+echo "mkinitramfs \$*" >> $calls
+while [ \$# -gt 0 ]; do
+	case \$1 in
+	-o) echo initramfs > "\$2"; shift 2 ;;
+	*) shift ;;
+	esac
+done
+EOF
+cat > "$work/debian-bin/ukify" <<EOF
+#!/bin/bash
+echo "ukify \$*" >> $calls
+for a; do
+	case \$a in
+	--output=*) head -c 1000 /dev/zero > "\${a#--output=}" ;;
+	--os-release=@*) cp "\${a#--os-release=@}" $work/osrelease-used ;;
+	esac
+done
+EOF
+# apt-get: its lists are too old until it is updated
+cat > "$work/debian-bin/apt-get" <<EOF
+#!/bin/bash
+echo "apt-get \$*" >> $calls
+case \$1 in
+update) touch $work/apt-updated ;;
+install) [ -e $work/apt-updated ] ;;
+esac
+EOF
+chmod +x "$work/debian-bin"/*
+DR() { TILEWIN_KERNEL_PATH=$deb_path bash "$root_tool" "$@"; }
+check "info: initramfs-tools makes the initramfs on Debian" bash -c "TILEWIN_KERNEL_PATH='$deb_path' bash '$root_tool' info | grep -qx initramfs=mkinitramfs"
+: > "$calls"
+DR install $k1 "$store" > "$work/out" 2>&1
+check "install with initramfs-tools: the initramfs with its compression" grep -q "^mkinitramfs -c zstd -o .* $k1$" "$calls"
+check "  ukify puts the UKI together" test -s "$esp/EFI/Linux/tilewin-$k1.efi"
+check "  of the kernel, the initramfs and the distribution's command line" \
+	grep -q "^ukify build --linux=$sb/usr/lib/modules/$k1/vmlinuz --initrd=.* --cmdline=cryptdevice=UUID=x:cryptlvm root=/dev/vg/root rw quiet " "$calls"
+check "  and names itself in the boot menu" grep -q "PRETTY_NAME=\"Arch Linux (tileWin kernel $k1)\"" "$work/osrelease-used"
+DR remove $k1 > /dev/null 2>&1
+rm "$work/debian-bin/ukify"
+DR install $k1 "$store" > "$work/out" 2>&1
+check "without ukify a UKI is refused, and says what to install" grep -q "systemd-ukify" "$work/out"
+check "  and nothing is left behind" bash -c "[ ! -e '$sb/usr/lib/modules/$k1' ] && ! ls '$esp/EFI/Linux/' | grep -q tilewin"
+rm "$work/debian-bin/mkinitramfs"
+DR install $k1 "$store" > "$work/out" 2>&1
+check "without any initramfs tool install says which would do" grep -q "None of mkinitcpio, dracut and initramfs-tools" "$work/out"
+
+: > "$calls"
+DR tools pahole xz libelf openssl python > "$work/out" 2>&1
+check "tools on Debian: the packages by their Debian names" \
+	grep -qx "apt-get install -y dwarves xz-utils libelf-dev openssl libssl-dev python3" "$calls"
+check "  with the lists updated first when they are too old" \
+	bash -c "grep -n . '$calls' | grep -qx '2:apt-get update'"
+check "  then installed" test "$(grep -c '^apt-get install' "$calls")" = 2
+DR tools scx-scheds > "$work/out" 2>&1
+check "what Debian has no package of is said" grep -q "Debian has no package of scx-scheds" "$work/out"
+check "  and not the build tools of another list" bash -c "TILEWIN_KERNEL_PATH='$deb_path' bash '$root_tool' tools rm 2>&1 | grep -q 'not a build tool'"
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

@@ -269,7 +269,7 @@ static void show_info(struct kernel_page *p) {
 	}
 	g_free(secure);
 	if (!initramfs || !*initramfs) {
-		char *more = g_strconcat(boot, " Neither mkinitcpio nor dracut is installed.", NULL);
+		char *more = g_strconcat(boot, " None of mkinitcpio, dracut and initramfs-tools is installed.", NULL);
 		g_free(boot);
 		boot = more;
 	}
