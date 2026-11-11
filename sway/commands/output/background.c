@@ -76,7 +76,7 @@ struct cmd_results *output_cmd_background(int argc, char **argv) {
 		}
 
 		if (!(src = join_args(argv, j))) goto cleanup;
-		if (!expand_path(&src)) {
+		if (!sway_expand_path(&src)) {
 			struct cmd_results *cmd_res = cmd_results_new(CMD_INVALID,
 				"Invalid syntax (%s)", src);
 			free(src);

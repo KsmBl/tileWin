@@ -35,7 +35,7 @@ char *join_args(char **argv, int argc);
 char *argsep(char **stringp, const char *delim, char *matched_delim);
 
 // Expand a path using shell replacements such as $HOME and ~
-bool expand_path(char **path);
+bool sway_expand_path(char **path);
 
 char *vformat_str(const char *fmt, va_list args) _SWAY_ATTRIB_PRINTF(1, 0);
 char *format_str(const char *fmt, ...) _SWAY_ATTRIB_PRINTF(1, 2);

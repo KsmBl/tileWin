@@ -311,7 +311,7 @@ char *argsep(char **stringp, const char *delim, char *matched) {
 	return start;
 }
 
-bool expand_path(char **path) {
+bool sway_expand_path(char **path) {
 	wordexp_t p = {0};
 	while (strstr(*path, "  ")) {
 		*path = realloc(*path, strlen(*path) + 2);

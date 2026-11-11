@@ -93,7 +93,7 @@ struct cmd_results *output_cmd_color_profile(int argc, char **argv) {
 		}
 
 		char *icc_path = strdup(argv[1]);
-		if (!expand_path(&icc_path)) {
+		if (!sway_expand_path(&icc_path)) {
 			struct cmd_results *cmd_res = cmd_results_new(CMD_INVALID,
 				"Invalid color profile specification: invalid file path");
 			free(icc_path);

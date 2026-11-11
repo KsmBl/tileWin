@@ -20,7 +20,7 @@ struct cmd_results *input_cmd_xkb_file(int argc, char **argv) {
 		ic->xkb_file = NULL;
 	} else {
 		ic->xkb_file = strdup(argv[0]);
-		if (!expand_path(&ic->xkb_file)) {
+		if (!sway_expand_path(&ic->xkb_file)) {
 			error = cmd_results_new(CMD_INVALID, "Invalid syntax (%s)",
 					ic->xkb_file);
 			free(ic->xkb_file);
