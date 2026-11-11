@@ -4,7 +4,8 @@
 #  - dark: the GTK theme becomes Adwaita-dark, made from the dark Adwaita
 #    built into GTK, and settings.ini (made when missing) prefers dark
 #  - light: back to Adwaita, not preferring dark
-#  - an Adwaita-dark folder of the user's own is left alone
+#  - an Adwaita-dark folder of the user's own is left alone, and so is the
+#    real one of gnome-themes-extra (Debian has it): none is made beside it
 #  - GTK 3 draws a window of the made theme dark (when PyGObject has GTK 3)
 # gsettings is a stand-in that keeps its values in a folder.
 #
@@ -47,8 +48,13 @@ echo "dark: gtk-theme $(setting gtk-theme), color-scheme $(setting color-scheme)
 [ "$(setting gtk-theme)" = Adwaita-dark ] || fail "dark: the GTK theme is not Adwaita-dark"
 [ "$(setting color-scheme)" = prefer-dark ] || fail "dark: color-scheme is not prefer-dark"
 [ "$(prefer)" = true ] || fail "dark: settings.ini was not made preferring dark"
-grep -q 'gtk-contained-dark.css' "$work/data/themes/Adwaita-dark/gtk-3.0/gtk.css" 2>/dev/null ||
-	fail "dark: no Adwaita-dark theme for GTK 3 was made"
+if [ -d /usr/share/themes/Adwaita-dark/gtk-3.0 ] || [ -d /usr/local/share/themes/Adwaita-dark/gtk-3.0 ]; then
+	[ ! -e "$work/data/themes/Adwaita-dark" ] ||
+		fail "dark: an Adwaita-dark was made beside the real one of the system"
+else
+	grep -q 'gtk-contained-dark.css' "$work/data/themes/Adwaita-dark/gtk-3.0/gtk.css" 2>/dev/null ||
+		fail "dark: no Adwaita-dark theme for GTK 3 was made"
+fi
 
 if python3 -c 'import gi; gi.require_version("Gtk", "3.0")' 2>/dev/null &&
 		[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
