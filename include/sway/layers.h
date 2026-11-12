@@ -13,6 +13,7 @@ struct sway_layer_surface {
 	struct wl_listener new_popup;
 
 	bool mapped;
+	bool saver; // of the screen saver tileWin runs: over everything, the lock screen too
 
 	struct wlr_scene_tree *popups;
 	struct sway_popup_desc desc;

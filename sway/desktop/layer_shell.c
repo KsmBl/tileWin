@@ -83,11 +83,13 @@ void arrange_layers(struct sway_output *output) {
 			&usable_area.width, &usable_area.height);
 	const struct wlr_box full_area = usable_area;
 
+	arrange_surface(output, &full_area, &usable_area, output->layers.saver, true);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_overlay, true);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_top, true);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_bottom, true);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_background, true);
 
+	arrange_surface(output, &full_area, &usable_area, output->layers.saver, false);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_overlay, false);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_top, false);
 	arrange_surface(output, &full_area, &usable_area, output->layers.shell_bottom, false);
@@ -104,6 +106,7 @@ void arrange_layers(struct sway_output *output) {
 
 	// Find topmost keyboard interactive layer, if such a layer exists
 	struct wlr_scene_tree *layers_above_shell[] = {
+		output->layers.saver,
 		output->layers.shell_overlay,
 		output->layers.shell_top,
 	};
@@ -144,7 +147,10 @@ void arrange_layers(struct sway_output *output) {
 }
 
 static struct wlr_scene_tree *sway_layer_get_scene(struct sway_output *output,
-		enum zwlr_layer_shell_v1_layer type) {
+		enum zwlr_layer_shell_v1_layer type, bool saver) {
+	if (saver) {
+		return output->layers.saver;
+	}
 	switch (type) {
 	case ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND:
 		return output->layers.shell_background;
@@ -270,7 +276,7 @@ static void handle_surface_commit(struct wl_listener *listener, void *data) {
 	if (layer_surface->initialized && committed & WLR_LAYER_SURFACE_V1_STATE_LAYER) {
 		enum zwlr_layer_shell_v1_layer layer_type = layer_surface->current.layer;
 		struct wlr_scene_tree *output_layer = sway_layer_get_scene(
-			surface->output, layer_type);
+			surface->output, layer_type, surface->saver);
 		wlr_scene_node_reparent(&surface->scene->tree->node, output_layer);
 	}
 
@@ -461,8 +467,10 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 	struct sway_output *output = layer_surface->output->data;
 
 	enum zwlr_layer_shell_v1_layer layer_type = layer_surface->pending.layer;
+	// the screen saver tileWin started goes over everything, the lock screen too
+	bool saver = tw_power_is_saver_client(wl_resource_get_client(layer_surface->resource));
 	struct wlr_scene_tree *output_layer = sway_layer_get_scene(
-		output, layer_type);
+		output, layer_type, saver);
 	struct wlr_scene_layer_surface_v1 *scene_surface =
 		wlr_scene_layer_surface_v1_create(output_layer, layer_surface);
 	if (!scene_surface) {
@@ -489,6 +497,7 @@ void handle_layer_shell_surface(struct wl_listener *listener, void *data) {
 	}
 
 	surface->output = output;
+	surface->saver = saver;
 	wl_list_insert(&output->layer_surfaces, &surface->link);
 
 	// now that the surface's output is known, we can advertise its scale

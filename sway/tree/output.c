@@ -102,6 +102,7 @@ static void destroy_scene_layers(struct sway_output *output) {
 	wlr_scene_node_destroy(&output->layers.shell_top->node);
 	wlr_scene_node_destroy(&output->layers.shell_overlay->node);
 	wlr_scene_node_destroy(&output->layers.session_lock->node);
+	wlr_scene_node_destroy(&output->layers.saver->node);
 }
 
 struct sway_output *output_create(struct wlr_output *wlr_output) {
@@ -116,6 +117,7 @@ struct sway_output *output_create(struct wlr_output *wlr_output) {
 	output->layers.shell_top = alloc_scene_tree(root->staging, &failed);
 	output->layers.shell_overlay = alloc_scene_tree(root->staging, &failed);
 	output->layers.session_lock = alloc_scene_tree(root->staging, &failed);
+	output->layers.saver = alloc_scene_tree(root->staging, &failed);
 
 	if (!failed) {
 		output->fullscreen_background = wlr_scene_rect_create(

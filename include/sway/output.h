@@ -29,6 +29,7 @@ struct sway_output {
 		struct wlr_scene_tree *shell_top;
 		struct wlr_scene_tree *shell_overlay;
 		struct wlr_scene_tree *session_lock;
+		struct wlr_scene_tree *saver; // tileWin's screen saver, over the lock screen too
 	} layers;
 
 	// when a container is fullscreen, in case the fullscreen surface is

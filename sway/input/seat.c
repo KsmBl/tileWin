@@ -1334,6 +1334,10 @@ void seat_set_focus_layer(struct sway_seat *seat,
 	} else if (!layer) {
 		return;
 	}
+	if (server.session_lock.lock) {
+		// the keys stay with the lock screen, also with the screen saver over it
+		return;
+	}
 	assert(layer->surface->mapped);
 	if (layer->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP &&
 			layer->current.keyboard_interactive

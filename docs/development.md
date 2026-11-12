@@ -94,6 +94,9 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   only after its time, that moving the mouse ends it and runs the lock command,
   and that `screensaver start` is not ended by the input right after it but by
   input a moment later;
+- locks a nested tileWin with the real lock screen and checks the screen saver
+  covers the lock screen after its time, and that a key ends it and brings the
+  lock screen back with the session still locked;
 - shows a card of every desktop style and switches through all themes, light
   and dark, checking that each card is drawn, that the dark scheme is darker
   where a theme has one, and that no two themes draw the chart alike;

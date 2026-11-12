@@ -592,6 +592,17 @@ if gdk_pixbuf.found()
 	)
 
 	test(
+		'screensaver-locked',
+		find_program('screensaver_locked.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [keyboard_tool, count_content],
+		env: saver_gui_env,
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 120,
+	)
+
+	test(
 		'doomsday',
 		find_program('doomsday.sh'),
 		args: [meson.project_build_root(), meson.project_source_root()],

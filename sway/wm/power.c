@@ -7,6 +7,8 @@
  *       saver starts (screensaver_command, tilewin-screensaver by default,
  *       which runs until input comes and is then ended; with
  *       "screensaver_lock yes" the screen is locked then); 0 is never.
+ *       The screen saver also comes on while the screen is locked: it is
+ *       shown over the lock screen, gets no input, and input ends it.
  *       Apps that keep the screen on (idle inhibitors, e.g. a video) pause
  *       the timers.
  *   lid_action closed|docked <action>
@@ -39,6 +41,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
 #include "config.h"
@@ -53,6 +56,7 @@
 #include "sway/config.h"
 #include "sway/desktop/idle_inhibit_v1.h"
 #include "sway/ipc-server.h"
+#include "sway/layers.h"
 #include "sway/output.h"
 #include "sway/server.h"
 #include "sway/tilewin.h"
@@ -214,17 +218,47 @@ static void saver_launch(void) {
 	sway_log(SWAY_DEBUG, "Screen saver started: %s", command);
 }
 
+static bool saver_alive(void) {
+	return power.saver_fd >= 0 &&
+		syscall(SYS_pidfd_send_signal, power.saver_fd, 0, NULL, 0) == 0;
+}
+
+/*
+ * Whether a client is the screen saver tileWin started (or a process of its
+ * group), whose surfaces are shown over everything, the lock screen too. They
+ * never get input while the session is locked: the keys and the mouse wake
+ * the computer, which ends the saver, and the lock screen is there again.
+ */
+bool tw_power_is_saver_client(struct wl_client *client) {
+	if (!client || !saver_alive()) { // alive, so its number is still its own
+		return false;
+	}
+	pid_t pid;
+	wl_client_get_credentials(client, &pid, NULL, NULL);
+	return pid > 0 && getpgid(pid) == power.saver_pid;
+}
+
 /* Ends the screen saver; true when one was showing. */
 static bool saver_end(void) {
 	if (power.saver_fd < 0) {
 		return false;
 	}
-	if (syscall(SYS_pidfd_send_signal, power.saver_fd, 0, NULL, 0) == 0) {
+	if (saver_alive()) {
 		kill(-power.saver_pid, SIGTERM);
 	}
 	close(power.saver_fd);
 	power.saver_fd = -1;
 	power.saver_by_hand = false;
+	// its surfaces go at once, even if it is slow to end or does not end at all
+	for (int i = 0; root && i < root->outputs->length; i++) {
+		struct sway_output *output = root->outputs->items[i];
+		struct sway_layer_surface *layer, *tmp;
+		wl_list_for_each_safe(layer, tmp, &output->layer_surfaces, link) {
+			if (layer->saver) {
+				wlr_layer_surface_v1_destroy(layer->layer_surface);
+			}
+		}
+	}
 	return true;
 }
 
@@ -239,7 +273,7 @@ static void run_stage(enum tw_idle_stage stage) {
 		power.idle_screen_off = true;
 		break;
 	case TW_IDLE_LOCK:
-		saver_end();
+		// a screen saver goes on over the lock screen, as on Windows
 		spawn(config->tw_lock_command);
 		break;
 	case TW_IDLE_SLEEP:
@@ -297,7 +331,7 @@ static int handle_timer(void *data) {
 
 /* Undoes dimming, the screen saver and turning the screen off after input. */
 static void wake(void) {
-	if (saver_end() && config && config->tw_screensaver_lock) {
+	if (saver_end() && config && config->tw_screensaver_lock && !server.session_lock.lock) {
 		spawn(config->tw_lock_command); // "on resume, display the logon screen"
 	}
 	undim();

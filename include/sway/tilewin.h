@@ -552,6 +552,9 @@ void tw_power_config_changed(void);
 /* The screen saver now ("screensaver start") or no more. */
 void tw_screensaver_start(void);
 void tw_screensaver_stop(void);
+/* The client is the screen saver tileWin started: shown over the lock screen too. */
+struct wl_client;
+bool tw_power_is_saver_client(struct wl_client *client);
 void tw_power_fini(void);
 
 #endif
