@@ -1337,7 +1337,20 @@ static void physics_step(struct decay *s, double h) {
 	separate(s);
 	for (int k = 0; k < s->body_count; k++) {
 		struct body *b = &s->bodies[k];
-		if (b->alive && !b->asleep && b->perch < 0) {
+		if (!b->alive || b->asleep || b->perch >= 0) {
+			continue;
+		}
+		body_pose(b);
+		// the ground gives way to nothing: rubble at rest pressing a piece under it down
+		// would push it through the bottom, as the rubble does not move and the ground
+		// pushes back only gently, so it is lifted to lie no deeper than a pixel in it
+		float deepest = 0;
+		for (int i = 0; i < b->n; i++) {
+			deepest = fmaxf(deepest, b->wy[i] - ground(s, b->wx[i]));
+		}
+		if (deepest > 1) {
+			b->y -= deepest - 1;
+			b->vy = fminf(b->vy, 0);
 			body_pose(b);
 		}
 	}
