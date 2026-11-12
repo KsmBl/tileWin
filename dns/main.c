@@ -43,7 +43,14 @@
  *  - block lists like Pi-hole's: hosts files, plain lists and adblock rules,
  *    downloaded once a day, with names allowed and blocked by hand;
  *  - DNS over HTTPS for the servers that have an https:// address in the
- *    config: their questions go encrypted, the others' as plain DNS.
+ *    config: their questions go encrypted, the others' as plain DNS;
+ *  - the network's own servers when the others fail: a public Wi-Fi lets no
+ *    DNS out before its login page is done, and its login page, a router's
+ *    page (fritz.box) and the names of a local network only its own servers
+ *    know. So a question none of the servers answers, or one they say does
+ *    not exist, goes to the network's servers too; when they answer what the
+ *    others could not, they are asked first for a while. Their answers are
+ *    not cached, as a login page answers every name with itself.
  *
  * Its state is in /var/lib/tilewin-dns (the counts, the lists) and what it is
  * doing in /run/tilewin-dns (status, prefetch), which the settings app reads.
@@ -56,6 +63,8 @@
 #define MAX_CONNS 64
 #define FAIL_MS 5000
 #define RETRY_MS 1200
+#define NETWORK_AFTER_MS 2000   // nothing answered by then: the network's servers too
+#define NETWORK_FIRST_MS 30000  // how long they are asked first once they answered
 #define TIMEOUT_MS 4000
 #define TEST_TIMEOUT_MS 2000
 #define TEST_PROBES 3
@@ -151,6 +160,9 @@ struct pending {
 	struct server targets[MAX_TARGETS];
 	int ntargets, nsent, nfailed;
 	bool tcp_busy;
+	bool via_network;  // asked of the network's servers, the others having failed
+	bool others_failed; // and that because they failed, not as they go first now
+	bool kept_answer;  // fail holds a no such name, given when the network has nothing better
 	int64_t started, retry_at, deadline;
 	int test_server, test_probe;
 	uint32_t test_gen;
@@ -203,6 +215,7 @@ static struct {
 	const char *source;
 	struct server net_own[MAX_TARGETS], net_auto[MAX_TARGETS];
 	int nown, nauto;
+	int64_t network_first_until; // the network's servers answered when the others did not
 	char net_sig[4096];
 	struct pending *pend[65536];
 	int npending;
@@ -1449,11 +1462,54 @@ static void send_more(struct pending *p, int upto) {
 	}
 }
 
+/* The servers of the network that are not asked anyway. */
+static int network_targets(struct server *out) {
+	int n = 0;
+	for (int i = 0; i < d.nauto; i++) {
+		bool used = false;
+		for (int j = 0; j < d.nup && !used; j++) {
+			used = same_address(&d.net_auto[i].addr, &d.up[j].addr) && !d.up[j].doh[0];
+		}
+		if (!used) {
+			out[n++] = d.net_auto[i];
+		}
+	}
+	return n;
+}
+
+/* The question goes to the network's servers instead; whether there are any.
+ * Only the questions of apps go there, never prefetches or speed tests. */
+static bool ask_network(struct pending *p, int64_t now) {
+	if (p->via_network || (p->kind != P_UDP && p->kind != P_TCP) || p->tcp_busy) {
+		return false;
+	}
+	struct server list[MAX_TARGETS];
+	int n = network_targets(list);
+	if (n == 0) {
+		return false;
+	}
+	p->via_network = true;
+	p->others_failed = true;
+	p->gen = ++d.gen; // an answer still coming over HTTPS is for the others
+	memcpy(p->targets, list, sizeof(struct server) * n);
+	p->ntargets = n;
+	p->nsent = p->nfailed = 0;
+	p->retry_at = INT64_MAX;
+	p->deadline = now + TIMEOUT_MS;
+	send_more(p, n);
+	return true;
+}
+
 static void forward(struct pending *p) {
+	d.forwarded++;
+	int64_t now = now_ms();
+	if (now < d.network_first_until && ask_network(p, now)) {
+		p->others_failed = false;
+		return;
+	}
 	p->ntargets = d.nup;
 	memcpy(p->targets, d.up, sizeof(struct server) * d.nup);
 	send_more(p, d.batch);
-	d.forwarded++;
 }
 
 static void deliver(struct pending *p, uint8_t *msg, size_t len) {
@@ -1511,7 +1567,9 @@ static void finish(struct pending *p, uint8_t *msg, size_t len, bool good) {
 	if (p->kind == P_TEST) {
 		test_sample(p, good ? (int)(now_ms() - p->started) : FAIL_MS);
 	} else {
-		uint32_t kept = good ? cache_store(&p->q, msg, len, now_ms()) : 0;
+		// what the network's servers say is not kept: a login page answers every
+		// name with itself until it is done
+		uint32_t kept = good && !p->via_network ? cache_store(&p->q, msg, len, now_ms()) : 0;
 		if (kept) {
 			dns_cap_ttls(msg, len, kept); // nobody keeps it longer than the service
 		}
@@ -1693,6 +1751,9 @@ static void target_failed(struct pending *p) {
 		send_more(p, p->nsent + 1);
 		return;
 	}
+	if (ask_network(p, now_ms())) {
+		return;
+	}
 	finish(p, p->fail, p->fail_len, false);
 }
 
@@ -1711,10 +1772,12 @@ static void got_answer(struct pending *p, int target, uint8_t *buf, size_t n) {
 		return;
 	}
 	if (rcode == DNS_RCODE_SERVFAIL || rcode == DNS_RCODE_REFUSED) {
-		free(p->fail);
-		p->fail = malloc(n);
-		memcpy(p->fail, buf, n);
-		p->fail_len = n;
+		if (!p->kept_answer) {
+			free(p->fail);
+			p->fail = malloc(n);
+			memcpy(p->fail, buf, n);
+			p->fail_len = n;
+		}
 		if (++p->nfailed < p->nsent) {
 			return; // another server may still answer
 		}
@@ -1722,8 +1785,32 @@ static void got_answer(struct pending *p, int target, uint8_t *buf, size_t n) {
 			send_more(p, p->nsent + 1);
 			return;
 		}
-		finish(p, buf, n, false);
+		if (ask_network(p, now_ms())) {
+			return;
+		}
+		finish(p, p->fail, p->fail_len, false);
 		return;
+	}
+	if (rcode == DNS_RCODE_NXDOMAIN && !p->via_network) {
+		// a name of the local network, which only its servers know; if they
+		// know nothing either, this answer is the one given
+		free(p->fail);
+		p->fail = malloc(n);
+		memcpy(p->fail, buf, n);
+		p->fail_len = n;
+		p->kept_answer = true;
+		if (ask_network(p, now_ms())) {
+			return;
+		}
+	} else if (p->via_network && p->others_failed && !p->kept_answer &&
+			rcode == DNS_RCODE_NOERROR) {
+		// the others failed and these answer: they go first for a while
+		if (now_ms() >= d.network_first_until) {
+			logmsg("the servers do not answer, the network's do: they are asked first");
+			d.status_dirty = true;
+			d.next_status = 0; // written now, not at the next round
+		}
+		d.network_first_until = now_ms() + NETWORK_FIRST_MS;
 	}
 	if (dns_truncated(buf) && p->kind != P_UDP && !p->targets[target].doh[0]) {
 		ask_over_tcp(p, &p->targets[target]);
@@ -2042,6 +2129,7 @@ static void write_status(void) {
 	text_add(&t, "prefetch_names %d\n", d.npf);
 	text_add(&t, "counted_names %d\n", d.nstats);
 	text_add(&t, "wired %d\n", d.wired);
+	text_add(&t, "network_first %d\n", now_ms() < d.network_first_until ? 1 : 0);
 	char path[PATH_MAX];
 	snprintf(path, sizeof(path), "%s/status", d.run_dir);
 	write_file(path, t.s, 0644, (gid_t)-1);
@@ -2099,6 +2187,13 @@ static void housekeeping(int64_t now) {
 			struct pending *p = d.pend[id];
 			if (!p) {
 				continue;
+			}
+			if (now >= p->deadline && ask_network(p, now)) {
+				continue;
+			}
+			if (!p->via_network && now - p->started >= NETWORK_AFTER_MS &&
+					ask_network(p, now)) {
+				continue; // none answered yet: the network may let no DNS out
 			}
 			if (now >= p->deadline) {
 				if (p->fail) {

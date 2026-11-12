@@ -7,9 +7,11 @@ every name with an address, count what they were asked and take as long as
 they are told to. It checks forwarding and the cache with its shortest and
 longest times, picking the fastest servers, falling over from a failing one,
 answers too big for UDP, the block lists, the servers of single networks,
-DNS over HTTPS (against a server with a certificate made for the test), and
-prefetching: the top names are asked again without anyone asking, and
-those prefetches are never counted as requests themselves.
+DNS over HTTPS (against a server with a certificate made for the test), the
+network's own servers for the names only they know and for a public Wi-Fi
+that lets no DNS out before its login, and prefetching: the top names are
+asked again without anyone asking, and those prefetches are never counted as
+requests themselves.
 
 usage: dns_service.py <tilewin-dnsd>
 """
@@ -100,6 +102,8 @@ class FakeServer:
         self.delay, self.ttl, self.address, self.rcode = delay, ttl, address, rcode
         self.ttls = {}       # name -> TTL of its answer
         self.big = set()     # names whose answer does not fit in UDP
+        self.nxdomain = set()  # names it says do not exist
+        self.silent = False  # answers nothing, as a network that lets no DNS out
         self.asked = {}      # name -> times asked
         self.lock = threading.Lock()
         # the same port for UDP and TCP: another test may hold it for TCP
@@ -131,9 +135,10 @@ class FakeServer:
         name, qtype, end = parse_question(msg)
         with self.lock:
             self.asked[name] = self.asked.get(name, 0) + 1
-        flags = 0x8180 | self.rcode
+        rcode = 3 if name in self.nxdomain else self.rcode
+        flags = 0x8180 | rcode
         records = []
-        if self.rcode == 0 and qtype == 1:
+        if rcode == 0 and qtype == 1:
             count = 40 if name in self.big else 1
             for i in range(count):
                 addr = self.address if count == 1 else bytes([10, 1, i // 256, i % 256])
@@ -147,6 +152,9 @@ class FakeServer:
     def serve_udp(self):
         while True:
             msg, peer = self.udp.recvfrom(4096)
+            if self.silent:
+                self.answer(msg, False)  # counted, never answered
+                continue
             def reply(msg=msg, peer=peer):
                 self.udp.sendto(self.answer(msg, False), peer)
             if self.delay:
@@ -584,6 +592,52 @@ def single_networks():
         d.cleanup()
 
 
+def network_servers():
+    chosen = FakeServer(address=b"\x0a\x00\x00\x01")
+    chosen.nxdomain.update(["fritz.box", "nothing.test"])
+    network = FakeServer(address=b"\x0a\x00\x00\x09")
+    network.nxdomain.add("nothing.test")
+    device = ("[device]\nconnection-uuid=33333333-4444\n\n[dhcp4]\n"
+              "dhcp4.domain_name_servers=%s\n" % network.text)
+    d = Daemon("servers %s\nfastest 0\ncache_min 60\nprefetch no\n" % chosen.text,
+               nm_devices={2: device})
+    try:
+        r = d.ask("public.test")
+        check(r and r[1] and r[1][0][2] == b"\x0a\x00\x00\x01" and network.count("public.test") == 0,
+              "a name the chosen servers know is not asked of the network")
+        r = d.ask("fritz.box")
+        check(r and r[0] == 0 and r[1] and r[1][0][2] == b"\x0a\x00\x00\x09",
+              "a name only the network knows (a router's page) comes from its servers: %s" % (r,))
+        d.ask("fritz.box")
+        check(network.count("fritz.box") == 2, "and its answer is not cached")
+        r = d.ask("nothing.test")
+        check(r and r[0] == 3, "a name nobody knows still does not exist")
+        check("network_first 0" in d.status(), "the chosen servers still go first")
+        # a public Wi-Fi before its login: only its own server answers
+        chosen.silent = True
+        started = time.time()
+        r = d.ask("login.portal.test")
+        took = time.time() - started
+        check(r and r[0] == 0 and r[1] and r[1][0][2] == b"\x0a\x00\x00\x09" and took < 4,
+              "when the chosen servers answer nothing, the network's do (in %.1f s)" % took)
+        check(wait_until(lambda: "network_first 1" in d.status(), 3),
+              "and they are asked first then")
+        before = chosen.count("next.test")
+        started = time.time()
+        r = d.ask("next.test")
+        took = time.time() - started
+        check(r and r[1] and took < 1 and chosen.count("next.test") == before,
+              "the next name goes to them at once (%.1f s)" % took)
+        r = d.ask("public.test")
+        check(r and r[1] and r[1][0][2] == b"\x0a\x00\x00\x01",
+              "what was cached before the login page stays")
+    finally:
+        d.stop()
+        if failures:
+            d.show_log()
+        d.cleanup()
+
+
 def networks_without_networkmanager():
     networkd = FakeServer(address=b"\x0a\x00\x00\x0b")
     before = FakeServer(address=b"\x0a\x00\x00\x0c")
@@ -742,6 +796,7 @@ checks = [
     ("downloaded lists", downloaded_lists),
     ("single networks", single_networks),
     ("networks without NetworkManager", networks_without_networkmanager),
+    ("the network's servers", network_servers),
     ("wired check", wired_check),
     ("prefetching", prefetching),
 ]
