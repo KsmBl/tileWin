@@ -546,6 +546,7 @@ struct net_flyout {
 	char *connecting;    // SSID being connected to, or disconnected from, until nmcli is done
 	bool disconnecting;
 	char *failed;        // SSID the last connecting failed for
+	bool wrong_password; // and it failed for its password
 	bool have_nmcli, wifi_enabled, loaded, rescanned;
 	char *expanded; // SSID of the expanded row
 	char *secret_ssid; // saved network whose password was asked for
@@ -937,6 +938,24 @@ static void net_requery(void *data) {
 	}
 }
 
+/*
+ * Whether nmcli failed for the password: NetworkManager asks its agents for a
+ * new one when the access point turns the password down and, as nmcli is not
+ * asked to be one, says the secrets were required but not provided. A
+ * password of the wrong length is an invalid psk, and 802.1X fails in the
+ * supplicant.
+ */
+static bool net_password_error(const char *error) {
+	static const char *const words[] = { "secrets were required", "no secrets",
+		"psk", "wep-key", "password", "802-1x", "802.1x supplicant", "supplicant-disconnect" };
+	for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+		if (strcasestr(error, words[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void net_action_done(void *data, const char *output) {
 	struct net_flyout *f = net_current;
 	if (!f) {
@@ -949,7 +968,18 @@ static void net_action_done(void *data, const char *output) {
 		free(f->connecting);
 	}
 	f->connecting = NULL;
-	if (error) {
+	f->wrong_password = f->failed && net_password_error(error);
+	if (f->wrong_password) {
+		// open the network with the field again, for the password to be typed anew
+		snprintf(f->status, sizeof(f->status), "The password is wrong. Type it again.");
+		f->status_error = true;
+		free(f->expanded);
+		f->expanded = strdup(f->failed);
+		f->asking_password = true;
+		memset(f->password, 0, sizeof(f->password));
+		f->password_cursor = (struct text_cursor){ 0 };
+		net_forget_secret(f);
+	} else if (error) {
 		snprintf(f->status, sizeof(f->status), "%.*s", (int)strcspn(error, "\n"), error);
 		f->status_error = true;
 	} else {
@@ -1031,6 +1061,34 @@ static void net_show_secret(struct net_flyout *f, int index) {
 	net_update(f);
 }
 
+/* The setting of a saved connection that holds the password of such a network. */
+static const char *net_secret_key(const char *security) {
+	if (strstr(security, "802.1X")) {
+		return "802-1x.password";
+	}
+	if (strstr(security, "WEP")) {
+		return "802-11-wireless-security.wep-key0";
+	}
+	return "802-11-wireless-security.psk";
+}
+
+/*
+ * Whether a password can be one of this network: WPA takes 8 to 63
+ * characters, or 64 hexadecimal digits. Says what is wrong in the status.
+ */
+static bool net_password_fits(struct net_flyout *f, struct wifi_net *n) {
+	size_t len = strlen(f->password);
+	bool wpa = (strstr(n->security, "WPA") || strstr(n->security, "SAE")) &&
+		!strstr(n->security, "802.1X") && !strstr(n->security, "WEP");
+	if (!wpa || (len >= 8 && len <= 63) ||
+			(len == 64 && strspn(f->password, "0123456789abcdefABCDEF") == 64)) {
+		return true;
+	}
+	snprintf(f->status, sizeof(f->status), "A Wi-Fi password has 8 to 63 characters");
+	f->status_error = true;
+	return false;
+}
+
 static void net_connect(struct net_flyout *f, int index) {
 	if (index < 0 || index >= f->nets->length) {
 		return;
@@ -1040,10 +1098,17 @@ static void net_connect(struct net_flyout *f, int index) {
 	if (secured && !n->known && !f->asking_password) {
 		f->asking_password = true;
 		f->password[0] = '\0';
+		f->password_cursor = (struct text_cursor){ 0 };
 		net_update(f);
 		return;
 	}
-	if (secured && !n->known && !f->password[0]) {
+	// a password typed: for a new network, or anew after a wrong one
+	bool typed = secured && f->asking_password;
+	if (typed && !f->password[0]) {
+		return;
+	}
+	if (typed && !net_password_fits(f, n)) {
+		net_update(f);
 		return;
 	}
 	char *ssid = shell_quote(n->ssid);
@@ -1053,17 +1118,34 @@ static void net_connect(struct net_flyout *f, int index) {
 	f->disconnecting = false;
 	free(f->failed);
 	f->failed = NULL;
+	f->wrong_password = false;
+	// the password reaches nmcli through the environment of the child, so it
+	// never appears in the shell's command line
+	if (typed) {
+		setenv("TILEWIN_WIFI_PSK", f->password, 1);
+	}
 	char *cmd;
 	if (n->known) {
-		cmd = format_str("nmcli connection up id %s 2>&1", ssid);
-	} else if (secured) {
-		// the password reaches nmcli through the environment of the child,
-		// so it never appears in the shell's command line
-		setenv("TILEWIN_WIFI_PSK", f->password, 1);
-		cmd = format_str("nmcli device wifi connect %s password \"$TILEWIN_WIFI_PSK\" 2>&1",
-			ssid);
+		char *con = n->uuid ? format_str("uuid %s", n->uuid) : format_str("id %s", ssid);
+		if (typed) {
+			// the saved password was wrong: keep the new one and connect with it
+			cmd = format_str("nmcli connection modify %s %s \"$TILEWIN_WIFI_PSK\" 2>&1 && "
+				"nmcli connection up %s 2>&1", con, net_secret_key(n->security), con);
+		} else {
+			cmd = format_str("nmcli connection up %s 2>&1", con);
+		}
+		free(con);
 	} else {
-		cmd = format_str("nmcli device wifi connect %s 2>&1", ssid);
+		// nmcli saves the connection it makes even when it fails, and with a
+		// wrong password the network would show as saved and never ask again:
+		// a connection for this SSID that was not there before goes again
+		cmd = format_str("before=$(nmcli -g UUID connection show 2>/dev/null); "
+			"if ! nmcli device wifi connect %s%s 2>&1; then "
+			"for u in $(nmcli -g UUID connection show 2>/dev/null); do "
+			"case \"$before\" in *\"$u\"*) continue ;; esac; "
+			"[ \"$(nmcli -g 802-11-wireless.ssid connection show uuid \"$u\" 2>/dev/null)\" = %s ] && "
+			"nmcli connection delete uuid \"$u\" >/dev/null 2>&1; "
+			"done; fi", ssid, typed ? " password \"$TILEWIN_WIFI_PSK\"" : "", ssid);
 	}
 	net_run_action(f, cmd, status);
 	unsetenv("TILEWIN_WIFI_PSK");
@@ -1421,7 +1503,8 @@ static void net_render(struct popup *p, cairo_t *cr) {
 				snprintf(sub, sizeof(sub), "%s", f->disconnecting ? "Disconnecting..." :
 					"Connecting...");
 			} else if (f->failed && strcmp(f->failed, n->ssid) == 0) {
-				snprintf(sub, sizeof(sub), "Could not connect");
+				snprintf(sub, sizeof(sub), f->wrong_password ? "Wrong password" :
+					"Could not connect");
 			} else {
 				snprintf(sub, sizeof(sub), "%s%s%s", n->active ? "Connected, " : "",
 					secured ? "secured" : "open", n->known && !n->active ? ", saved" : "");
@@ -1599,6 +1682,7 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 		break;
 	case NET_HS_CANCEL:
 		f->asking_password = false;
+		f->wrong_password = false;
 		memset(f->password, 0, sizeof(f->password));
 		net_update(f);
 		break;

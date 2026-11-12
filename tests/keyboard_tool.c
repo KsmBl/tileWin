@@ -9,7 +9,7 @@
  *   key <mods> <name>      presses one key with those modifiers held, where
  *                          mods is ctrl, shift, alt, super, any of them joined with
  *                          "+", or none, and name is a letter, a digit,
- *                          "return", "tab", "escape", "f4" or an arrow: "up",
+ *                          "return", "tab", "escape", "backspace", "f4" or an arrow: "up",
  *                          "down", "left", "right"
  *   hold alt <ms>          holds Alt down that long (for a pointer tool that
  *                          scrolls meanwhile), then lets go
@@ -80,7 +80,7 @@ static const struct {
 	{ "9", KEY_9 }, { "return", KEY_ENTER }, { "tab", KEY_TAB }, { "escape", KEY_ESC },
 	{ "up", KEY_UP }, { "down", KEY_DOWN }, { "left", KEY_LEFT }, { "right", KEY_RIGHT },
 	{ "minus", KEY_MINUS }, { "slash", KEY_SLASH }, { "space", KEY_SPACE },
-	{ "f4", KEY_F4 }, { "f1", KEY_F1 }, { "period", KEY_DOT },
+	{ "f4", KEY_F4 }, { "f1", KEY_F1 }, { "period", KEY_DOT }, { "backspace", KEY_BACKSPACE },
 };
 
 static bool code_of(const char *name, uint32_t *code) {
