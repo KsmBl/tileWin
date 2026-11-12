@@ -94,6 +94,10 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   only after its time, that moving the mouse ends it and runs the lock command,
   and that `screensaver start` is not ended by the input right after it but by
   input a moment later;
+- lets a nested tileWin sit idle until its screen goes off and checks the
+  session gets locked with it, that a key turns the screen on again showing the
+  lock screen, still locked, and that no second lock screen starts the next
+  time;
 - locks a nested tileWin with the real lock screen and checks the screen saver
   covers the lock screen after its time, and that a key ends it and brings the
   lock screen back with the session still locked;

@@ -98,6 +98,7 @@ polkit_agent disable
 panel_command $panel
 idle_timeout screensaver 2
 idle_timeout screen_off 4
+lock_command true
 screensaver_command $work/saver.sh
 output HEADLESS-1 mode --custom 1280x720 pos 0 0
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'

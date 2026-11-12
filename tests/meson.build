@@ -603,6 +603,16 @@ if gdk_pixbuf.found()
 	)
 
 	test(
+		'screen-off-lock',
+		find_program('screen_off_lock.sh'),
+		args: [meson.project_build_root(), meson.project_source_root()],
+		depends: [keyboard_tool, count_content],
+		suite: 'gui',
+		is_parallel: false,
+		timeout: 120,
+	)
+
+	test(
 		'doomsday',
 		find_program('doomsday.sh'),
 		args: [meson.project_build_root(), meson.project_source_root()],

@@ -2121,7 +2121,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 		p->idle_dd[i] = gtk_drop_down_new_from_strings(duration_labels);
 		g_object_set_data(G_OBJECT(p->idle_dd[i]), "stage", GINT_TO_POINTER(i));
 		g_signal_connect(p->idle_dd[i], "notify::selected", G_CALLBACK(on_idle), p);
-		ui_row(power, stage_titles[i], NULL, p->idle_dd[i]);
+		ui_row(power, stage_titles[i], i == 1 ? "Locks the screen too" : NULL, p->idle_dd[i]);
 	}
 
 	GtkWidget *lid = ui_group(content, has_lid() ? "Power button and lid" : "Power button",

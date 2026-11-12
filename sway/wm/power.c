@@ -2,11 +2,12 @@
  * Screen power, like the power options of Windows:
  *
  *   idle_timeout dim|screen_off|lock|sleep|screensaver <seconds>
- *       after that long without input the screen turns darker, turns off,
- *       gets locked (lock_command), the computer goes to sleep or the screen
- *       saver starts (screensaver_command, tilewin-screensaver by default,
- *       which runs until input comes and is then ended; with
- *       "screensaver_lock yes" the screen is locked then); 0 is never.
+ *       after that long without input the screen turns darker, turns off
+ *       (and gets locked, so it comes on again locked), gets locked
+ *       (lock_command), the computer goes to sleep or the screen saver
+ *       starts (screensaver_command, tilewin-screensaver by default, which
+ *       runs until input comes and is then ended; with "screensaver_lock
+ *       yes" the screen is locked then); 0 is never.
  *       The screen saver also comes on while the screen is locked: it is
  *       shown over the lock screen, gets no input, and input ends it.
  *       Apps that keep the screen on (idle inhibitors, e.g. a video) pause
@@ -14,7 +15,8 @@
  *   lid_action closed|docked <action>
  *       what closing the laptop lid does, without and with an external
  *       monitor: default (leave it to logind), nothing, sleep (stand by in
- *       RAM), hibernate (to disk), hybrid_sleep (both), lock, screen_off or
+ *       RAM), hibernate (to disk), hybrid_sleep (both), lock, screen_off (which
+ *       locks too, unless only the built-in screen goes off while docked) or
  *       shutdown. As soon as one is not "default", tileWin takes logind's
  *       handle-lid-switch inhibitor lock and does all lid handling itself.
  *   power_key_action <action>
@@ -144,6 +146,13 @@ static void spawn(const char *command) {
 	}
 }
 
+/* Starts the lock screen (lock_command), unless the session is locked already. */
+static void lock_session(void) {
+	if (config && !server.session_lock.lock) {
+		spawn(config->tw_lock_command);
+	}
+}
+
 static void run_command(const char *command) {
 	char *copy = strdup(command);
 	list_t *results = execute_command(copy, NULL, NULL);
@@ -269,12 +278,13 @@ static void run_stage(enum tw_idle_stage stage) {
 		break;
 	case TW_IDLE_SCREEN_OFF:
 		saver_end(); // nobody sees it any more
+		lock_session(); // so the screen comes on again locked
 		run_command("output * power off");
 		power.idle_screen_off = true;
 		break;
 	case TW_IDLE_LOCK:
 		// a screen saver goes on over the lock screen, as on Windows
-		spawn(config->tw_lock_command);
+		lock_session();
 		break;
 	case TW_IDLE_SLEEP:
 		saver_end();
@@ -620,6 +630,7 @@ void tw_power_lid(bool closed) {
 		free(cmd);
 	} else {
 		power.lid_screen_off = true;
+		lock_session();
 		run_command("output * power off");
 	}
 }
@@ -660,8 +671,9 @@ bool tw_power_key(bool pressed) {
 		clock_gettime(CLOCK_MONOTONIC, &power.key_rest);
 	}
 	if (!run_action(action)) {
-		// screen_off: like idling, the next input turns the screens on again
+		// screen_off: like idling, the next input turns the screens on again, locked
 		power.idle_screen_off = true;
+		lock_session();
 		run_command("output * power off");
 	}
 	return true;
