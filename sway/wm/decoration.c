@@ -515,6 +515,10 @@ bool tw_handle_button(struct sway_seat *seat, uint32_t time_msec,
 		if (button == BTN_LEFT) {
 			layouts_cancel();
 			set_pressed(cont, hit);
+			// an open menu of the window goes on the press, as a click outside
+			// it does: while it is open a GTK app takes the close of no window
+			// but the menu's, so the X would do nothing
+			view_close_popups(cont->view);
 		}
 		return true;
 	case TW_HIT_EDGE:
