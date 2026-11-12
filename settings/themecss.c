@@ -605,6 +605,10 @@ char *settings_theme_css(const struct tw_theme *t) {
 		add_win11(css, t, dark, accent);
 		break;
 	}
+	// the brightness over 100 %, the gamma boost of the night light (page_screen.c),
+	// amber as on the quick settings of the taskbar
+	g_string_append(css, "scale.tw-boost > trough > highlight { background-color: #f0a030; "
+		"border-color: #f0a030; }\n");
 	return g_string_free(css, FALSE);
 }
 

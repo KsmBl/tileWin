@@ -14,6 +14,7 @@
 #include "tw_battery.h"
 #include "panel.h"
 #include "stringop.h"
+#include "tw_brightness.h"
 #include "tw_disks.h"
 
 /*
@@ -1869,7 +1870,8 @@ static void brightness_update(struct widget *w) {
 		snprintf(path, sizeof(path), "/sys/class/backlight/%s/max_brightness", de->d_name);
 		ok = ok && read_file(path, max, sizeof(max));
 		if (ok && atoi(max) > 0) {
-			s->percent = atoi(cur) * 100 / atoi(max);
+			// with the backlight at full, the gamma boost of the night light up to 130
+			s->percent = tw_brightness_shown(atoi(cur) * 100 / atoi(max));
 			s->present = true;
 			break;
 		}
@@ -1927,7 +1929,13 @@ static void brightness_render(struct widget *w, struct render_ctx *ctx, struct p
 
 static bool brightness_scroll(struct widget *w, struct psurface *s, struct hotspot *hs,
 		int direction) {
-	proc_spawn(direction < 0 ? "brightnessctl -q set 5%+" : "brightnessctl -q set 5%-");
+	struct brightness_state *b = ((struct poll_data *)w->data)->state;
+	if (b->percent > 100) {
+		// like the brightness keys: within the boost, but not into it from below
+		tw_boost_write(b->percent + (direction < 0 ? 5 : -5));
+	} else {
+		proc_spawn(direction < 0 ? "brightnessctl -q set 5%+" : "brightnessctl -q set 5%-");
+	}
 	brightness_update(w);
 	widget_set_dirty(w);
 	return true;

@@ -6,6 +6,7 @@
 #include <string.h>
 #include "ipc.h"
 #include "settings.h"
+#include "tw_brightness.h"
 #include "tw_paths.h"
 
 /*
@@ -15,7 +16,8 @@
  *    (main_output in common.conf: the desktop icons, the main taskbar). Changes apply right away and ask to be
  *    kept (they revert after 15 seconds otherwise); kept settings are written
  *    to displays.conf, which common.conf includes.
- *  - brightness of a laptop screen (brightnessctl)
+ *  - brightness of a laptop screen (brightnessctl), on to 130 % while the
+ *    night light runs: over 100 % its gamma curve lifts the darker tones
  *  - night light: nightlight.conf and the on/off state, which
  *    tilewin-nightlight watches
  *  - power: dimming, turning the screen off, locking and sleeping after a time
@@ -1356,9 +1358,11 @@ static long read_long_file(const char *dir, const char *file) {
 static gboolean apply_brightness(gpointer data) {
 	struct screen_page *p = data;
 	p->brightness_timer = 0;
-	char value[16];
-	snprintf(value, sizeof(value), "%d%%",
+	// over 100 the backlight stays at full and the night light adds the rest
+	int backlight = tw_brightness_split(
 		(int)lround(gtk_range_get_value(GTK_RANGE(p->brightness_scale))));
+	char value[16];
+	snprintf(value, sizeof(value), "%d%%", backlight < 1 ? 1 : backlight);
 	const char *argv[] = { "brightnessctl", "-q", "set", value, NULL };
 	GError *error = NULL;
 	if (!g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
@@ -1368,8 +1372,22 @@ static gboolean apply_brightness(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+static char *brightness_format(GtkScale *scale, double value, gpointer data) {
+	return g_strdup_printf("%d%%", (int)lround(value));
+}
+
+/* The part over 100 % is the gamma boost: the filled part turns amber there. */
+static void brightness_boost_look(GtkWidget *scale) {
+	if (gtk_range_get_value(GTK_RANGE(scale)) > 100.5) {
+		gtk_widget_add_css_class(scale, "tw-boost");
+	} else {
+		gtk_widget_remove_css_class(scale, "tw-boost");
+	}
+}
+
 static void on_brightness(GtkRange *range, gpointer data) {
 	struct screen_page *p = data;
+	brightness_boost_look(GTK_WIDGET(range));
 	if (p->updating) {
 		return;
 	}
@@ -1938,7 +1956,12 @@ void screen_page_refresh(struct settings *s) {
 		long max = read_long_file(p->backlight, "max_brightness");
 		long cur = read_long_file(p->backlight, "brightness");
 		if (max > 0 && cur >= 0) {
-			gtk_range_set_value(GTK_RANGE(p->brightness_scale), cur * 100.0 / max);
+			double value = cur * 100.0 / max;
+			if (gtk_adjustment_get_upper(gtk_range_get_adjustment(
+					GTK_RANGE(p->brightness_scale))) > 100) {
+				value = tw_brightness_shown((int)lround(value));
+			}
+			gtk_range_set_value(GTK_RANGE(p->brightness_scale), value);
 		}
 	}
 	night_refresh(p);
@@ -2088,10 +2111,22 @@ GtkWidget *screen_page_new(struct settings *s) {
 	p->backlight = find_backlight();
 	if (p->backlight) {
 		GtkWidget *group = ui_group(content, "Brightness", NULL);
-		p->brightness_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 1, 100, 1);
+		// over 100 % only while the night light runs, which holds the gamma tables
+		bool boost = tw_boost_available();
+		p->brightness_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 1,
+			boost ? TW_BOOST_MAX : 100, 1);
 		gtk_widget_set_size_request(p->brightness_scale, 280, -1);
+		gtk_scale_set_draw_value(GTK_SCALE(p->brightness_scale), TRUE);
+		gtk_scale_set_value_pos(GTK_SCALE(p->brightness_scale), GTK_POS_RIGHT);
+		gtk_scale_set_format_value_func(GTK_SCALE(p->brightness_scale), brightness_format,
+			NULL, NULL);
+		if (boost) {
+			gtk_scale_add_mark(GTK_SCALE(p->brightness_scale), 100, GTK_POS_BOTTOM, NULL);
+		}
 		g_signal_connect(p->brightness_scale, "value-changed", G_CALLBACK(on_brightness), p);
-		ui_row(group, "Brightness of the built-in screen", NULL, p->brightness_scale);
+		ui_row(group, "Brightness of the built-in screen", boost ?
+			"Over 100% the darker tones are lifted, for bright surroundings" : NULL,
+			p->brightness_scale);
 	}
 
 	night_times_init();

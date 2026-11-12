@@ -88,6 +88,18 @@ test(
 )
 
 test(
+	'brightness-boost',
+	executable(
+		'test-brightness-boost',
+		'test_brightness_boost.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'grid',
 	executable(
 		'test-grid',
@@ -1313,3 +1325,13 @@ if gdk_pixbuf.found()
 		timeout: 60,
 	)
 endif
+
+test(
+	'brightness-boost-gui',
+	find_program('brightness_boost.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)

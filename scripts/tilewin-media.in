@@ -33,6 +33,8 @@ Examples:
   tilewin-media mic                 mute or unmute the microphone
   tilewin-media brightness up       brighter
   tilewin-media brightness 70       set the brightness to 70%
+  tilewin-media brightness 120      brighter than the backlight can: over 100% the
+                                    night light lifts the darker tones (up to 130%)
   tilewin-media play                play or pause the music
   tilewin-media next                next track
   tilewin-media previous            previous track
@@ -259,7 +261,17 @@ mic_command() {
 
 # ---------- brightness ----------
 
-brightness_get() {
+# Over 100% the backlight stays at full and tilewin-nightlight lifts the darker
+# tones with a gamma curve, up to 130%. The keys (up and down, +N and -N) stop
+# at 100% on the way up, so they never go there by accident, but move within
+# it once the slider or "brightness 120" put it there.
+BOOST_MAX=130
+
+boost_get() {
+	have tilewin-nightlight && tilewin-nightlight boost 2>/dev/null || echo 100
+}
+
+backlight_get() {
 	if have brightnessctl; then
 		brightnessctl -m 2>/dev/null | head -n 1 | cut -d, -f4 | tr -d %
 	elif have light; then
@@ -273,9 +285,32 @@ brightness_get() {
 	fi
 }
 
+# the backlight, plus the boost while it is at full
+brightness_get() {
+	value=$(backlight_get)
+	if [ -n "$value" ] && [ "$value" -ge 100 ]; then
+		boost=$(boost_get)
+		is_number "$boost" && [ "$boost" -gt 100 ] && value=$boost
+	fi
+	echo "$value"
+}
+
 brightness_set() {
 	# never turn the backlight off completely
-	percent=$(clamp "$1" 1 100)
+	percent=$(clamp "$1" 1 "$BOOST_MAX")
+	boost=100
+	if [ "$percent" -gt 100 ]; then
+		# the backlight at full, the night light does the rest
+		if have tilewin-nightlight && tilewin-nightlight boost "$percent" 2>/dev/null; then
+			boost=$percent
+		else
+			echo "Over 100% needs the night light (tilewin-nightlight) running: 100% then." >&2
+		fi
+		percent=100
+	fi
+	if [ "$boost" = 100 ] && have tilewin-nightlight; then
+		tilewin-nightlight boost 100 2>/dev/null
+	fi
 	if have brightnessctl; then
 		brightnessctl -q set "$percent%"
 	elif have light; then
@@ -284,6 +319,15 @@ brightness_set() {
 		echo "Install brightnessctl to change the brightness." >&2
 		exit 1
 	fi
+}
+
+# brightness_step <current> <change>: up stops at 100% unless already over it
+brightness_step() {
+	target=$(($1 + $2))
+	if [ "$1" -le 100 ] && [ "$target" -gt 100 ]; then
+		target=100
+	fi
+	brightness_set "$target"
 }
 
 show_brightness() {
@@ -310,10 +354,10 @@ brightness_command() {
 		return
 		;;
 	up|brighter|increase|raise|more|plus)
-		brightness_set $((current + ${amount:-$BRIGHTNESS_STEP}))
+		brightness_step "$current" "${amount:-$BRIGHTNESS_STEP}"
 		;;
 	down|darker|dimmer|decrease|lower|less|minus)
-		brightness_set $((current - ${amount:-$BRIGHTNESS_STEP}))
+		brightness_step "$current" "-${amount:-$BRIGHTNESS_STEP}"
 		;;
 	*)
 		parsed=$(parse_amount "$word")
@@ -322,7 +366,7 @@ brightness_command() {
 		if [ "$1" = set ]; then
 			brightness_set "$2"
 		else
-			brightness_set $((current + $2))
+			brightness_step "$current" "$2"
 		fi
 		;;
 	esac

@@ -9,6 +9,7 @@
 #include "draw.h"
 #include "log.h"
 #include "panel.h"
+#include "tw_brightness.h"
 
 #define HIDE_MS 1800
 
@@ -142,6 +143,11 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 	double W = s->width, H = s->height;
 	uint32_t dim = (fg & 0xffffff00) | 0x50;
 	uint32_t fill = osd.muted ? ((fg & 0xffffff00) | 0x90) : accent;
+	if (osd.kind == OSD_BRIGHTNESS && osd.value > 100) {
+		// over 100 % is the gamma boost of the night light, as on the quick settings
+		fill = tw_theme_color(panel->theme, "flyout.boost",
+			style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+	}
 
 	double r = 0;
 	if (!vertical(panel)) {
@@ -179,7 +185,7 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 		// Windows 10: number, vertical slider, icon
 		pd_text(cr, font, number, 0, 10, W, 24, fg, PD_CENTER);
 		double top = 44, bottom = H - 50, height = bottom - top;
-		double level = osd.kind == OSD_MIC ? (osd.muted ? 0 : 1) : osd.value / 100.0;
+		double level = osd.kind == OSD_MIC ? (osd.muted ? 0 : 1) : fmin(osd.value / 100.0, 1);
 		pd_rect(cr, W / 2 - 2, top, 4, height, dim);
 		pd_rect(cr, W / 2 - 2, bottom - height * level, 4, height * level, fill);
 		pd_rect(cr, W / 2 - 8, bottom - height * level - 4, 16, 8, fg);
@@ -195,7 +201,7 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 			bx, 0, W - bx - 12, H, fg, PD_LEFT);
 		return;
 	}
-	double level = osd.value / 100.0;
+	double level = fmin(osd.value / 100.0, 1);
 	pd_rounded(cr, bx, H / 2 - 2, bw, 4, 2);
 	pd_color(cr, dim);
 	cairo_fill(cr);
@@ -348,7 +354,8 @@ void osd_handle_command(struct panel *panel, int argc, char **argv) {
 		osd.muted = argc > 2 && is_true(argv[2]);
 	} else if (strcmp(kind, "brightness") == 0) {
 		osd.kind = OSD_BRIGHTNESS;
-		osd.value = clamp_percent(argc > 1 ? argv[1] : NULL);
+		int value = argc > 1 ? atoi(argv[1]) : 0;
+		osd.value = value < 0 ? 0 : value > TW_BOOST_MAX ? TW_BOOST_MAX : value;
 		osd.muted = false;
 	} else if (strcmp(kind, "mic") == 0) {
 		osd.kind = OSD_MIC;

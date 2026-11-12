@@ -38,6 +38,14 @@ void draw_line(cairo_t *cr, const struct fly_style *st, struct popup *p, int y);
 /* 0-100 for a pointer x on a slider box. */
 int slider_value(struct pbox b, double x);
 void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int value);
+/* 0-max for a pointer x on a slider box of 0-max. */
+int slider_value_max(struct pbox b, double x, int max);
+/*
+ * A slider of 0-max (100 or more): with a max over 100 the part past a mark
+ * at 100 is drawn in the color over, the brightness boost of the gamma curve.
+ */
+void draw_slider_max(cairo_t *cr, const struct fly_style *st, struct pbox b, int value,
+	int max, uint32_t over);
 /* A 40x20 on/off switch. */
 void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on);
 void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,

@@ -4,6 +4,11 @@
  * buttons, volume and brightness sliders and the battery. With the theme key
  * panel.quick_settings the network, volume and battery icons open it too.
  *
+ * While tilewin-nightlight runs the brightness slider goes on to 130 %: past
+ * a mark at 100 % the backlight stays at full and the night light's gamma
+ * curve lifts the darker tones (tw_brightness.h). That part is drawn in the
+ * color flyout.boost, with the percentage beside the slider.
+ *
  * The state is read when it opens (nmcli and pactl in one shell, sysfs) and
  * after changes; nothing runs while it is closed.
  */
@@ -17,6 +22,7 @@
 #include "tw_battery.h"
 #include "flyout.h"
 #include "popup.h"
+#include "tw_brightness.h"
 #include "tw_paths.h"
 
 #define QS_WIDTH 360
@@ -56,7 +62,9 @@ struct qs {
 	bool audio, muted;
 	int volume;
 	bool backlight;
-	int brightness;
+	int brightness; // 0-100 of the backlight, then the boost up to brightness_max
+	int brightness_max; // 100, or TW_BOOST_MAX while the night light can boost
+	int backlight_set; // percentage of the backlight last read or set
 	bool battery, charging;
 	int capacity;
 
@@ -118,15 +126,21 @@ static void read_sysfs(struct qs *q) {
 		return;
 	}
 	q->backlight = false;
-	dir = opendir("/sys/class/backlight");
+	// $TILEWIN_SYS_BACKLIGHT stands in for /sys/class/backlight in the tests
+	const char *light_root = getenv("TILEWIN_SYS_BACKLIGHT") ? getenv("TILEWIN_SYS_BACKLIGHT") :
+		"/sys/class/backlight";
+	dir = opendir(light_root);
 	while (dir && (de = readdir(dir))) {
 		char path[512], cur[32], max[32];
-		snprintf(path, sizeof(path), "/sys/class/backlight/%s/brightness", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/brightness", light_root, de->d_name);
 		bool ok = de->d_name[0] != '.' && read_file(path, cur, sizeof(cur));
-		snprintf(path, sizeof(path), "/sys/class/backlight/%s/max_brightness", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/max_brightness", light_root, de->d_name);
 		if (ok && read_file(path, max, sizeof(max)) && atol(max) > 0) {
 			q->backlight = true;
-			q->brightness = (int)((atol(cur) * 100 + atol(max) / 2) / atol(max));
+			q->backlight_set = (int)((atol(cur) * 100 + atol(max) / 2) / atol(max));
+			q->brightness_max = tw_boost_available() ? TW_BOOST_MAX : 100;
+			q->brightness = q->brightness_max > 100 ?
+				tw_brightness_shown(q->backlight_set) : q->backlight_set;
 			break;
 		}
 	}
@@ -557,8 +571,15 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 	if (q->backlight) {
 		ti_brightness(p->panel, cr, x0, y + (SLIDER_ROW - 20) / 2.0, 20, st.fg);
 		q->brightness_slider = (struct pbox){ x0 + 32, y, cw - 32 - 34, SLIDER_ROW };
-		draw_slider(cr, &st, q->brightness_slider,
-			q->drag == QD_BRIGHTNESS ? q->drag_value : q->brightness);
+		int value = q->drag == QD_BRIGHTNESS ? q->drag_value : q->brightness;
+		uint32_t boost = tw_theme_color(p->panel->theme, "flyout.boost",
+			st.style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+		draw_slider_max(cr, &st, q->brightness_slider, value, q->brightness_max, boost);
+		if (value > 100) {
+			char text[16];
+			snprintf(text, sizeof(text), "%d%%", value);
+			pd_text(cr, st.font, text, x0 + cw - 36, y, 40, SLIDER_ROW, st.fg, PD_RIGHT);
+		}
 		qs_stop(p, q->brightness_slider, QH_BRIGHTNESS, 0);
 		psurface_hotspot_is_slider(p->surface);
 		y += SLIDER_ROW;
@@ -619,12 +640,21 @@ static void apply_drag(struct qs *q, bool now) {
 		q->volume = q->drag_value;
 	} else if (q->drag == QD_BRIGHTNESS) {
 		int value = q->drag_value < 1 ? 1 : q->drag_value; // never turn the screen off
-		snprintf(cmd, sizeof(cmd), "brightnessctl -q set %d%%", value);
+		// over 100 the backlight stays at full and the night light adds the rest
+		int backlight = tw_brightness_split(value);
 		q->brightness = value;
+		if (backlight == q->backlight_set) {
+			cmd[0] = '\0';
+		} else {
+			snprintf(cmd, sizeof(cmd), "brightnessctl -q set %d%%", backlight);
+			q->backlight_set = backlight;
+		}
 	} else {
 		return;
 	}
-	proc_spawn(cmd);
+	if (cmd[0]) {
+		proc_spawn(cmd);
+	}
 	if (!now) {
 		q->drag_timer = loop_add_timer(q->panel->loop, 60, drag_timer_fired, NULL);
 	}
@@ -718,8 +748,8 @@ static void qs_motion(struct popup *p, double x, double y) {
 	q->py = y;
 	q->inside = true;
 	if (q->drag != QD_NONE) {
-		struct pbox b = q->drag == QD_VOLUME ? q->volume_slider : q->brightness_slider;
-		q->drag_value = slider_value(b, x);
+		q->drag_value = q->drag == QD_VOLUME ? slider_value(q->volume_slider, x) :
+			slider_value_max(q->brightness_slider, x, q->brightness_max);
 		apply_drag(q, false);
 	}
 	popup_set_dirty(p);
@@ -769,7 +799,7 @@ static void qs_button(struct popup *p, double x, double y, uint32_t button, bool
 		popup_set_dirty(p);
 	} else if (q->backlight && pbox_contains(&q->brightness_slider, x, y)) {
 		q->drag = QD_BRIGHTNESS;
-		q->drag_value = slider_value(q->brightness_slider, x);
+		q->drag_value = slider_value_max(q->brightness_slider, x, q->brightness_max);
 		apply_drag(q, true);
 		popup_set_dirty(p);
 	} else if (q->battery_box.width && pbox_contains(&q->battery_box, x, y)) {
@@ -790,7 +820,8 @@ static void qs_axis(struct popup *p, double x, double y, int direction) {
 	int current = target == QD_VOLUME ? q->volume : q->brightness;
 	q->drag = target;
 	q->drag_value = current + (direction < 0 ? 5 : -5);
-	q->drag_value = q->drag_value < 0 ? 0 : q->drag_value > 100 ? 100 : q->drag_value;
+	int max = target == QD_BRIGHTNESS ? q->brightness_max : 100;
+	q->drag_value = q->drag_value < 0 ? 0 : q->drag_value > max ? max : q->drag_value;
 	apply_drag(q, true);
 	q->drag = QD_NONE;
 	query_later(q, 300);

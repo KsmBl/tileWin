@@ -32,11 +32,16 @@ tilewin-media volume 40        # set the volume to 40%
 tilewin-media mute             # mute or unmute
 tilewin-media mic              # mute or unmute the microphone
 tilewin-media brightness 70    # set the brightness to 70% (up, down, +10, -10)
+tilewin-media brightness 120   # brighter than the backlight goes (up to 130%)
 tilewin-media play             # play or pause (next, previous, stop)
 tilewin-media help             # all examples
 ```
 
-It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
+It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players.
+
+### Brightness over 100%
+
+The brightness goes on to 130%, for a sunny room: over 100% the backlight stays at full and the night light lifts the dark and middle tones of the picture with a gamma curve (out = in^(1/g), g from 1 at 100% to 1.6 at 130%: a middle grey of 50% shows as 65%, black stays black and white stays white). It is applied together with the night light's color temperature, in the same gamma tables, as only one program can hold those of a screen; so it needs `tilewin-nightlight` running (tileWin starts it) and a screen with gamma tables, and while the night light is not running the sliders end at 100%. The quick settings slider shows a mark at 100%, draws the part past it in amber (theme key `flyout.boost`) and shows the percentage beside it; so does the brightness popup, and the Screen page of the settings has a mark at 100% and turns the filled part amber over it. The brightness keys (and the scroll wheel on the brightness icon) stop at 100% on the way up, so the boost never comes by accident, but once the slider or `tilewin-media brightness 120` put it there they move within it and back down. The boost is kept in `~/.local/state/tileWin/brightness-boost` (100 to 130) and comes back at the next login; `tilewin-nightlight boost` prints it and `tilewin-nightlight boost 115` sets it. The slider of the battery flyout ends at 100% and sets the boost back to none. The popup can also be shown on its own with `tilewinmsg panel osd volume|brightness <percent>`, `panel osd mic <muted>` or `panel osd media`.
 
 ## Keyboard shortcuts
 
@@ -94,7 +99,7 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 
 ## Quick settings
 
-`Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness, the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
+`Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness (on to 130%, past a mark at 100%, see [Brightness over 100%](#brightness-over-100)), the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
 
 Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
 
@@ -202,7 +207,7 @@ Each built kernel can be **added to the boot menu**, **loaded** (started straigh
 
 ## Night light
 
-`tilewin-nightlight` makes the screen colors warmer, like the night light of Windows. tileWin starts it; it does nothing while the night light is off. Turn it on with the Screen page of the settings, the quick settings or `tilewin-nightlight on|off|toggle`.
+`tilewin-nightlight` makes the screen colors warmer, like the night light of Windows. tileWin starts it; it does nothing while the night light is off. Turn it on with the Screen page of the settings, the quick settings or `tilewin-nightlight on|off|toggle`. It also makes the brightness over 100% (see [Brightness over 100%](#brightness-over-100)), with `tilewin-nightlight boost [100-130]`.
 
 `~/.config/tileWin/nightlight.conf`:
 
@@ -213,7 +218,7 @@ from 21:00
 to 07:00
 ```
 
-Turning it off by hand lasts until the next start time of the schedule. Night light needs a screen with gamma tables (most real screens; not nested or virtual ones) and no other program such as gammastep or wlsunset controlling them.
+Turning it off by hand lasts until the next start time of the schedule. Night light needs a screen with gamma tables (most real screens; not nested or virtual ones) and no other program such as gammastep or wlsunset controlling them. Whether it is on is kept in `~/.local/state/tileWin/nightlight`, the brightness over 100% in `~/.local/state/tileWin/brightness-boost`; it watches both files and `nightlight.conf`.
 
 ## Settings app
 

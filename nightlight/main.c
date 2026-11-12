@@ -6,6 +6,7 @@
  *                                      (tileWin starts it)
  *   tilewin-nightlight on|off|toggle   turns the night light on or off now
  *   tilewin-nightlight status          prints "on" or "off"
+ *   tilewin-nightlight boost [100-130] sets or prints the brightness over 100 %
  *
  * ~/.config/tileWin/nightlight.conf:
  *   temperature 3400    color temperature while on, 1900 (warm) to 6500 K
@@ -17,6 +18,11 @@
  * The schedule writes it at the start and end times, so turning the night
  * light off by hand lasts until the next start time. Both files are watched,
  * so the settings app and the quick settings only write them.
+ *
+ * Brightness over 100 % (the backlight is at full then) is a gamma curve that
+ * lifts the dark and middle tones, in the same tables as the temperature: only
+ * one program can hold the gamma tables of a screen. Its strength, 100 to 130,
+ * is kept in ~/.local/state/tileWin/brightness-boost and watched too.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -33,6 +39,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include "tw_brightness.h"
 #include "tw_paths.h"
 #include "wlr-gamma-control-unstable-v1-client-protocol.h"
 
@@ -69,6 +76,7 @@ static struct {
 	struct timespec fade_start;
 	int fade_ms;
 	bool fading;
+	int boost; // brightness over 100 %, 100 for none
 	char *config_path, *state_path;
 } nl;
 
@@ -182,12 +190,7 @@ static void set_ramps(struct output *out) {
 	}
 	double rgb[3];
 	temperature_rgb(nl.temperature, rgb);
-	for (int c = 0; c < 3; c++) {
-		for (uint32_t i = 0; i < out->size; i++) {
-			double v = out->size > 1 ? (double)i / (out->size - 1) : 1;
-			table[c * out->size + i] = (uint16_t)round(v * rgb[c] * 65535.0);
-		}
-	}
+	tw_gamma_ramp(table, out->size, rgb, nl.boost);
 	munmap(table, bytes);
 	zwlr_gamma_control_v1_set_gamma(out->gamma, fd);
 	close(fd);
@@ -217,7 +220,7 @@ static const struct zwlr_gamma_control_v1_listener gamma_listener = {
 };
 
 static void apply(void) {
-	bool neutral = !nl.fading && nl.temperature >= TEMP_NEUTRAL - 0.5;
+	bool neutral = !nl.fading && nl.temperature >= TEMP_NEUTRAL - 0.5 && nl.boost <= 100;
 	struct output *out;
 	wl_list_for_each(out, &nl.outputs, link) {
 		if (neutral) {
@@ -285,6 +288,13 @@ static void reload(bool first) {
 	nl.inside = inside;
 	nl.on = read_state();
 	set_target();
+	int boost = tw_boost_read();
+	if (boost != nl.boost) {
+		nl.boost = boost;
+		if (!nl.fading) {
+			apply(); // follows the slider at once
+		}
+	}
 }
 
 /* ---------- wayland ---------- */
@@ -349,6 +359,7 @@ static int run(void) {
 	}
 	wl_list_init(&nl.outputs);
 	nl.temperature = TEMP_NEUTRAL;
+	nl.boost = 100;
 	struct wl_registry *registry = wl_display_get_registry(nl.display);
 	wl_registry_add_listener(registry, &registry_listener, NULL);
 	wl_display_roundtrip(nl.display);
@@ -400,7 +411,8 @@ static int run(void) {
 				for (char *p = buf; p < buf + len;) {
 					struct inotify_event *ev = (struct inotify_event *)p;
 					if (ev->len && (strcmp(ev->name, "nightlight.conf") == 0 ||
-							strcmp(ev->name, "nightlight") == 0)) {
+							strcmp(ev->name, "nightlight") == 0 ||
+							strcmp(ev->name, "brightness-boost") == 0)) {
 						changed = true;
 					}
 					p += sizeof(*ev) + ev->len;
@@ -439,9 +451,22 @@ int main(int argc, char **argv) {
 		write_state(!read_state());
 	} else if (strcmp(cmd, "status") == 0) {
 		printf("%s\n", read_state() ? "on" : "off");
+	} else if (strcmp(cmd, "boost") == 0) {
+		if (argc < 3) {
+			printf("%d\n", tw_boost_available() ? tw_boost_read() : 100);
+			return 0;
+		}
+		int boost = atoi(argv[2]);
+		if (boost > 100 && !tw_boost_available()) {
+			fprintf(stderr, "tilewin-nightlight: it does not run, so the brightness "
+				"can't go over 100 %%\n");
+			return 1;
+		}
+		tw_boost_write(boost);
 	} else {
-		fprintf(stderr, "Usage: tilewin-nightlight [on|off|toggle|status]\n"
-			"Without an argument it keeps the screen colors (tileWin starts it).\n");
+		fprintf(stderr, "Usage: tilewin-nightlight [on|off|toggle|status|boost [100-%d]]\n"
+			"Without an argument it keeps the screen colors (tileWin starts it).\n",
+			TW_BOOST_MAX);
 		return strcmp(cmd, "-h") == 0 || strcmp(cmd, "--help") == 0 ? 0 : 1;
 	}
 	return 0;

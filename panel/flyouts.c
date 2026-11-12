@@ -20,6 +20,7 @@
 #include "textfield.h"
 #include "tw_battery.h"
 #include "stringop.h"
+#include "tw_brightness.h"
 #include "wifi_caps.h"
 
 /*
@@ -276,16 +277,32 @@ void fly_draw_bar(cairo_t *cr, const struct fly_style *st, double x, double y, d
 }
 
 int slider_value(struct pbox b, double x) {
-	double v = (x - b.x - 10) * 100.0 / (b.width - 20);
-	return v < 0 ? 0 : v > 100 ? 100 : (int)(v + 0.5);
+	return slider_value_max(b, x, 100);
+}
+
+int slider_value_max(struct pbox b, double x, int max) {
+	double v = (x - b.x - 10) * max / (b.width - 20);
+	return v < 0 ? 0 : v > max ? max : (int)(v + 0.5);
 }
 
 void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int value) {
+	draw_slider_max(cr, st, b, value, 100, 0);
+}
+
+void draw_slider_max(cairo_t *cr, const struct fly_style *st, struct pbox b, int value,
+		int max, uint32_t over) {
 	double x = b.x + 10, w = b.width - 20, cy = b.y + b.height / 2.0;
-	value = value < 0 ? 0 : value > 100 ? 100 : value;
-	double kx = x + w * value / 100.0;
+	max = max < 100 ? 100 : max;
+	value = value < 0 ? 0 : value > max ? max : value;
+	double kx = x + w * value / max;
+	double mx = x + w * 100 / max; // the mark at 100
+	bool beyond = max > 100;
 	if (st->style == PS_CLASSIC) {
 		pd_bevel(cr, x, cy - 2, w, 4, true);
+		if (beyond) {
+			pd_rect(cr, mx, cy - 1, x + w - mx - 1, 2, over);
+			pd_rect(cr, mx, cy + 7, 1, 5, 0x000000ff);
+		}
 		pd_rect(cr, kx - 5, cy - 10, 11, 20, 0xc0c0c0ff);
 		pd_bevel(cr, kx - 5, cy - 10, 11, 20, false);
 		return;
@@ -294,18 +311,35 @@ void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int val
 	pd_rounded(cr, x, cy - 2, w, 4, 2);
 	pd_color(cr, st->track);
 	cairo_fill(cr);
+	if (beyond) {
+		// the part over 100 is tinted even when the value is below it
+		cairo_new_path(cr);
+		pd_rounded(cr, mx, cy - 2, x + w - mx, 4, 2);
+		pd_color(cr, (over & 0xffffff00) | 0x55);
+		cairo_fill(cr);
+	}
 	if (kx > x + 2) {
 		cairo_new_path(cr);
-		pd_rounded(cr, x, cy - 2, kx - x, 4, 2);
+		pd_rounded(cr, x, cy - 2, (beyond && kx > mx ? mx : kx) - x, 4, 2);
 		pd_color(cr, st->accent);
 		cairo_fill(cr);
 	}
+	if (beyond && kx > mx) {
+		cairo_new_path(cr);
+		pd_rounded(cr, mx - 2, cy - 2, kx - mx + 2, 4, 2);
+		pd_color(cr, over);
+		cairo_fill(cr);
+	}
+	if (beyond) {
+		pd_rect(cr, round(mx) - 1, cy - 7, 2, 14, (st->fg & 0xffffff00) | 0x90);
+	}
+	uint32_t dot = beyond && value > 100 ? over : st->accent;
 	cairo_new_path(cr);
 	if (st->style == PS_LUNA || st->style == PS_AERO) {
 		pd_rounded(cr, kx - 5.5, cy - 9.5, 11, 19, 3);
 		pd_color(cr, 0xf4f4f4ff);
 		cairo_fill_preserve(cr);
-		pd_color(cr, 0x00000066);
+		pd_color(cr, beyond && value > 100 ? over : 0x00000066);
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
 	} else {
@@ -317,7 +351,7 @@ void draw_slider(cairo_t *cr, const struct fly_style *st, struct pbox b, int val
 		cairo_stroke(cr);
 		cairo_new_path(cr);
 		cairo_arc(cr, kx, cy, 5, 0, 2 * M_PI);
-		pd_color(cr, st->accent);
+		pd_color(cr, dot);
 		cairo_fill(cr);
 	}
 }
@@ -2613,6 +2647,7 @@ static void power_apply_drag(struct power_flyout *f, bool now) {
 	}
 	f->drag_dirty = false;
 	int value = f->drag_value < 1 ? 1 : f->drag_value; // never switch the screen off
+	tw_boost_write(100); // this slider ends at 100, without the gamma boost
 	char cmd[64];
 	snprintf(cmd, sizeof(cmd), "brightnessctl -q set %d%%", value);
 	proc_spawn(cmd);
