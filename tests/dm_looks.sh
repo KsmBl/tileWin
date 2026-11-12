@@ -5,6 +5,7 @@
 #  - some things only that Windows had are where they belong: the blue bands of
 #    XP and its orange line, the grey dialog of Windows 95 on its teal, the white
 #    dialog of Windows 3, the red power button of Windows 7;
+#  - the users of XP are in the middle of the screen, one of them or more;
 #  - card_style plain turns it all into a card, on any theme.
 #
 # usage: dm_looks.sh <build dir> <source dir>
@@ -105,6 +106,48 @@ if card.getpixel((640, 20)) == xp.getpixel((640, 20)):
     print('FAIL: card_style plain on Windows XP still has its bands')
     sys.exit(1)
 PY
+
+# Windows XP: the users are in the middle of the screen, right of the line, how many
+# they are; the users come from a passwd of our own, put over /etc/passwd where a
+# namespace of our own lets us
+if unshare -rm true 2>/dev/null; then
+	printf 'show_users yes\nmin_uid 1000\nmax_uid 60000\nclock none\n' > "$work/users.conf"
+	for n in 1 2 4; do
+		: > "$work/passwd$n"
+		for i in $(seq 1 $n); do
+			echo "user$i:x:$((1000 + i)):1000:User $i:/nonexistent:/bin/sh" >> "$work/passwd$n"
+		done
+		echo winxp > "$work/config/tileWin/current-theme"
+		unshare -rm sh -c 'mount --bind "$1" /etc/passwd && exec "$2" --render "$3" --size 1280x720 --config "$4"' \
+			sh "$work/passwd$n" "$greeter" "$work/xpusers$n.tmp" "$work/users.conf" ||
+			fail "Windows XP with $n users gave no picture"
+	done
+	python3 -I - "$work" <<'PY' || failures=$((failures + 1))
+import sys
+from PIL import Image
+bad = 0
+for n in (1, 2, 4):
+    picture = Image.open('%s/xpusers%d.tmp' % (sys.argv[1], n)).convert('RGB')
+    # the frames of the pictures of the users, at their left edge: white, or orange
+    # for the chosen one; with a user and "Another user" under it, the tiles reach
+    # as far above the first frame as below the last
+    rows = [y for y in range(picture.height) if (lambda p: p[0] >= 200 and p[1] >= 180)(picture.getpixel((677, y)))]
+    tiles = n + 1
+    if not rows:
+        print('FAIL: Windows XP with %d users shows no users' % n)
+        bad += 1
+        continue
+    frames = 1 + sum(1 for a, b in zip(rows, rows[1:]) if b - a > 1)
+    middle = (rows[0] + rows[-1]) / 2
+    if frames != tiles or abs(middle - picture.height / 2) > 3:
+        print('FAIL: Windows XP with %d users: %d tiles from %d to %d, not in the middle'
+              % (n, frames, rows[0], rows[-1]))
+        bad += 1
+sys.exit(1 if bad else 0)
+PY
+else
+	echo "no namespace of our own for a passwd: the users of XP are not checked"
+fi
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

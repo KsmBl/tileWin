@@ -443,6 +443,14 @@ static void xp_band(cairo_t *cr, double y, double h, double r, double gr, double
 	cairo_fill(cr);
 }
 
+/* how tall the tile of user i is: the chosen one is taller, for its password */
+static double xp_tile_h(int i) {
+	if (i == g.user_sel || g.user_count == 0) {
+		return typing_name() ? 138 : 104;
+	}
+	return 70;
+}
+
 static void draw_xp(struct output *o, cairo_t *cr, double W, double H) {
 	bool dark = g.theme && g.theme->dark;
 	const char *wallpaper = dm_config_str(g.config, "wallpaper");
@@ -499,12 +507,29 @@ static void draw_xp(struct output *o, cairo_t *cr, double W, double H) {
 	const char *help = g.stage == STAGE_DONE ? "Welcome" : "To begin, click your user name";
 	text_on_wallpaper(cr, "Tahoma, Noto Sans, Sans 13", help, 0, H * 0.36 + 62, lw, 28, RIGHT);
 
-	// right of it, a tile for each user
-	double x = W / 2 + 28, w = W / 2 - 60 < 380 ? W / 2 - 60 : 380, y = mid_y + 34;
+	// right of it, a tile for each user: the list has its middle at the middle of the
+	// screen, as on XP; when it is taller than the room between the bands, it starts
+	// under the upper band and goes as far down as needed for the chosen one to show
+	double x = W / 2 + 28, w = W / 2 - 60 < 380 ? W / 2 - 60 : 380;
 	int total = g.user_count > 0 ? g.user_count + 1 : 1;
-	for (int i = 0; i < total && y < H - band - 74; i++) {
+	double gap = 8, top = mid_y + 34, bottom = H - band - 4, list_h = -gap, sel_end = 0;
+	for (int i = 0; i < total; i++) {
+		list_h += xp_tile_h(i) + gap;
+		if (i == g.user_sel) {
+			sel_end = list_h;
+		}
+	}
+	double y = H / 2 - list_h / 2;
+	int first = 0;
+	if (y < top) {
+		y = top;
+		for (double skipped = 0; first < total - 1 && y + sel_end - skipped > bottom; first++) {
+			skipped += xp_tile_h(first) + gap;
+		}
+	}
+	for (int i = first; i < total && y + xp_tile_h(i) <= bottom; i++) {
 		bool sel = i == g.user_sel || g.user_count == 0;
-		double th = sel ? (typing_name() ? 138 : 104) : 70;
+		double th = xp_tile_h(i);
 		if (sel) {
 			cairo_pattern_t *p = cairo_pattern_create_linear(x, 0, x + w, 0);
 			cairo_pattern_add_color_stop_rgba(p, 0, 0, 0.14, 0.5, 0.85);
@@ -545,7 +570,7 @@ static void draw_xp(struct output *o, cairo_t *cr, double W, double H) {
 				text_on_wallpaper(cr, g.font, status_line(), fx, fy, w - pic - 30, 20, LEFT);
 			}
 		}
-		y += th + 8;
+		y += th + gap;
 	}
 
 	// below, the way out on the left and what else there is on the right
