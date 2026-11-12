@@ -185,6 +185,18 @@ test(
 )
 
 test(
+	'battery-history',
+	executable(
+		'test-battery-history',
+		'test_battery_history.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, pango, pangocairo, rsvg, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'widgets',
 	executable(
 		'test-widgets',
@@ -1166,6 +1178,16 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	depends: [pointer_tool],
+	suite: 'gui',
+	is_parallel: false,
+	timeout: 120,
+)
+
+test(
+	'battery-chart',
+	find_program('battery_chart.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
 	suite: 'gui',
 	is_parallel: false,
 	timeout: 120,

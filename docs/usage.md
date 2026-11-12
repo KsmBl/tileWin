@@ -52,6 +52,10 @@ The Theme page turns dark mode on and off by the clock (`dark_schedule 21:00 07:
 
 On battery at 10% a notification says the battery is low, and at 5% an urgent one says it is almost empty, which also comes through do not disturb. This does not depend on the battery saver or keep awake. Being plugged in starts it over. The Battery saver group of the Screen page sets the level (`battery_warning 10`, half of it is the urgent one, `battery_warning off` for never).
 
+## Battery history
+
+The battery flyout (`panel power`, the battery icon of the taskbar) shows a chart of the charge over the last 24 hours, with the time it charged in green. The taskbar takes the charge down every five minutes and whenever it changes, in `~/.local/state/tileWin/battery-history`, which keeps the last two days, so the chart goes on after a restart. Nothing is taken down while the computer is off, asleep or hibernating: such a time is a straight line from the last reading before it to the first after it. Without a battery there is no chart.
+
 ## Screens at 125% or 150%
 
 The taskbar, its menus and flyouts, the desktop icons and the notifications ask the compositor for the real scale of the screen (`fractional-scale-v1`) and draw for exactly the pixels they cover, so text and lines stay sharp on a screen with `scale 1.5`. Where the protocol is missing they draw at the next whole scale, which is shrunk to fit.

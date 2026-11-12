@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "draw.h"
+#include "tw_battery.h"
 #include "flyout.h"
 #include "popup.h"
 #include "tw_paths.h"
@@ -90,22 +91,23 @@ static bool read_file(const char *path, char *buf, size_t size) {
 
 static void read_sysfs(struct qs *q) {
 	q->battery = false;
-	DIR *dir = opendir("/sys/class/power_supply");
+	const char *root = tw_power_supply_dir();
+	DIR *dir = opendir(root);
 	struct dirent *de;
 	while (dir && (de = readdir(dir))) {
 		char path[512], buf[64];
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/type", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/type", root, de->d_name);
 		if (de->d_name[0] == '.' || !read_file(path, buf, sizeof(buf)) ||
 				strcmp(buf, "Battery") != 0) {
 			continue;
 		}
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/capacity", root, de->d_name);
 		if (!read_file(path, buf, sizeof(buf))) {
 			continue;
 		}
 		q->battery = true;
 		q->capacity = atoi(buf);
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/status", root, de->d_name);
 		q->charging = read_file(path, buf, sizeof(buf)) && strcmp(buf, "Charging") == 0;
 		break;
 	}

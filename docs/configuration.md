@@ -303,7 +303,7 @@ Keys for the widgets on the desktop:
 Keys for the flyouts of the taskbar widgets (CPU, memory, network, volume, battery, Bluetooth, clock, quick settings, notifications and the others):
 - `flyout { bg; fg; disabled_fg; border; radius; field_bg; field_fg; font }` color the box; without them it takes the `menu { }` colors. `bg_gradient` fills it with a gradient instead.
 - `flyout { frame_width 4; frame <color>; frame_gradient "..."; frame_gloss "..."; inner_border <color> }` draws a frame around the content: the Luna blue of Windows XP, the glass of Windows 7.
-- `flyout { accent; link; bar }` color switches and buttons, the links at the bottom and the filled part of usage bars; `chart_bg; chart_grid; chart_line; chart_radius` the charts of the last minute (green on black, as the Task Manager drew them, in the 95 and XP themes). On Windows 95 the charts are sunken and the bars filled with blocks.
+- `flyout { accent; link; bar }` color switches and buttons, the links at the bottom and the filled part of usage bars; `chart_bg; chart_grid; chart_line; chart_radius` the charts of the last minute (green on black, as the Task Manager drew them, in the 95 and XP themes); `chart_charging` the times the battery charged on the chart of the battery flyout (green, yellow where the line is green already). On Windows 95 the charts are sunken and the bars filled with blocks.
 - Every built-in theme sets them to match its taskbar and Start menu: the dark panes of Windows 8 and 10, glass on 7, the Luna frame on XP, the raised grey box on 95. Put them in the `dark { }` block for the dark scheme.
 
 Keys for a whole theme:

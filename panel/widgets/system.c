@@ -11,6 +11,7 @@
 #include <sys/statvfs.h>
 #include <unistd.h>
 #include "draw.h"
+#include "tw_battery.h"
 #include "panel.h"
 #include "stringop.h"
 #include "tw_disks.h"
@@ -1384,7 +1385,8 @@ static void battery_update(struct widget *w) {
 	struct battery_state *s = ((struct poll_data *)w->data)->state;
 	const char *device = widget_conf(w, "device", NULL);
 	s->present = false;
-	DIR *dir = opendir("/sys/class/power_supply");
+	const char *root = tw_power_supply_dir();
+	DIR *dir = opendir(root);
 	if (!dir) {
 		return;
 	}
@@ -1394,11 +1396,11 @@ static void battery_update(struct widget *w) {
 			continue;
 		}
 		char path[512], buf[64];
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/type", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/type", root, de->d_name);
 		if (!read_file(path, buf, sizeof(buf)) || strcmp(buf, "Battery") != 0) {
 			continue;
 		}
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/capacity", root, de->d_name);
 		if (!read_file(path, buf, sizeof(buf))) {
 			// batteries of wireless mice and keyboards report no percentage;
 			// keep looking, the battery of the computer comes later
@@ -1406,7 +1408,7 @@ static void battery_update(struct widget *w) {
 		}
 		s->capacity = atoi(buf);
 		s->present = true;
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", de->d_name);
+		snprintf(path, sizeof(path), "%s/%s/status", root, de->d_name);
 		if (!read_file(path, s->status, sizeof(s->status))) {
 			s->status[0] = '\0';
 		}

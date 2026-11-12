@@ -397,6 +397,7 @@ int main(int argc, char **argv) {
 	appsound_init(&panel);
 	bt_init(&panel);
 	scheduler_init(&panel);
+	battery_history_init(&panel);
 	clipboard_init(&panel);
 	welcome_new_user(&panel);
 
@@ -429,6 +430,7 @@ int main(int argc, char **argv) {
 	thumbnails_fini(&panel);
 	notes_fini(); // what was typed last is written before the taskbar goes
 	scheduler_fini();
+	battery_history_fini();
 	bt_fini();
 	notify_fini(&panel);
 	panel_wayland_fini(&panel);

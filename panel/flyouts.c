@@ -18,6 +18,7 @@
 #include "flyout.h"
 #include "popup.h"
 #include "textfield.h"
+#include "tw_battery.h"
 #include "stringop.h"
 #include "wifi_caps.h"
 
@@ -2352,6 +2353,8 @@ void flyout_volume_toggle(struct panel *panel, struct popup_anchor anchor, const
 /* ================= battery and power ================= */
 
 #define POWER_HEADER 84
+#define POWER_CHART 146 // the title row, the chart of the last day and its labels
+#define POWER_CHART_HEIGHT 88
 #define POWER_BRIGHTNESS 56
 #define POWER_MODES 80
 #define POWER_AWAKE 58
@@ -2397,13 +2400,75 @@ static void format_minutes(char *out, size_t size, long minutes, const char *suf
 	}
 }
 
+/*
+ * The history of the battery for the chart of the flyout: for the whole
+ * session, a reading every minute, taken down every five or when it changed
+ * (tw_battery.h), in a file of the state folder, so a restarted taskbar and the
+ * next session go on from it. TILEWIN_BATTERY_POLL_MS reads more often, for
+ * the tests.
+ */
+static struct {
+	struct panel *panel;
+	struct loop_timer *timer;
+	struct tw_battery_history history;
+	char *path;
+} bat_rec;
+
+/* Reads the battery and takes it down when due (always with force). */
+static bool bat_rec_take(bool force) {
+	int percent;
+	bool charging;
+	if (!tw_battery_read(tw_power_supply_dir(), &percent, &charging)) {
+		return false;
+	}
+	long long now = (long long)time(NULL);
+	if (tw_battery_history_record(&bat_rec.history, now, percent, charging,
+			force ? 0 : TW_BATTERY_INTERVAL)) {
+		tw_battery_history_prune(&bat_rec.history, now, TW_BATTERY_KEEP);
+		tw_battery_history_save(&bat_rec.history, bat_rec.path);
+	}
+	return true;
+}
+
+static void bat_rec_tick(void *data) {
+	bat_rec.timer = NULL;
+	bool battery = bat_rec_take(false);
+	const char *poll = getenv("TILEWIN_BATTERY_POLL_MS");
+	int ms = poll && atoi(poll) > 0 ? atoi(poll) : battery ? 60000 : 600000;
+	bat_rec.timer = loop_add_timer_lazy(bat_rec.panel->loop, ms < 1000 ? 1000 : ms,
+		bat_rec_tick, NULL);
+}
+
+void battery_history_init(struct panel *panel) {
+	bat_rec.panel = panel;
+	bat_rec.path = tw_battery_history_path();
+	tw_battery_history_load(&bat_rec.history, bat_rec.path);
+	bat_rec_tick(NULL);
+}
+
+void battery_history_fini(void) {
+	if (!bat_rec.panel) {
+		return;
+	}
+	if (bat_rec.timer) {
+		loop_remove_timer(bat_rec.panel->loop, bat_rec.timer);
+		bat_rec.timer = NULL;
+	}
+	bat_rec_take(true); // the line ends where the session did
+	tw_battery_history_free(&bat_rec.history);
+	free(bat_rec.path);
+	bat_rec.path = NULL;
+	bat_rec.panel = NULL;
+}
+
 static void power_read(struct power_flyout *f) {
 	f->battery = false;
-	DIR *dir = opendir("/sys/class/power_supply");
+	const char *root = tw_power_supply_dir();
+	DIR *dir = opendir(root);
 	struct dirent *de;
 	while (dir && (de = readdir(dir))) {
 		char base[300], path[512], buf[64];
-		snprintf(base, sizeof(base), "/sys/class/power_supply/%s", de->d_name);
+		snprintf(base, sizeof(base), "%s/%s", root, de->d_name);
 		snprintf(path, sizeof(path), "%s/type", base);
 		if (de->d_name[0] == '.' || !read_sys(path, buf, sizeof(buf)) ||
 				strcmp(buf, "Battery") != 0) {
@@ -2464,6 +2529,9 @@ static void power_read(struct power_flyout *f) {
 
 static int power_height(struct power_flyout *f) {
 	int h = POWER_HEADER;
+	if (f->battery) {
+		h += POWER_CHART;
+	}
 	if (f->backlight) {
 		h += POWER_BRIGHTNESS;
 	}
@@ -2554,6 +2622,98 @@ static void power_apply_drag(struct power_flyout *f, bool now) {
 	}
 }
 
+static void chart_axis_percent(char *out, size_t size, double v) {
+	snprintf(out, size, "%.0f%%", v);
+}
+
+/*
+ * The charge of the last 24 hours, now at the right edge, in the look of the
+ * other charts of the flyouts; charging in green (theme key
+ * flyout.chart_charging). A time the machine was off or
+ * asleep is a straight line from before it to after it.
+ */
+static void power_render_chart(struct power_flyout *f, cairo_t *cr, const struct fly_style *st,
+		int x0, int y, int cw) {
+	// now in steps of five minutes, about a pixel: the chart stays the same when
+	// the flyout is drawn again for something else
+	long long now = (long long)time(NULL);
+	now -= now % TW_BATTERY_INTERVAL;
+	struct tw_battery_sample current = { now, f->capacity, f->charging };
+	int count = 0;
+	struct tw_battery_point *points = tw_battery_history_points(&bat_rec.history, now,
+		TW_BATTERY_SPAN, &current, &count);
+	// green, or yellow on a chart whose line is green already (Windows 95)
+	uint32_t line = st->chart_line;
+	int r = line >> 24 & 0xff, g_ = line >> 16 & 0xff, b = line >> 8 & 0xff;
+	uint32_t green = g_ > r + 40 && g_ > b + 40 ? 0xffd700ff : st->dark ? 0x6ccb5fff : 0x107c10ff;
+	green = tw_theme_color(f->base.panel->theme, "flyout.chart_charging", green);
+	bool any_charging = false;
+	for (int i = 0; i + 1 < count; i++) {
+		any_charging |= points[i].charging;
+	}
+
+	pd_text(cr, st->font, "Last 24 hours", x0, y + 6, cw, 22, st->dim, PD_LEFT);
+	if (any_charging) {
+		// a key for the green
+		int tw = 0;
+		pd_text_size(cr, st->font, "Charging", &tw, NULL);
+		pd_text(cr, st->font, "Charging", x0 + cw - tw, y + 6, tw, 22, st->dim, PD_LEFT);
+		pd_rect(cr, x0 + cw - tw - 14, y + 16, 10, 3, green);
+	}
+
+	struct pbox g = { x0, y + 32, cw, POWER_CHART_HEIGHT };
+	fly_draw_chart_bg(cr, st, g);
+	// a mark every six hours
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x + g.width * i / 4, g.y, 1, g.height, st->chart_grid);
+	}
+	pd_chart_axis(cr, st->font, g.x, g.y, g.width, g.height, 100, chart_axis_percent,
+		(st->fg & 0xffffff00) | 0x30, st->dim);
+#define PX(i) (g.x + g.width * points[i].x)
+#define PY(i) (g.y + g.height - g.height * points[i].y)
+	if (count == 1) {
+		cairo_new_path(cr);
+		cairo_arc(cr, PX(0) - 2, PY(0), 2.5, 0, 2 * M_PI);
+		pd_color(cr, points[0].charging ? green : st->chart_line);
+		cairo_fill(cr);
+	} else if (count > 1) {
+		cairo_new_path(cr);
+		cairo_move_to(cr, PX(0), g.y + g.height);
+		for (int i = 0; i < count; i++) {
+			cairo_line_to(cr, PX(i), PY(i));
+		}
+		cairo_line_to(cr, PX(count - 1), g.y + g.height);
+		cairo_close_path(cr);
+		pd_color(cr, (st->chart_line & 0xffffff00) | 0x40);
+		cairo_fill(cr);
+		// the line in runs of the same color, so their corners join
+		cairo_set_line_width(cr, 1.5);
+		cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+		int run = 0;
+		for (int i = 1; i < count; i++) {
+			if (i + 1 < count && points[i].charging == points[run].charging) {
+				continue;
+			}
+			cairo_new_path(cr);
+			cairo_move_to(cr, PX(run), PY(run));
+			for (int k = run + 1; k <= i; k++) {
+				cairo_line_to(cr, PX(k), PY(k));
+			}
+			pd_color(cr, points[run].charging ? green : st->chart_line);
+			cairo_stroke(cr);
+			run = i;
+		}
+	}
+#undef PX
+#undef PY
+	free(points);
+	int ly = g.y + g.height + 2;
+	pd_text(cr, st->font, "24 hours ago", g.x, ly, g.width / 3, 22, st->dim, PD_LEFT);
+	pd_text(cr, st->font, "12 h", g.x + g.width / 3, ly, g.width / 3, 22, st->dim, PD_CENTER);
+	pd_text(cr, st->font, "Now", g.x + 2 * g.width / 3, ly, g.width - 2 * g.width / 3, 22,
+		st->dim, PD_RIGHT);
+}
+
 static void power_render(struct popup *p, cairo_t *cr) {
 	struct power_flyout *f = p->data;
 	struct fly_style st;
@@ -2577,6 +2737,12 @@ static void power_render(struct popup *p, cairo_t *cr) {
 			st.dim, PD_LEFT);
 	}
 	y += POWER_HEADER;
+
+	if (f->battery) {
+		draw_line(cr, &st, p, y);
+		power_render_chart(f, cr, &st, x0, y, cw);
+		y += POWER_CHART;
+	}
 
 	if (f->backlight) {
 		draw_line(cr, &st, p, y);
