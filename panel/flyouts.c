@@ -1483,9 +1483,15 @@ static void net_render(struct popup *p, cairo_t *cr) {
 				fill_hover(cr, &st, row);
 			}
 			ti_network(p->panel, cr, x0, y + 14, 20, signal_bars(n->signal), true, true, st.fg);
+			// the network connected to has Disconnect on its row, without opening
+			// it first; its band goes in the line under its name then
+			bool busy = f->connecting && strcmp(f->connecting, n->ssid) == 0;
+			bool row_disconnect = n->active && !expanded && !busy && f->wifi_device;
 			// the band on the right, and the most it goes with this PC under it
 			int tag = 0;
-			if (n->bands) {
+			if (row_disconnect) {
+				tag = 108;
+			} else if (n->bands) {
 				char band[48], rate[48];
 				net_band_text(n, band, sizeof(band));
 				tag = 118;
@@ -1509,10 +1515,23 @@ static void net_render(struct popup *p, cairo_t *cr) {
 				snprintf(sub, sizeof(sub), "%s%s%s", n->active ? "Connected, " : "",
 					secured ? "secured" : "open", n->known && !n->active ? ", saved" : "");
 				sub[0] = toupper((unsigned char)sub[0]);
+				if (row_disconnect && n->bands) {
+					// short, beside the button
+					char band[48];
+					net_band_text(n, band, sizeof(band));
+					snprintf(sub, sizeof(sub), "Connected \u00b7 %s", band);
+				}
 			}
 			pd_text(cr, st.font, sub, x0 + 34, y + 25, cw - 34 - tag, 18, st.dim, PD_LEFT);
 			psurface_add_hotspot(p->surface, row.x, row.y, row.width, NET_ROW, NULL,
 				NET_HS_ROW, i, NULL);
+			if (row_disconnect) {
+				// added after the row, so it is the one a click on it finds
+				struct pbox button = { x0 + cw - 104, y + 9, 104, 30 };
+				draw_button(cr, &st, button, "Disconnect", false, hovered(&f->base, button));
+				psurface_add_hotspot(p->surface, button.x, button.y, button.width,
+					button.height, NULL, NET_HS_DISCONNECT, i, NULL);
+			}
 			if (expanded) {
 				int by = y + NET_ROW + 2, bh = 30;
 				if (f->asking_password) {

@@ -11,6 +11,8 @@
 #    down opens the field again, the connection nmcli saved with it goes, and
 #    the one typed then connects; a saved network whose password is wrong asks
 #    for a new one and keeps it in the connection;
+#  - network: the network connected to has Disconnect on its row, which
+#    disconnects without the row being opened;
 #  - power: Tab and Enter reach the Keep awake switch.
 # Nothing shows until a key is used: no ring on a flyout just opened.
 #
@@ -51,7 +53,8 @@ cp "$source_dir/config/taskbar.conf" "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
 
 # Testnet takes the password "right pw2"; a wrong one is turned down the way
 # NetworkManager does it, and the connection made for it is kept, as nmcli does.
-# With $work/known there is a saved connection for it, whose password is wrong.
+# With $work/known there is a saved connection for it, whose password is wrong;
+# with $work/active it is connected.
 denied='Error: Connection activation failed: (7) Secrets were required, but not provided.'
 cat > "$work/bin/nmcli" <<EOS
 #!/bin/sh
@@ -59,8 +62,10 @@ echo "\$*" >> "$work/nmcli.calls"
 case "\$*" in
 "radio wifi") echo enabled ;;
 "-t -f WIFI radio") echo enabled ;;
-"-t -f DEVICE,TYPE,STATE,CONNECTION device") echo 'wlan0:wifi:disconnected:' ;;
-*"device wifi list"*) printf ' :80:WPA2:Testnet:AA\\\\:BB\\\\:CC\\\\:DD\\\\:EE\\\\:FF:5180 MHz:540 Mbit/s:80 MHz\\n' ;;
+"-t -f DEVICE,TYPE,STATE,CONNECTION device")
+	if [ -f "$work/active" ]; then echo 'wlan0:wifi:connected:Testnet'; else echo 'wlan0:wifi:disconnected:'; fi ;;
+*"device wifi list"*) [ -f "$work/active" ] && printf '*' || printf ' '
+	printf ':80:WPA2:Testnet:AA\\\\:BB\\\\:CC\\\\:DD\\\\:EE\\\\:FF:5180 MHz:540 Mbit/s:80 MHz\\n' ;;
 "-t -f UUID,TYPE connection show") [ -f "$work/known" ] && echo 'cccc-3333:802-11-wireless' ;;
 "-g UUID connection show") cat "$work/saved" 2>/dev/null; [ -f "$work/known" ] && echo cccc-3333 ;;
 "-g 802-11-wireless.ssid connection show uuid "*) echo Testnet ;;
@@ -212,6 +217,20 @@ grep -q 'connection modify uuid cccc-3333 802-11-wireless-security.psk fresh pw3
 	fail "the new password of a saved network was not kept: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 [ "$(grep -c 'connection up uuid cccc-3333' "$work/nmcli.calls")" = 2 ] ||
 	fail "it did not connect again with the new password"
+"$keys" key none escape key none escape
+sleep 0.4
+
+# ---- network: Disconnect on the row of the network connected to
+ipc panel close >/dev/null 2>&1
+touch "$work/active"
+ipc panel network >/dev/null 2>&1 || true
+sleep 1.2
+: > "$work/nmcli.calls"
+# from the end: Refresh, then the Disconnect of the row
+"$keys" key none up key none up key none return
+sleep 1.0
+grep -q 'device disconnect wlan0' "$work/nmcli.calls" ||
+	fail "Disconnect on the row did not disconnect: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 "$keys" key none escape key none escape
 sleep 0.4
 
