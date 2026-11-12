@@ -392,6 +392,7 @@ int main(int argc, char **argv) {
 	tw_panel_start();
 	tw_nightlight_start();
 	tw_polkit_start();
+	tw_portal_start();
 	tw_xdg_autostart();
 	tw_session_restore();
 	run_deferred_commands();

@@ -231,6 +231,19 @@ snap_layouts {
 
 The numbers are where the line down and the line across go, 0.1 to 0.9 of the screen.
 
+## Login pages of Wi-Fi: portal.conf
+
+`~/.config/tileWin/portal.conf`, read by `tilewin-portal` each time a network comes up (the Network page sets `accept`):
+
+```
+accept yes                 # accept login pages by themselves (no: only say there is one)
+check_url http://nmcheck.gnome.org/check_network_status.txt
+check_text NetworkManager is online
+browser chromium           # for pages made by scripts: a name, a path, or none
+```
+
+The check URL has to be plain HTTP, as a network can only show its login page instead of a page that is not encrypted; a network answers it with a redirect or a page of its own while it wants a login. Without `browser` the first of Chromium, Chrome, Brave, Edge and Vivaldi found is used. Login pages often have certificates of their own, so theirs are not checked: nothing is sent to them but the forms of their own pages. `tilewin-portal check [name]` checks the network now, does what it would do and says so (exit status 0 online, 2 a page for you, 1 failed, 3 no network); `TILEWIN_PORTAL_DEBUG=1` makes the one tileWin starts say what it does.
+
 ## The DNS service: /etc/tileWin/dns.conf
 
 `tilewin-dnsd` (the systemd service `tilewin-dnsd.service`) answers on `127.0.0.153`. Turning it on (the switch on the DNS page, or `pkexec /usr/local/libexec/tilewin-dns-apply enable`) sends the DNS of the computer there, the way the computer does DNS:

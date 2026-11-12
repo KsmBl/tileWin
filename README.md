@@ -65,6 +65,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **A desktop** with icons, and widgets as clocks, charts and gauges.
 - **12 themes**, Windows 1 to Windows 11 and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
 - **Little helpers:** clipboard history, a snipping tool that also reads text, an emoji picker, sticky notes, screen savers, night light and a lock screen.
+- **Login pages of public Wi-Fi** accepted by themselves: the terms ticked, not the newsletter, and the right button pressed, also on pages made by scripts (with Chromium); a page that wants your email or room number opens for you instead.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
 - **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.

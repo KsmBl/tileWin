@@ -22,6 +22,7 @@ optdepends=(
 	'pavucontrol: the volume mixer'
 	'pipewire-pulse: a sound server for the volume widget'
 	'networkmanager: the network flyout and page'
+	'chromium: accepting login pages of public Wi-Fi made by scripts'
 	'playerctl: media keys and buttons'
 	'tesseract: copying text from the screen'
 	'tesseract-data-eng: the English language data for tesseract'

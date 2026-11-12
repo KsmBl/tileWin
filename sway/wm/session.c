@@ -139,6 +139,28 @@ void tw_nightlight_start(void) {
 }
 
 /*
+ * The login pages of public Wi-Fi (tilewin-portal): it watches NetworkManager
+ * for the whole session and goes when the compositor does. A second one
+ * started meanwhile gives up, as one holds a lock per session.
+ */
+void tw_portal_start(void) {
+	if (getenv("TILEWIN_DM_STATE") || !tw_in_path("tilewin-portal")) {
+		return;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {
+			execlp("tilewin-portal", "tilewin-portal", (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	} else if (pid > 0) {
+		waitpid(pid, NULL, 0);
+	}
+}
+
+/*
  * The password prompt of polkit (tilewin-polkit), unless the config turns it
  * off for another agent. Like the night light it is a client of ours: it
  * goes when the compositor does. Only one agent can have the session, so a
@@ -848,6 +870,7 @@ enum helper {
 	HELPER_NIGHTLIGHT = 1 << 0,
 	HELPER_POLKIT = 1 << 1,
 	HELPER_CLIPBOARD = 1 << 2, // the taskbar starts it again when it needs it
+	HELPER_PORTAL = 1 << 3,
 };
 
 static const struct {
@@ -857,6 +880,7 @@ static const struct {
 	{ "tilewin-nightlight", HELPER_NIGHTLIGHT },
 	{ "tilewin-polkit", HELPER_POLKIT },
 	{ "tilewin-clipboard", HELPER_CLIPBOARD },
+	{ "tilewin-portal", HELPER_PORTAL },
 };
 
 /* Whether that process runs for this session (its Wayland display is ours). */
@@ -929,7 +953,8 @@ static enum helper stop_replaced_helpers(void) {
 		if (helper && kill((pid_t)pid, SIGTERM) == 0) {
 			sway_log(SWAY_INFO, "Restarting %s, which an update replaced",
 				helper == HELPER_NIGHTLIGHT ? "tilewin-nightlight" :
-				helper == HELPER_POLKIT ? "tilewin-polkit" : "tilewin-clipboard");
+				helper == HELPER_POLKIT ? "tilewin-polkit" :
+				helper == HELPER_PORTAL ? "tilewin-portal" : "tilewin-clipboard");
 			stopped |= helper;
 		}
 	}
@@ -949,6 +974,9 @@ static int start_replaced_helpers(void *data) {
 	if (helpers_to_start & HELPER_POLKIT) {
 		tw_polkit_start();
 	}
+	if (helpers_to_start & HELPER_PORTAL) {
+		tw_portal_start();
+	}
 	helpers_to_start = 0;
 	return 0;
 }
@@ -957,7 +985,7 @@ static int start_replaced_helpers(void *data) {
 static void do_restart_in_place(void *data) {
 	sway_log(SWAY_INFO, "Restarting tileWin without ending the session: the windows stay open");
 	helpers_to_start |= stop_replaced_helpers();
-	if (helpers_to_start & (HELPER_NIGHTLIGHT | HELPER_POLKIT)) {
+	if (helpers_to_start & (HELPER_NIGHTLIGHT | HELPER_POLKIT | HELPER_PORTAL)) {
 		// the new ones once the old ones are gone: a second polkit agent
 		// cannot have the session while the first still holds it
 		if (!helpers_timer) {
@@ -971,6 +999,7 @@ static void do_restart_in_place(void *data) {
 		// one that was not running yet (just installed, or turned on) starts
 		// now; with one already holding the session the new one just leaves
 		tw_polkit_start();
+		tw_portal_start();
 	}
 	tw_panel_restart();   // a taskbar that was replaced on disk is replaced here
 	reload_config_now();  // config, theme, decorations, wallpaper, bindings

@@ -132,6 +132,16 @@ NetworkManager has no setting for the last three, so tileWin keeps them in `/etc
 
 Every "Network settings" link of tileWin (the network flyout, the network usage flyout) opens it. All DNS is set on the **DNS** page.
 
+### Login pages of public Wi-Fi
+
+Hotels, trains, cafés and airports often show a page to accept before the internet works. `tilewin-portal`, which tileWin starts with the session, takes care of it: each time NetworkManager has a network, it asks for a plain HTTP page whose answer it knows (GNOME's check page). A network with a login page answers with that page instead, which is then loaded in the background and accepted:
+
+- tileWin reads the page itself: it follows redirects, meta refreshes and scripts that only send the page on, ticks the checkboxes of the terms (never those of newsletters, offers or partners), leaves Decline, Help, Imprint and the like alone, and presses the button or link that most says "let me in", in English, German, French, Spanish, Italian, Dutch, Portuguese, Polish, Turkish and Swedish, over as many pages as the network has;
+- pages made only by scripts are worked the same way in a headless Chromium, if one is installed (Chromium, Chrome, Brave, Edge or Vivaldi);
+- a page that asks for something only you can give (an email, a name, a room number, a voucher, a password) is not filled in by guess: it opens in your browser, as does a page that could not be accepted.
+
+A notification says what came of it. The switch **Accept login pages by themselves** on the Network page turns it off; then the notification only says that the network wants you to log in, with a button that opens the page. The settings are in `~/.config/tileWin/portal.conf` ([reference](configuration.md#login-pages-of-wi-fi-portalconf)); `tilewin-portal check` does it all now and tells what it did.
+
 The **DNS** page drives `tilewin-dnsd`, tileWin's own DNS service, which systemd-resolved hands every lookup to while it is on (one switch; it hands DNS back to NetworkManager when turned off):
 
 - **Servers for all networks**: in order, or of a list the fastest few: each server is timed once an hour (or as often as set) and the fastest are asked at the same time, the others standing by. When none of them answers, as on a public Wi-Fi before its login, or they say a name does not exist, as for a router's page, the network's own servers are asked too, so login pages and local names still open. The **HTTPS** switch of a server asks it over HTTPS (DNS over HTTPS), encrypted, so the network in between can neither read nor change the questions and answers; the well-known servers (Cloudflare, Quad9, Google, OpenDNS, AdGuard, Mullvad, Control D, CleanBrowsing) have their https:// address at hand, for any other it is typed in. A server that fails over HTTPS (a certificate for another name, no answer) says so under it.

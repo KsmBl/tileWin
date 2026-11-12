@@ -9,7 +9,9 @@
 # lately can be allowed from its log, a server of a single network, picked on
 # the DNS page, goes to NetworkManager, when the service says the DNS of
 # the computer does not come to it, the page offers to send it through again,
-# and a well-known server is asked over HTTPS with its own https:// address.
+# and a well-known server is asked over HTTPS with its own https:// address;
+# the switch of the login pages of Wi-Fi writes "accept no" to portal.conf,
+# keeping what else is in it.
 #
 # usage: settings_network.sh <build dir>
 set -u
@@ -152,7 +154,13 @@ grep -q '^set aaaa-1111 1000 20000 0$' "$work/limits.log" ||
 # again, without the message above
 pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
 sleep 2
+printf '# mine\ncheck_url http://check.example/\n' > "$XDG_CONFIG_HOME/tileWin/portal.conf"
 start network 1500
+click 1207 1116 # Accept login pages by themselves: off
+grep -qx 'accept no' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
+	fail "the switch of login pages did not write accept no: $(cat "$XDG_CONFIG_HOME/tileWin/portal.conf")"
+grep -qx 'check_url http://check.example/' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
+	fail "the switch of login pages lost the rest of portal.conf"
 click 1116 489 # Show, beside the password
 grep -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||
 	fail "showing the password did not ask NetworkManager for it"

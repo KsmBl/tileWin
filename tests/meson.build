@@ -804,6 +804,25 @@ test(
 )
 
 test(
+	'portal-pages',
+	executable(
+		'test-portal',
+		'test_portal.c',
+		link_with: lib_portal,
+		dependencies: dependency('libcurl'),
+	),
+	suite: 'unit',
+)
+
+test(
+	'portal',
+	find_program('portal.py'),
+	args: [join_paths(meson.project_build_root(), 'portal', 'tilewin-portal')],
+	suite: 'unit',
+	timeout: 180,
+)
+
+test(
 	'menu-open-buttons',
 	find_program('menu_open_buttons.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

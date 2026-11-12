@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "settings.h"
+#include "tw_paths.h"
 
 /*
  * Network page: each saved network of NetworkManager (Wi-Fi, cable, ...) with
@@ -1204,6 +1205,90 @@ void network_dns_section_attach(struct settings *s, GtkWidget *content) {
 	load_conns(p);
 }
 
+/* ---------- the login pages of public Wi-Fi (tilewin-portal) ---------- */
+
+static char *portal_path(void) {
+	char *dir = tw_config_dir();
+	char *path = dir ? g_build_filename(dir, "portal.conf", NULL) : NULL;
+	free(dir);
+	return path;
+}
+
+/* Whether portal.conf says "accept no"; anything else (or no file) is yes. */
+static bool portal_accepts(void) {
+	char *path = portal_path();
+	char *text = NULL;
+	bool accept = true;
+	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			char *line = g_strstrip(*l);
+			if (g_str_has_prefix(line, "accept") && g_ascii_isspace(line[6])) {
+				char *v = g_strstrip(line + 7);
+				accept = strcmp(v, "no") != 0 && strcmp(v, "false") != 0 && strcmp(v, "off") != 0;
+			}
+		}
+		g_strfreev(lines);
+	}
+	g_free(text);
+	g_free(path);
+	return accept;
+}
+
+/* Writes the accept line, keeping the rest of the file as it is. */
+static gboolean on_portal_switch(GtkSwitch *sw, gboolean state, gpointer data) {
+	struct network_page *p = data;
+	char *path = portal_path();
+	char *text = NULL;
+	GString *out = g_string_new(NULL);
+	bool written = false;
+	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			const char *line = *l;
+			while (*line == ' ' || *line == '\t') {
+				line++;
+			}
+			if (g_str_has_prefix(line, "accept") && (line[6] == ' ' || line[6] == '\t')) {
+				if (!written) {
+					g_string_append_printf(out, "accept %s\n", state ? "yes" : "no");
+					written = true;
+				}
+			} else if (**l || l[1]) {
+				g_string_append_printf(out, "%s\n", *l);
+			}
+		}
+		g_strfreev(lines);
+	}
+	if (!written) {
+		if (out->len == 0) {
+			g_string_append(out, "# The login pages of public Wi-Fi, see tilewin-portal\n");
+		}
+		g_string_append_printf(out, "accept %s\n", state ? "yes" : "no");
+	}
+	if (!path || !tw_write_string(path, out->str)) {
+		settings_problem(p->s, "Could not save the setting for login pages", NULL, NULL, NULL);
+	}
+	g_string_free(out, TRUE);
+	g_free(text);
+	g_free(path);
+	gtk_switch_set_state(sw, state);
+	return TRUE;
+}
+
+static void add_portal(struct network_page *p, GtkWidget *content) {
+	GtkWidget *group = ui_group(content, "Login pages of Wi-Fi networks", "Hotels, trains, "
+		"cafés and airports often show a page to accept before the internet works. tileWin "
+		"accepts it in the background: it ticks the boxes of the terms (never those of "
+		"newsletters) and presses the button that lets you in. A page that asks for your email, "
+		"room number or a voucher opens in your browser instead.");
+	GtkWidget *sw = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(sw), portal_accepts());
+	g_signal_connect(sw, "state-set", G_CALLBACK(on_portal_switch), p);
+	ui_row(group, "Accept login pages by themselves", "Off: only a notification says that a "
+		"network wants you to log in", sw);
+}
+
 GtkWidget *network_page_new(struct settings *s) {
 	struct network_page *p = section_new(s);
 	GtkWidget *content;
@@ -1249,6 +1334,7 @@ GtkWidget *network_page_new(struct settings *s) {
 	gtk_box_append(GTK_BOX(ui_row_box(row)), p->save_password);
 
 	add_advanced(p);
+	add_portal(p, content);
 	sync_rows(p);
 	s->network_page = p;
 	load_conns(p);
