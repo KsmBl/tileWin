@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 #include "../dm/config.h"
 #include "../dm/sessions.h"
 #include "list.h"
@@ -190,11 +191,66 @@ static char *effective_scheme(struct login_page *p) {
 }
 
 /*
+ * The files of the pictures of the login screen, in the runtime folder: named
+ * after this process, as two settings apps at once (or the tests, side by
+ * side) would draw into each other's otherwise. They go when the app does.
+ */
+static char *runtime_file_of(const char *name, int pid) {
+	char *base = g_strdup_printf("tilewin-dm-%s-%d", name, pid);
+	char *path = g_build_filename(g_get_user_runtime_dir(), base, NULL);
+	g_free(base);
+	return path;
+}
+
+static char *runtime_file(const char *name) {
+	return runtime_file_of(name, (int)getpid());
+}
+
+/* The files of that process: the files first, then the folders (remove() takes both). */
+static void remove_runtime_files_of(int pid) {
+	static const char *const names[] = { "render.png", "render.conf", "preview.conf",
+		"look/tileWin/current-theme", "look/tileWin/color-scheme", "look/tileWin", "look" };
+	char *look = runtime_file_of("look", pid);
+	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		char *path = strncmp(names[i], "look/", 5) == 0 ?
+			g_build_filename(look, names[i] + 5, NULL) : runtime_file_of(names[i], pid);
+		remove(path);
+		g_free(path);
+	}
+	g_free(look);
+}
+
+static void remove_runtime_files(void) {
+	remove_runtime_files_of((int)getpid());
+}
+
+/* Those of settings apps that ended without cleaning up (killed, crashed). */
+static void remove_stale_runtime_files(void) {
+	GDir *dir = g_dir_open(g_get_user_runtime_dir(), 0, NULL);
+	const char *name;
+	while (dir && (name = g_dir_read_name(dir))) {
+		const char *dash = strrchr(name, '-');
+		if (!g_str_has_prefix(name, "tilewin-dm-") || !dash || !g_ascii_isdigit(dash[1])) {
+			continue;
+		}
+		int pid = atoi(dash + 1);
+		char proc[32];
+		snprintf(proc, sizeof(proc), "/proc/%d", pid);
+		if (pid > 0 && pid != (int)getpid() && access(proc, F_OK) != 0) {
+			remove_runtime_files_of(pid);
+		}
+	}
+	if (dir) {
+		g_dir_close(dir);
+	}
+}
+
+/*
  * A config folder like the one the daemon writes for the greeter: the theme and
  * the scheme of the login screen, and none of your own settings. Newly allocated.
  */
 static char *write_look_folder(struct login_page *p) {
-	char *dir = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-look", NULL);
+	char *dir = runtime_file("look");
 	char *inner = g_build_filename(dir, "tileWin", NULL);
 	g_mkdir_with_parents(inner, 0700);
 	char *theme = effective_theme(p), *scheme = effective_scheme(p);
@@ -250,9 +306,9 @@ static void render_start(struct login_page *p) {
 		return;
 	}
 	char *text = config_text(p);
-	char *conf = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-render.conf", NULL);
+	char *conf = runtime_file("render.conf");
 	if (!p->render_file) {
-		p->render_file = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-render.png", NULL);
+		p->render_file = runtime_file("render.png");
 	}
 	g_file_set_contents(conf, text, -1, NULL);
 	char *look = write_look_folder(p);
@@ -467,7 +523,7 @@ static void on_reset(GtkButton *button, gpointer data) {
 static void on_try(GtkButton *button, gpointer data) {
 	struct login_page *p = data;
 	char *text = config_text(p);
-	char *conf = g_build_filename(g_get_user_runtime_dir(), "tilewin-dm-preview.conf", NULL);
+	char *conf = runtime_file("preview.conf");
 	GError *error = NULL;
 	if (g_file_set_contents(conf, text, -1, &error)) {
 		char *look = write_look_folder(p);
@@ -1250,6 +1306,12 @@ static GtkWidget *tabs_bar_new(GtkWidget *stack) {
 
 GtkWidget *login_page_new(struct settings *s) {
 	struct login_page *p = g_new0(struct login_page, 1);
+	static bool cleanup_set;
+	if (!cleanup_set) {
+		atexit(remove_runtime_files);
+		remove_stale_runtime_files();
+		cleanup_set = true;
+	}
 	p->s = s;
 	p->controls = g_new0(GtkWidget *, dm_option_count);
 	p->placed = g_new0(bool, dm_option_count);
