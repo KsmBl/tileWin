@@ -108,11 +108,11 @@ while ! ipc -t get_tree | grep -q '"name": "tileWin Settings"' && [ $attempt -lt
 	sleep 0.2
 	attempt=$((attempt + 1))
 done
-sleep 2
 ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
-sleep 2
 "$pointer" 1280 800 move 640 400
-sleep 0.5
+# the page and the picture on top drawn to the end, before anything is compared with it
+screen_sum() { grim -t ppm - | cksum; }
+wait_still 15 screen_sum || fail "the page never stopped drawing"
 
 grep -q '^status$' "$work/calls" 2>/dev/null || fail "the page did not ask whether it is in use"
 
@@ -138,6 +138,8 @@ sys.exit(0 if r > 170 and g < 80 and b < 60 else 1)'
 }
 
 bar_up && fail "the Save bar shows with nothing changed"
+picture_sum() { thumb - | cksum; }
+wait_still 5 picture_sum
 thumb "$work/before.png"
 
 # the card to the right, and dark: the picture follows at once, nothing is saved yet

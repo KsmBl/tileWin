@@ -19,6 +19,10 @@ for needed in "$compositor" "$settings" "$tool"; do
 		exit 77
 	fi
 done
+if ! command -v grim >/dev/null 2>&1; then
+	echo "grim is not installed: skipping"
+	exit 77
+fi
 if ! command -v dbus-run-session >/dev/null 2>&1; then
 	echo "dbus-run-session is not installed: skipping"
 	exit 77
@@ -80,19 +84,24 @@ if [ -z "$display" ]; then
 	tail -n 2 "$work/log"
 	exit 1
 fi
-sleep 6 # the settings app has to be up and laid out before it is clicked
+# the settings app has to be up and laid out before it is clicked
+. "$(dirname "$0")/wait.sh"
+# the checksum of the screen, nothing while it cannot be taken
+shot() { WAYLAND_DISPLAY=$display grim "$work/shot.png" 2>/dev/null && md5sum < "$work/shot.png"; }
+wait_until 20 sh -c "'$build/swaymsg/tilewinmsg' -s '$work/tilewin.sock' -t get_tree | grep -q '\"app_id\": \"org.tilewin.Settings\"'"
+wait_still 20 shot
 
 # The page is tall enough to show the taskbar menu, the last one of the
 # right-click menus: open its Theme submenu, then add a separator to it, which
 # saves the menu.
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2577 >/dev/null 2>&1
-sleep 1
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2185 >/dev/null 2>&1
-sleep 3
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2634 >/dev/null 2>&1
+wait_still 10 shot
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2242 >/dev/null 2>&1
+written=$XDG_CONFIG_HOME/tileWin/taskbar.conf
+wait_until 5 sh -c "sed -n '/submenu \"Theme\"/,/^\t}/p' '$written' | grep -q separator"
 kill "$starter" 2>/dev/null
 pkill -f "^[^ ]*/tilewin -c $work/" 2>/dev/null
 
-written=$XDG_CONFIG_HOME/tileWin/taskbar.conf
 theme=$(sed -n '/submenu "Theme"/,/^\t}/p' "$written")
 if echo "$theme" | grep -q '^[[:space:]]*themes$' && echo "$theme" | grep -q separator &&
 		! grep -v "^[[:space:]]*#" "$written" | grep -q "tilewin-theme set"; then
@@ -101,6 +110,6 @@ if echo "$theme" | grep -q '^[[:space:]]*themes$' && echo "$theme" | grep -q sep
 fi
 echo "the Theme submenu was not saved as the list of every installed theme."
 echo "Either the editor keeps the old items, or the Taskbar page has been"
-echo "rearranged and the submenu is no longer at 1094,2577."
+echo "rearranged and the submenu is no longer at 1094,2634."
 echo "$theme"
 exit 1

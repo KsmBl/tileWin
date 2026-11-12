@@ -36,6 +36,9 @@ sock=$XDG_RUNTIME_DIR/tw-thumbs-$$.sock
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
 export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
+# GIO without gvfs, which does not answer on the bus of the nested session:
+# GTK 4 would wait for its D-Bus timeout, 25 seconds, before the window comes
+export GIO_USE_VFS=local
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 if ! python3 -c 'import gi; gi.require_version("Gtk", "4.0"); from gi.repository import Gtk' \
 		>/dev/null 2>&1; then
@@ -55,12 +58,20 @@ cleanup() {
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT
+. "$(dirname "$0")/wait.sh"
 trap 'exit 1' INT TERM
 
 
 # the middle of the preview over the first taskbar button (Windows 10)
 preview_color() {
 	grim -g "317,560 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tu1 | tr -s ' ' | sed 's/^ //'
+}
+
+# the checksum of the screen, nothing while it cannot be taken
+shot() { grim "$work/shot.png" 2>/dev/null && md5sum < "$work/shot.png"; }
+preview_is_red() {
+	set -- $(preview_color)
+	[ "${1:-0}" -gt 150 ] && [ "${3:-255}" -lt 90 ]
 }
 
 run() {
@@ -91,14 +102,24 @@ EOC
 	WAYLAND_DISPLAY=$(cat "$work/display")
 	export WAYLAND_DISPLAY
 	ipc theme win10 >/dev/null
-	sleep 2
+	wait_still 10 shot # the theme in place before the window comes
 	ipc exec "python3 $source_dir/tests/color_window.py Red '#d02020'" >/dev/null
-	sleep 3
-	"$pointer" 1280 720 move 372 700 wait 2500 >/dev/null 2>&1 &
-	held=$!
-	sleep 2
+	# the window there and the taskbar drawn with its button
+	wait_until 15 sh -c "'$msg' -s '$sock' -t get_tree | grep -qE '\"name\": *\"Red\"'" ||
+		fail "$renderer: the red window never came up"
+	wait_still 10 shot
+	# resting on the button until the preview is there and red; the pointer
+	# goes away and back if the button was not there yet
+	for _ in 1 2 3; do
+		"$pointer" 1280 720 move 640 300 wait 200 move 372 700 wait 10000 >/dev/null 2>&1 &
+		held=$!
+		wait_until 5 preview_is_red && break
+		kill "$held" 2>/dev/null
+		wait "$held" 2>/dev/null
+	done
 	set -- $(preview_color)
-	wait "$held"
+	kill "$held" 2>/dev/null
+	wait "$held" 2>/dev/null
 	[ "${1:-0}" -gt 150 ] && [ "${3:-255}" -lt 90 ] ||
 		fail "$renderer: the preview of a red window is not red: $*"
 	ipc exit >/dev/null 2>&1
