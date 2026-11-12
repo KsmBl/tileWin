@@ -48,10 +48,10 @@ wallpaper solid #008080
 session_restore no
 output * mode --custom 1280x1500
 for_window [app_id="org.tilewin.Settings"] fullscreen enable
+exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 exec "$settings" --page=keyboard
 EOF
 
-before=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 	SWAYSOCK="$work/tilewin.sock" TILEWINSOCK="$work/tilewin.sock" \
 	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
@@ -62,8 +62,7 @@ attempt=0
 while [ -z "$display" ] && [ $attempt -lt 40 ]; do
 	sleep 0.5
 	attempt=$((attempt + 1))
-	after=$(ls "$XDG_RUNTIME_DIR" | grep '^wayland-[0-9]*$')
-	display=$(echo "$after" | grep -vxF "$before" | head -n 1)
+	display=$(cat "$work/display" 2>/dev/null)
 done
 if [ -z "$display" ]; then
 	echo "the nested compositor never came up"

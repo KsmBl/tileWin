@@ -359,7 +359,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -369,7 +368,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -379,7 +377,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -390,7 +387,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -401,7 +397,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -418,7 +413,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 60,
 )
 
@@ -428,7 +422,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -438,7 +431,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -448,7 +440,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -458,7 +449,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -468,7 +458,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -478,7 +467,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -488,7 +476,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -501,7 +488,6 @@ test(
 	depends: [pointer_tool, keyboard_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -512,9 +498,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	# each of these starts a compositor of its own and finds it by the socket
-	# it adds, so two of them at once would find each other's
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -525,7 +508,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -536,7 +518,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -547,7 +528,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -558,7 +538,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -569,7 +548,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 300,
 )
 
@@ -589,8 +567,7 @@ if gdk_pixbuf.found()
 		depends: [count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 900,
+			timeout: 900,
 	)
 
 	test(
@@ -600,8 +577,7 @@ if gdk_pixbuf.found()
 		depends: [pointer_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 300,
+			timeout: 300,
 	)
 
 	test(
@@ -611,8 +587,7 @@ if gdk_pixbuf.found()
 		depends: [pointer_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 120,
+			timeout: 120,
 	)
 
 	test(
@@ -622,8 +597,7 @@ if gdk_pixbuf.found()
 		depends: [keyboard_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 120,
+			timeout: 120,
 	)
 
 	test(
@@ -632,8 +606,7 @@ if gdk_pixbuf.found()
 		args: [meson.project_build_root(), meson.project_source_root()],
 		depends: [keyboard_tool, count_content],
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 120,
+			timeout: 120,
 	)
 
 	test(
@@ -643,8 +616,7 @@ if gdk_pixbuf.found()
 		depends: [pointer_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 240,
+			timeout: 240,
 	)
 
 	test(
@@ -654,8 +626,7 @@ if gdk_pixbuf.found()
 		depends: [count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 300,
+			timeout: 300,
 	)
 endif
 
@@ -674,7 +645,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -684,7 +654,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -694,7 +663,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 180,
 )
 
@@ -705,7 +673,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -715,7 +682,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -726,7 +692,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 240,
 )
 
@@ -737,7 +702,6 @@ test(
 	depends: [pointer_tool, keyboard_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -748,7 +712,6 @@ test(
 	depends: [pointer_tool, keyboard_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 150,
 )
 
@@ -758,7 +721,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -769,7 +731,6 @@ test(
 	depends: [pointer_tool, keyboard_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 150,
 )
 
@@ -833,7 +794,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool, keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 180,
 )
 
@@ -844,7 +804,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 60,
 )
 
@@ -874,7 +833,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 60,
 )
 
@@ -884,7 +842,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -895,7 +852,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -906,7 +862,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -917,7 +872,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -928,7 +882,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -939,7 +892,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -950,7 +902,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -961,7 +912,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -972,7 +922,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool, keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -982,7 +931,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -993,7 +941,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool, keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1004,7 +951,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1014,7 +960,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1024,7 +969,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 180,
 )
 
@@ -1035,7 +979,6 @@ test(
 	env: saver_gui_env,
 	depends: [keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 180,
 )
 
@@ -1046,7 +989,6 @@ test(
 	env: saver_gui_env,
 	depends: [keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1057,7 +999,6 @@ test(
 	env: saver_gui_env,
 	depends: [keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1067,7 +1008,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1078,7 +1018,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool, keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1089,7 +1028,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1100,7 +1038,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1110,7 +1047,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -1121,7 +1057,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1139,7 +1074,6 @@ test(
 	env: saver_gui_env,
 	depends: [dm_fake, keyboard_tool, pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 180,
 )
 
@@ -1150,7 +1084,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1169,7 +1102,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool, keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1180,7 +1112,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1191,7 +1122,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1201,7 +1131,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1211,7 +1140,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -1222,7 +1150,6 @@ test(
 	depends: [pointer_tool],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1233,7 +1160,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 90,
 )
 
@@ -1243,7 +1169,6 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	env: saver_gui_env,
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 60,
 )
 
@@ -1254,7 +1179,6 @@ test(
 	env: saver_gui_env,
 	depends: [pointer_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )
 
@@ -1266,8 +1190,7 @@ if gdk_pixbuf.found()
 		env: saver_gui_env,
 		depends: [pointer_tool, count_content],
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 60,
+			timeout: 60,
 	)
 
 	test(
@@ -1277,8 +1200,7 @@ if gdk_pixbuf.found()
 		depends: [keyboard_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 300,
+			timeout: 300,
 	)
 
 	test(
@@ -1288,8 +1210,7 @@ if gdk_pixbuf.found()
 		depends: [keyboard_tool, count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 120,
+			timeout: 120,
 	)
 
 	test(
@@ -1299,8 +1220,7 @@ if gdk_pixbuf.found()
 		depends: [count_content, pointer_tool],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 60,
+			timeout: 60,
 	)
 
 	test(
@@ -1310,8 +1230,7 @@ if gdk_pixbuf.found()
 		depends: [count_content, pointer_tool],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 60,
+			timeout: 60,
 	)
 
 	test(
@@ -1321,8 +1240,7 @@ if gdk_pixbuf.found()
 		depends: [count_content],
 		env: saver_gui_env,
 		suite: 'gui',
-		is_parallel: false,
-		timeout: 60,
+			timeout: 60,
 	)
 endif
 
@@ -1332,6 +1250,5 @@ test(
 	args: [meson.project_build_root(), meson.project_source_root()],
 	depends: [keyboard_tool],
 	suite: 'gui',
-	is_parallel: false,
 	timeout: 120,
 )

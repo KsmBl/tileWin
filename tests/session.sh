@@ -4,7 +4,8 @@
 # leaves them running when it is killed instead of waiting for its command,
 # and the tests stop their compositor either way; hundreds of orphaned buses
 # later the user runs out of inotify instances, and file watching stops
-# working for everything.
+# working for everything. It also gives the compositor a display name of its
+# own (TILEWIN_WAYLAND_SOCKET).
 #
 # usage: session.sh <command> [args...]
 set -u
@@ -19,6 +20,11 @@ done
 DBUS_SESSION_BUS_ADDRESS=$(head -n 1 "$address")
 export DBUS_SESSION_BUS_ADDRESS
 rm -f "$address"
+
+# a display name of its own, not one of the 32 numbered ones, which run out
+# when many tests run at once
+TILEWIN_WAYLAND_SOCKET=wayland-tw-test-$$
+export TILEWIN_WAYLAND_SOCKET
 
 "$@" &
 child=$!

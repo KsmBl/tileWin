@@ -662,9 +662,18 @@ bool server_init(struct sway_server *server) {
 
 	wl_list_init(&server->pending_launcher_ctxs);
 
+	// a name of its own when asked for one: the tests run many nested
+	// compositors at once, more than the 32 numbered names there are
+	const char *wanted = getenv("TILEWIN_WAYLAND_SOCKET");
+	if (wanted && *wanted && !strchr(wanted, '/') &&
+			wl_display_add_socket(server->wl_display, wanted) >= 0) {
+		server->socket = strdup(wanted);
+	}
+	unsetenv("TILEWIN_WAYLAND_SOCKET"); // not for compositors started inside it
+
 	// Avoid using "wayland-0" as display socket
 	char name_candidate[16];
-	for (unsigned int i = 1; i <= 32; ++i) {
+	for (unsigned int i = 1; i <= 32 && !server->socket; ++i) {
 		snprintf(name_candidate, sizeof(name_candidate), "wayland-%u", i);
 		if (wl_display_add_socket(server->wl_display, name_candidate) >= 0) {
 			server->socket = strdup(name_candidate);

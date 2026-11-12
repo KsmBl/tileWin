@@ -9,6 +9,16 @@ meson test -C build-release --suite unit   # the config parser, the config edito
 meson test -C build-release --suite gui    # drives a nested tileWin and looks at what it does
 ```
 
+All tests run side by side, as many at once as the computer has cores
+(`--num-processes` sets fewer): each `gui` test starts a nested tileWin of its
+own, with its own config, state, socket and temporary folder, and learns its
+Wayland display from a file the nested session writes, never by looking for a
+new socket, which another test may have just made. A new test has to keep it
+so. The whole run takes about three minutes with 28 at once, the `unit` suite about
+a minute; while working on one thing, run only its tests by name
+(`meson test -C build-release portal flyout-keyboard`), and everything before a
+commit.
+
 The coverage test walks the sources and fails when the taskbar or the
 compositor reads a setting that no page of the settings app offers, so nothing
 ends up settable only by hand. The `gui` suite starts a nested tileWin and:
