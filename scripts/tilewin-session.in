@@ -13,6 +13,23 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -z "$TILEWIN_SESSION_DBUS" ] &&
 	exec dbus-run-session -- "$0" "$@"
 fi
 
+# The variables of environment.d (~/.config/environment.d, /etc/environment.d),
+# as GNOME and Plasma sessions have them: e.g. GTK3_MODULES, which gives GTK 3
+# apps failBrauwser's open and save dialogs (tileWin turns them on only while
+# failBrauwser is the default file manager). One VAR=value a line, exported
+# as it is, never evaluated.
+envgen=/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator
+[ -x "$envgen" ] || envgen=/lib/systemd/user-environment-generators/30-systemd-environment-d-generator
+if [ -x "$envgen" ]; then
+	while IFS= read -r line; do
+		case "$line" in
+		[A-Za-z_]*=*) export "$line" ;;
+		esac
+	done <<EOF
+$("$envgen" 2>/dev/null)
+EOF
+fi
+
 export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-tileWin}"
 export XDG_SESSION_DESKTOP="${XDG_SESSION_DESKTOP:-tileWin}"
 export XDG_SESSION_TYPE=wayland

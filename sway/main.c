@@ -389,6 +389,7 @@ int main(int argc, char **argv) {
 	load_swaybars();
 	tw_record_binary();
 	tw_session_export_environment();
+	tw_file_dialogs_start(); // before the first app starts
 	tw_panel_start();
 	tw_nightlight_start();
 	tw_polkit_start();

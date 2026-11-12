@@ -435,6 +435,10 @@ void tw_panel_start(void);
 /* Starts tilewin-nightlight, which keeps the night light colors. */
 void tw_nightlight_start(void);
 void tw_portal_start(void);
+/* The open and save dialogs: failBrauwser's while it is the default file manager. */
+void tw_file_dialogs_start(void);
+void tw_file_dialogs_update(void);
+bool tw_failbrauwser_is_default(void);
 void tw_polkit_start(void);
 /* animate.c: window and desktop animations ("animations", "animation_speed") */
 void tw_animate_open(struct sway_container *con);

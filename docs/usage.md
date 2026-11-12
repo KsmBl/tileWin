@@ -220,6 +220,15 @@ to 07:00
 
 Turning it off by hand lasts until the next start time of the schedule. Night light needs a screen with gamma tables (most real screens; not nested or virtual ones) and no other program such as gammastep or wlsunset controlling them. Whether it is on is kept in `~/.local/state/tileWin/nightlight`, the brightness over 100% in `~/.local/state/tileWin/brightness-boost`; it watches both files and `nightlight.conf`.
 
+## Open and save dialogs
+
+Apps show GTK's open and save dialogs. With failBrauwser installed as the file chooser and chosen as the default file manager (the file manager on the **Apps** page, or `xdg-mime default ... inode/directory`), they show failBrauwser's instead; another file manager as the default gives GTK's dialogs back. tileWin decides it when the session starts and again whenever the default changes, for every app started after that:
+
+- GTK 3 apps get failBrauwser's module from `~/.config/environment.d`, which `tilewin-session` reads as GNOME and Plasma do; tileWin sets `FAILBRAUWSER_NO_CHOOSER` to `0` or `1` for the apps it starts and for those D-Bus and systemd start, so the module takes over the dialog or leaves it to GTK.
+- GTK 4, Qt, Flatpak apps and the browsers ask the portal: while failBrauwser is not the default, tileWin writes `~/.config/xdg-desktop-portal/tilewin-portals.conf`, failBrauwser's `portals.conf` with GTK's file chooser, and removes it again once failBrauwser is the default. A `tilewin-portals.conf` of your own is never touched.
+
+failBrauwser's dialogs float in the middle of the screen, also in tile mode (a rule in `common.conf` that knows them by their title, as they do not name the window they are for yet).
+
 ## Settings app
 
 `tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you. Type anywhere in the window (or press Ctrl+F) to search all settings; a result opens its page and highlights the setting.

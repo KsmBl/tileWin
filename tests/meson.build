@@ -838,6 +838,15 @@ test(
 )
 
 test(
+	'file-dialogs',
+	find_program('file_dialogs.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	suite: 'gui',
+	timeout: 60,
+)
+
+test(
 	'menu-open-buttons',
 	find_program('menu_open_buttons.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
