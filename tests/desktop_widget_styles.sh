@@ -14,6 +14,7 @@
 #
 # usage: desktop_widget_styles.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -57,7 +58,7 @@ fail() {
 }
 cleanup() {
 	"$msg" -s "$sock" exit >/dev/null 2>&1
-	sleep 0.5
+	wait_until 5 sh -c "! pgrep -f '^[^ ]*/tilewin -c $work/' >/dev/null"
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT INT TERM
@@ -94,7 +95,7 @@ EOF
 cat > "$work/tilewin.conf" <<EOF
 wallpaper solid #008080
 session_restore no
-panel_command $panel
+panel_command $panel --debug 2>>$work/panel.log
 animations off
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 EOF
@@ -117,7 +118,26 @@ fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
 ipc() { "$msg" -s "$sock" "$@"; }
 ipc mode window >/dev/null 2>&1
-sleep 3
+
+# a checksum of the screen, and how often the taskbar has loaded its config and
+# theme (it says so in its log)
+screen() { grim -t ppm - 2>/dev/null | md5sum; }
+loads() { grep -c 'Reloading panel config and theme' "$work/panel.log" 2>/dev/null; }
+more_loads() { [ "$(loads)" -gt "$1" ]; }
+# the taskbar and the screen at rest: no load waiting to be done, nothing
+# moving on the screen but the clocks and the charts, which move a step a
+# second at most
+rest_state() { loads; screen; }
+at_rest() { wait_still 10 rest_state; }
+# every card is drawn
+drawn() {
+	grim "$work/check.png" 2>/dev/null || return 1
+	echo "$cards" | while read -r name col row columns rows; do
+		# shellcheck disable=SC2046
+		[ "$("$count" "$work/check.png" $(area "$col" "$row" "$columns" "$rows"))" -ge 150 ] ||
+			return 1
+	done
+}
 
 panel_pid() {
 	ipc -t get_tilewin | sed -n 's/.*"panel_pid": *\([0-9]*\).*/\1/p'
@@ -125,13 +145,20 @@ panel_pid() {
 area() {
 	echo "$((14 + 100 * $1)) $((14 + 100 * $2)) $((100 * $3 - 8)) $((100 * $4 - 8))"
 }
+# the taskbar is up and has drawn the cards
+wait_until 30 drawn
+at_rest
 started=$(panel_pid)
 
 for theme in win95 winxp win7 win8 win10 win11 sway; do
 	for scheme in light dark; do
+		loads=$(loads)
 		ipc theme "$theme" >/dev/null 2>&1
 		ipc color_scheme "$scheme" >/dev/null 2>&1
-		sleep 3
+		# each makes the taskbar load the theme again
+		wait_until 10 more_loads "$loads"
+		at_rest
+		wait_until 5 drawn
 		shot=$work/$theme-$scheme.png
 		grim "$shot"
 		echo "$cards" | while read -r name col row columns rows; do

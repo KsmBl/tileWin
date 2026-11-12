@@ -27,6 +27,7 @@ for needed in dbus-daemon grim python3; do
 		exit 77
 	fi
 done
+. "$(dirname "$0")/wait.sh"
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 	echo "no XDG_RUNTIME_DIR: skipping"
 	exit 77
@@ -79,23 +80,12 @@ env -u WAYLAND_DISPLAY -u DISPLAY \
 	WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$sock" TILEWINSOCK="$sock" \
 	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 
-attempt=0
-while [ ! -s "$work/display" ] && [ $attempt -lt 60 ]; do
-	sleep 0.2
-	attempt=$((attempt + 1))
-done
-if [ ! -s "$work/display" ]; then
+if ! wait_for_file 30 "$work/display"; then
 	echo "the nested compositor never came up"
 	tail -n 3 "$work/log"
 	exit 1
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
-if command -v curl >/dev/null 2>&1; then
-	(for _ in 1 2 3 4 5 6 7 8; do
-		curl -s -o /dev/null --max-time 2 http://example.com; sleep 1
-	done) &
-fi
-sleep 12
 
 # The pixels of a part of the screen with a color like: "r g b" and a
 # tolerance; prints how many.
@@ -118,7 +108,21 @@ print(sum(1 for i in range(0, len(px) - 2, 3)
 ' "$5" "$6" "$7" "$8"
 }
 
-# the chart of the card (4 x 2 cells at the top left), below its heading
+if command -v curl >/dev/null 2>&1; then
+	(for _ in 1 2 3 4 5 6 7 8; do
+		curl -s -o /dev/null --max-time 2 http://example.com; sleep 1
+	done) &
+fi
+
+# the chart of the card (4 x 2 cells at the top left), below its heading: once
+# the lines have risen off the bottom, which a little traffic does in a couple
+# of seconds (lying at the bottom they are too short for the checks below)
+lines_up() {
+	[ "$(count 24 62 272 134 0 120 215 30)" -ge 30 ] &&
+		[ "$(count 24 62 272 134 192 96 42 30)" -ge 10 ] &&
+		[ "$(count 24 62 60 134 90 90 90 40)" -ge 15 ]
+}
+wait_until 20 lines_up
 down=$(count 24 62 272 134 0 120 215 30)
 up=$(count 24 62 272 134 192 96 42 30)
 echo "chart on the desktop: $down pixels of the line in, $up of the line out"
@@ -130,13 +134,19 @@ labels=$(count 24 62 60 134 90 90 90 40)
 
 # its flyout: the same two lines, with a scale of its own
 "$pointer" 1280 720 click 150 120 >/dev/null 2>&1
-sleep 2
+flyout_open() {
+	[ "$(count 20 130 80 90 170 170 170 40)" -ge 15 ]
+}
+wait_until 10 flyout_open
 flyout_labels=$(count 20 130 80 90 170 170 170 40)
 echo "flyout: $flyout_labels pixels of scale labels"
 [ "$flyout_labels" -ge 15 ] || fail "the chart of the flyout has no labels on its scale"
 
 "$pointer" 1280 720 click 900 600 >/dev/null 2>&1 # the flyout closes
-sleep 1
+flyout_closed() {
+	! flyout_open
+}
+wait_until 5 flyout_closed
 
 # In every theme and scheme it looks like the other charts: the face of its
 # chart and the grid on it (its two most common colors) are those of the CPU
@@ -159,11 +169,27 @@ c = collections.Counter(tuple(px[i:i + 3]) for i in range(0, len(px) - 2, 3))
 print(" ".join("%d %d %d" % k for k, _ in c.most_common(2)))
 '
 }
+faces() {
+	echo "$(face 0) / $(face 400)"
+}
+screen_sum() {
+	grim -t ppm - | cksum
+}
+screen_changed() {
+	[ "$(screen_sum)" != "$1" ]
+}
 for theme in win95 winxp win7 win8 win10 win11 sway; do
 	for scheme in light dark; do
+		before=$(screen_sum)
 		"$msg" -s "$sock" theme "$theme" >/dev/null 2>&1
 		"$msg" -s "$sock" color_scheme "$scheme" >/dev/null 2>&1
-		sleep 3
+		# The panel takes the new look over a moment after the config file
+		# changed and draws the cards again. Once the screen has changed, a
+		# moment more, then until both charts keep their colors (the lines
+		# move on now and then, the face and grid stay).
+		wait_until 5 screen_changed "$before"
+		sleep 1
+		wait_still 10 faces
 		net=$(face 0)
 		cpu=$(face 400)
 		# within a few levels: the cards of win8 have a tint of their own each

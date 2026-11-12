@@ -9,6 +9,7 @@
 #
 # usage: edge_buttons.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -48,7 +49,7 @@ fail() {
 }
 cleanup() {
 	"$msg" -s "$sock" exit >/dev/null 2>&1
-	sleep 0.5
+	wait_until 5 sh -c "! pgrep -f '^[^ ]*/tilewin -c $work/' >/dev/null"
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT
@@ -94,16 +95,31 @@ def walk(n):
 		walk(c)
 walk(json.load(sys.stdin))' "$1"
 }
+# a checksum of the screen: still once everything is drawn where it goes
+screen() { grim -t ppm - 2>/dev/null | md5sum; }
+there() { [ -n "$(window "$1")" ]; }
 open_window() {
 	ipc exec "xfce4-terminal --disable-server -T $1" >/dev/null 2>&1
-	attempt=0
-	while [ -z "$(window "$1")" ] && [ $attempt -lt 40 ]; do
-		sleep 0.5
-		attempt=$((attempt + 1))
-	done
-	sleep 1
-	[ -n "$(window "$1")" ] || { echo "window $1 never came up"; exit 1; }
+	wait_until 20 there "$1" || { echo "window $1 never came up"; exit 1; }
+	wait_still 10 screen
 }
+# the window is where a snap puts it: right, topright or left
+placed() {
+	set -- "$1" $(window "$2")
+	[ $# = 5 ] || return 1
+	case $1 in
+	right) [ "$2" -ge 640 ] ;;
+	topright) [ "$2" -ge 640 ] && [ $(($3 + $5)) -le 360 ] ;;
+	left) [ $(($2 + $4)) -le 640 ] ;;
+	esac
+}
+snap() {
+	ipc "[title=^$1$] snap $2" >/dev/null
+	wait_until 10 placed "$2" "$1"
+	wait_still 10 screen
+}
+maximized() { set -- $(window "$1"); [ "${3:-0}" = 1280 ]; }
+in_theme() { ipc -t get_tilewin | grep -q "\"theme\": *\"$1\""; }
 # the mean brightness of a strip of the screen, to tell whether the popup is up
 mean() {
 	grim -g "$1,$2 $3x$4" -t ppm - 2>/dev/null | python3 -c '
@@ -124,34 +140,33 @@ print(sum(pixels) // max(1, len(pixels)))'
 gone() { [ -z "$(window "$1")" ]; }
 for theme in win95 win10; do
 	ipc theme $theme >/dev/null
-	sleep 2
+	wait_until 10 in_theme $theme
+	wait_still 10 screen
 	# the maximize button of a window in the right half, from the top edge
 	case $theme in win95) max_x=1248 ;; win10) max_x=1210 ;; esac
 	open_window r$theme
-	ipc "[title=^r$theme$] snap right" >/dev/null
-	sleep 1
+	snap r$theme right
 	"$pointer" 1280 720 click $max_x 0 >/dev/null 2>&1
-	sleep 1
+	wait_until 5 maximized r$theme
+	wait_still 10 screen
 	set -- $(window r$theme)
 	[ "${3:-0}" = 1280 ] || fail "$theme: the top edge over maximize did not maximize the window: $*"
 	"$pointer" 1280 720 click 1279 0 >/dev/null 2>&1
-	sleep 1.5
+	wait_until 5 gone r$theme
 	gone r$theme || fail "$theme: the corner did not close the maximized window"
 
 	open_window q$theme
-	ipc "[title=^q$theme$] snap topright" >/dev/null
-	sleep 1
+	snap q$theme topright
 	"$pointer" 1280 720 click 1279 0 >/dev/null 2>&1
-	sleep 1.5
+	wait_until 5 gone q$theme
 	gone q$theme || fail "$theme: the corner did not close the window in the top right quarter"
 
 	# close of a window in the left half, from the top edge
 	case $theme in win95) close_x=626 ;; win10) close_x=617 ;; esac
 	open_window l$theme
-	ipc "[title=^l$theme$] snap left" >/dev/null
-	sleep 1
+	snap l$theme left
 	"$pointer" 1280 720 click $close_x 0 >/dev/null 2>&1
-	sleep 1.5
+	wait_until 5 gone l$theme
 	gone l$theme || fail "$theme: the top edge over close did not close the left window"
 done
 

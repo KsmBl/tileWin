@@ -7,6 +7,7 @@
 #
 # usage: startmenu_styles.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -47,7 +48,7 @@ fail() {
 }
 cleanup() {
 	"$msg" -s "$sock" exit >/dev/null 2>&1
-	sleep 0.5
+	wait_until 5 sh -c "! pgrep -f '^[^ ]*/tilewin -c $work/' >/dev/null"
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT
@@ -58,7 +59,7 @@ wallpaper solid #204070
 session_restore no
 remember_windows no
 animations off
-panel_command $panel
+panel_command $panel --debug 2>>$work/panel.log
 output HEADLESS-1 mode --custom 1280x720 pos 0 0
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 EOC
@@ -80,6 +81,44 @@ if [ ! -s "$work/display" ]; then
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
 ipc() { "$msg" -s "$sock" "$@"; }
+
+# a checksum of the screen, and how often the taskbar has loaded its config and
+# theme (it says so in its log)
+screen() { grim -t ppm - 2>/dev/null | md5sum; }
+loads() { grep -c 'Reloading panel config and theme' "$work/panel.log" 2>/dev/null; }
+more_loads() { [ "$(loads)" -gt "$1" ]; }
+changed_from() { [ "$(screen)" != "$1" ]; }
+# the taskbar and the screen at rest: no load waiting to be done, nothing
+# moving on the screen
+rest_state() { loads; screen; }
+at_rest() { wait_still 10 rest_state; }
+# runs a command that makes the taskbar load its config and theme again, and
+# waits until it has and has drawn everything anew
+loaded() {
+	_loads=$(loads)
+	"$@" >/dev/null
+	wait_until 10 more_loads "$_loads"
+	at_rest
+}
+# runs an ipc command that changes the screen, and waits for it to be done
+shown() {
+	_before=$(screen)
+	ipc "$@" >/dev/null
+	wait_until 10 changed_from "$_before"
+	at_rest
+}
+# the taskbar is drawn, at the top or the bottom: there is more than wallpaper
+strip() { grim -g "0,$1 1280x40" -t ppm - 2>/dev/null | md5sum; }
+panel_up() {
+	_middle=$(strip 340)
+	[ "$(strip 0)" != "$_middle" ] || [ "$(strip 680)" != "$_middle" ]
+}
+if ! wait_until 30 panel_up; then
+	echo "the taskbar never came up"
+	tail -n 3 "$work/log"
+	exit 1
+fi
+at_rest
 pixel() { grim -g "$1,$2 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tu1 | tr -s ' ' | sed 's/^ //'; }
 # the mean brightness of a part of the screen
 mean() {
@@ -125,22 +164,21 @@ print('%02x%02x%02x' % tuple(color))
 PY
 }
 close() { python3 -c "import sys; a, b = (int(x, 16) for x in sys.argv[1:]); print(sum(abs(((a >> s) & 255) - ((b >> s) & 255)) for s in (0, 8, 16)) <= ${3:-24})" "$1" "$2"; }
-show() {
+relayout() {
 	sed -i "s/^\t#\? \?layout [a-z]*$/\tlayout $1/" "$conf"
-	ipc panel reload >/dev/null
-	sleep 1.2
+	ipc panel reload
+}
+show() {
+	loaded relayout "$1"
 	grim -t ppm "$work/without.ppm"
-	ipc panel startmenu toggle >/dev/null
-	sleep 1.2
+	shown panel startmenu toggle
 	grim -t ppm "$work/with.ppm"
-	ipc panel startmenu toggle >/dev/null
-	sleep 0.4
+	shown panel startmenu toggle
 	dominant "$work/without.ppm" "$work/with.ppm"
 }
 
 for theme in win1 win95 win11; do
-	ipc theme $theme >/dev/null
-	sleep 2
+	loaded ipc theme $theme
 	menu=$(show classic)
 	case $theme in
 		win1) styles="twocolumn list centered progman" ;;
@@ -155,8 +193,7 @@ for theme in win1 win95 win11; do
 done
 
 # the start screen of tiles in the blue of the title bars of Windows 1
-ipc theme win1 >/dev/null
-sleep 2
+loaded ipc theme win1
 got=$(show tiles)
 [ "$(close 5555ff "$got")" = True ] || fail "win1: the start screen is #$got, not the blue #5555ff"
 

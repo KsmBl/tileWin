@@ -8,6 +8,7 @@
 #
 # usage: settings_login.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -118,6 +119,10 @@ grep -q '^status$' "$work/calls" 2>/dev/null || fail "the page did not ask wheth
 # the picture on top: how much of it differs from a shot of it before
 thumb() { grim -g "261,20 304x171" "$1"; }
 differs() { ! cmp -s "$1" "$2"; }
+# whether the picture now is (or is not) the one in the file
+looks_like() { thumb "$work/now.png" && cmp -s "$1" "$work/now.png"; }
+looks_unlike() { thumb "$work/now.png" && ! cmp -s "$1" "$work/now.png"; }
+bar_down() { ! bar_up; }
 # the Save bar: its blue button, at the bottom when there is something to save
 bar_up() {
 	grim -g "1186,743 1x1" -t ppm - 2>/dev/null | tail -c 3 | od -An -tu1 | python3 -c '
@@ -139,27 +144,23 @@ thumb "$work/before.png"
 "$pointer" 1280 800 click 1197 690
 sleep 0.5
 "$pointer" 1280 800 click 1199 360
-sleep 1
-thumb "$work/after.png"
-differs "$work/before.png" "$work/after.png" || fail "the picture does not follow the settings"
-bar_up || fail "no Save bar after a change"
+wait_until 5 looks_unlike "$work/before.png" || fail "the picture does not follow the settings"
+wait_until 5 bar_up || fail "no Save bar after a change"
 if grep -q '^write$' "$work/calls"; then
 	fail "something was saved before Save"
 fi
 
 # Discard: back as it was, the bar goes
 "$pointer" 1280 800 click 1128 743
-sleep 1
-bar_up && fail "the Save bar stayed after Discard"
-thumb "$work/discarded.png"
-differs "$work/before.png" "$work/discarded.png" && fail "Discard did not bring the picture back"
+wait_until 5 bar_down || fail "the Save bar stayed after Discard"
+wait_until 5 looks_like "$work/before.png" || fail "Discard did not bring the picture back"
 
 # Save: what changed, what the file said, and no defaults
 "$pointer" 1280 800 click 1197 690
-sleep 0.8
+wait_until 5 bar_up # Save is there to press
 "$pointer" 1280 800 click 1213 743
-sleep 1.5
-grep -q '^write$' "$work/calls" || fail "Save did not reach the helper: $(cat "$work/calls")"
+wait_until 5 grep -q '^write$' "$work/calls" || fail "Save did not reach the helper: $(cat "$work/calls")"
+wait_until 5 test -s "$work/written"
 grep -q '^card_position right$' "$work/written" 2>/dev/null || fail "the change was not saved: $(cat "$work/written" 2>/dev/null)"
 grep -q '^theme "win7"$' "$work/written" 2>/dev/null || fail "the theme of the file got lost"
 grep -q '^vt 4$' "$work/written" 2>/dev/null || fail "a number of the file got lost"
@@ -167,15 +168,14 @@ grep -q '^env FOO=bar$' "$work/written" 2>/dev/null || fail "an env line of the 
 if grep -q 'remember_user' "$work/written" 2>/dev/null; then
 	fail "a default was written out"
 fi
-bar_up && fail "the Save bar stayed after saving"
+wait_until 5 bar_down || fail "the Save bar stayed after saving"
 
 # a helper that refuses: the banner, and the change is still there to save
 touch "$work/refuse"
 "$pointer" 1280 800 click 1133 690
-sleep 0.8
+wait_until 5 bar_up # Save is there to press
 "$pointer" 1280 800 click 1213 743
-sleep 1.5
-banner_up || fail "a refusal shows no banner"
+wait_until 5 banner_up || fail "a refusal shows no banner"
 bar_up || fail "after a refusal the change was taken for saved"
 rm -f "$work/refuse"
 "$pointer" 1280 800 click 1251 24

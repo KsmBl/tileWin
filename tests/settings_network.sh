@@ -12,25 +12,33 @@
 # and a well-known server is asked over HTTPS with its own https:// address;
 # the switch of the login pages of Wi-Fi writes "accept no" to portal.conf,
 # keeping what else is in it.
+# Given a part (the network page, the dns page, or the dns page once the
+# DNS of the computer has stopped coming to the service: rewire), only that
+# one, so that the parts can run side by side.
 #
-# usage: settings_network.sh <build dir>
+# usage: settings_network.sh <build dir> [network|dns|rewire]
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
+part=${2:-all}
 compositor=$build/sway/tilewin
 settings=$build/settings/tilewin-settings
+msg=$build/swaymsg/tilewinmsg
 tool=$build/tests/pointer-tool
 
-for needed in "$compositor" "$settings" "$tool"; do
+for needed in "$compositor" "$settings" "$msg" "$tool"; do
 	if [ ! -x "$needed" ]; then
 		echo "$needed was not built: skipping"
 		exit 77
 	fi
 done
-if ! command -v dbus-run-session >/dev/null 2>&1; then
-	echo "dbus-run-session is not installed: skipping"
-	exit 77
-fi
+for needed in dbus-run-session grim; do
+	if ! command -v "$needed" >/dev/null 2>&1; then
+		echo "$needed is not installed: skipping"
+		exit 77
+	fi
+done
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
 	echo "no XDG_RUNTIME_DIR: skipping"
 	exit 77
@@ -111,27 +119,65 @@ exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display-$page'
 exec "$settings" --page=$page
 EOC
 	rm -f "$work/display-$page" # the page was open before: not its old display
+	sock=$work/$page.sock
 	env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 \
 		WLR_RENDERER=pixman SWAYSOCK="$work/$page.sock" TILEWINSOCK="$work/$page.sock" \
 		"$(dirname "$0")/session.sh" "$compositor" -c "$work/tw-$page.conf" > "$work/tw-$page.log" 2>&1 &
-	display=
-	attempt=0
-	while [ -z "$display" ] && [ $attempt -lt 40 ]; do
-		sleep 0.5
-		attempt=$((attempt + 1))
-		display=$(cat "$work/display-$page" 2>/dev/null)
-	done
-	if [ -z "$display" ]; then
+	if ! wait_for_file 20 "$work/display-$page"; then
 		echo "the nested compositor never came up"
 		exit 1
 	fi
-	sleep 6
+	display=$(cat "$work/display-$page")
+	# the page up and drawn to the end
+	if ! wait_until 20 settings_up; then
+		echo "the settings app never came up"
+		exit 1
+	fi
+	wait_still 10 screen
 	[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/$page.png"
 }
-
+settings_up() {
+	"$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"'
+}
+# Ends the nested tileWin of a page; until it is gone, so that its socket
+# name is free again before the next one starts.
+stop() {
+	pkill -f "^[^ ]*/tilewin -c $work/tw-$1.conf" 2>/dev/null
+	wait_until 10 gone "$1"
+}
+gone() {
+	! pgrep -f "^[^ ]*/tilewin -c $work/tw-$1.conf" && [ ! -e "$work/$1.sock" ]
+}
+# the checksum of the screen, to tell when it has changed and stopped changing
+screen() {
+	WAYLAND_DISPLAY=$display grim -t ppm - | cksum
+}
+changed_from() {
+	[ "$(screen)" != "$1" ]
+}
+# Clicks and waits for the page to answer: for the screen to change (not for
+# long, a click may change nothing to be seen) and then to be still.
 click() {
+	before=$(screen)
 	WAYLAND_DISPLAY=$display "$tool" 1280 "$height" click "$1" "$2" >/dev/null 2>&1
-	sleep 1
+	wait_until 2 changed_from "$before"
+	wait_still 10 screen
+}
+# whether the settings app of this page still runs
+app_runs() {
+	for pid in $(pgrep -f "^$settings" 2>/dev/null); do
+		if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null |
+				grep -qx "WAYLAND_DISPLAY=$display"; then
+			return 0
+		fi
+	done
+	return 1
+}
+# logged <seconds> <grep args...>: until grep finds it (a file the page writes)
+logged() {
+	_seconds=$1
+	shift
+	wait_until "$_seconds" grep "$@"
 }
 
 failed=0
@@ -140,103 +186,126 @@ fail() {
 	failed=1
 }
 
-start network 1500
-# the advanced settings: one of NetworkManager's, and tileWin's limits
-click 1207 595 # Connect automatically: off
-grep -q 'connection modify uuid aaaa-1111 connection.autoconnect no' "$work/nm.log" ||
-	fail "turning off connecting automatically did not reach NetworkManager"
-# ("Saved" now shows under the network, the rows below are 24 pixels lower)
-click 1207 797 # Connect again after 1 GB: on, beside the download limit kept for it
-click 1194 975 # Apply
-sleep 1
-grep -q '^set aaaa-1111 1000 20000 0$' "$work/limits.log" ||
-	fail "the limits did not reach the helper as 1000 MB, 20000 kbit/s down and none up"
-# again, without the message above
-pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
-sleep 2
-printf '# mine\ncheck_url http://check.example/\n' > "$XDG_CONFIG_HOME/tileWin/portal.conf"
-start network 1500
-click 1207 1116 # Accept login pages by themselves: off
-grep -qx 'accept no' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
-	fail "the switch of login pages did not write accept no: $(cat "$XDG_CONFIG_HOME/tileWin/portal.conf")"
-grep -qx 'check_url http://check.example/' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
-	fail "the switch of login pages lost the rest of portal.conf"
-click 1116 489 # Show, beside the password
-grep -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||
-	fail "showing the password did not ask NetworkManager for it"
-click 1135 384 # Get the address: ...
-click 1105 467 # ... Fixed address, filled in from the lease
-click 1194 609 # Apply
-sleep 1
-grep -q 'connection modify uuid aaaa-1111 ipv4.method manual ipv4.addresses 192.168.1.129/24 ipv4.gateway 192.168.1.1' \
-	"$work/nm.log" || fail "the fixed address was not saved with its subnet and gateway"
-grep -q 'connection up uuid aaaa-1111' "$work/nm.log" ||
-	fail "the connected network did not connect again with the new address"
-pkill -f "^[^ ]*/tilewin -c $work/tw-network.conf" 2>/dev/null
-sleep 2 # its socket name is free again before the next one starts
+doing() {
+	[ "$part" = all ] || [ "$part" = "$1" ]
+}
+
+if doing network; then
+	start network 1500
+	# the advanced settings: one of NetworkManager's, and tileWin's limits
+	click 1207 595 # Connect automatically: off
+	logged 5 -q 'connection modify uuid aaaa-1111 connection.autoconnect no' "$work/nm.log" ||
+		fail "turning off connecting automatically did not reach NetworkManager"
+	# ("Saved" now shows under the network, the rows below are 24 pixels lower)
+	click 1207 797 # Connect again after 1 GB: on, beside the download limit kept for it
+	click 1194 975 # Apply
+	logged 5 -q '^set aaaa-1111 1000 20000 0$' "$work/limits.log" ||
+		fail "the limits did not reach the helper as 1000 MB, 20000 kbit/s down and none up"
+	# again, without the message above
+	stop network
+	printf '# mine\ncheck_url http://check.example/\n' > "$XDG_CONFIG_HOME/tileWin/portal.conf"
+	start network 1500
+	click 1207 1116 # Accept login pages by themselves: off
+	logged 5 -qx 'accept no' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
+		fail "the switch of login pages did not write accept no: $(cat "$XDG_CONFIG_HOME/tileWin/portal.conf")"
+	logged 5 -qx 'check_url http://check.example/' "$XDG_CONFIG_HOME/tileWin/portal.conf" ||
+		fail "the switch of login pages lost the rest of portal.conf"
+	click 1116 489 # Show, beside the password
+	logged 5 -q -- '-s -g 802-11-wireless-security.psk connection show uuid aaaa-1111' "$work/nm.log" ||
+		fail "showing the password did not ask NetworkManager for it"
+	click 1135 384 # Get the address: ...
+	click 1105 467 # ... Fixed address, filled in from the lease
+	click 1194 609 # Apply
+	logged 5 -q 'connection modify uuid aaaa-1111 ipv4.method manual ipv4.addresses 192.168.1.129/24 ipv4.gateway 192.168.1.1' \
+		"$work/nm.log" || fail "the fixed address was not saved with its subnet and gateway"
+	logged 5 -q 'connection up uuid aaaa-1111' "$work/nm.log" ||
+		fail "the connected network did not connect again with the new address"
+	stop network
+fi
 
 # names the service blocked lately, as it writes them (newest first)
 printf '%s\n' "$(date +%s) 3 1 list tracker.example.com" "$(date +%s) 1 28 list tracker.example.com" \
 	"$(date +%s) 2 1 hand ads.example.org" > "$work/run/blocked"
-start dns 2600
-click 1196 2503 # Allow, beside tracker.example.com in the names blocked lately
-click 1110 326 # Ask: ...
-click 1100 409 # ... These servers, in this order
-sleep 1
-grep -q '^config' "$work/dns.log" || fail "the DNS page never handed its config to the helper"
-grep -q '^fastest 0$' "$work/dns.conf" || fail "\"these servers, in order\" did not write fastest 0"
-grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8$' "$work/dns.conf" || fail "the servers were lost"
-grep -q '^prefetch_skip ads.test$' "$work/dns.conf" || fail "a name never to prefetch was lost"
-grep -q '^allow tracker.example.com$' "$work/dns.conf" ||
-	fail "allowing a name blocked lately did not put it among the names never blocked"
-# the servers of the network itself, in the section of single networks
-click 1133 779 # This network asks: ...
-click 1120 862 # ... Servers of its own
-click 1160 898 # Add a server...
-click 1000 1083 # ... 9.9.9.9 (Quad9)
-sleep 1
-[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/dns-section.png"
-grep -q 'connection modify uuid aaaa-1111 ipv4.ignore-auto-dns yes ipv4.dns 9.9.9.9 ' "$work/nm.log" ||
-	fail "the DNS page did not give the network its own server"
-grep -q 'device reapply wlan0' "$work/nm.log" ||
-	fail "the connected network did not take its new DNS server at once"
+if doing dns; then
+	start dns 2600
+	click 1196 2503 # Allow, beside tracker.example.com in the names blocked lately
+	click 1110 326 # Ask: ...
+	click 1100 409 # ... These servers, in this order
+	logged 5 -q '^config' "$work/dns.log" || fail "the DNS page never handed its config to the helper"
+	logged 5 -q '^fastest 0$' "$work/dns.conf" || fail "\"these servers, in order\" did not write fastest 0"
+	logged 5 -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8$' "$work/dns.conf" || fail "the servers were lost"
+	logged 5 -q '^prefetch_skip ads.test$' "$work/dns.conf" || fail "a name never to prefetch was lost"
+	logged 5 -q '^allow tracker.example.com$' "$work/dns.conf" ||
+		fail "allowing a name blocked lately did not put it among the names never blocked"
+	# the servers of the network itself, in the section of single networks
+	click 1133 779 # This network asks: ...
+	click 1120 862 # ... Servers of its own
+	click 1160 898 # Add a server...
+	click 1000 1083 # ... 9.9.9.9 (Quad9)
+	[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/dns-section.png"
+	logged 5 -q 'connection modify uuid aaaa-1111 ipv4.ignore-auto-dns yes ipv4.dns 9.9.9.9 ' "$work/nm.log" ||
+		fail "the DNS page did not give the network its own server"
+	logged 5 -q 'device reapply wlan0' "$work/nm.log" ||
+		fail "the connected network did not take its new DNS server at once"
 
-# a server for all networks from the list of known ones (its list is made
-# anew by the pick: the app used to crash on that)
-click 1160 571 # Add a server...
-# the page reads the status of the service every three seconds: the list has
-# to survive that while it is open (it was made anew under the open popup)
-sleep 4
-click 1000 654 # ... 1.0.0.1 (Cloudflare), the first not in the list yet
-sleep 1
-pgrep -f "^$settings" >/dev/null || fail "the settings app crashed while a server was picked"
-grep -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
-	fail "a server picked from the list was not added to the servers for all networks"
+	# a server for all networks from the list of known ones (its list is made
+	# anew by the pick: the app used to crash on that)
+	click 1160 571 # Add a server...
+	# the page reads the status of the service every three seconds: the list has
+	# to survive that while it is open (it was made anew under the open popup)
+	sleep 4
+	click 1000 654 # ... 1.0.0.1 (Cloudflare), the first not in the list yet
+	logged 5 -q '^servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1$' "$work/dns.conf" ||
+		fail "a server picked from the list was not added to the servers for all networks"
+	app_runs || fail "the settings app crashed while a server was picked"
+	stop dns
+elif doing rewire; then
+	# the config as the part above leaves it
+	cat > "$work/dns.conf" <<'EOD'
+# The DNS service of tileWin, written by its settings app.
+# See docs/configuration.md for what each line means.
 
-# The service runs, but the DNS of the computer does not come to it: the page
-# says so and offers to send it through again
-pkill -f "^[^ ]*/tilewin -c $work/tw-dns.conf" 2>/dev/null
-sleep 2
-printf '%s\n' "pid $$" "source all-networks" "use 1.1.1.1" "today 0 0 0 0" "wired 0" \
-	"doh_error 9.9.9.9 the certificate is not for dns.quad9.net" > "$work/run/status"
-echo 'doh 9.9.9.9 https://dns.quad9.net/dns-query' >> "$work/dns.conf"
-printf '[main]\ndns=none\n' > "$work/nmconf/zz-tilewin-dns.conf" # it is on
-: > "$work/dns.log"
-height=900
-start dns 900
-[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/rewire.png"
-click 1186 256 # Connect, beside "Send the DNS of this computer through it again"
-sleep 1
-grep -q '^enable' "$work/dns.log" ||
-	fail "\"Connect\" did not send the DNS of the computer through the service again"
-# DNS over HTTPS for a server: a well-known one has its address at hand
-click 1160 492 # HTTPS, beside 1.1.1.1
-sleep 1
-[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/doh.png"
-grep -q '^doh 1.1.1.1 https://cloudflare-dns.com/dns-query$' "$work/dns.conf" ||
-	fail "turning on HTTPS for 1.1.1.1 did not give it Cloudflare's https:// address"
-grep -q '^doh 9.9.9.9 https://dns.quad9.net/dns-query$' "$work/dns.conf" ||
-	fail "the https:// address another server had was lost"
+servers 1.1.1.1 9.9.9.9 8.8.8.8 1.0.0.1
+fastest 0
+test_interval 3600
+
+cache yes
+cache_min 0
+cache_max 86400
+cache_size 10000
+
+prefetch yes
+prefetch_percent 5
+prefetch_days 7
+prefetch_skip ads.test
+
+blocking yes
+block_answer null
+allow tracker.example.com
+EOD
+fi
+
+if doing rewire; then
+	# The service runs, but the DNS of the computer does not come to it: the page
+	# says so and offers to send it through again
+	printf '%s\n' "pid $$" "source all-networks" "use 1.1.1.1" "today 0 0 0 0" "wired 0" \
+		"doh_error 9.9.9.9 the certificate is not for dns.quad9.net" > "$work/run/status"
+	echo 'doh 9.9.9.9 https://dns.quad9.net/dns-query' >> "$work/dns.conf"
+	printf '[main]\ndns=none\n' > "$work/nmconf/zz-tilewin-dns.conf" # it is on
+	: > "$work/dns.log"
+	start dns 900
+	[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/rewire.png"
+	click 1186 256 # Connect, beside "Send the DNS of this computer through it again"
+	logged 5 -q '^enable' "$work/dns.log" ||
+		fail "\"Connect\" did not send the DNS of the computer through the service again"
+	# DNS over HTTPS for a server: a well-known one has its address at hand
+	click 1160 492 # HTTPS, beside 1.1.1.1
+	[ -n "${SHOT_DIR:-}" ] && WAYLAND_DISPLAY=$display grim "$SHOT_DIR/doh.png"
+	logged 5 -q '^doh 1.1.1.1 https://cloudflare-dns.com/dns-query$' "$work/dns.conf" ||
+		fail "turning on HTTPS for 1.1.1.1 did not give it Cloudflare's https:// address"
+	logged 5 -q '^doh 9.9.9.9 https://dns.quad9.net/dns-query$' "$work/dns.conf" ||
+		fail "the https:// address another server had was lost"
+fi
 
 if [ $failed -ne 0 ]; then
 	echo "--- nmcli was asked:"

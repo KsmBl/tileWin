@@ -13,6 +13,7 @@
 #
 # usage: start_search.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -27,7 +28,7 @@ for needed in "$compositor" "$msg" "$panel" "$keys"; do
 		exit 77
 	fi
 done
-for needed in dbus-run-session find timeout; do
+for needed in dbus-run-session find timeout grim md5sum; do
 	if ! command -v "$needed" >/dev/null 2>&1; then
 		echo "$needed is not installed: skipping"
 		exit 77
@@ -59,6 +60,16 @@ for a in "\$@"; do printf '%s\n' "\$a"; done > "$work/$name.called"
 EOS
 	chmod +x "$work/bin/$name"
 done
+# the search for files runs find: it writes down each search it finished, so
+# the test knows when the files found are in the menu
+cat > "$work/bin/find" <<EOS
+#!/bin/sh
+$(command -v find) "\$@"
+status=\$?
+printf '%s\n' "\$*" >> "$work/found"
+exit \$status
+EOS
+chmod +x "$work/bin/find"
 export PATH=$work/bin:$PATH
 
 failures=0
@@ -69,7 +80,7 @@ fail() {
 ipc() { "$msg" -s "$sock" "$@"; }
 cleanup() {
 	ipc exit >/dev/null 2>&1
-	sleep 0.5
+	wait_until 5 sh -c "! pgrep -f '^[^ ]*/tilewin -c $work/' >/dev/null"
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT
@@ -101,7 +112,41 @@ if [ ! -s "$work/display" ]; then
 	exit 1
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
-sleep 1.5
+
+# a checksum of what the screen shows, and of a strip of it across
+screen() { grim -t ppm - 2>/dev/null | md5sum; }
+strip() { grim -g "0,$1 1280x40" -t ppm - 2>/dev/null | md5sum; }
+# the taskbar is drawn, at the top or the bottom: there is more than wallpaper
+panel_up() {
+	_middle=$(strip 340)
+	[ "$(strip 0)" != "$_middle" ] || [ "$(strip 680)" != "$_middle" ]
+}
+changed_from() { [ "$(screen)" != "$1" ]; }
+# runs an ipc command that shows something, and waits until it shows: a menu
+# that is on the screen has the keyboard (the keyboard tool takes a moment to
+# start typing, and lets the last key take effect before it ends)
+shown() {
+	_before=$(screen)
+	ipc "$@" >/dev/null
+	wait_until 10 changed_from "$_before"
+}
+# runs an ipc command that redraws the screen, then waits until it has been
+# redrawn: the screen changed, the taskbar is there, and nothing moves anymore
+redrawn() {
+	shown "$@"
+	wait_until 10 panel_up
+	wait_still 10 screen
+}
+# the start menu opens, ready for the keyboard
+open_menu() { shown panel startmenu toggle; }
+if ! wait_until 30 panel_up; then
+	echo "the taskbar never came up"
+	tail -n 3 "$work/log"
+	exit 1
+fi
+wait_still 10 screen
+# a search for files has been finished and shown
+found() { grep -qF -- "*$1*" "$work/found" 2>/dev/null; }
 
 # waits for a stand-in to have been called, and says what with
 called() {
@@ -115,60 +160,58 @@ called() {
 }
 
 for theme in win10 win7 win11; do
-	ipc theme $theme >/dev/null
-	sleep 1
+	if ipc -t get_tilewin | grep -q "\"theme\": *\"$theme\""; then
+		# already in it: the taskbar loads it again, which shows nothing
+		# that could be waited for
+		ipc theme $theme >/dev/null
+		sleep 1
+	else
+		redrawn theme $theme
+	fi
 
-	ipc panel startmenu toggle >/dev/null
-	sleep 0.5
+	open_menu
 	"$keys" text dark key none space text mode key none return
 	got=$(called tilewin-settings)
 	[ "$got" = "--page=theme" ] || fail "$theme: dark mode opened '$got', not the Theme page"
-	sleep 0.5
 
-	ipc panel startmenu toggle >/dev/null
-	sleep 0.5
+	open_menu
 	"$keys" text 6 key shift 8 text 7 key none return
 	got=$(called wl-copy | tail -n 1)
 	[ "$got" = "42" ] || fail "$theme: 6*7 copied '$got', not 42"
-	sleep 0.5
 
-	ipc panel startmenu toggle >/dev/null
-	sleep 0.5
+	open_menu
+	rm -f "$work/found"
 	"$keys" text zebra
-	sleep 1.2
+	wait_until 10 found zebra
+	wait_still 10 screen
 	"$keys" key none return
 	got=$(called xdg-open)
 	[ "$got" = "$tricky" ] || fail "$theme: zebra opened '$got', not '$tricky'"
-	sleep 0.5
 done
 
 # hidden folders stay out: the only other zebra is not found
-rm -f "$tricky"
-ipc panel startmenu toggle >/dev/null
-sleep 0.5
+rm -f "$tricky" "$work/found"
+open_menu
 "$keys" text hiddenzebra
-sleep 1.2
+wait_until 10 found hiddenzebra || fail "the files were not searched for hiddenzebra"
+wait_still 10 screen
 "$keys" key none return
 sleep 0.8
 [ ! -e "$work/xdg-open.called" ] || fail "a file in a hidden folder was found: $(cat "$work/xdg-open.called")"
 "$keys" key none escape key none escape
-sleep 0.5
+wait_still 10 screen
 
 # the launcher: a command comes before a setting of that name
-ipc panel launcher >/dev/null
-sleep 0.5
+shown panel launcher
 "$keys" text dig key none return
-sleep 0.2
-attempt=0
-while [ ! -e "$work/dig.called" ] && [ $attempt -lt 25 ]; do
-	sleep 0.2
-	attempt=$((attempt + 1))
-done
+wait_until 5 test -e "$work/dig.called"
 [ -e "$work/dig.called" ] || fail "Enter in the launcher did not run the command dig"
-[ -z "$(called tilewin-settings)" ] || fail "the launcher opened a setting for the command dig"
+# what Enter runs, it runs at once: had it opened a setting as well, that
+# would have come with dig
 sleep 0.5
-ipc panel launcher >/dev/null
-sleep 0.5
+[ ! -e "$work/tilewin-settings.called" ] ||
+	fail "the launcher opened a setting for the command dig: $(called tilewin-settings)"
+shown panel launcher
 "$keys" text dig key none down key none return
 got=$(called tilewin-settings)
 echo "the row below the command: $got"

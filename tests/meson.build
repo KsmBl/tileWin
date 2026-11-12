@@ -560,15 +560,20 @@ if gdk_pixbuf.found()
 
 	# needs a compositor and grim, so it is not part of the default run:
 	#   meson test -C build --suite gui
-	test(
-		'settings-pages-draw',
-		find_program('render_pages.sh'),
-		args: [meson.project_build_root(), meson.project_source_root()],
-		depends: [count_content],
-		env: saver_gui_env,
-		suite: 'gui',
-			timeout: 900,
-	)
+	# the pages in groups, one test each, so that they are drawn side by side
+	page_groups = 5
+	foreach group : range(1, page_groups + 1)
+		test(
+			'settings-pages-draw-@0@'.format(group),
+			find_program('render_pages.sh'),
+			args: [meson.project_build_root(), meson.project_source_root(),
+				group.to_string(), page_groups.to_string()],
+			depends: [count_content],
+			env: saver_gui_env,
+			suite: 'gui',
+			timeout: 300,
+		)
+	endforeach
 
 	test(
 		'desktop-widgets',
@@ -609,15 +614,18 @@ if gdk_pixbuf.found()
 			timeout: 120,
 	)
 
-	test(
-		'doomsday',
-		find_program('doomsday.sh'),
-		args: [meson.project_build_root(), meson.project_source_root()],
-		depends: [pointer_tool, count_content],
-		env: saver_gui_env,
-		suite: 'gui',
+	# the Blizzard, and the other kinds, side by side
+	foreach part : ['blizzard', 'others']
+		test(
+			'doomsday-' + part,
+			find_program('doomsday.sh'),
+			args: [meson.project_build_root(), meson.project_source_root(), part],
+			depends: [pointer_tool, count_content],
+			env: saver_gui_env,
+			suite: 'gui',
 			timeout: 240,
-	)
+		)
+	endforeach
 
 	test(
 		'desktop-widget-styles',
@@ -638,15 +646,18 @@ test(
 	timeout: 30,
 )
 
-test(
-	'settings-network',
-	find_program('settings_network.sh'),
-	args: [meson.project_build_root()],
-	depends: [pointer_tool],
-	env: saver_gui_env,
-	suite: 'gui',
-	timeout: 120,
-)
+# the Network page and the two parts of the DNS page side by side
+foreach part : ['network', 'dns', 'rewire']
+	test(
+		'settings-network-' + part,
+		find_program('settings_network.sh'),
+		args: [meson.project_build_root(), part],
+		depends: [pointer_tool],
+		env: saver_gui_env,
+		suite: 'gui',
+		timeout: 120,
+	)
+endforeach
 
 test(
 	'panel-idle',
@@ -875,15 +886,18 @@ test(
 	timeout: 120,
 )
 
-test(
-	'snap-animated',
-	find_program('snap_animated.sh'),
-	args: [meson.project_build_root(), meson.project_source_root()],
-	env: saver_gui_env,
-	depends: [pointer_tool],
-	suite: 'gui',
-	timeout: 120,
-)
+# the two kinds of animation side by side
+foreach expensive : ['no', 'yes']
+	test(
+		'snap-animated-' + (expensive == 'yes' ? 'expensive' : 'picture'),
+		find_program('snap_animated.sh'),
+		args: [meson.project_build_root(), meson.project_source_root(), expensive],
+		env: saver_gui_env,
+		depends: [pointer_tool],
+		suite: 'gui',
+		timeout: 120,
+	)
+endforeach
 
 test(
 	'edge-buttons',
@@ -1193,15 +1207,18 @@ if gdk_pixbuf.found()
 			timeout: 60,
 	)
 
-	test(
-		'polkit-themes',
-		find_program('polkit_themes.sh'),
-		args: [meson.project_build_root(), meson.project_source_root()],
-		depends: [keyboard_tool, count_content],
-		env: saver_gui_env,
-		suite: 'gui',
+	# the themes in two halves, side by side
+	foreach part : ['1', '2']
+		test(
+			'polkit-themes-' + part,
+			find_program('polkit_themes.sh'),
+			args: [meson.project_build_root(), meson.project_source_root(), part + '/2'],
+			depends: [keyboard_tool, count_content],
+			env: saver_gui_env,
+			suite: 'gui',
 			timeout: 300,
-	)
+		)
+	endforeach
 
 	test(
 		'polkit-agent',

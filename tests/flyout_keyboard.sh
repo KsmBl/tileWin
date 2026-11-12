@@ -18,6 +18,7 @@
 #
 # usage: flyout_keyboard.sh <build dir> <source dir>
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -100,7 +101,7 @@ fail() {
 ipc() { "$msg" -s "$sock" "$@"; }
 cleanup() {
 	ipc exit >/dev/null 2>&1
-	sleep 0.5
+	wait_until 5 sh -c "! pgrep -f '^[^ ]*/tilewin -c $work/' >/dev/null"
 	rm -rf "$work" "$sock"
 }
 trap cleanup EXIT
@@ -132,22 +133,53 @@ if [ ! -s "$work/display" ]; then
 	exit 1
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
-sleep 1.5
+
+# a checksum of the screen, and of a strip of it across
+screen() { grim -t ppm - 2>/dev/null | md5sum; }
+strip() { grim -g "0,$1 1280x40" -t ppm - 2>/dev/null | md5sum; }
+# the taskbar is drawn, at the top or the bottom: there is more than wallpaper
+panel_up() {
+	_middle=$(strip 340)
+	[ "$(strip 0)" != "$_middle" ] || [ "$(strip 680)" != "$_middle" ]
+}
+changed_from() { [ "$(screen)" != "$1" ]; }
+# what nmcli was asked and what the screen shows: both stop changing once a
+# flyout has done what a key asked for
+calls() { cat "$work/nmcli.calls" 2>/dev/null | wc -l; }
+state() { calls; screen; }
+settled() { wait_still 10 state; }
+# runs an ipc command that opens a flyout, and waits until it is on the screen
+# and done drawing
+shown() {
+	_before=$(screen)
+	ipc "$@" >/dev/null 2>&1
+	wait_until 10 changed_from "$_before"
+	settled
+}
+called() { grep -q -- "$1" "$work/$2.calls" 2>/dev/null; }
+night_is() { [ "$(cat "$XDG_STATE_HOME/tileWin/nightlight" 2>/dev/null)" = "$1" ]; }
+if ! wait_until 30 panel_up; then
+	echo "the taskbar never came up"
+	tail -n 3 "$work/log"
+	exit 1
+fi
+wait_still 10 screen
 
 # ---- quick settings: first button, down, right: night light
-ipc panel quicksettings >/dev/null
-sleep 0.8
+shown panel quicksettings
 grim -t ppm "$work/plain.ppm"
+plain=$(screen)
 "$keys" key none tab
-sleep 0.4
+wait_until 5 changed_from "$plain"
+wait_still 10 screen
 grim -t ppm "$work/ring.ppm"
 cmp -s "$work/plain.ppm" "$work/ring.ppm" && fail "no ring shows after Tab"
 "$keys" key none down key none right key none return
-sleep 0.5
+wait_until 5 night_is on
 night=$(cat "$XDG_STATE_HOME/tileWin/nightlight" 2>/dev/null)
 [ "$night" = on ] || fail "Enter on the night light button left it '$night'"
 "$keys" key none space
-sleep 0.5
+wait_until 5 night_is off
 night=$(cat "$XDG_STATE_HOME/tileWin/nightlight" 2>/dev/null)
 [ "$night" = off ] || fail "Space on the night light button left it '$night'"
 
@@ -156,7 +188,7 @@ night=$(cat "$XDG_STATE_HOME/tileWin/nightlight" 2>/dev/null)
 "$keys" key none down
 sleep 0.2
 "$keys" key none right key none right
-sleep 0.5
+wait_until 5 called 'set-sink-volume @DEFAULT_SINK@ 45%' pactl
 grep -q 'set-sink-volume @DEFAULT_SINK@ 45%' "$work/pactl.calls" ||
 	fail "Right on the volume slider did not go from 40% to 45%: $(cat "$work/pactl.calls")"
 : > "$work/pactl.calls"
@@ -169,30 +201,34 @@ fi
 sleep 0.4
 
 # ---- network: the row, then Connect, then the password
-ipc panel network >/dev/null 2>&1 || true
-sleep 1.2
+: > "$work/nmcli.calls"
+shown panel network
+wait_until 10 called 'device wifi list' nmcli
+settled
 : > "$work/nmcli.calls"
 # from the end, since the addresses of this computer may come first: the last
 # stop is Refresh, the one above it the network
 "$keys" key none up key none up key none return
-sleep 0.5
+settled
 "$keys" key none down key none return
-sleep 0.5
+settled
 # too short for WPA: not tried, and the field keeps it
 "$keys" text ab key none space text cd key none return
 sleep 0.8
 grep -q 'connect Testnet' "$work/nmcli.calls" && fail "a password of 5 characters was tried"
-"$keys" key none backspace key none backspace key none backspace key none backspace key none backspace
-# a wrong one: turned down, and the field is there to type the next one
-"$keys" text wrong key none space text pw1 key none return
-sleep 1.2
+# a wrong one, typed over it: turned down, and the field is there to type the
+# next one
+"$keys" key none backspace key none backspace key none backspace key none backspace \
+	key none backspace text wrong key none space text pw1 key none return
+wait_until 10 called 'connection delete uuid bbbb-2222' nmcli
+settled
 grep -q 'connect Testnet password wrong pw1' "$work/nmcli.calls" ||
 	fail "the keyboard did not connect: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 grep -q 'connection delete uuid bbbb-2222' "$work/nmcli.calls" ||
 	fail "the connection saved with the wrong password stayed: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 grep -q 'connection delete uuid cccc-3333' "$work/nmcli.calls" && fail "a connection that was there before went"
 "$keys" text right key none space text pw2 key none return
-sleep 1.2
+wait_until 10 called 'connect Testnet password right pw2' nmcli
 grep -q 'connect Testnet password right pw2' "$work/nmcli.calls" ||
 	fail "no new password could be typed after the wrong one: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 "$keys" key none escape key none escape
@@ -201,18 +237,23 @@ sleep 0.4
 # ---- network: a saved network whose password is no longer right
 ipc panel close >/dev/null 2>&1
 touch "$work/known"
-ipc panel network >/dev/null 2>&1 || true
-sleep 1.2
+: > "$work/nmcli.calls"
+shown panel network
+wait_until 10 called 'device wifi list' nmcli
+settled
 : > "$work/nmcli.calls"
 "$keys" key none up key none up key none return
-sleep 0.5
+settled
 # Show password comes first in a saved network, Connect to the right of it
 "$keys" key none down key none right key none return
-sleep 1.2
+wait_until 10 called 'connection up uuid cccc-3333' nmcli
+settled
 grep -q 'connection up uuid cccc-3333' "$work/nmcli.calls" ||
 	fail "the saved network was not connected: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 "$keys" text fresh key none space text pw3 key none return
-sleep 1.2
+two_ups() { [ "$(grep -c 'connection up uuid cccc-3333' "$work/nmcli.calls")" = 2 ]; }
+wait_until 10 called 'connection modify uuid cccc-3333' nmcli
+wait_until 10 two_ups
 grep -q 'connection modify uuid cccc-3333 802-11-wireless-security.psk fresh pw3' "$work/nmcli.calls" ||
 	fail "the new password of a saved network was not kept: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 [ "$(grep -c 'connection up uuid cccc-3333' "$work/nmcli.calls")" = 2 ] ||
@@ -223,12 +264,14 @@ sleep 0.4
 # ---- network: Disconnect on the row of the network connected to
 ipc panel close >/dev/null 2>&1
 touch "$work/active"
-ipc panel network >/dev/null 2>&1 || true
-sleep 1.2
+: > "$work/nmcli.calls"
+shown panel network
+wait_until 10 called 'device wifi list' nmcli
+settled
 : > "$work/nmcli.calls"
 # from the end: Refresh, then the Disconnect of the row
 "$keys" key none up key none up key none return
-sleep 1.0
+wait_until 10 called 'device disconnect wlan0' nmcli
 grep -q 'device disconnect wlan0' "$work/nmcli.calls" ||
 	fail "Disconnect on the row did not disconnect: $(tr '\n' '|' < "$work/nmcli.calls" | tail -c 500)"
 "$keys" key none escape key none escape
@@ -236,8 +279,7 @@ sleep 0.4
 
 # ---- power: walk until the keep awake switch answers
 ipc panel close >/dev/null 2>&1
-ipc panel power >/dev/null 2>&1
-sleep 0.8
+shown panel power
 awake() { ipc -t get_tilewin | grep -c '"keep_awake": *true'; }
 for step in 1 2 3 4 5; do
 	"$keys" key none tab key none return

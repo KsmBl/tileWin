@@ -6,9 +6,12 @@
 #  - typing shows in its field
 #  - Escape answers No (exit 1) and Return answers Yes (exit 0)
 # Screenshots are left in $POLKIT_SHOTS when that is set, one per theme.
+# With a part such as 1/2 it works only every second theme from the first,
+# so that the parts can run side by side.
 #
-# usage: polkit_themes.sh <build dir> <source dir>
+# usage: polkit_themes.sh <build dir> <source dir> [<part>/<parts>]
 set -u
+. "$(dirname "$0")/wait.sh"
 
 build=$1
 source_dir=$2
@@ -74,19 +77,13 @@ env -u WAYLAND_DISPLAY -u DISPLAY \
 	WLR_LIBINPUT_NO_DEVICES=1 SWAYSOCK="$sock" TILEWINSOCK="$sock" \
 	"$(dirname "$0")/session.sh" "$compositor" -c "$work/tilewin.conf" > "$work/log" 2>&1 &
 
-attempt=0
-while [ ! -s "$work/display" ] && [ $attempt -lt 60 ]; do
-	sleep 0.2
-	attempt=$((attempt + 1))
-done
-if [ ! -s "$work/display" ]; then
+if ! wait_for_file 12 "$work/display"; then
 	echo "the nested compositor never came up"
 	tail -n 3 "$work/log"
 	exit 1
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
 export SWAYSOCK=$sock TILEWINSOCK=$sock
-sleep 1
 
 mean() { # <png> <x> <y> <w> <h>: the mean of red, green and blue
 	"$count" --mean "$@" | awk '{ printf "%d", ($1 + $2 + $3) / 3 }'
@@ -98,7 +95,13 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
 a, b = (GdkPixbuf.Pixbuf.new_from_file(f) for f in sys.argv[1:3])
 da, db = a.get_pixels(), b.get_pixels()
-print(sum(1 for i in range(0, len(da), a.get_n_channels()) if da[i:i + 3] != db[i:i + 3]))
+n = a.get_n_channels()
+step, count = n * 1024, 0
+for start in range(0, len(da), step): # stretches the same at once, the others pixel by pixel
+	ra, rb = da[start:start + step], db[start:start + step]
+	if ra != rb:
+		count += sum(1 for i in range(0, len(ra), n) if ra[i:i + 3] != rb[i:i + 3])
+print(count)
 ' "$1" "$2"
 }
 preview() { # starts one; its exit status lands in $work/status
@@ -108,33 +111,50 @@ preview() { # starts one; its exit status lands in $work/status
 }
 answer() { # <key>: presses it and prints the preview's exit status
 	"$keys" key none "$1" >/dev/null 2>&1
-	attempt=0
-	while [ ! -s "$work/status" ] && [ $attempt -lt 25 ]; do
-		sleep 0.2
-		attempt=$((attempt + 1))
-	done
-	if [ -s "$work/status" ]; then
+	if wait_for_file 5 "$work/status"; then
 		cat "$work/status"
 	else
 		echo none
 	fi
 }
 
-grim -o HEADLESS-1 "$work/plain.png"
+shot() { # <output> <png>: takes it and prints its checksum
+	grim -o "$1" "$2" && cksum < "$2"
+}
+dialog_up() { # the dialog on the main display, drawn to the end, in asking.png
+	grim -o HEADLESS-2 "$work/asking.png" &&
+		[ "$("$count" "$work/asking.png" 340 120 600 480)" -gt 20000 ] &&
+		wait_still 5 shot HEADLESS-2 "$work/asking.png"
+}
+side_shaded() { # in side.png
+	grim -o HEADLESS-1 "$work/side.png" &&
+		[ "$(mean "$work/side.png" 0 0 200 200)" -lt $((plain * 3 / 4)) ]
+}
+typing_shown() { # the typing on the screen, drawn to the end, in typed.png
+	grim -o HEADLESS-2 "$work/typed.png" && ! cmp -s "$work/asking.png" "$work/typed.png" &&
+		wait_still 5 shot HEADLESS-2 "$work/typed.png"
+}
+
+wait_still 5 shot HEADLESS-1 "$work/plain.png"
 plain=$(mean "$work/plain.png" 0 0 200 200)
 themes=${POLKIT_THEMES:-$(ls "$source_dir/themes")}
+part=${3:-1/1}
+index=0
 for theme in $themes; do
+	index=$((index + 1))
+	[ $(((index - 1) % ${part#*/})) -eq $((${part%/*} - 1)) ] || continue
 	[ -f "$source_dir/themes/$theme/theme.conf" ] || continue
 	"$msg" -s "$sock" theme "$theme" >/dev/null 2>&1
-	sleep 0.5
+	# the preview takes the theme written down; the screens drawn again in it
+	wait_until 5 grep -qx "$theme" "$XDG_CONFIG_HOME/tileWin/current-theme"
+	wait_still 5 shot HEADLESS-1 "$work/side.png"
 
 	preview
-	sleep 1.2
-	grim -o HEADLESS-1 "$work/side.png"
-	grim -o HEADLESS-2 "$work/asking.png"
+	# (a wait that runs out leaves its screenshot for the checks below to fail on)
+	wait_until 10 dialog_up
+	wait_until 3 side_shaded
 	"$keys" text abc >/dev/null 2>&1
-	sleep 0.4
-	grim -o HEADLESS-2 "$work/typed.png"
+	wait_until 3 typing_shown
 	if [ -n "${POLKIT_SHOTS:-}" ]; then
 		mkdir -p "$POLKIT_SHOTS"
 		cp "$work/typed.png" "$POLKIT_SHOTS/$theme.png"
@@ -146,7 +166,7 @@ for theme in $themes; do
 	preview_pid=
 
 	preview
-	sleep 1.2
+	wait_until 10 dialog_up
 	yes=$(answer return)
 	preview_pid=
 	echo "$theme: side screen $side (from $plain), dialog pixels $dialog, typing changed" \
