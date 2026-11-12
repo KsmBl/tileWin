@@ -7,6 +7,8 @@
 #  - a key ends it and brings back the lock screen, still locked: the lock
 #    screen keeps running, the desktop does not show, and a second lock screen
 #    cannot lock the session (it is locked already);
+#  - that key only ends the saver: on the sign-in view it is not typed into
+#    the password field;
 #  - the screen saver comes again after the next three seconds without input.
 #
 # usage: screensaver_locked.sh <build dir> <source dir>
@@ -149,6 +151,35 @@ running || fail "the screen saver did not come again while locked"
 "$keyboard" key none escape >/dev/null 2>&1
 sleep 1
 still_locked || fail "the session is not locked any more after the second key"
+
+# the key that ends the screen saver is not typed into the password field: with
+# the sign-in view showing and its field empty ("a" opens it, Backspace takes
+# the "a" back), the saver comes, "x" ends it, and the screen is the same as
+# before, with no dot in the field
+"$keyboard" key none a key none backspace >/dev/null 2>&1
+sleep 0.5
+grim "$work/sign-in.png" 2>/dev/null
+sleep 4
+sign_in_saver=$(brightness)
+echo "on the sign-in view, four seconds later: brightness $sign_in_saver"
+[ "$sign_in_saver" -lt 3 ] || fail "the screen saver did not cover the sign-in view"
+"$keyboard" key none x >/dev/null 2>&1
+sleep 1
+grim "$work/after-x.png" 2>/dev/null
+# the password field, under the middle of the screen (the avatar above it is
+# not drawn the same to the pixel every time)
+if ! python3 -I -c '
+import sys, gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+a, b = (GdkPixbuf.Pixbuf.new_from_file(p).new_subpixbuf(440, 380, 400, 120)
+	for p in sys.argv[1:3])
+rows = lambda p: [p.get_pixels()[y * p.get_rowstride():y * p.get_rowstride() +
+	p.get_width() * p.get_n_channels()] for y in range(p.get_height())]
+sys.exit(0 if rows(a) == rows(b) else 1)' "$work/sign-in.png" "$work/after-x.png"; then
+	fail "the key that ended the screen saver was typed into the password field"
+fi
+still_locked || fail "the session is not locked any more after the third key"
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

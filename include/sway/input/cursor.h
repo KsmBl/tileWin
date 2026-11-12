@@ -90,6 +90,9 @@ struct sway_cursor {
 	enum seat_config_hide_cursor_when_typing hide_when_typing;
 
 	size_t pressed_button_count;
+	// buttons whose press ended the screen saver: their release goes nowhere either
+	uint32_t tw_saver_buttons[8];
+	size_t tw_saver_buttons_len;
 };
 
 struct sway_node;
@@ -110,9 +113,10 @@ void cursor_rebase(struct sway_cursor *cursor);
 void cursor_rebase_all(void);
 void cursor_update_image(struct sway_cursor *cursor, struct sway_node *node);
 
-void cursor_handle_activity_from_idle_source(struct sway_cursor *cursor,
+/* Both return true when the input ended the screen saver (tw_power_activity). */
+bool cursor_handle_activity_from_idle_source(struct sway_cursor *cursor,
 		enum sway_input_idle_source idle_source);
-void cursor_handle_activity_from_device(struct sway_cursor *cursor,
+bool cursor_handle_activity_from_device(struct sway_cursor *cursor,
 		struct wlr_input_device *device);
 void cursor_unhide(struct sway_cursor *cursor);
 int cursor_get_timeout(struct sway_cursor *cursor);

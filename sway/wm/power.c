@@ -354,23 +354,27 @@ static void wake(void) {
 	memset(power.done, 0, sizeof(power.done));
 }
 
-void tw_power_activity(void) {
+/* Input came; true when it ended the screen saver, so it goes no further (as on
+ * Windows, the key or click that ends the saver is not typed or clicked). */
+bool tw_power_activity(void) {
 	clock_gettime(CLOCK_MONOTONIC, &power.last_input);
 	if (power.saver_by_hand && power.saver_fd >= 0) {
 		long since = (power.last_input.tv_sec - power.saver_started.tv_sec) * 1000 +
 			(power.last_input.tv_nsec - power.saver_started.tv_nsec) / 1000000;
 		if (since < SAVER_GRACE_MS) {
-			return; // letting go of the keys that started it
+			return false; // letting go of the keys that started it
 		}
 	}
 	for (int i = 0; i < TW_IDLE_STAGES; i++) {
 		if (power.done[i]) {
+			bool saver = power.saver_fd >= 0;
 			wake();
 			schedule();
-			return;
+			return saver;
 		}
 	}
 	// otherwise the timer notices the new input time when it fires
+	return false;
 }
 
 static void apply_inhibited(void) {

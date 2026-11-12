@@ -75,6 +75,10 @@ struct sway_keyboard {
 
 	struct wl_event_source *key_repeat_source;
 	struct sway_binding *repeat_binding;
+
+	// keys whose press ended the screen saver: their release goes nowhere either
+	uint32_t tw_saver_keys[8];
+	size_t tw_saver_keys_len;
 };
 
 struct sway_keyboard_group {

@@ -447,7 +447,7 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 		keyboard->seat_device->input_device->wlr_device;
 	char *device_identifier = input_device_get_identifier(wlr_device);
 	bool exact_identifier = keyboard->wlr->group != NULL;
-	seat_idle_notify_activity(seat, IDLE_SOURCE_KEYBOARD);
+	bool ended_saver = seat_idle_notify_activity(seat, IDLE_SOURCE_KEYBOARD);
 	bool locked = server.session_lock.lock;
 	struct sway_keyboard_shortcuts_inhibitor *sway_inhibitor =
 		keyboard_shortcuts_inhibitor_get_for_focused_surface(seat);
@@ -472,6 +472,26 @@ static void handle_key_event(struct sway_keyboard *keyboard,
 			tw_power_key(tw_input && event->state == WL_KEYBOARD_KEY_STATE_PRESSED)) {
 		free(device_identifier);
 		return;
+	}
+	// the key that ends the screen saver only ends it, as on Windows: neither it
+	// nor its release reaches the lock screen's password field or a window
+	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED && ended_saver) {
+		if (keyboard->tw_saver_keys_len < sizeof(keyboard->tw_saver_keys) /
+				sizeof(keyboard->tw_saver_keys[0])) {
+			keyboard->tw_saver_keys[keyboard->tw_saver_keys_len++] = event->keycode;
+		}
+		free(device_identifier);
+		return;
+	}
+	if (event->state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+		for (size_t i = 0; i < keyboard->tw_saver_keys_len; i++) {
+			if (keyboard->tw_saver_keys[i] == event->keycode) {
+				keyboard->tw_saver_keys[i] =
+					keyboard->tw_saver_keys[--keyboard->tw_saver_keys_len];
+				free(device_identifier);
+				return;
+			}
+		}
 	}
 	if (tw_input && !locked) {
 		for (size_t i = 0; i < keyinfo.raw_keysyms_len; i++) {

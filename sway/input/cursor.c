@@ -251,21 +251,22 @@ static enum sway_input_idle_source idle_source_from_device(
 	abort();
 }
 
-void cursor_handle_activity_from_idle_source(struct sway_cursor *cursor,
+bool cursor_handle_activity_from_idle_source(struct sway_cursor *cursor,
 		enum sway_input_idle_source idle_source) {
 	wl_event_source_timer_update(
 			cursor->hide_source, cursor_get_timeout(cursor));
 
-	seat_idle_notify_activity(cursor->seat, idle_source);
+	bool ended_saver = seat_idle_notify_activity(cursor->seat, idle_source);
 	if (idle_source != IDLE_SOURCE_TOUCH) {
 		cursor_unhide(cursor);
 	}
+	return ended_saver;
 }
 
-void cursor_handle_activity_from_device(struct sway_cursor *cursor,
+bool cursor_handle_activity_from_device(struct sway_cursor *cursor,
 		struct wlr_input_device *device) {
 	enum sway_input_idle_source idle_source = idle_source_from_device(device);
-	cursor_handle_activity_from_idle_source(cursor, idle_source);
+	return cursor_handle_activity_from_idle_source(cursor, idle_source);
 }
 
 void cursor_unhide(struct sway_cursor *cursor) {
@@ -379,7 +380,25 @@ static void handle_pointer_button(struct wl_listener *listener, void *data) {
 		}
 	}
 
-	cursor_handle_activity_from_device(cursor, &event->pointer->base);
+	bool ended_saver = cursor_handle_activity_from_device(cursor, &event->pointer->base);
+	// the click that ends the screen saver only ends it, as on Windows: neither
+	// it nor its release reaches the lock screen or a window
+	if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && ended_saver) {
+		if (cursor->tw_saver_buttons_len < sizeof(cursor->tw_saver_buttons) /
+				sizeof(cursor->tw_saver_buttons[0])) {
+			cursor->tw_saver_buttons[cursor->tw_saver_buttons_len++] = event->button;
+		}
+		return;
+	}
+	if (event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+		for (size_t i = 0; i < cursor->tw_saver_buttons_len; i++) {
+			if (cursor->tw_saver_buttons[i] == event->button) {
+				cursor->tw_saver_buttons[i] =
+					cursor->tw_saver_buttons[--cursor->tw_saver_buttons_len];
+				return;
+			}
+		}
+	}
 	dispatch_cursor_button(cursor, &event->pointer->base,
 			event->time_msec, event->button, event->state);
 }

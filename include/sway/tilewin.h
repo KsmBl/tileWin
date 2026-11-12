@@ -537,7 +537,7 @@ enum tw_power_action {
 bool tw_idle_stage_parse(const char *name, enum tw_idle_stage *stage);
 bool tw_power_action_parse(const char *name, enum tw_power_action *action);
 /* Input happened (cheap, called for every event). */
-void tw_power_activity(void);
+bool tw_power_activity(void);
 /* An app keeps the screen on (idle inhibitor) or stopped doing so. */
 void tw_power_set_inhibited(bool inhibited);
 /* Keep awake: no idle timers, no screen saver and no battery saver until it is turned off. */

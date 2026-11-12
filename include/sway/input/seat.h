@@ -248,7 +248,8 @@ struct seat_config *seat_get_config(struct sway_seat *seat);
 
 struct seat_config *seat_get_config_by_name(const char *name);
 
-void seat_idle_notify_activity(struct sway_seat *seat,
+/* True when the input ended the screen saver: it then goes no further. */
+bool seat_idle_notify_activity(struct sway_seat *seat,
 		enum sway_input_idle_source source);
 
 bool seat_is_input_allowed(struct sway_seat *seat, struct wlr_surface *surface);
