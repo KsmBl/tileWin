@@ -172,11 +172,20 @@ const char *saver_screenshot(const struct saver *saver) {
 
 static uint64_t random_state;
 
+/* Seeded from the clock, or from TILEWIN_SAVER_SEED when given, so a run can be replayed. */
 double saver_random(void) {
 	if (!random_state) {
-		struct timespec ts;
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		random_state = (uint64_t)ts.tv_nsec * 2654435761u + (uint64_t)ts.tv_sec + 1;
+		const char *seed = getenv("TILEWIN_SAVER_SEED");
+		if (seed && *seed) {
+			random_state = strtoull(seed, NULL, 10) * 2654435761u + 1;
+		} else {
+			struct timespec ts;
+			clock_gettime(CLOCK_MONOTONIC, &ts);
+			random_state = (uint64_t)ts.tv_nsec * 2654435761u + (uint64_t)ts.tv_sec + 1;
+		}
+		if (!random_state) {
+			random_state = 1;
+		}
 	}
 	// xorshift64*
 	random_state ^= random_state >> 12;

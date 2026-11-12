@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "doomsday.h"
 
 static int failures;
@@ -263,8 +264,23 @@ static void test_jungle(void) {
 	finish(&r);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+	// the seed of saver_random(), printed so that a failing run can be replayed with
+	// TILEWIN_SAVER_SEED; "decay" as the argument runs only the first test
+	const char *seed = getenv("TILEWIN_SAVER_SEED");
+	if (!seed || !*seed) {
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		char chosen[32];
+		snprintf(chosen, sizeof(chosen), "%u", (unsigned)(ts.tv_nsec ^ ts.tv_sec * 1000003u));
+		setenv("TILEWIN_SAVER_SEED", chosen, 1);
+		seed = getenv("TILEWIN_SAVER_SEED");
+	}
+	printf("seed %s (TILEWIN_SAVER_SEED)\n", seed);
 	test_decay();
+	if (argc > 1 && strcmp(argv[1], "decay") == 0) {
+		return failures != 0;
+	}
 	test_decay_fast();
 	test_jungle();
 	// started and ended at once, and at tiny sizes
