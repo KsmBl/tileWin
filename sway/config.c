@@ -548,6 +548,7 @@ bool load_main_config(const char *file, bool is_active, bool validating) {
 	tw_load_theme_tile_config(config);
 	bool success = load_config(path, config, &config->swaynag_config_errors);
 	tw_fix_task_manager(config);
+	tw_fix_file_manager(config);
 	tw_add_default_bindings(config);
 
 	if (validating) {

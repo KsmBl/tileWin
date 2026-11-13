@@ -33,6 +33,7 @@ ends up settable only by hand. The `gui` suite starts a nested tileWin and:
   socket of `tilewin-clipboard`, then weighs both processes to check that a
   copied picture is held by that program and not by the taskbar;
 - checks that a `$taskmanager` nobody has installed is replaced by one that is,
+  and a `$filemanager` by the default app for folders,
   and that `expensive_calculations on` makes a window being maximized pass
   through sizes on the way instead of jumping to the end;
 - opens a window, restarts, and checks that the very same window is still

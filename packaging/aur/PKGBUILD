@@ -27,7 +27,7 @@ optdepends=(
 	'tesseract: copying text from the screen'
 	'tesseract-data-eng: the English language data for tesseract'
 	'xfce4-terminal: the terminal of the default config'
-	'thunar: the file manager of the default config'
+	'thunar: a file manager, when none is installed (tileWin opens the one that is)'
 	'xdg-desktop-portal-gtk: file dialogs and dark mode for apps'
 )
 backup=(

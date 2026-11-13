@@ -173,6 +173,8 @@ void tw_load_theme_tile_config(struct sway_config *config);
 void tw_add_default_bindings(struct sway_config *config);
 /* Points $taskmanager at a task manager that is actually installed. */
 void tw_fix_task_manager(struct sway_config *config);
+/* Points $filemanager at a file manager that is actually installed. */
+void tw_fix_file_manager(struct sway_config *config);
 void tw_after_reload(void);
 /* The focused window first again, after focus_priority or the config changed. */
 void tw_priority_refresh(void);
@@ -439,6 +441,8 @@ void tw_portal_start(void);
 void tw_file_dialogs_start(void);
 void tw_file_dialogs_update(void);
 bool tw_failbrauwser_is_default(void);
+/* The Exec line of the default app for folders (inode/directory), or NULL. */
+char *tw_folder_default_exec(void);
 void tw_polkit_start(void);
 /* animate.c: window and desktop animations ("animations", "animation_speed") */
 void tw_animate_open(struct sway_container *con);

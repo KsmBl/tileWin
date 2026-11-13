@@ -3,6 +3,9 @@
 #
 #  - $taskmanager naming a program nobody has installed must fall back to one
 #    that is there, or the taskbar menu and Ctrl+Shift+Escape open nothing.
+#  - $filemanager naming a program nobody has installed (Thunar, which
+#    install.sh no longer installs) must fall back to the default app for
+#    folders, or File Explorer and Super+E open nothing.
 #  - "expensive_calculations on" must lay a window out again on every frame
 #    while it changes size, so the tree shows sizes on the way instead of the
 #    window jumping straight to the end.
@@ -56,12 +59,21 @@ cat > "$work/bin/xfce4-taskmanager" <<EOF
 echo ran > "$work/taskmanager-ran"
 EOF
 chmod +x "$work/bin/xfce4-taskmanager"
+# and a file manager of our own, the default for folders
+printf '#!/bin/sh\nexit 0\n' > "$work/bin/tw-test-files"
+chmod +x "$work/bin/tw-test-files"
+mkdir -p "$XDG_DATA_HOME/applications"
+printf '[Desktop Entry]\nType=Application\nName=Files\nExec=tw-test-files %%U\n' \
+	> "$XDG_DATA_HOME/applications/tw-test-files.desktop"
+printf '[Default Applications]\ninode/directory=tw-test-files.desktop\n' \
+	> "$XDG_CONFIG_HOME/mimeapps.list"
 PATH=$work/bin:$PATH
 export PATH
 
 sock=$work/ipc.sock
 cat > "$work/tilewin.conf" <<EOF
 set \$taskmanager tilewin-no-such-task-manager
+set \$filemanager tilewin-no-such-file-manager
 wallpaper solid #204070
 session_restore no
 animations enable
@@ -105,6 +117,16 @@ else
 	else
 		echo "\$taskmanager fell back to '$chosen'"
 	fi
+fi
+
+# ---------- $filemanager falls back to the default app for folders ----------
+ipc exec "sh -c 'echo \$filemanager > $work/files'" >/dev/null 2>&1
+sleep 1.5
+files=$(cat "$work/files" 2>/dev/null)
+if [ "$files" != tw-test-files ]; then
+	fail "\$filemanager fell back to '$files', not the default for folders (tw-test-files)"
+else
+	echo "\$filemanager fell back to the default for folders"
 fi
 
 # ---------- expensive_calculations lays the window out every frame ----------

@@ -119,7 +119,7 @@ Start tileWin:
 
 **Dependencies:**
 - **Required:** wlroots 0.20 (built along with tileWin where the system has none), wayland, wayland-protocols, libinput, libxkbcommon, libevdev, pixman, libdrm, cairo, pango, gdk-pixbuf2, librsvg, json-c, pcre2, xcb-util-wm, Xwayland, systemd-libs (sd-bus, for the tray), libcurl (DNS over HTTPS), meson and ninja. `tilewin-update` also uses curl, and git for the source.
-- **Optional:** pam (the lock screen and the display manager are skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal and thunar (the default terminal and file manager in the configs), swaylock.
+- **Optional:** pam (the lock screen and the display manager are skipped without it), polkit (the password prompt for apps that need an administrator is skipped without it), gtk4 (the settings app is skipped without it), grim, slurp and wl-clipboard (screenshots and the snipping tool), tesseract with its language data (copying text from the screen), pavucontrol/pactl (volume widget), xfce4-terminal (the default terminal in the configs; any file manager that is installed is used, Thunar, Nautilus, Dolphin and the others, and `install.sh` installs none), swaylock.
 
 To update:
 

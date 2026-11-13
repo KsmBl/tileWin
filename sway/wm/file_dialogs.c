@@ -107,9 +107,10 @@ static char *ini_value(const char *text, const char *group, const char *key) {
 }
 
 /* Whether the .desktop file of that id starts failBrauwser. */
-static bool desktop_is_failbrauwser(const char *id) {
+/* The Exec line of an app by its desktop file id, the first found. */
+static char *desktop_exec(const char *id) {
 	if (!id || !*id || strchr(id, '/')) {
-		return false;
+		return NULL;
 	}
 	char dirs[PATH_MAX * 4];
 	char home[PATH_MAX];
@@ -124,12 +125,10 @@ static bool desktop_is_failbrauwser(const char *id) {
 			continue;
 		}
 		char *exec = ini_value(text, "Desktop Entry", "Exec");
-		bool yes = exec && strcasestr(exec, "failbrauwser");
-		free(exec);
 		free(text);
-		return yes; // the first one found is the one that counts
+		return exec; // the first one found is the one that counts
 	}
-	return false;
+	return NULL;
 }
 
 /*
@@ -137,7 +136,7 @@ static bool desktop_is_failbrauwser(const char *id) {
  * with an entry for inode/directory decides, the desktop's own before the
  * plain one, the user's before the system's.
  */
-bool tw_failbrauwser_is_default(void) {
+char *tw_folder_default_exec(void) {
 	char cfg[PATH_MAX], data[PATH_MAX];
 	config_home(cfg, sizeof(cfg));
 	data_home(data, sizeof(data));
@@ -159,7 +158,8 @@ bool tw_failbrauwser_is_default(void) {
 		snprintf(path, sizeof(path), "%s/applications/mimeapps.list", dir);
 		files[n++] = strdup(path);
 	}
-	bool result = false, decided = false;
+	char *result = NULL;
+	bool decided = false;
 	for (int i = 0; i < n; i++) {
 		char *text = decided ? NULL : read_all(files[i]);
 		char *value = text ? ini_value(text, "Default Applications", "inode/directory") : NULL;
@@ -173,7 +173,7 @@ bool tw_failbrauwser_is_default(void) {
 				if (!*id) {
 					continue;
 				}
-				result = desktop_is_failbrauwser(id);
+				result = desktop_exec(id);
 				decided = true;
 			}
 		}
@@ -182,6 +182,13 @@ bool tw_failbrauwser_is_default(void) {
 		free(files[i]);
 	}
 	return result;
+}
+
+bool tw_failbrauwser_is_default(void) {
+	char *exec = tw_folder_default_exec();
+	bool yes = exec && strcasestr(exec, "failbrauwser");
+	free(exec);
+	return yes;
 }
 
 /* Whether failBrauwser's dialogs are installed at all. */

@@ -248,6 +248,91 @@ void tw_fix_task_manager(struct sway_config *cfg) {
 	task->value = replacement;
 }
 
+/* An Exec line as a command: its field codes (%U, %f, ...) left out. */
+static char *exec_command(const char *exec) {
+	char *out = calloc(1, strlen(exec) + 1);
+	char *o = out;
+	for (const char *p = exec; *p; p++) {
+		if (p[0] == '%' && p[1]) {
+			if (p[1] == '%') {
+				*o++ = '%';
+			}
+			p++;
+			continue;
+		}
+		*o++ = *p;
+	}
+	while (o > out && (o[-1] == ' ' || o[-1] == '\t')) {
+		*--o = '\0';
+	}
+	return out;
+}
+
+void tw_fix_file_manager(struct sway_config *cfg) {
+	if (!cfg || !cfg->symbols) {
+		return;
+	}
+	struct sway_variable *files = NULL;
+	for (int i = 0; i < cfg->symbols->length; i++) {
+		struct sway_variable *var = cfg->symbols->items[i];
+		if (strcmp(var->name, "$filemanager") == 0) {
+			files = var;
+		}
+	}
+	if (!files || !files->value) {
+		return;
+	}
+	char *program = first_word(files->value);
+	bool installed = program && tw_in_path(program);
+	free(program);
+	if (installed) {
+		return;
+	}
+	// the one chosen for folders, else one of the usual ones that is there
+	char *replacement = NULL;
+	char *exec = tw_folder_default_exec();
+	if (exec) {
+		char *command = exec_command(exec);
+		char *first = first_word(command);
+		if (first && tw_in_path(first)) {
+			replacement = command;
+			command = NULL;
+		}
+		free(first);
+		free(command);
+		free(exec);
+	}
+	static const char *const known[] = {
+		"nautilus", "dolphin", "nemo", "caja", "pcmanfm-qt", "pcmanfm", "thunar",
+		"failbrauwser", "spacefm", "konqueror",
+	};
+	const char *found = replacement ? NULL : first_in_path(known, sizeof(known) / sizeof(known[0]));
+	if (found) {
+		replacement = strdup(found);
+	}
+	if (!replacement) {
+		return;
+	}
+	sway_log(SWAY_INFO, "$filemanager '%s' is not installed: opening '%s' instead",
+		files->value, replacement);
+	char *was = format_str("exec %s", files->value);
+	char *now = format_str("exec %s", replacement);
+	for (int m = 0; m < cfg->modes->length; m++) {
+		struct sway_mode *mode = cfg->modes->items[m];
+		for (int i = 0; i < mode->keysym_bindings->length; i++) {
+			struct sway_binding *binding = mode->keysym_bindings->items[i];
+			if (binding->command && strcmp(binding->command, was) == 0) {
+				free(binding->command);
+				binding->command = strdup(now);
+			}
+		}
+	}
+	free(was);
+	free(now);
+	free(files->value);
+	files->value = replacement;
+}
+
 void tw_add_default_bindings(struct sway_config *cfg) {
 	static const char *defaults[][2] = {
 		{ "XF86AudioRaiseVolume", "volume-up" },
