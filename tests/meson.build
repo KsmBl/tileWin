@@ -1274,7 +1274,7 @@ test(
 	'brightness-boost-gui',
 	find_program('brightness_boost.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
-	depends: [keyboard_tool],
+	depends: [keyboard_tool, pointer_tool],
 	suite: 'gui',
 	timeout: 120,
 )

@@ -1930,8 +1930,8 @@ static void brightness_render(struct widget *w, struct render_ctx *ctx, struct p
 static bool brightness_scroll(struct widget *w, struct psurface *s, struct hotspot *hs,
 		int direction) {
 	struct brightness_state *b = ((struct poll_data *)w->data)->state;
-	if (b->percent > 100) {
-		// like the brightness keys: within the boost, but not into it from below
+	if (b->percent > 100 || (b->percent == 100 && direction < 0 && tw_boost_available())) {
+		// like the brightness keys: on past 100% into the boost of the night light
 		tw_boost_write(b->percent + (direction < 0 ? 5 : -5));
 	} else {
 		proc_spawn(direction < 0 ? "brightnessctl -q set 5%+" : "brightnessctl -q set 5%-");

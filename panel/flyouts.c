@@ -300,8 +300,10 @@ void draw_slider_max(cairo_t *cr, const struct fly_style *st, struct pbox b, int
 	if (st->style == PS_CLASSIC) {
 		pd_bevel(cr, x, cy - 2, w, 4, true);
 		if (beyond) {
+			// the groove past 100 in the boost color, a tick above and below the mark
 			pd_rect(cr, mx, cy - 1, x + w - mx - 1, 2, over);
-			pd_rect(cr, mx, cy + 7, 1, 5, 0x000000ff);
+			pd_rect(cr, round(mx), cy - 8, 1, 5, 0x000000ff);
+			pd_rect(cr, round(mx), cy + 4, 1, 5, 0x000000ff);
 		}
 		pd_rect(cr, kx - 5, cy - 10, 11, 20, 0xc0c0c0ff);
 		pd_bevel(cr, kx - 5, cy - 10, 11, 20, false);
@@ -315,7 +317,7 @@ void draw_slider_max(cairo_t *cr, const struct fly_style *st, struct pbox b, int
 		// the part over 100 is tinted even when the value is below it
 		cairo_new_path(cr);
 		pd_rounded(cr, mx, cy - 2, x + w - mx, 4, 2);
-		pd_color(cr, (over & 0xffffff00) | 0x55);
+		pd_color(cr, (over & 0xffffff00) | 0x80);
 		cairo_fill(cr);
 	}
 	if (kx > x + 2) {
@@ -2409,7 +2411,9 @@ struct power_flyout {
 	int capacity;
 	char detail[96];
 	bool backlight;
-	int brightness;
+	int brightness;     // 0-100 of the backlight, then the boost up to brightness_max
+	int brightness_max; // 100, or TW_BOOST_MAX while the night light can boost
+	int backlight_set;  // the percentage of the backlight itself
 	int profiles; // bit mask of available profiles
 	int profile;  // index of the active profile
 	bool dragging, drag_dirty;
@@ -2544,14 +2548,20 @@ static void power_read(struct power_flyout *f) {
 	}
 	if (!f->dragging) {
 		f->backlight = false;
-		dir = opendir("/sys/class/backlight");
+		// $TILEWIN_SYS_BACKLIGHT stands in for /sys/class/backlight in the tests
+		const char *light_root = getenv("TILEWIN_SYS_BACKLIGHT") ?
+			getenv("TILEWIN_SYS_BACKLIGHT") : "/sys/class/backlight";
+		dir = opendir(light_root);
 		while (dir && (de = readdir(dir))) {
 			char base[300];
-			snprintf(base, sizeof(base), "/sys/class/backlight/%s", de->d_name);
+			snprintf(base, sizeof(base), "%s/%s", light_root, de->d_name);
 			long current = read_long(base, "brightness"), max = read_long(base, "max_brightness");
 			if (de->d_name[0] != '.' && current >= 0 && max > 0) {
 				f->backlight = true;
-				f->brightness = (int)((current * 100 + max / 2) / max);
+				f->backlight_set = (int)((current * 100 + max / 2) / max);
+				f->brightness_max = tw_boost_available() ? TW_BOOST_MAX : 100;
+				f->brightness = f->brightness_max > 100 ?
+					tw_brightness_shown(f->backlight_set) : f->backlight_set;
 				break;
 			}
 		}
@@ -2640,6 +2650,11 @@ static void power_drag_timer(void *data) {
 	}
 }
 
+/* Where the brightness slider ends: 100, or TW_BOOST_MAX while the night light runs. */
+static int power_brightness_max(const struct power_flyout *f) {
+	return f->brightness_max > 100 ? f->brightness_max : 100;
+}
+
 static void power_apply_drag(struct power_flyout *f, bool now) {
 	if (!now && f->drag_timer) {
 		f->drag_dirty = true;
@@ -2647,10 +2662,14 @@ static void power_apply_drag(struct power_flyout *f, bool now) {
 	}
 	f->drag_dirty = false;
 	int value = f->drag_value < 1 ? 1 : f->drag_value; // never switch the screen off
-	tw_boost_write(100); // this slider ends at 100, without the gamma boost
-	char cmd[64];
-	snprintf(cmd, sizeof(cmd), "brightnessctl -q set %d%%", value);
-	proc_spawn(cmd);
+	// over 100 the backlight stays at full and the night light adds the rest
+	int backlight = tw_brightness_split(value);
+	if (backlight != f->backlight_set) {
+		char cmd[64];
+		snprintf(cmd, sizeof(cmd), "brightnessctl -q set %d%%", backlight);
+		proc_spawn(cmd);
+		f->backlight_set = backlight;
+	}
 	f->brightness = value;
 	if (!now) {
 		f->drag_timer = loop_add_timer(f->base.panel->loop, 60, power_drag_timer, NULL);
@@ -2784,7 +2803,9 @@ static void power_render(struct popup *p, cairo_t *cr) {
 		int value = f->dragging ? f->drag_value : f->brightness;
 		ti_brightness(p->panel, cr, x0, y + 18, 22, st.fg);
 		struct pbox slider = { x0 + 38, y + 10, cw - 38 - 46, 36 };
-		draw_slider(cr, &st, slider, value);
+		uint32_t boost = tw_theme_color(p->panel->theme, "flyout.boost",
+			st.style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+		draw_slider_max(cr, &st, slider, value, power_brightness_max(f), boost);
 		psurface_add_hotspot(p->surface, slider.x, slider.y, slider.width, slider.height, NULL,
 			POWER_HS_BRIGHTNESS, 0, NULL);
 		psurface_hotspot_is_slider(p->surface);
@@ -2854,7 +2875,7 @@ static void power_button(struct popup *p, double x, double y, uint32_t button, b
 	if (hs->kind == POWER_HS_BRIGHTNESS) {
 		f->dragging = true;
 		f->drag_box = hs->box;
-		f->drag_value = slider_value(hs->box, x);
+		f->drag_value = slider_value_max(hs->box, x, power_brightness_max(f));
 		power_apply_drag(f, false);
 		popup_set_dirty(p);
 	} else if (hs->kind == POWER_HS_PROFILE && hs->id >= 0 && hs->id < 3) {
@@ -2875,7 +2896,7 @@ static void power_motion(struct popup *p, double x, double y) {
 	struct power_flyout *f = p->data;
 	flyout_motion(p, x, y);
 	if (f->dragging) {
-		f->drag_value = slider_value(f->drag_box, x);
+		f->drag_value = slider_value_max(f->drag_box, x, power_brightness_max(f));
 		power_apply_drag(f, false);
 	}
 }
@@ -2886,7 +2907,8 @@ static void power_axis(struct popup *p, double x, double y, int direction) {
 		return;
 	}
 	int value = f->brightness + (direction < 0 ? 5 : -5);
-	f->drag_value = value < 1 ? 1 : value > 100 ? 100 : value;
+	int max = power_brightness_max(f);
+	f->drag_value = value < 1 ? 1 : value > max ? max : value;
 	power_apply_drag(f, false);
 	popup_set_dirty(p);
 }

@@ -575,7 +575,8 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 		uint32_t boost = tw_theme_color(p->panel->theme, "flyout.boost",
 			st.style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
 		draw_slider_max(cr, &st, q->brightness_slider, value, q->brightness_max, boost);
-		if (value > 100) {
+		// the number whenever the slider goes on past 100, so 100 shows not to be its end
+		if (value > 100 || q->brightness_max > 100) {
 			char text[16];
 			snprintf(text, sizeof(text), "%d%%", value);
 			pd_text(cr, st.font, text, x0 + cw - 36, y, 40, SLIDER_ROW, st.fg, PD_RIGHT);

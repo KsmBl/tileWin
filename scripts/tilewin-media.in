@@ -262,9 +262,8 @@ mic_command() {
 # ---------- brightness ----------
 
 # Over 100% the backlight stays at full and tilewin-nightlight lifts the darker
-# tones with a gamma curve, up to 130%. The keys (up and down, +N and -N) stop
-# at 100% on the way up, so they never go there by accident, but move within
-# it once the slider or "brightness 120" put it there.
+# tones with a gamma curve, up to 130%. The keys (up and down, +N and -N) go on
+# past 100% as the sliders do.
 BOOST_MAX=130
 
 boost_get() {
@@ -321,13 +320,9 @@ brightness_set() {
 	fi
 }
 
-# brightness_step <current> <change>: up stops at 100% unless already over it
+# brightness_step <current> <change>: on past 100% while the night light runs
 brightness_step() {
-	target=$(($1 + $2))
-	if [ "$1" -le 100 ] && [ "$target" -gt 100 ]; then
-		target=100
-	fi
-	brightness_set "$target"
+	brightness_set "$(($1 + $2))"
 }
 
 show_brightness() {

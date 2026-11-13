@@ -21,8 +21,9 @@ msg=$build/swaymsg/tilewinmsg
 panel=$build/panel/tilewin-panel
 nightlight=$build/nightlight/tilewin-nightlight
 keys=$build/tests/keyboard-tool
+pointer=$build/tests/pointer-tool
 
-for needed in "$compositor" "$msg" "$panel" "$nightlight" "$keys"; do
+for needed in "$compositor" "$msg" "$panel" "$nightlight" "$keys" "$pointer"; do
 	if [ ! -x "$needed" ]; then
 		echo "$needed was not built: skipping"
 		exit 77
@@ -181,9 +182,12 @@ sleep 0.4
 
 # ---- the brightness keys
 tilewin-media --no-popup brightness up >/dev/null
+[ "$(cat "$work/backlight/test_bl/brightness")" = 100 ] || fail "up from 95% is not 100%"
+[ "$(cat "$boost_file")" = 100 ] || fail "up from 95% went over 100%"
+# and on past 100 %, as the sliders
 tilewin-media --no-popup brightness up >/dev/null
-[ "$(cat "$work/backlight/test_bl/brightness")" = 100 ] || fail "up twice from 95% is not 100%"
-[ "$(cat "$boost_file")" = 100 ] || fail "the brightness keys went over 100%"
+[ "$(cat "$boost_file")" = 105 ] || fail "up from 100% left the boost at $(cat "$boost_file")"
+[ "$(cat "$work/backlight/test_bl/brightness")" = 100 ] || fail "the backlight left full over 100%"
 tilewin-media brightness 125 >/dev/null
 sleep 0.3
 [ "$(cat "$boost_file")" = 125 ] || fail "\"brightness 125\" left the boost at $(cat "$boost_file")"
@@ -192,6 +196,22 @@ tilewin-media --no-popup brightness down >/dev/null
 [ "$(cat "$boost_file")" = 120 ] || fail "down from 125% left the boost at $(cat "$boost_file")"
 tilewin-media --no-popup brightness | grep -q 'Brightness: 120%' ||
 	fail "tilewin-media does not show 120%: $(tilewin-media --no-popup brightness)"
+
+# ---- the slider of the battery flyout goes on past 100 % too
+tilewin-media --no-popup brightness 100 >/dev/null
+ipc theme win11 >/dev/null 2>&1 # where the flyout and its slider are
+sleep 1.2
+ipc panel power >/dev/null
+sleep 1.5
+# the right end of its slider (the flyout over the battery icon, 1280x720)
+"$pointer" 1280 720 click 1200 499 >/dev/null 2>&1
+sleep 0.6
+[ "$(cat "$boost_file")" = 130 ] ||
+	fail "the end of the battery flyout's slider left the boost at $(cat "$boost_file")"
+[ "$(cat "$work/backlight/test_bl/brightness")" = 100 ] ||
+	fail "the battery flyout put the backlight at $(cat "$work/backlight/test_bl/brightness")"
+"$keys" key none escape
+sleep 0.4
 
 # ---- without the night light: up to 100 % only
 # only the night light of this nested tileWin: the one that holds its lock

@@ -143,11 +143,17 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 	double W = s->width, H = s->height;
 	uint32_t dim = (fg & 0xffffff00) | 0x50;
 	uint32_t fill = osd.muted ? ((fg & 0xffffff00) | 0x90) : accent;
-	if (osd.kind == OSD_BRIGHTNESS && osd.value > 100) {
-		// over 100 % is the gamma boost of the night light, as on the quick settings
-		fill = tw_theme_color(panel->theme, "flyout.boost",
-			style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+	// over 100 % is the gamma boost of the night light, as on the quick settings: while
+	// it can be had the bar goes on to TW_BOOST_MAX past a mark at 100, its part
+	// there tinted, so 100 % shows not to be the end
+	uint32_t boost = tw_theme_color(panel->theme, "flyout.boost",
+		style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+	double max = 100;
+	if (osd.kind == OSD_BRIGHTNESS && (osd.value > 100 || tw_boost_available())) {
+		max = TW_BOOST_MAX;
 	}
+	bool beyond = max > 100;
+	double mark = 100 / max; // where 100 % is, 0-1 along the bar
 
 	double r = 0;
 	if (!vertical(panel)) {
@@ -185,9 +191,20 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 		// Windows 10: number, vertical slider, icon
 		pd_text(cr, font, number, 0, 10, W, 24, fg, PD_CENTER);
 		double top = 44, bottom = H - 50, height = bottom - top;
-		double level = osd.kind == OSD_MIC ? (osd.muted ? 0 : 1) : fmin(osd.value / 100.0, 1);
+		double level = osd.kind == OSD_MIC ? (osd.muted ? 0 : 1) : fmin(osd.value / max, 1);
 		pd_rect(cr, W / 2 - 2, top, 4, height, dim);
-		pd_rect(cr, W / 2 - 2, bottom - height * level, 4, height * level, fill);
+		if (beyond) {
+			pd_rect(cr, W / 2 - 2, top, 4, height * (1 - mark), (boost & 0xffffff00) | 0x66);
+		}
+		double below = beyond ? fmin(level, mark) : level;
+		pd_rect(cr, W / 2 - 2, bottom - height * below, 4, height * below, fill);
+		if (beyond && level > mark) {
+			pd_rect(cr, W / 2 - 2, bottom - height * level, 4, height * (level - mark), boost);
+		}
+		if (beyond) {
+			pd_rect(cr, W / 2 - 7, round(bottom - height * mark) - 1, 14, 2,
+				(fg & 0xffffff00) | 0xa0);
+		}
 		pd_rect(cr, W / 2 - 8, bottom - height * level - 4, 16, 8, fg);
 		draw_icon(panel, cr, (W - 24) / 2, H - 38, 24, fg);
 		return;
@@ -201,14 +218,31 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 			bx, 0, W - bx - 12, H, fg, PD_LEFT);
 		return;
 	}
-	double level = fmin(osd.value / 100.0, 1);
+	double level = fmin(osd.value / max, 1);
 	pd_rounded(cr, bx, H / 2 - 2, bw, 4, 2);
 	pd_color(cr, dim);
 	cairo_fill(cr);
-	if (level > 0) {
-		pd_rounded(cr, bx, H / 2 - 2, bw * level, 4, 2);
+	if (beyond) {
+		pd_rounded(cr, bx + bw * mark, H / 2 - 2, bw * (1 - mark), 4, 2);
+		pd_color(cr, (boost & 0xffffff00) | 0x66);
+		cairo_fill(cr);
+	}
+	double below = beyond ? fmin(level, mark) : level;
+	if (below > 0) {
+		pd_rounded(cr, bx, H / 2 - 2, bw * below, 4, 2);
 		pd_color(cr, fill);
 		cairo_fill(cr);
+	}
+	if (beyond && level > mark) {
+		pd_rounded(cr, bx + bw * mark - 2, H / 2 - 2, bw * (level - mark) + 2, 4, 2);
+		pd_color(cr, boost);
+		cairo_fill(cr);
+	}
+	if (beyond) {
+		pd_rect(cr, round(bx + bw * mark) - 1, H / 2 - 7, 2, 14, (fg & 0xffffff00) | 0xa0);
+	}
+	if (beyond && osd.value > 100) {
+		fill = boost; // the knob
 	}
 	double kx = bx + bw * level;
 	if (style == PS_FLUENT) {
