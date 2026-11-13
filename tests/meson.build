@@ -1271,6 +1271,15 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'fingerprint',
+	find_program('fingerprint.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'settings-cpu',
 	find_program('settings_cpu.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

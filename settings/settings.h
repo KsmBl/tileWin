@@ -304,6 +304,8 @@ GtkWidget *startmenu_page_new(struct settings *s);
 GtkWidget *about_page_new(struct settings *s);
 /* page_cpu.c: the Processor page, limits on the clock of the cores */
 GtkWidget *cpu_page_new(struct settings *s);
+/* page_fingerprint.c: the fingers that unlock the lock screen */
+GtkWidget *fingerprint_page_new(struct settings *s);
 GtkWidget *login_page_new(struct settings *s);
 void menus_page_refresh(struct settings *s);
 GtkWidget *launcher_page_new(struct settings *s);

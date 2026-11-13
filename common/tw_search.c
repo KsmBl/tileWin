@@ -70,6 +70,9 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"avatar-default-symbolic" },
 	{ "backup", "Backup", "restore save export import copy settings file another computer",
 		"document-save-symbolic" },
+	{ "fingerprint", "Fingerprint", "fingerprint finger reader sensor scan enroll add remove "
+		"unlock lock screen sign in hello biometric fprintd",
+		"auth-fingerprint-symbolic" },
 	{ "cpu", "Processor", "cpu processor clock speed frequency ghz mhz limit cores core "
 		"threads underclock throttle slow down cooler quieter fan heat battery turbo boost "
 		"performance efficient p-core e-core",

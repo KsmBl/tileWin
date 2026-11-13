@@ -723,6 +723,7 @@ static void build_window(struct settings *s) {
 		{ "devices", devices_page_new, 6 },
 		{ "keyboard", keyboard_page_new, 3 },
 		{ "mouse", mouse_page_new, 3 },
+		{ "fingerprint", fingerprint_page_new, 3 },
 		{ "apps", apps_page_new, 5 },
 		{ "account", account_page_new, 5 },
 		{ "backup", backup_page_new, 5 },

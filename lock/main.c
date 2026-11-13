@@ -5,7 +5,9 @@
  * darkened with the time and date, like Windows. Any key or click shows the
  * sign-in view with the user's picture, name and a password field. The
  * password is checked with PAM (service "tilewin-lock", or "login" when that
- * file is not installed) in a child process, so the screen keeps drawing.
+ * file is not installed) in a child process, so the screen keeps drawing. A
+ * finger the user enrolled on the fingerprint reader unlocks it too, from the
+ * clock on (fingerprint.c, through fprintd).
  * If this program dies while the session is locked, the compositor keeps it
  * locked.
  *
@@ -37,6 +39,9 @@
 #include "tw_desktop.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
+#if HAVE_FINGERPRINT
+#include "fingerprint.h"
+#endif
 
 #define MESSAGE_MS 3000
 #define BACK_TO_CLOCK_MS 30000
@@ -87,6 +92,9 @@ static struct {
 	char message[128];
 	struct timespec message_until, last_input;
 	int last_minute;
+
+	bool fingerprint; // a finger is listened for
+	bool fingerprint_matched;
 
 	char *user, *full_name;
 	cairo_surface_t *avatar;
@@ -415,6 +423,11 @@ static void render_output(struct lock_output *o) {
 			text(cr, "Noto Sans, Sans 12", msg, cx, my, 1, 1, NULL, NULL);
 			my += 26;
 		}
+		if (lock.fingerprint && !(msg && *msg)) {
+			text(cr, "Noto Sans, Sans 11", "Or touch the fingerprint reader", cx, my, 0.85, 1,
+				NULL, NULL);
+			my += 24;
+		}
 		if (lock.xkb_state && xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CAPS,
 				XKB_STATE_MODS_LOCKED) > 0) {
 			text(cr, "Noto Sans, Sans 11", "Caps Lock is on", cx, my, 0.85, 1, NULL, NULL);
@@ -532,9 +545,32 @@ static void finish_check(void) {
 	set_message("The password is incorrect. Try again.");
 }
 
+/* ---------- fingerprint ---------- */
+
+#if HAVE_FINGERPRINT
+static void fingerprint_matched(void) {
+	lock.fingerprint_matched = true; // unlocked from the main loop, not inside sd-bus
+}
+
+static void fingerprint_message(const char *text) {
+	// a finger on the reader is like a key: the sign-in view says what came of it
+	clock_gettime(CLOCK_MONOTONIC, &lock.last_input);
+	lock.view = VIEW_SIGN_IN;
+	set_message(text);
+}
+
+static void fingerprint_changed(void) {
+	lock.fingerprint = fp_listening();
+	lock.dirty = true;
+}
+#endif
+
 /* ---------- input ---------- */
 
 static void wake_up(void) {
+#if HAVE_FINGERPRINT
+	fp_retry();
+#endif
 	clock_gettime(CLOCK_MONOTONIC, &lock.last_input);
 	if (lock.view != VIEW_SIGN_IN) {
 		lock.view = VIEW_SIGN_IN;
@@ -999,6 +1035,14 @@ int main(int argc, char **argv) {
 		create_lock_surface(o);
 	}
 	wl_display_roundtrip(lock.display);
+#if HAVE_FINGERPRINT
+	static const struct fp_callbacks fp_cb = {
+		.matched = fingerprint_matched,
+		.message = fingerprint_message,
+		.changed = fingerprint_changed,
+	};
+	fp_start(lock.user, &fp_cb);
+#endif
 
 	lock.running = true;
 	clock_gettime(CLOCK_MONOTONIC, &lock.last_input);
@@ -1031,11 +1075,22 @@ int main(int argc, char **argv) {
 			wl_display_cancel_read(lock.display);
 			break;
 		}
-		struct pollfd fds[2] = {
+		struct pollfd fds[3] = {
 			{ .fd = wl_display_get_fd(lock.display), .events = POLLIN },
 			{ .fd = lock.auth_fd, .events = POLLIN },
+			{ .fd = -1 },
 		};
-		int ret = poll(fds, lock.auth_fd >= 0 ? 2 : 1, 1000);
+		int timeout = 1000;
+#if HAVE_FINGERPRINT
+		fds[2].fd = fp_fd();
+		fds[2].events = fp_poll_events();
+		int fp_wait = fp_timeout_ms();
+		if (fp_wait >= 0 && fp_wait < timeout) {
+			timeout = fp_wait;
+		}
+#endif
+		// a pollfd of -1 is passed over
+		int ret = poll(fds, 3, timeout);
 		if (ret > 0 && (fds[0].revents & POLLIN)) {
 			if (wl_display_read_events(lock.display) < 0) {
 				break;
@@ -1052,7 +1107,17 @@ int main(int argc, char **argv) {
 		if (lock.auth_fd >= 0 && ret > 0 && (fds[1].revents & (POLLIN | POLLHUP))) {
 			finish_check();
 		}
+#if HAVE_FINGERPRINT
+		fp_dispatch();
+		if (lock.fingerprint_matched) {
+			fp_stop();
+			unlock();
+		}
+#endif
 	}
+#if HAVE_FINGERPRINT
+	fp_stop();
+#endif
 	clear_password();
 	return lock.lock ? 1 : 0;
 }
