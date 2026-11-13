@@ -55,6 +55,7 @@ struct fp_page {
 	int passed;
 	guint enroll_signal;
 	bool enroll_done;
+	gulong shutdown_handler;
 };
 
 static const char *finger_name(const char *id) {
@@ -512,8 +513,21 @@ static void rebuild(struct fp_page *p) {
 	}
 }
 
+/*
+ * The app quits (its window closed) while a finger is being added: the reader
+ * is let go of here, as the page itself is not destroyed then. fprintd would
+ * let go by itself once the app is gone, but a driver busy grabbing a picture
+ * (Broadcom's) keeps the reader claimed until fprintd is started again.
+ */
+static void on_shutdown(GApplication *app, gpointer data) {
+	enroll_end(data);
+}
+
 static void on_destroy(GtkWidget *widget, gpointer data) {
 	struct fp_page *p = data;
+	if (p->shutdown_handler) {
+		g_signal_handler_disconnect(p->s->app, p->shutdown_handler);
+	}
 	enroll_end(p);
 	if (p->dialog) {
 		gtk_window_destroy(GTK_WINDOW(p->dialog));
@@ -546,6 +560,7 @@ GtkWidget *fingerprint_page_new(struct settings *s) {
 		&p->content);
 	g_signal_connect(page, "destroy", G_CALLBACK(on_destroy), p);
 	g_signal_connect(page, "map", G_CALLBACK(on_map), p);
+	p->shutdown_handler = g_signal_connect(s->app, "shutdown", G_CALLBACK(on_shutdown), p);
 	load(p);
 	rebuild(p);
 	return page;
