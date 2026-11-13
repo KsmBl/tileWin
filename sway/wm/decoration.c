@@ -5,6 +5,7 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xcursor_manager.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_output_layout.h>
 #include "sway/desktop/transaction.h"
 #include "sway/ipc-server.h"
@@ -113,6 +114,29 @@ void tw_container_update_deco_state(struct sway_container *con) {
 		con->pending.fullscreen_mode == FULLSCREEN_NONE;
 }
 
+/*
+ * A message box or another dialog of a fixed size over the window it belongs
+ * to (tileWin's dialogs, the about boxes of apps): its frame has a close button
+ * only, as on Windows, and nothing to maximize or minimize.
+ */
+static bool deco_is_dialog(struct sway_container *con) {
+	struct sway_view *view = con ? con->view : NULL;
+	if (!view || view->type != SWAY_VIEW_XDG_SHELL || !view->wlr_xdg_toplevel) {
+		return false;
+	}
+	// tileWin's own message box, also when its app gave it no window to belong to
+	const char *app_id = view_get_app_id(view);
+	if (app_id && strcmp(app_id, "org.tilewin.Dialog") == 0) {
+		return true;
+	}
+	if (!view->wlr_xdg_toplevel->parent) {
+		return false;
+	}
+	const struct wlr_xdg_toplevel_state *s = &view->wlr_xdg_toplevel->current;
+	return s->min_width > 0 && s->min_width == s->max_width &&
+		s->min_height > 0 && s->min_height == s->max_height;
+}
+
 struct tw_insets tw_deco_insets(bool maximized) {
 	struct tw_insets insets;
 	tw_style_insets(tw_theme, maximized, &insets, NULL);
@@ -181,6 +205,7 @@ void tw_deco_arrange(struct sway_container *con, int width, int height) {
 
 	bool maximized = con->current.tw_maximized;
 	bool focused = con->current.focused;
+	bool dialog = deco_is_dialog(con);
 	float scale = container_scale(con);
 	const char *title = con->title ? con->title : "";
 	cairo_surface_t *icon = tw_icon_for_view(con->view, (int)ceil(16 * scale));
@@ -188,7 +213,7 @@ void tw_deco_arrange(struct sway_container *con, int width, int height) {
 	bool frame_ok = tw->frame_cache.valid &&
 		tw->frame_cache.width == width && tw->frame_cache.height == height &&
 		tw->frame_cache.focused == focused && tw->frame_cache.maximized == maximized &&
-		tw->frame_cache.scale == scale &&
+		tw->frame_cache.dialog == dialog && tw->frame_cache.scale == scale &&
 		tw->frame_cache.theme_generation == tw_theme_generation;
 	bool top_ok = frame_ok && tw->top_cache.valid &&
 		tw->top_cache.hover == tw->hover && tw->top_cache.pressed == tw->pressed &&
@@ -210,6 +235,7 @@ void tw_deco_arrange(struct sway_container *con, int width, int height) {
 		.icon = icon,
 		.hover = tw->hover,
 		.pressed = tw->pressed,
+		.dialog = dialog,
 	};
 
 	struct wlr_box top = { -grab, -grab, width + 2 * grab, in.top + grab };
@@ -229,6 +255,7 @@ void tw_deco_arrange(struct sway_container *con, int width, int height) {
 	tw->frame_cache.height = height;
 	tw->frame_cache.focused = focused;
 	tw->frame_cache.maximized = maximized;
+	tw->frame_cache.dialog = dialog;
 	tw->frame_cache.scale = scale;
 	tw->frame_cache.theme_generation = tw_theme_generation;
 	tw->top_cache.valid = true;
@@ -353,10 +380,11 @@ enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 	if (box_contains(&b.close, x, y)) {
 		return TW_HIT_CLOSE;
 	}
-	if (box_contains(&b.maximize, x, y)) {
+	bool dialog = deco_is_dialog(con); // a close button only
+	if (!dialog && box_contains(&b.maximize, x, y)) {
 		return TW_HIT_MAXIMIZE;
 	}
-	if (box_contains(&b.minimize, x, y)) {
+	if (!dialog && box_contains(&b.minimize, x, y)) {
 		return TW_HIT_MINIMIZE;
 	}
 

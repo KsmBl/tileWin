@@ -234,6 +234,16 @@ Apps show GTK's open and save dialogs. With failBrauwser installed as the file c
 
 failBrauwser's dialogs float in the middle of the screen, also in tile mode (a rule in `common.conf` that knows them by their title, as they do not name the window they are for yet).
 
+## Message dialogs
+
+GTK 3 apps show their message dialogs as tileWin's, in the look of the theme that is on: "Save changes?" with Save, Don't Save and Cancel, questions, warnings and errors. tileWin puts its GTK 3 module (`libtilewin-gtk3-dialogs.so`) into `GTK3_MODULES` of the apps it starts, after failBrauwser's, and the module hands such a dialog to `tilewin-dialog`, which shows it over the app's window and gives the app the button pressed:
+
+- the frame is the theme's, with a close button only, and the inside is drawn as the settings are, from the grey bevels of Windows 95 and the beige of XP to the band of buttons of Windows 7 and later and the accent button of Windows 11; the icon is the red cross, the yellow triangle or the blue i or ? of Windows;
+- the buttons stand as on Windows: the one Return presses first, Cancel last, centred up to XP and on the right after it; the app's access keys work (Alt and the underlined letter), Escape answers as closing the dialog does;
+- a dialog with more in it than its texts and buttons (a check box like "Don't ask again", an entry, a list) stays GTK's own, so nothing of it gets lost.
+
+`TILEWIN_NO_GTK_DIALOGS=1` keeps GTK's own dialogs for an app (e.g. `env TILEWIN_NO_GTK_DIALOGS=1 mousepad`). GTK 4 apps cannot load modules and keep theirs.
+
 ## Settings app
 
 `tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you. Type anywhere in the window (or press Ctrl+F) to search all settings; a result opens its page and highlights the setting.

@@ -1066,10 +1066,58 @@ static void spawn_shell(const char *script) {
 	}
 }
 
+/*
+ * GTK 3 apps show their message dialogs ("Save changes?", questions, warnings)
+ * as tileWin's, in the look of the theme: tileWin's module goes into
+ * GTK3_MODULES, after what is there (failBrauwser's for the file chooser).
+ * $TILEWIN_GTK3_DIALOGS names another module (the tests take the build's).
+ */
+static void add_gtk3_module(const char *module);
+
+static void add_gtk3_dialogs_module(void) {
+	const char *module = getenv("TILEWIN_GTK3_DIALOGS");
+	if (!module || !*module) {
+		module = TILEWIN_GTK3_DIALOGS;
+	}
+	// GTK loads a module of GTK3_MODULES only by its whole path
+	char *whole = realpath(module, NULL);
+	if (!whole) {
+		return; // built without GTK 3, or not installed
+	}
+	add_gtk3_module(whole);
+	free(whole);
+}
+
+static void add_gtk3_module(const char *module) {
+	const char *current = getenv("GTK3_MODULES");
+	if (current && *current) {
+		// already there: nothing to add
+		char *copy = strdup(current);
+		bool found = false;
+		char *save = NULL;
+		for (char *part = strtok_r(copy, ":", &save); part && !found;
+				part = strtok_r(NULL, ":", &save)) {
+			found = strcmp(part, module) == 0;
+		}
+		free(copy);
+		if (found) {
+			return;
+		}
+		size_t len = strlen(current) + strlen(module) + 2;
+		char *value = malloc(len);
+		snprintf(value, len, "%s:%s", current, module);
+		setenv("GTK3_MODULES", value, 1);
+		free(value);
+	} else {
+		setenv("GTK3_MODULES", module, 1);
+	}
+}
+
 void tw_session_export_environment(void) {
 	// Qt apps follow the dark color scheme through the portal's platform theme
 	// (tilewin-session sets it; this is for a tileWin started without it)
 	setenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal", 0);
+	add_gtk3_dialogs_module();
 	if (getenv("TILEWIN_NO_APP_TWEAKS")) {
 		return; // nested or test instances must not take over the user session
 	}
@@ -1079,7 +1127,7 @@ void tw_session_export_environment(void) {
 	spawn_shell("command -v dbus-update-activation-environment >/dev/null || exit 0; "
 		"dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY "
 		"XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORMTHEME "
-		"TILEWINSOCK SWAYSOCK I3SOCK; "
+		"TILEWINSOCK SWAYSOCK I3SOCK GTK3_MODULES; "
 		"command -v systemctl >/dev/null || exit 0; "
 		"systemctl --user reset-failed xdg-desktop-portal-gtk.service xdg-desktop-portal.service "
 		"thunar.service 2>/dev/null; "

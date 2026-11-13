@@ -158,6 +158,9 @@ endif
 add_project_arguments('-DSYSCONFDIR="/@0@"'.format(join_paths(prefix, sysconfdir)), language : 'c')
 tilewin_datadir = join_paths(prefix, datadir, 'tileWin')
 add_project_arguments('-DTILEWIN_DATADIR="@0@"'.format(tilewin_datadir), language : 'c')
+# the GTK 3 module that shows GTK's message dialogs as tileWin's (dialog/)
+add_project_arguments('-DTILEWIN_GTK3_DIALOGS="@0@"'.format(join_paths(prefix,
+	get_option('libdir'), 'tileWin', 'libtilewin-gtk3-dialogs.so')), language : 'c')
 
 git = find_program('git', native: true, required: false)
 
@@ -211,6 +214,7 @@ gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
 if gtk4.found()
 	gtk4 = gtk4.as_system()
 	subdir('settings')
+	subdir('dialog')
 endif
 
 subdir('tests')

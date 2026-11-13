@@ -103,7 +103,7 @@ struct tw_container {
 	struct {
 		bool valid;
 		int width, height;
-		bool focused, maximized;
+		bool focused, maximized, dialog;
 		float scale;
 		int theme_generation;
 	} frame_cache;
