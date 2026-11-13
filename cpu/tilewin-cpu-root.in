@@ -1,0 +1,129 @@
+#!/bin/bash
+# What the Processor page of the tileWin settings does to the clock of the
+# cores, run with pkexec:
+#
+#   tilewin-cpu-root set CPU=KHZ...   limits each of these CPUs (logical ones, as
+#                                     /sys/devices/system/cpu/cpuN numbers them)
+#                                     to at most KHZ, and keeps it for the next
+#                                     start; KHZ at the CPU's own highest takes
+#                                     the limit away
+#   tilewin-cpu-root reset            every CPU at its full speed again, nothing kept
+#   tilewin-cpu-root apply            sets the kept limits (tilewin-cpu-limits.service
+#                                     at every start)
+#
+# The limits are kept in /etc/tilewin/cpu-limits, a line "cpuN KHZ" each. A limit
+# below the CPU's lowest clock or above its highest is refused, as is anything
+# that is not a CPU. While limits are kept, tilewin-cpu-limits.service is
+# enabled, so they come back after a restart.
+#
+# For the tests: TILEWIN_CPU_ROOT puts /sys and /etc below a folder of its own
+# and leaves systemd alone.
+set -uo pipefail
+
+root=${TILEWIN_CPU_ROOT:-}
+cpus=$root/sys/devices/system/cpu
+kept=$root/etc/tilewin/cpu-limits
+
+die() { echo "$*" >&2; exit 1; }
+
+freq() { # cpu file
+	cat "$cpus/$1/cpufreq/$2" 2>/dev/null
+}
+
+# Sets the highest clock of one CPU; its lowest comes down first if it was above.
+limit() { # cpu khz
+	local cpu=$1 khz=$2 min
+	min=$(freq "$cpu" scaling_min_freq)
+	if [[ -n $min && $min -gt $khz ]]; then
+		echo "$khz" > "$cpus/$cpu/cpufreq/scaling_min_freq" || return 1
+	fi
+	echo "$khz" > "$cpus/$cpu/cpufreq/scaling_max_freq"
+}
+
+# The kept limits as "cpuN KHZ" lines, the CPUs of the arguments replaced.
+keep() { # cpuN=khz...
+	mkdir -p "${kept%/*}"
+	local tmp
+	tmp=$(mktemp "$kept.XXXXXX") || return 1
+	{
+		[[ -f $kept ]] && cat "$kept"
+	} | awk -v changed="$*" '
+		BEGIN { n = split(changed, items, " "); for (i = 1; i <= n; i++) { split(items[i], kv, "="); set[kv[1]] = kv[2] } }
+		$1 in set { next }
+		NF == 2 { print }
+		END { for (c in set) if (set[c] != "full") print c, set[c] }
+	' | sort -V > "$tmp"
+	if [[ -s $tmp ]]; then
+		chmod 644 "$tmp"
+		mv "$tmp" "$kept"
+	else
+		rm -f "$tmp" "$kept"
+	fi
+	service_follows
+}
+
+# The service runs at the next start only while there is something to set.
+service_follows() {
+	[[ -n $root ]] && return 0
+	command -v systemctl >/dev/null 2>&1 || return 0
+	# installed since systemd last read its units: it has to know it first
+	systemctl cat tilewin-cpu-limits.service >/dev/null 2>&1 || systemctl daemon-reload
+	if [[ -s $kept ]]; then
+		systemctl enable tilewin-cpu-limits.service >/dev/null 2>&1
+	else
+		systemctl disable tilewin-cpu-limits.service >/dev/null 2>&1
+	fi
+	return 0
+}
+
+case "${1:-}" in
+set)
+	shift
+	[[ $# -gt 0 ]] || die "usage: tilewin-cpu-root set CPU=KHZ..."
+	changes=()
+	for arg in "$@"; do
+		[[ $arg =~ ^([0-9]{1,4})=([0-9]{3,9})$ ]] || die "not a CPU and a clock in kHz: $arg"
+		cpu=cpu${BASH_REMATCH[1]}
+		khz=${BASH_REMATCH[2]}
+		[[ -d $cpus/$cpu/cpufreq ]] || die "$cpu has no clock that can be set"
+		low=$(freq "$cpu" cpuinfo_min_freq)
+		high=$(freq "$cpu" cpuinfo_max_freq)
+		[[ -n $low && -n $high ]] || die "$cpu does not say what clocks it can run at"
+		((khz >= low && khz <= high)) ||
+			die "$cpu runs at $((low / 1000)) to $((high / 1000)) MHz, not $((khz / 1000)) MHz"
+		limit "$cpu" "$khz" || die "$cpu took no limit of $((khz / 1000)) MHz"
+		if ((khz == high)); then
+			changes+=("$cpu=full")
+		else
+			changes+=("$cpu=$khz")
+		fi
+	done
+	keep "${changes[@]}" || die "the limits could not be kept for the next start"
+	echo "Limited"
+	;;
+reset)
+	for dir in "$cpus"/cpu[0-9]*; do
+		cpu=${dir##*/}
+		high=$(freq "$cpu" cpuinfo_max_freq) || continue
+		[[ -n $high ]] && limit "$cpu" "$high"
+	done
+	rm -f "$kept"
+	service_follows
+	echo "Every core at full speed"
+	;;
+apply)
+	[[ -f $kept ]] || exit 0
+	while read -r cpu khz; do
+		[[ $cpu =~ ^cpu[0-9]{1,4}$ && $khz =~ ^[0-9]{3,9}$ ]] || continue
+		low=$(freq "$cpu" cpuinfo_min_freq)
+		high=$(freq "$cpu" cpuinfo_max_freq)
+		[[ -n $low && -n $high ]] || continue
+		((khz < low)) && khz=$low
+		((khz > high)) && khz=$high
+		limit "$cpu" "$khz"
+	done < "$kept"
+	;;
+*)
+	die "usage: tilewin-cpu-root set CPU=KHZ... | reset | apply"
+	;;
+esac

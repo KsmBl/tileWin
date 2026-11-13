@@ -1,0 +1,11 @@
+[Unit]
+Description=Limit the clock speed of the processor's cores as set in the tileWin settings
+ConditionPathExists=/etc/tilewin/cpu-limits
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=@libexecdir@/tilewin-cpu-root apply
+
+[Install]
+WantedBy=multi-user.target

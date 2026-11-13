@@ -302,6 +302,8 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop);
 void menus_section_attach(struct settings *s, GtkWidget *content);
 GtkWidget *startmenu_page_new(struct settings *s);
 GtkWidget *about_page_new(struct settings *s);
+/* page_cpu.c: the Processor page, limits on the clock of the cores */
+GtkWidget *cpu_page_new(struct settings *s);
 GtkWidget *login_page_new(struct settings *s);
 void menus_page_refresh(struct settings *s);
 GtkWidget *launcher_page_new(struct settings *s);

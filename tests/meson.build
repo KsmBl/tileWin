@@ -1271,6 +1271,15 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'settings-cpu',
+	find_program('settings_cpu.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'gtk3-dialogs',
 	find_program('gtk3_dialogs.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

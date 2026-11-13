@@ -727,6 +727,7 @@ static void build_window(struct settings *s) {
 		{ "account", account_page_new, 5 },
 		{ "backup", backup_page_new, 5 },
 		{ "kernel", kernel_page_new, 6 },
+		{ "cpu", cpu_page_new, 6 },
 		{ "about", about_page_new, 5 },
 	};
 	lazy_pages = g_ptr_array_new_with_free_func(g_free);

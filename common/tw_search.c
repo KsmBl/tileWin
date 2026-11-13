@@ -70,6 +70,10 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"avatar-default-symbolic" },
 	{ "backup", "Backup", "restore save export import copy settings file another computer",
 		"document-save-symbolic" },
+	{ "cpu", "Processor", "cpu processor clock speed frequency ghz mhz limit cores core "
+		"threads underclock throttle slow down cooler quieter fan heat battery turbo boost "
+		"performance efficient p-core e-core",
+		"computer-symbolic" },
 	{ "kernel", "Kernel", "linux kernel build compile version latest longterm live patching "
 		"livepatch kpatch kexec load boot grub uki efi modules drivers "
 		"compression zstd xz lz4 gzip lzo localmodconfig",

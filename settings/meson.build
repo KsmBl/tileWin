@@ -14,6 +14,7 @@ tilewin_settings = executable(
 		'page_appwindows.c',
 		'page_backup.c',
 		'page_bluetooth.c',
+		'page_cpu.c',
 		'page_datetime.c',
 		'page_desktop.c',
 		'page_devices.c',
