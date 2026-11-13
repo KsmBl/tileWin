@@ -689,6 +689,7 @@ void ui_list_gpus(GPtrArray *values, GPtrArray *labels) {
 /* "Default" first, then the given values, each shown as format % value. */
 void ui_list_numbers(GPtrArray *values, GPtrArray *labels, const char *label_format,
 		const int *numbers) {
+	g_ptr_array_add(labels, g_strdup("Default")); // stands for the value not set
 	for (int i = 0; numbers[i] >= 0; i++) {
 		g_ptr_array_add(values, g_strdup_printf("%d", numbers[i]));
 		g_ptr_array_add(labels, g_strdup_printf(label_format, numbers[i]));
