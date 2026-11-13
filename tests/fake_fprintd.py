@@ -7,6 +7,8 @@ usage: fake_fprintd.py <dir>
   <dir>/touch     written by the test: "match" or "no-match", the next finger
                   laid on the reader while it verifies; taken away once used
   <dir>/calls     every method called, one a line
+  <dir>/enroll-fail  written by the test: the next enrolling fails after its first
+                  stage, as a reader that stopped waiting for the next touch
   <dir>/ready     there once the name is owned
 Enrolling passes a stage every 0.3 seconds and completes after the third.
 """
@@ -83,6 +85,12 @@ def enroll_step():
     if not state["enrolling"]:
         return False
     state["stage"] += 1
+    fail = os.path.join(DIR, "enroll-fail")
+    if os.path.exists(fail) and state["stage"] == 2:
+        os.unlink(fail)
+        state["enrolling"] = None
+        emit("EnrollStatus", "enroll-failed", True)
+        return False
     if state["stage"] < STAGES:
         emit("EnrollStatus", "enroll-stage-passed", False)
         return True

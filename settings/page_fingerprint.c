@@ -49,8 +49,9 @@ struct fp_page {
 	GtkWidget *finger_dd, *add;
 	bool busy;
 	// the dialog of adding one
-	GtkWidget *dialog, *progress, *status, *cancel;
+	GtkWidget *dialog, *progress, *count, *status, *cancel, *again;
 	char *enrolling;
+	char *finger; // the finger of the dialog, for Try again
 	int passed;
 	guint enroll_signal;
 	bool enroll_done;
@@ -191,10 +192,22 @@ static void enroll_status_text(struct fp_page *p, const char *text) {
 	}
 }
 
+static void show_count(struct fp_page *p) {
+	if (p->count) {
+		char *text = p->stages > 0 ? g_strdup_printf("%d of %d touches", p->passed, p->stages) :
+			g_strdup_printf("%d touches", p->passed);
+		gtk_label_set_text(GTK_LABEL(p->count), text);
+		g_free(text);
+	}
+}
+
 static void finish_dialog(struct fp_page *p, const char *text, bool success) {
 	enroll_status_text(p, text);
 	if (p->cancel) {
 		gtk_button_set_label(GTK_BUTTON(p->cancel), success ? "Done" : "Close");
+	}
+	if (p->again) {
+		gtk_widget_set_visible(p->again, !success); // from the start, without closing
 	}
 	p->enroll_done = true;
 	char *name = g_strdup(p->enrolling ? finger_name(p->enrolling) : "");
@@ -220,6 +233,8 @@ static void on_enroll_status(GDBusConnection *bus, const char *sender, const cha
 		if (p->progress) {
 			gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(p->progress), 1);
 		}
+		p->passed = MAX(p->passed, p->stages);
+		show_count(p);
 		finish_dialog(p, "The fingerprint is added. It unlocks the lock screen now.", true);
 		return;
 	}
@@ -230,7 +245,9 @@ static void on_enroll_status(GDBusConnection *bus, const char *sender, const cha
 			gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(p->progress),
 				MIN(p->passed / whole, 0.99));
 		}
-		enroll_status_text(p, "Good. Lift the finger and touch the reader again.");
+		show_count(p);
+		enroll_status_text(p, "Good. Lift the finger and touch the reader again, with another "
+			"part of it.");
 		return;
 	}
 	static const struct {
@@ -240,7 +257,9 @@ static void on_enroll_status(GDBusConnection *bus, const char *sender, const cha
 		{ "enroll-swipe-too-short", "Swipe the finger again, a little slower." },
 		{ "enroll-finger-not-centered", "Put the finger in the middle of the reader." },
 		{ "enroll-remove-and-retry", "Lift the finger and touch the reader again." },
-		{ "enroll-failed", "The fingerprint could not be added. Try again." },
+		{ "enroll-failed", "The reader stopped waiting for the next touch. Try again: lift the "
+			"finger all the way between touches, keep it on the reader for a second, and "
+			"use another part of it each time." },
 		{ "enroll-data-full", "The reader has no room for another fingerprint." },
 		{ "enroll-duplicate", "This fingerprint is already added, as another finger." },
 		{ "enroll-disconnected", "The fingerprint reader was disconnected." },
@@ -268,7 +287,7 @@ static void on_dialog_close(GtkButton *button, gpointer data) {
 		enroll_end(p); // cancelled
 		settings_status(p->s, "No fingerprint added");
 	}
-	p->dialog = p->progress = p->status = p->cancel = NULL;
+	p->dialog = p->progress = p->count = p->status = p->cancel = p->again = NULL;
 	if (dialog) {
 		gtk_window_destroy(GTK_WINDOW(dialog));
 	}
@@ -277,6 +296,17 @@ static void on_dialog_close(GtkButton *button, gpointer data) {
 static gboolean on_dialog_close_request(GtkWindow *window, gpointer data) {
 	on_dialog_close(NULL, data);
 	return TRUE;
+}
+
+static void enroll_begin(struct fp_page *p, const char *id);
+
+static void on_again(GtkButton *button, gpointer data) {
+	struct fp_page *p = data;
+	if (p->finger) {
+		char *id = g_strdup(p->finger);
+		enroll_begin(p, id);
+		g_free(id);
+	}
 }
 
 static void open_dialog(struct fp_page *p, const char *id) {
@@ -302,22 +332,39 @@ static void open_dialog(struct fp_page *p, const char *id) {
 	gtk_box_append(GTK_BOX(box), heading);
 	g_free(title);
 	g_free(lower);
-	GtkWidget *how = gtk_label_new("Touch the fingerprint reader with this finger, lift it, and "
-		"touch it again, a little differently each time, until the bar is full.");
+	GtkWidget *how = gtk_label_new("Lay this finger on the fingerprint reader for a second, lift it "
+		"all the way, and lay it on again, each time with another part of it: a little "
+		"higher, lower, more to the left or the right, its tip, its sides. A touch too much like "
+		"one before does not count. Go on until the bar is full.");
 	gtk_label_set_wrap(GTK_LABEL(how), TRUE);
 	gtk_label_set_max_width_chars(GTK_LABEL(how), 44);
 	gtk_label_set_xalign(GTK_LABEL(how), 0);
 	gtk_box_append(GTK_BOX(box), how);
 	p->progress = gtk_progress_bar_new();
 	gtk_box_append(GTK_BOX(box), p->progress);
+	p->count = gtk_label_new(NULL);
+	gtk_label_set_xalign(GTK_LABEL(p->count), 0);
+	gtk_widget_add_css_class(p->count, "dim-label");
+	gtk_box_append(GTK_BOX(box), p->count);
+	show_count(p);
 	p->status = gtk_label_new("Touch the reader.");
 	gtk_label_set_xalign(GTK_LABEL(p->status), 0);
 	gtk_label_set_wrap(GTK_LABEL(p->status), TRUE);
+	// as wide as the text above: a long message wraps instead of widening the window
+	gtk_label_set_max_width_chars(GTK_LABEL(p->status), 44);
+	gtk_label_set_width_chars(GTK_LABEL(p->status), 44);
+	gtk_label_set_lines(GTK_LABEL(p->status), 4);
 	gtk_box_append(GTK_BOX(box), p->status);
+	GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+	p->again = gtk_button_new_with_label("Try again");
+	gtk_widget_set_visible(p->again, FALSE);
+	g_signal_connect(p->again, "clicked", G_CALLBACK(on_again), p);
+	gtk_box_append(GTK_BOX(buttons), p->again);
 	p->cancel = gtk_button_new_with_label("Cancel");
-	gtk_widget_set_halign(p->cancel, GTK_ALIGN_END);
 	g_signal_connect(p->cancel, "clicked", G_CALLBACK(on_dialog_close), p);
-	gtk_box_append(GTK_BOX(box), p->cancel);
+	gtk_box_append(GTK_BOX(buttons), p->cancel);
+	gtk_box_append(GTK_BOX(box), buttons);
 	gtk_window_present(GTK_WINDOW(dialog));
 }
 
@@ -334,7 +381,14 @@ static void on_add(GtkButton *button, gpointer data) {
 			id = fingers[i].id;
 		}
 	}
-	if (!id) {
+	if (id) {
+		enroll_begin(p, id);
+	}
+}
+
+/* Claims the reader and starts adding the finger, in the dialog, opened or again. */
+static void enroll_begin(struct fp_page *p, const char *id) {
+	if (p->busy) {
 		return;
 	}
 	GError *error = NULL;
@@ -350,9 +404,20 @@ static void on_add(GtkButton *button, gpointer data) {
 	p->enrolling = g_strdup(id);
 	p->passed = 0;
 	p->enroll_done = false;
+	g_free(p->finger);
+	p->finger = g_strdup(id);
 	p->enroll_signal = g_dbus_connection_signal_subscribe(p->bus, FPRINT, FPRINT_DEVICE,
 		"EnrollStatus", p->device, NULL, G_DBUS_SIGNAL_FLAGS_NONE, on_enroll_status, p, NULL);
-	open_dialog(p, id);
+	if (!p->dialog) {
+		open_dialog(p, id);
+	} else {
+		// Try again: the same dialog from the start
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(p->progress), 0);
+		show_count(p);
+		enroll_status_text(p, "Touch the reader.");
+		gtk_button_set_label(GTK_BUTTON(p->cancel), "Cancel");
+		gtk_widget_set_visible(p->again, FALSE);
+	}
 	r = call_sync(p, p->device, FPRINT_DEVICE, "EnrollStart", g_variant_new("(s)", id), NULL,
 		&error);
 	if (!r) {
@@ -456,6 +521,7 @@ static void on_destroy(GtkWidget *widget, gpointer data) {
 	g_clear_object(&p->bus);
 	g_free(p->device);
 	g_free(p->reader_name);
+	g_free(p->finger);
 	g_ptr_array_free(p->enrolled, TRUE);
 	g_free(p);
 }

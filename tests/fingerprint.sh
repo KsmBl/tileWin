@@ -2,7 +2,8 @@
 # The fingerprint reader, with a fake fprintd on the nested session's bus
 # (fake_fprintd.py, TILEWIN_FPRINT_BUS=session):
 #  - the Fingerprint page of the settings adds a finger (Claim, EnrollStart,
-#    the stages, Release) and removes it again;
+#    the stages, Release), after a first try the reader gave up on with Try
+#    again, and removes it again;
 #  - the lock screen listens for a finger once one is enrolled: a finger that
 #    is not recognised leaves the session locked and says so, and it listens
 #    again; the right one unlocks it;
@@ -98,13 +99,19 @@ ipc exec "$settings --page=fingerprint" >/dev/null
 wait_until 20 sh -c "'$msg' -s '$sock' -t get_tree | grep -q '\"app_id\": \"org.tilewin.Settings\"'" ||
 	fail "the settings never came up"
 wait_still 15 screen
+touch "$fp/enroll-fail" # the reader gives up after the first touch
 click 1195 465 # Add...
+wait_until 10 grep -qx Release "$fp/calls" || fail "the reader was not let go after it gave up"
+[ -s "$fp/fingers" ] && fail "a finger was added although the reader gave up"
+wait_still 5 screen
+click 706 629 # Try again
 wait_until 10 grep -qx right-index-finger "$fp/fingers" ||
 	fail "Add... enrolled no finger: $(tr '\n' ' ' < "$fp/calls")"
-wait_until 5 grep -qx Release "$fp/calls" || fail "the reader was not let go after enrolling"
+wait_until 5 sh -c "[ \$(grep -cx Release '$fp/calls') -ge 2 ]" ||
+	fail "the reader was not let go after enrolling"
 grep -qx 'EnrollStart right-index-finger' "$fp/calls" || fail "EnrollStart was not asked for the right finger"
 wait_still 5 screen
-click 803 543 # Done
+click 802 577 # Done
 wait_still 5 screen
 click 1187 299 # Remove, on the row of the finger
 wait_until 5 sh -c "[ ! -s '$fp/fingers' ]" ||
