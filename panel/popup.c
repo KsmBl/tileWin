@@ -1,5 +1,6 @@
 #include <gio/gio.h>
 #include <linux/input-event-codes.h>
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1113,11 +1114,27 @@ list_t *theme_menu_items(struct panel *panel) {
 
 /* ================= run dialog ================= */
 
+#define RUN_SUGGEST_MAX 8
+#define RUN_SUGGEST_ROW 22
+
+struct run_suggestion {
+	char *text; // what the field holds once it is taken
+	const char *kind; // "earlier", "program", "folder", "file"
+};
+
 struct rundialog {
 	struct text_cursor tc;
 	char text[1024];
 	list_t *history;
 	int history_pos;
+	// autocompletion: what fits what was typed, under the field
+	char typed[1024];      // the text the suggestions were made for
+	list_t *suggestions;   // struct run_suggestion *
+	int selected;          // -1: none, the field holds what was typed
+	list_t *programs;      // char *: the programs of $PATH, read once, sorted
+	struct popup *drop;    // the list, a child of the dialog
+	bool drop_above;       // no room below: the list is above the field, the best next to it
+	double field_x, field_y, field_w, field_h; // the field, in surface coordinates
 };
 
 enum {
@@ -1362,6 +1379,10 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 	text_style_colors(panel, &ts);
 	ts.fg = tw_theme_color(panel->theme, "dialog.field_fg", 0x000000ff);
 	text_draw(cr, &ts, rd->text, &rd->tc, fx + 5, fy, fw - 10, fh);
+	rd->field_x = M + fx;
+	rd->field_y = M + fy;
+	rd->field_w = fw;
+	rd->field_h = fh;
 
 	double btn_w = 75, btn_h = style == PS_CLASSIC ? 23 : 26;
 	double btn_y = h - btn_h - 14;
@@ -1453,8 +1474,313 @@ static void rundialog_button(struct popup *p, double x, double y, uint32_t butto
 	}
 }
 
+/* ---------- autocompletion ---------- */
+
+static void suggestions_clear(struct rundialog *rd) {
+	for (int i = 0; rd->suggestions && i < rd->suggestions->length; i++) {
+		struct run_suggestion *sg = rd->suggestions->items[i];
+		free(sg->text);
+		free(sg);
+	}
+	if (rd->suggestions) {
+		rd->suggestions->length = 0;
+	}
+	rd->selected = -1;
+}
+
+static void suggest(struct rundialog *rd, const char *text, const char *kind) {
+	if (rd->suggestions->length >= RUN_SUGGEST_MAX || strcmp(text, rd->typed) == 0) {
+		return;
+	}
+	for (int i = 0; i < rd->suggestions->length; i++) {
+		if (strcmp(((struct run_suggestion *)rd->suggestions->items[i])->text, text) == 0) {
+			return;
+		}
+	}
+	struct run_suggestion *sg = calloc(1, sizeof(*sg));
+	sg->text = strdup(text);
+	sg->kind = kind;
+	list_add(rd->suggestions, sg);
+}
+
+static int compare_names(const void *a, const void *b) {
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* The programs of $PATH, once: names that can be run, sorted, each once. */
+static void load_programs(struct rundialog *rd) {
+	if (rd->programs) {
+		return;
+	}
+	rd->programs = create_list();
+	const char *env = getenv("PATH");
+	char *path = strdup(env ? env : "/usr/local/bin:/usr/bin:/bin");
+	char *save = NULL;
+	for (char *dir = strtok_r(path, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
+		DIR *d = opendir(dir);
+		struct dirent *de;
+		while (d && (de = readdir(d))) {
+			if (de->d_name[0] == '.') {
+				continue;
+			}
+			char *full = format_str("%s/%s", dir, de->d_name);
+			struct stat st;
+			if (stat(full, &st) == 0 && S_ISREG(st.st_mode) && access(full, X_OK) == 0) {
+				list_add(rd->programs, strdup(de->d_name));
+			}
+			free(full);
+		}
+		if (d) {
+			closedir(d);
+		}
+	}
+	free(path);
+	qsort(rd->programs->items, rd->programs->length, sizeof(void *), compare_names);
+	// each name once: the first of $PATH is the one that runs
+	int out = 0;
+	for (int i = 0; i < rd->programs->length; i++) {
+		if (out > 0 && strcmp(rd->programs->items[out - 1], rd->programs->items[i]) == 0) {
+			free(rd->programs->items[i]);
+		} else {
+			rd->programs->items[out++] = rd->programs->items[i];
+		}
+	}
+	rd->programs->length = out;
+}
+
+/* Files and folders for the path the text ends with: head is the text before it. */
+static void suggest_paths(struct rundialog *rd, const char *head, size_t head_len,
+		const char *token) {
+	const char *slash = strrchr(token, '/');
+	char *dir_part = slash ? strndup(token, slash - token + 1) : strdup("");
+	const char *prefix = slash ? slash + 1 : token;
+	char *dir = *dir_part ? tw_expand_home(dir_part) : strdup(".");
+	if (!dir) {
+		free(dir_part);
+		return;
+	}
+	DIR *d = opendir(dir);
+	list_t *names = create_list();
+	struct dirent *de;
+	size_t plen = strlen(prefix);
+	while (d && (de = readdir(d))) {
+		if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0 ||
+				(de->d_name[0] == '.' && prefix[0] != '.') ||
+				strncmp(de->d_name, prefix, plen) != 0) {
+			continue; // hidden ones only when a dot was typed
+		}
+		list_add(names, strdup(de->d_name));
+	}
+	if (d) {
+		closedir(d);
+	}
+	qsort(names->items, names->length, sizeof(void *), compare_names);
+	for (int i = 0; i < names->length; i++) {
+		char *full = format_str("%s/%s", dir, (char *)names->items[i]);
+		struct stat st;
+		bool folder = stat(full, &st) == 0 && S_ISDIR(st.st_mode);
+		free(full);
+		char *text = format_str("%.*s%s%s%s", (int)head_len, head, dir_part,
+			(char *)names->items[i], folder ? "/" : "");
+		suggest(rd, text, folder ? "folder" : "file");
+		free(text);
+	}
+	list_free_items_and_destroy(names);
+	free(dir);
+	free(dir_part);
+}
+
+/* What fits what was typed: earlier entries, then programs or paths. */
+static void suggestions_make(struct rundialog *rd) {
+	if (!rd->suggestions) {
+		rd->suggestions = create_list();
+	}
+	suggestions_clear(rd);
+	snprintf(rd->typed, sizeof(rd->typed), "%s", rd->text);
+	const char *t = rd->text;
+	if (!*t) {
+		return;
+	}
+	size_t len = strlen(t);
+	for (int i = 0; i < rd->history->length; i++) {
+		if (strncasecmp(rd->history->items[i], t, len) == 0) {
+			suggest(rd, rd->history->items[i], "earlier");
+		}
+	}
+	// the word being typed: after the last space
+	const char *token = strrchr(t, ' ');
+	token = token ? token + 1 : t;
+	size_t head_len = token - t;
+	bool path = token[0] == '/' || token[0] == '~' || strncmp(token, "./", 2) == 0 ||
+		strchr(token, '/');
+	if (path) {
+		suggest_paths(rd, t, head_len, token);
+	} else if (head_len == 0) {
+		load_programs(rd);
+		for (int i = 0; i < rd->programs->length; i++) {
+			if (strncmp(rd->programs->items[i], t, len) == 0) {
+				suggest(rd, rd->programs->items[i], "program");
+			}
+		}
+	}
+}
+
+static void drop_render(struct popup *p, cairo_t *cr) {
+	struct popup *dialog = p->parent;
+	struct rundialog *rd = dialog ? dialog->data : NULL;
+	if (!rd || !rd->suggestions) {
+		return;
+	}
+	struct panel *panel = p->panel;
+	double w = p->surface->width, h = p->surface->height;
+	pd_rect(cr, 0, 0, w, h, tw_theme_color(panel->theme, "dialog.field_bg", 0xffffffff));
+	cairo_rectangle(cr, 0.5, 0.5, w - 1, h - 1);
+	pd_color(cr, panel_style(panel) == PS_CLASSIC ? 0x000000ff :
+		tw_theme_color(panel->theme, "dialog.field_border", 0x7f9db9ff));
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	struct text_style ts = { 0 };
+	text_style_colors(panel, &ts);
+	uint32_t fg = tw_theme_color(panel->theme, "dialog.field_fg", 0x000000ff);
+	uint32_t dim = (fg & 0xffffff00) | 0x80;
+	int count = rd->suggestions->length;
+	for (int i = 0; i < count; i++) {
+		struct run_suggestion *sg = rd->suggestions->items[i];
+		// above the field the order turns round, so the best one is next to it
+		double y = 1 + (rd->drop_above ? count - 1 - i : i) * RUN_SUGGEST_ROW;
+		bool on = i == rd->selected;
+		if (on) {
+			pd_rect(cr, 1, y, w - 2, RUN_SUGGEST_ROW, ts.selection_bg);
+		}
+		int kind_w = 60;
+		pd_text(cr, bar_font(panel), sg->text, 6, y, w - 12 - kind_w, RUN_SUGGEST_ROW,
+			on ? ts.selection_fg : fg, PD_LEFT);
+		pd_text(cr, bar_font(panel), sg->kind, w - 6 - kind_w, y, kind_w, RUN_SUGGEST_ROW,
+			on ? ts.selection_fg : dim, PD_RIGHT);
+		psurface_add_hotspot(p->surface, 0, y, w, RUN_SUGGEST_ROW, NULL, 1, i, NULL);
+	}
+}
+
+static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods);
+static void suggestions_take(struct popup *dialog, int index);
+
+static void drop_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (!pressed && hs && p->parent) {
+		suggestions_take(p->parent, (int)hs->id);
+	}
+}
+
+static void drop_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
+	if (p->parent) {
+		rundialog_key(p->parent, sym, utf8, mods); // the field goes on taking the keys
+	}
+}
+
+static void drop_destroy(struct popup *p) {
+	struct rundialog *rd = p->parent ? p->parent->data : NULL;
+	if (rd && rd->drop == p) {
+		rd->drop = NULL;
+	}
+}
+
+static const struct popup_vtable drop_vtable = {
+	.render = drop_render,
+	.button = drop_button,
+	.key = drop_key,
+	.destroy = drop_destroy,
+};
+
+/* Shows the list under the field (above it when there is no room), or hides it. */
+static void drop_update(struct popup *dialog) {
+	struct rundialog *rd = dialog->data;
+	int count = rd->suggestions ? rd->suggestions->length : 0;
+	if (count == 0 || rd->field_w <= 0) {
+		if (rd->drop) {
+			popup_destroy(rd->drop);
+			rd->drop = NULL;
+		}
+		return;
+	}
+	int width = (int)rd->field_w, height = count * RUN_SUGGEST_ROW + 2;
+	int x = dialog->x + (int)rd->field_x;
+	int y = dialog->y + (int)(rd->field_y + rd->field_h);
+	rd->drop_above = y + height > dialog->output->height;
+	if (rd->drop_above) {
+		y = dialog->y + (int)rd->field_y - height; // a taskbar at the bottom: above
+	}
+	if (rd->drop) {
+		popup_move_resize(rd->drop, x, y, width, height);
+	} else {
+		rd->drop = popup_create(dialog->panel, POPUP_RUN, dialog, dialog->output, x, y, width,
+			height, &drop_vtable, NULL);
+	}
+	if (rd->drop) {
+		popup_set_dirty(rd->drop);
+	}
+}
+
+/* Puts a suggestion in the field; a folder shows what is in it next. */
+static void suggestions_take(struct popup *dialog, int index) {
+	struct rundialog *rd = dialog->data;
+	if (!rd->suggestions || index < 0 || index >= rd->suggestions->length) {
+		return;
+	}
+	struct run_suggestion *sg = rd->suggestions->items[index];
+	snprintf(rd->text, sizeof(rd->text), "%s", sg->text);
+	text_cursor_end(rd->text, &rd->tc, false);
+	bool folder = strcmp(sg->kind, "folder") == 0;
+	if (folder) {
+		suggestions_make(rd);
+	} else {
+		suggestions_clear(rd);
+	}
+	drop_update(dialog);
+	popup_set_dirty(dialog);
+}
+
+/* The field shows the suggestion the arrows are on, or what was typed. */
+static void suggestions_select(struct popup *dialog, int step) {
+	struct rundialog *rd = dialog->data;
+	int count = rd->suggestions->length;
+	int sel = rd->selected + step;
+	sel = sel < -1 ? count - 1 : sel >= count ? -1 : sel;
+	rd->selected = sel;
+	snprintf(rd->text, sizeof(rd->text), "%s", sel < 0 ? rd->typed :
+		((struct run_suggestion *)rd->suggestions->items[sel])->text);
+	text_cursor_end(rd->text, &rd->tc, false);
+	if (rd->drop) {
+		popup_set_dirty(rd->drop);
+	}
+}
+
 static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct rundialog *rd = p->data;
+	bool listing = rd->drop && rd->suggestions && rd->suggestions->length > 0;
+	if (listing) {
+		switch (sym) {
+		case XKB_KEY_Escape: // the list goes first, the dialog with the next
+			suggestions_clear(rd);
+			drop_update(p);
+			if (strcmp(rd->text, rd->typed) != 0) {
+				snprintf(rd->text, sizeof(rd->text), "%s", rd->typed);
+				text_cursor_end(rd->text, &rd->tc, false);
+			}
+			popup_set_dirty(p);
+			return;
+		case XKB_KEY_Up:
+		case XKB_KEY_Down:
+			// towards the list and through it, whichever side of the field it is on
+			suggestions_select(p, (sym == XKB_KEY_Down) != rd->drop_above ? 1 : -1);
+			popup_set_dirty(p);
+			return;
+		case XKB_KEY_Tab:
+			suggestions_take(p, rd->selected >= 0 ? rd->selected : 0);
+			return;
+		default:
+			break;
+		}
+	}
 	switch (sym) {
 	case XKB_KEY_Escape:
 		popup_close_later(p->panel);
@@ -1462,6 +1788,14 @@ static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, u
 	case XKB_KEY_Return:
 	case XKB_KEY_KP_Enter:
 		rundialog_execute(p);
+		return;
+	case XKB_KEY_Tab:
+		// with the list closed: show it for what is there
+		suggestions_make(rd);
+		drop_update(p);
+		if (rd->suggestions->length == 1) {
+			suggestions_take(p, 0);
+		}
 		return;
 	case XKB_KEY_Up:
 	case XKB_KEY_Down:
@@ -1478,11 +1812,19 @@ static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, u
 			text_cursor_end(rd->text, &rd->tc, true);
 		}
 		break;
-	default:
+	default: {
+		char before[sizeof(rd->text)];
+		snprintf(before, sizeof(before), "%s", rd->text);
 		if (text_key(rd->text, sizeof(rd->text), &rd->tc, sym, utf8, mods) == TEXT_KEY_IGNORED) {
 			return;
 		}
+		if (strcmp(before, rd->text) != 0) {
+			// typed: what fits it now
+			suggestions_make(rd);
+			drop_update(p);
+		}
 		break;
+	}
 	}
 	popup_set_dirty(p);
 }
@@ -1490,6 +1832,13 @@ static void rundialog_key(struct popup *p, xkb_keysym_t sym, const char *utf8, u
 static void rundialog_destroy(struct popup *p) {
 	struct rundialog *rd = p->data;
 	list_free_items_and_destroy(rd->history);
+	suggestions_clear(rd);
+	if (rd->suggestions) {
+		list_free(rd->suggestions);
+	}
+	if (rd->programs) {
+		list_free_items_and_destroy(rd->programs);
+	}
 	free(rd);
 }
 

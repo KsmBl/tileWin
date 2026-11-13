@@ -646,7 +646,10 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		shutdown_dialog_open(panel, output, argc > 1 && strcmp(argv[1], "logoff") == 0);
 	} else if (strcmp(cmd, "run") == 0) {
 		if (output) {
-			rundialog_open(panel, output);
+			// "panel run TEXT" opens it with TEXT in the field
+			char *text = argc > 1 ? join_args(argv + 1, argc - 1) : NULL;
+			rundialog_open_with(panel, output, text);
+			free(text);
 		}
 	} else if (strcmp(cmd, "activate") == 0 && argc > 1) {
 		taskbar_activate_index(panel, atoi(argv[1]));

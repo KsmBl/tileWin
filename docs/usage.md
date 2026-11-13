@@ -130,6 +130,10 @@ The reading **stays on the last repository it saw**, so moving to a browser or a
 
 git is asked in the background — one shell running two git commands (the tag is asked once a minute), whose answers the taskbar reads when they are ready — so the bar never waits for a slow repository, and nothing runs at all while the widget is off screen.
 
+## Run dialog
+
+Win+R opens the Run dialog. While you type, a list under the field (above it when the taskbar leaves no room) offers what fits: earlier entries first, then programs of `$PATH` while the command is typed, files and folders for a path (`/`, `~`, `./`). The arrows go through it and put the entry in the field, Tab or a click takes it (a folder then lists what is in it), Enter runs what is in the field, Escape closes the list and a second Escape the dialog. Tab with the list closed lists what fits, and takes it when it is the only one. `tilewinmsg panel run TEXT` opens it with TEXT in the field.
+
 ## Bluetooth
 
 The Bluetooth flyout (`panel bluetooth`, the Bluetooth icon of the taskbar, or the arrow of the Bluetooth button) turns Bluetooth on and off, lists paired and nearby devices and connects, disconnects, pairs and forgets them. It talks to BlueZ directly, so `bluetoothctl` is not needed, but `bluetoothd` must run (`sudo systemctl enable --now bluetooth`). While a device pairs, codes to type on it are shown in the flyout. The icon shows whether Bluetooth is off, on or connected, the tooltip to what; it takes no room without an adapter or `bluetoothd`. A `taskbar.conf` from an older version needs `bluetooth` added to its `right` line, or the widget added on the Taskbar page.
