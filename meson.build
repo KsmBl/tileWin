@@ -209,6 +209,7 @@ subdir('portal')
 subdir('kernel')
 subdir('devices')
 subdir('cpu')
+subdir('claude')
 subdir('network')
 
 gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))

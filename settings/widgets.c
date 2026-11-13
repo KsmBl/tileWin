@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "settings.h"
+#include "tw_claude_usage.h"
 #include "tw_desktop.h"
 #include "tw_disks.h"
 #include "tw_widgets.h"
@@ -62,6 +63,23 @@ static void list_mixers(GPtrArray *values, GPtrArray *labels) {
 	ui_list_apps("Mixer", true, values, labels);
 }
 
+/* The Claude Code folders of this computer, each with the account logged in there. */
+static void list_claude_accounts(GPtrArray *values, GPtrArray *labels) {
+	g_ptr_array_add(labels, g_strdup("The one used last"));
+	list_t *all = tw_claude_usage_all();
+	const char *home = g_get_home_dir();
+	for (int i = 0; i < all->length; i++) {
+		struct tw_claude_usage *u = all->items[i];
+		bool in_home = g_str_has_prefix(u->dir, home) && u->dir[strlen(home)] == '/';
+		char *shown = in_home ? g_strdup_printf("~%s", u->dir + strlen(home)) : g_strdup(u->dir);
+		g_ptr_array_add(values, g_strdup(shown));
+		g_ptr_array_add(labels, g_strdup_printf("%s%s%s%s", u->account ? u->account : "No account",
+			" (", shown, u->connected ? ")" : ", not connected yet)"));
+		g_free(shown);
+	}
+	tw_claude_usage_list_free(all);
+}
+
 static void list_calendars(GPtrArray *values, GPtrArray *labels) {
 	g_ptr_array_add(values, g_strdup("exec tilewin-settings --page datetime"));
 	g_ptr_array_add(labels, g_strdup("Date & time settings"));
@@ -80,6 +98,7 @@ static const struct {
 	{ "battery", "device", ui_list_batteries },
 	{ "power", "device", ui_list_batteries },
 	{ "clock", "settings", list_calendars },
+	{ "claude", "account", list_claude_accounts },
 	{ NULL, "interval", list_seconds },
 	{ NULL, "width", list_pixels },
 	{ NULL, "max_width", list_pixels },
@@ -328,6 +347,12 @@ static bool list_styles(const char *widget, GPtrArray *values, GPtrArray *labels
 
 static void add_option_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt, bool desktop) {
+	char *row_type = widget_type_of(widget);
+	bool own_editor = strcmp(row_type, "claude") == 0 && strcmp(opt->key, "show") == 0;
+	g_free(row_type);
+	if (own_editor) {
+		return; // ticked and sorted in a group of its own
+	}
 	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
 	bool styles = desktop && strcmp(opt->key, "style") == 0;
 	struct cstmt *block = desktop ? widget_desktop_entry(s, widget) :
@@ -389,6 +414,274 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 	}
 	ui_row(list, opt->title, opt->hint, control);
 	g_free(value);
+}
+
+/* ---------- what the Claude widget shows ---------- */
+
+/*
+ * The items of the Claude widget, ticked and in order: "show" of its block for
+ * the taskbar, of its desktop_widgets entry for the desktop, each with presets
+ * of its own. Ticked items come first, in their order; the arrows move them.
+ */
+struct show_editor {
+	struct settings *s;
+	char *widget;
+	bool desktop;
+	GPtrArray *order;   // item ids, all of them: the ticked ones first
+	GHashTable *ticked; // id -> id
+	GtkWidget *list, *presets;
+	bool updating;
+	guint rebuild_idle;
+};
+
+static const char *show_default(struct show_editor *e) {
+	return e->desktop ? TW_CLAUDE_SHOW_DESKTOP : TW_CLAUDE_SHOW_TASKBAR;
+}
+
+static const struct tw_claude_preset *show_presets(struct show_editor *e) {
+	return e->desktop ? tw_claude_desktop_presets : tw_claude_taskbar_presets;
+}
+
+static char *show_current(struct show_editor *e) {
+	GString *out = g_string_new(NULL);
+	for (guint i = 0; i < e->order->len; i++) {
+		if (g_hash_table_contains(e->ticked, e->order->pdata[i])) {
+			g_string_append_printf(out, "%s%s", out->len ? " " : "", (char *)e->order->pdata[i]);
+		}
+	}
+	return g_string_free(out, FALSE);
+}
+
+/* The order and ticks of a "show" value: its items first, then the others. */
+static void show_load(struct show_editor *e, const char *show) {
+	g_ptr_array_set_size(e->order, 0);
+	g_hash_table_remove_all(e->ticked);
+	char **ids = g_strsplit_set(show ? show : "", " ,\t", -1);
+	for (int i = 0; ids[i]; i++) {
+		const struct tw_claude_item *item = tw_claude_item_find(ids[i]);
+		if (item && !g_hash_table_contains(e->ticked, item->id)) {
+			g_ptr_array_add(e->order, (gpointer)item->id);
+			g_hash_table_add(e->ticked, (gpointer)item->id);
+		}
+	}
+	g_strfreev(ids);
+	for (size_t i = 0; i < tw_claude_item_count; i++) {
+		if (!g_hash_table_contains(e->ticked, tw_claude_items[i].id)) {
+			g_ptr_array_add(e->order, (gpointer)tw_claude_items[i].id);
+		}
+	}
+}
+
+static void show_rebuild(struct show_editor *e);
+
+static gboolean show_rebuild_idle(gpointer data) {
+	struct show_editor *e = data;
+	e->rebuild_idle = 0;
+	show_rebuild(e);
+	return G_SOURCE_REMOVE;
+}
+
+/* After the click: the row clicked in is among the ones the list is made of again. */
+static void show_rebuild_later(struct show_editor *e) {
+	if (!e->rebuild_idle) {
+		e->rebuild_idle = g_idle_add(show_rebuild_idle, e);
+	}
+}
+
+static void show_write(struct show_editor *e) {
+	char *show = show_current(e);
+	// the default is written as nothing, so a later default comes along
+	const char *value = strcmp(show, show_default(e)) == 0 ? NULL : show;
+	if (e->desktop) {
+		write_desktop_option(e->s, e->widget, "show", value);
+	} else {
+		write_option(e->s, e->widget, "show", value);
+	}
+	g_free(show);
+	show_rebuild_later(e);
+}
+
+static void on_show_tick(GtkCheckButton *check, gpointer data) {
+	struct show_editor *e = data;
+	if (e->updating) {
+		return;
+	}
+	const char *id = g_object_get_data(G_OBJECT(check), "item");
+	if (gtk_check_button_get_active(check)) {
+		g_hash_table_add(e->ticked, (gpointer)id);
+		// a newly ticked item goes after the ticked ones
+		guint at = 0, ticked = 0;
+		for (guint i = 0; i < e->order->len; i++) {
+			if (e->order->pdata[i] == id) {
+				at = i;
+			} else if (g_hash_table_contains(e->ticked, e->order->pdata[i])) {
+				ticked++;
+			}
+		}
+		g_ptr_array_remove_index(e->order, at);
+		g_ptr_array_insert(e->order, ticked, (gpointer)id);
+	} else if (g_hash_table_size(e->ticked) > 1) {
+		g_hash_table_remove(e->ticked, id);
+	} else {
+		show_rebuild_later(e); // the last one stays: a widget showing nothing helps nobody
+		return;
+	}
+	show_write(e);
+}
+
+static void show_move(struct show_editor *e, const char *id, int step) {
+	for (guint i = 0; i < e->order->len; i++) {
+		if (e->order->pdata[i] == id) {
+			guint to = i + step;
+			if ((int)i + step < 0 || to >= e->order->len ||
+					!g_hash_table_contains(e->ticked, e->order->pdata[to])) {
+				return;
+			}
+			e->order->pdata[i] = e->order->pdata[to];
+			e->order->pdata[to] = (gpointer)id;
+			show_write(e);
+			return;
+		}
+	}
+}
+
+static void on_show_up(GtkButton *button, gpointer data) {
+	show_move(data, g_object_get_data(G_OBJECT(button), "item"), -1);
+}
+
+static void on_show_down(GtkButton *button, gpointer data) {
+	show_move(data, g_object_get_data(G_OBJECT(button), "item"), 1);
+}
+
+static void on_show_preset(GObject *dropdown, GParamSpec *pspec, gpointer data) {
+	struct show_editor *e = data;
+	if (e->updating) {
+		return;
+	}
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+	const struct tw_claude_preset *presets = show_presets(e);
+	for (guint n = 0; presets[n].title; n++) {
+		if (n == i) {
+			show_load(e, presets[n].show);
+			show_write(e);
+			return;
+		}
+	}
+}
+
+static void show_rebuild(struct show_editor *e) {
+	e->updating = true;
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(e->list))) {
+		gtk_list_box_remove(GTK_LIST_BOX(e->list), child);
+	}
+	char *current = show_current(e);
+	const struct tw_claude_preset *presets = show_presets(e);
+	guint selected = GTK_INVALID_LIST_POSITION, n = 0;
+	for (; presets[n].title; n++) {
+		if (strcmp(presets[n].show, current) == 0) {
+			selected = n;
+		}
+	}
+	// a list of one's own shows as such in the presets
+	GtkStringList *model = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(e->presets)));
+	guint items = g_list_model_get_n_items(G_LIST_MODEL(model));
+	if (items > n) {
+		gtk_string_list_remove(model, n);
+	}
+	if (selected == GTK_INVALID_LIST_POSITION) {
+		gtk_string_list_append(model, "Your own");
+		selected = n;
+	}
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(e->presets), selected);
+	g_free(current);
+
+	guint ticked = g_hash_table_size(e->ticked);
+	for (guint i = 0; i < e->order->len; i++) {
+		const char *id = e->order->pdata[i];
+		const struct tw_claude_item *item = tw_claude_item_find(id);
+		bool on = g_hash_table_contains(e->ticked, id);
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		gtk_widget_set_margin_start(box, 12);
+		gtk_widget_set_margin_end(box, 12);
+		gtk_widget_set_margin_top(box, 4);
+		gtk_widget_set_margin_bottom(box, 4);
+		GtkWidget *check = gtk_check_button_new_with_label(item->title);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(check), on);
+		gtk_widget_set_hexpand(check, TRUE);
+		g_object_set_data(G_OBJECT(check), "item", (gpointer)id);
+		g_signal_connect(check, "toggled", G_CALLBACK(on_show_tick), e);
+		gtk_box_append(GTK_BOX(box), check);
+		// buttons of their own: ui_icon_button frees its data with the button
+		GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
+		gtk_widget_set_tooltip_text(up, "Earlier");
+		gtk_widget_add_css_class(up, "flat");
+		gtk_widget_set_sensitive(up, on && i > 0);
+		g_signal_connect(up, "clicked", G_CALLBACK(on_show_up), e);
+		g_object_set_data(G_OBJECT(up), "item", (gpointer)id);
+		gtk_box_append(GTK_BOX(box), up);
+		GtkWidget *down = gtk_button_new_from_icon_name("go-down-symbolic");
+		gtk_widget_set_tooltip_text(down, "Later");
+		gtk_widget_add_css_class(down, "flat");
+		gtk_widget_set_sensitive(down, on && i + 1 < ticked);
+		g_signal_connect(down, "clicked", G_CALLBACK(on_show_down), e);
+		g_object_set_data(G_OBJECT(down), "item", (gpointer)id);
+		gtk_box_append(GTK_BOX(box), down);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+	}
+	e->updating = false;
+}
+
+static void show_editor_free(gpointer data) {
+	struct show_editor *e = data;
+	if (e->rebuild_idle) {
+		g_source_remove(e->rebuild_idle);
+	}
+	g_ptr_array_unref(e->order);
+	g_hash_table_unref(e->ticked);
+	g_free(e->widget);
+	g_free(e);
+}
+
+static void show_editor_attach(struct settings *s, GtkWidget *content, const char *widget,
+		bool desktop) {
+	struct show_editor *e = g_new0(struct show_editor, 1);
+	e->s = s;
+	e->widget = g_strdup(widget);
+	e->desktop = desktop;
+	e->order = g_ptr_array_new();
+	e->ticked = g_hash_table_new(g_str_hash, g_str_equal);
+	struct cstmt *block = desktop ? widget_desktop_entry(s, widget) :
+		confdoc_block(s->taskbar, "widget", widget, false);
+	char *value = cstmt_join(confdoc_child(block, "show", NULL), 0);
+	show_load(e, value && *value ? value : show_default(e));
+	g_free(value);
+
+	GtkWidget *group = ui_group(content, desktop ? "What it shows on the desktop" :
+		"What it shows on the taskbar", "Tick what to show; the arrows put it earlier or "
+		"later. The time left is how long the limit lasts at the pace it was used at since "
+		"it started.");
+	GtkStringList *names = gtk_string_list_new(NULL);
+	const struct tw_claude_preset *presets = show_presets(e);
+	for (guint n = 0; presets[n].title; n++) {
+		gtk_string_list_append(names, presets[n].title);
+	}
+	e->presets = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
+	g_signal_connect(e->presets, "notify::selected", G_CALLBACK(on_show_preset), e);
+	ui_row(group, "Preset", NULL, e->presets);
+	e->list = gtk_list_box_new();
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(e->list), GTK_SELECTION_NONE);
+	gtk_widget_add_css_class(e->list, "boxed-list");
+	gtk_widget_set_margin_bottom(e->list, 8);
+	GtkWidget *holder = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(holder), e->list);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(holder), FALSE);
+	gtk_list_box_append(GTK_LIST_BOX(group), holder);
+	g_object_set_data_full(G_OBJECT(e->list), "editor", e, show_editor_free);
+	show_rebuild(e);
 }
 
 /* ---------- the apps of the quick launch ---------- */
@@ -592,6 +885,9 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
+	if (strcmp(type, "claude") == 0) {
+		show_editor_attach(s, content, name, desktop); // what it shows comes first
+	}
 	const struct tw_widget_info *info = tw_widget_find(type);
 	bool quick = strcmp(type, "quicklaunch") == 0;
 	bool any = info && info->options && info->options->key;
@@ -611,6 +907,7 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	if (quick) {
 		quick_editor_attach(s, content);
 	}
+
 
 	GtkWidget *events = ui_group(content, "Mouse actions",
 		"Commands run when the widget is clicked or scrolled, e.g. exec pavucontrol. "

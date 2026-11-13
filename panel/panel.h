@@ -295,6 +295,9 @@ struct widget_sample {
 	bool series_rate; // bytes per second, labelled B/s, kB/s, MB/s
 };
 
+struct gadget_ctx;
+struct gadget_palette;
+
 struct widget_impl {
 	const char *type;
 	void (*init)(struct widget *w);
@@ -312,6 +315,9 @@ struct widget_impl {
 	void (*state_changed)(struct widget *w);
 	/* What it measures, for the desktop styles that draw it their own way. */
 	bool (*sample)(struct widget *w, struct widget_sample *sample);
+	/* A desktop style of its own (ctx->style); false leaves it to the common ones. */
+	bool (*draw_gadget)(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal);
 };
 
 struct widget {
@@ -376,6 +382,7 @@ extern const struct widget_impl widget_spacer;
 extern const struct widget_impl widget_custom;
 extern const struct widget_impl widget_notifications;
 extern const struct widget_impl widget_git;
+extern const struct widget_impl widget_claude;
 
 /* ---------- panel ---------- */
 

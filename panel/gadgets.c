@@ -1184,6 +1184,10 @@ bool gadget_draw(struct gadget_ctx *ctx) {
 	if (ctx->card) {
 		gadget_draw_card(ctx, &pal);
 	}
+	if (ctx->widget->impl->draw_gadget &&
+			ctx->widget->impl->draw_gadget(ctx->widget, ctx, &pal)) {
+		return true;
+	}
 	if (strcmp(style, "digital") == 0) {
 		draw_digital(ctx, &pal);
 		return true;

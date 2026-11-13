@@ -48,7 +48,10 @@ int main(void) {
 			"the default style is not the taskbar look", info->type);
 		for (const struct tw_widget_style *style = info->styles; style->name; style++) {
 			check(style->title && *style->title, "a style without a title", info->type);
-			check(is_drawn(style->name), "a style the panel does not draw", info->type);
+			// or its own, which the widget draws itself and is put on the desktop in
+			const char *own = tw_widget_desktop_style(info->type);
+			check(is_drawn(style->name) || (own && strcmp(style->name, own) == 0),
+				"a style the panel does not draw", info->type);
 			check(style->rows >= 1 && style->columns >= 0, "a style without cells", info->type);
 			for (const struct tw_widget_style *other = style + 1; other->name; other++) {
 				check(strcmp(style->name, other->name) != 0, "a style twice", info->type);

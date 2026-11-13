@@ -1271,6 +1271,32 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'settings-claude',
+	find_program('settings_claude.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
+	'claude-usage',
+	find_program('claude_usage.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
+	'run-complete',
+	find_program('run_complete.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'fingerprint',
 	find_program('fingerprint.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

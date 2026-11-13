@@ -52,6 +52,12 @@ extern const struct tw_widget_option tw_widget_desktop_options[];
 const struct tw_widget_style *tw_widget_style_find(const struct tw_widget_info *info,
 	const char *name);
 
+/*
+ * The style a widget gets when it is put on the desktop, one it draws itself
+ * (widget_impl.draw_gadget, e.g. the Claude widget's list); NULL keeps the default.
+ */
+const char *tw_widget_desktop_style(const char *type);
+
 /* The widget of that type, or of the type in "type:name" (custom:weather). */
 const struct tw_widget_info *tw_widget_find(const char *type_or_name);
 

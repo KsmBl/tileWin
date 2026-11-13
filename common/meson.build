@@ -16,6 +16,7 @@ lib_sway_common = static_library(
 		'tw_disks.c',
 		'tw_netusage.c',
 		'tw_battery.c',
+		'tw_claude_usage.c',
 		'tw_grid.c',
 		'tw_search.c',
 		'tw_widgets.c',
@@ -27,6 +28,7 @@ lib_sway_common = static_library(
 	),
 	dependencies: [
 		cairo,
+		jsonc,
 		math,
 		gdk_pixbuf,
 		rsvg,

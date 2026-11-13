@@ -130,6 +130,12 @@ The reading **stays on the last repository it saw**, so moving to a browser or a
 
 git is asked in the background — one shell running two git commands (the tag is asked once a minute), whose answers the taskbar reads when they are ready — so the bar never waits for a slow repository, and nothing runs at all while the widget is off screen.
 
+## Claude Code usage
+
+The **Claude Code usage** widget (taskbar and desktop) shows the 5-hour and weekly usage limits of a Claude Code account: how much of each is used, when it resets, and how long it lasts at the pace it was used at since it started (or that it lasts until it resets). Its settings tick what it shows and put it in order, with presets, apart for the taskbar (both limits by default) and the desktop (everything, a line for each, in the style "A line for each item"); the bars turn orange above 80% and red above 95% (Warning above, Critical above).
+
+tileWin never logs in to Claude and never reads its login: Claude Code shows these limits to its status line command (for Claude.ai subscriptions, after each answer), and `tilewin-claude-usage`, put in front of that command, writes them down in `~/.cache/tileWin/claude-usage/` and then runs the status line the folder had, with the same input. A click on the widget of a folder that is not connected yet does that (`tilewin-claude-usage connect [folder]`; `disconnect` gives the old status line back). The account is a Claude Code folder: `~/.claude` (or `$CLAUDE_CONFIG_DIR`) for the installed one, the folder of a portable one (`tilewin-claude-usage connect /path/to/its/folder`); the widget shows the one used last, or the one picked under Account. The values are as new as the last answer of Claude Code there: the tooltip and the desktop say how old they are, and a window whose reset time has passed shows 0%.
+
 ## Run dialog
 
 Win+R opens the Run dialog. While you type, a list under the field (above it when the taskbar leaves no room) offers what fits: earlier entries first, then programs of `$PATH` while the command is typed, files and folders for a path (`/`, `~`, `./`). The arrows go through it and put the entry in the field, Tab or a click takes it (a folder then lists what is in it), Enter runs what is in the field, Escape closes the list and a second Escape the dialog. Tab with the list closed lists what fits, and takes it when it is the only one. `tilewinmsg panel run TEXT` opens it with TEXT in the field.

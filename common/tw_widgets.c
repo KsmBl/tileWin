@@ -19,6 +19,18 @@ static const struct tw_widget_option opts_clock[] = {
 		NULL },
 	{ 0 },
 };
+static const struct tw_widget_option opts_claude[] = {
+	{ "account", "Account", "The Claude Code folder whose limits it shows: ~/.claude for the "
+		"installed one, the folder of a portable one. The one used last by default", NULL },
+	// "show" has an editor of its own in the settings: ticked and in order
+	{ "show", "Shows", "What, in this order: usage_5h usage_7d reset_5h reset_7d left_5h "
+		"left_7d", NULL },
+	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
+		"80 by default", NULL },
+	{ "critical", "Critical above", "Percent; 95 by default", NULL },
+	{ 0 },
+};
+
 static const struct tw_widget_option opts_git[] = {
 	{ "show_tag", "Show the newest tag", "The tag git describe reaches from HEAD, e.g. v1.0.7",
 		choice_yes_no },
@@ -259,6 +271,14 @@ static const struct tw_widget_style styles_plain[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_claude[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "list", "A line for each item", 3, 3 },
+	{ "tile", "Tile with its name", 2, 2 },
+	{ "ring", "Ring of the 5-hour limit", 2, 2 },
+	{ "bar", "Bar of the 5-hour limit", 3, 1 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_meter[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "chart", "Chart of the last measurements", 3, 2 },
@@ -326,6 +346,8 @@ const struct tw_widget_info tw_widgets[] = {
 	{ "power", "Power draw", "Watts the computer is drawing", STATUS, opts_power, styles_meter },
 	{ "git", "Git", "Branch and changed lines of the repository the focused window works in",
 		STATUS, opts_git, styles_plain },
+	{ "claude", "Claude Code usage", "The 5-hour and weekly usage limits of a Claude Code "
+		"account, when they reset and how long they last", STATUS, opts_claude, styles_claude },
 	{ "clock", "Clock", "Time and date with a calendar", STATUS, opts_clock, styles_clock },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history",
 		STATUS, opts_notifications, styles_plain },
@@ -341,6 +363,20 @@ const struct tw_widget_info tw_widgets[] = {
 };
 
 const size_t tw_widget_count = sizeof(tw_widgets) / sizeof(tw_widgets[0]);
+
+const char *tw_widget_desktop_style(const char *type) {
+	static const struct {
+		const char *type, *style;
+	} own[] = {
+		{ "claude", "list" },
+	};
+	for (size_t i = 0; type && i < sizeof(own) / sizeof(own[0]); i++) {
+		if (strcmp(own[i].type, type) == 0) {
+			return own[i].style;
+		}
+	}
+	return NULL;
+}
 
 const struct tw_widget_option tw_widget_events[] = {
 	{ "on_click", "On click", "Command, e.g. exec pavucontrol", NULL },

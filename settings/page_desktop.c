@@ -82,7 +82,11 @@ static void on_add(GtkButton *button, gpointer data) {
 		gtk_popover_popdown(GTK_POPOVER(popover));
 	}
 	struct cstmt *block = confdoc_block(doc(a->p), "desktop_widgets", NULL, true);
-	char *entry = g_strdup_printf("%s {\n}", a->name);
+	// a widget with a desktop look of its own starts in it (the Claude widget's list)
+	const struct tw_widget_info *info = tw_widget_find(a->name);
+	const char *style = info ? tw_widget_desktop_style(info->type) : NULL;
+	char *entry = style ? g_strdup_printf("%s {\n\tstyle %s\n}", a->name, style) :
+		g_strdup_printf("%s {\n}", a->name);
 	confdoc_append(doc(a->p), block, entry);
 	g_free(entry);
 	settings_taskbar_changed(a->p->s);
