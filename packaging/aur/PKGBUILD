@@ -1,6 +1,6 @@
 # Maintainer: KsmBl <katzen.sind.lecker69@gmail.com>
 pkgname=tilewin
-pkgver=1.2
+pkgver=1.3
 pkgrel=1
 pkgdesc='Wayland compositor with a tile mode like sway and a window mode like Windows, with taskbar, themes and settings app'
 arch=('x86_64')
