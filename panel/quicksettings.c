@@ -23,6 +23,7 @@
 #include "flyout.h"
 #include "popup.h"
 #include "tw_brightness.h"
+#include "tw_volume.h"
 #include "tw_paths.h"
 
 #define QS_WIDTH 360
@@ -549,8 +550,10 @@ static void qs_render(struct popup *p, cairo_t *cr) {
 		}
 		ti_speaker(p->panel, cr, x0, y + (SLIDER_ROW - 20) / 2.0, 20,
 			q->drag == QD_VOLUME ? q->drag_value : q->volume, q->muted, st.fg);
-		draw_slider(cr, &st, q->volume_slider,
-			q->drag == QD_VOLUME ? q->drag_value : q->volume);
+		uint32_t volume_boost = tw_theme_color(p->panel->theme, "flyout.boost",
+			st.style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+		draw_slider_max(cr, &st, q->volume_slider,
+			q->drag == QD_VOLUME ? q->drag_value : q->volume, TW_VOLUME_MAX, volume_boost);
 		if (qs_hovered(q, q->volume_more)) {
 			fill_hover(cr, &st, q->volume_more);
 		}
@@ -749,7 +752,8 @@ static void qs_motion(struct popup *p, double x, double y) {
 	q->py = y;
 	q->inside = true;
 	if (q->drag != QD_NONE) {
-		q->drag_value = q->drag == QD_VOLUME ? slider_value(q->volume_slider, x) :
+		q->drag_value = q->drag == QD_VOLUME ?
+			slider_value_max(q->volume_slider, x, TW_VOLUME_MAX) :
 			slider_value_max(q->brightness_slider, x, q->brightness_max);
 		apply_drag(q, false);
 	}
@@ -795,7 +799,7 @@ static void qs_button(struct popup *p, double x, double y, uint32_t button, bool
 		open_next(q, NEXT_VOLUME);
 	} else if (q->audio && pbox_contains(&q->volume_slider, x, y)) {
 		q->drag = QD_VOLUME;
-		q->drag_value = slider_value(q->volume_slider, x);
+		q->drag_value = slider_value_max(q->volume_slider, x, TW_VOLUME_MAX);
 		apply_drag(q, true);
 		popup_set_dirty(p);
 	} else if (q->backlight && pbox_contains(&q->brightness_slider, x, y)) {
@@ -821,7 +825,7 @@ static void qs_axis(struct popup *p, double x, double y, int direction) {
 	int current = target == QD_VOLUME ? q->volume : q->brightness;
 	q->drag = target;
 	q->drag_value = current + (direction < 0 ? 5 : -5);
-	int max = target == QD_BRIGHTNESS ? q->brightness_max : 100;
+	int max = target == QD_BRIGHTNESS ? q->brightness_max : TW_VOLUME_MAX;
 	q->drag_value = q->drag_value < 0 ? 0 : q->drag_value > max ? max : q->drag_value;
 	apply_drag(q, true);
 	q->drag = QD_NONE;

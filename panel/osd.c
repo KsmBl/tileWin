@@ -10,6 +10,7 @@
 #include "log.h"
 #include "panel.h"
 #include "tw_brightness.h"
+#include "tw_volume.h"
 
 #define HIDE_MS 1800
 
@@ -151,6 +152,8 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 	double max = 100;
 	if (osd.kind == OSD_BRIGHTNESS && (osd.value > 100 || tw_boost_available())) {
 		max = TW_BOOST_MAX;
+	} else if (osd.kind == OSD_VOLUME) {
+		max = TW_VOLUME_MAX; // the sound system amplifies over 100
 	}
 	bool beyond = max > 100;
 	double mark = 100 / max; // where 100 % is, 0-1 along the bar
@@ -199,7 +202,8 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 		double below = beyond ? fmin(level, mark) : level;
 		pd_rect(cr, W / 2 - 2, bottom - height * below, 4, height * below, fill);
 		if (beyond && level > mark) {
-			pd_rect(cr, W / 2 - 2, bottom - height * level, 4, height * (level - mark), boost);
+			pd_rect(cr, W / 2 - 2, bottom - height * level, 4, height * (level - mark),
+				osd.muted ? fill : boost);
 		}
 		if (beyond) {
 			pd_rect(cr, W / 2 - 7, round(bottom - height * mark) - 1, 14, 2,
@@ -235,13 +239,13 @@ static void osd_render(struct psurface *s, cairo_t *cr) {
 	}
 	if (beyond && level > mark) {
 		pd_rounded(cr, bx + bw * mark - 2, H / 2 - 2, bw * (level - mark) + 2, 4, 2);
-		pd_color(cr, boost);
+		pd_color(cr, osd.muted ? fill : boost); // muted it is all grey
 		cairo_fill(cr);
 	}
 	if (beyond) {
 		pd_rect(cr, round(bx + bw * mark) - 1, H / 2 - 7, 2, 14, (fg & 0xffffff00) | 0xa0);
 	}
-	if (beyond && osd.value > 100) {
+	if (beyond && osd.value > 100 && !osd.muted) {
 		fill = boost; // the knob
 	}
 	double kx = bx + bw * level;
@@ -368,11 +372,6 @@ static bool is_true(const char *s) {
 		strcmp(s, "muted") == 0 || strcmp(s, "on") == 0);
 }
 
-static int clamp_percent(const char *s) {
-	int value = s ? atoi(s) : 0;
-	return value < 0 ? 0 : value > 100 ? 100 : value;
-}
-
 void osd_handle_command(struct panel *panel, int argc, char **argv) {
 	if (argc < 1) {
 		return;
@@ -384,7 +383,8 @@ void osd_handle_command(struct panel *panel, int argc, char **argv) {
 	}
 	if (strcmp(kind, "volume") == 0) {
 		osd.kind = OSD_VOLUME;
-		osd.value = clamp_percent(argc > 1 ? argv[1] : NULL);
+		int value = argc > 1 ? atoi(argv[1]) : 0;
+		osd.value = value < 0 ? 0 : value > TW_VOLUME_MAX ? TW_VOLUME_MAX : value;
 		osd.muted = argc > 2 && is_true(argv[2]);
 	} else if (strcmp(kind, "brightness") == 0) {
 		osd.kind = OSD_BRIGHTNESS;

@@ -29,6 +29,7 @@ The same can be done from a terminal with `tilewin-media`:
 tilewin-media                  # show volume, microphone, brightness and music
 tilewin-media volume up        # louder (volume down: quieter)
 tilewin-media volume 40        # set the volume to 40%
+tilewin-media volume 120       # louder than 100%, amplified (up to 130%)
 tilewin-media mute             # mute or unmute
 tilewin-media mic              # mute or unmute the microphone
 tilewin-media brightness 70    # set the brightness to 70% (up, down, +10, -10)
@@ -38,6 +39,10 @@ tilewin-media help             # all examples
 ```
 
 It uses `wpctl`, `pactl` or `amixer` for audio, `brightnessctl` or `light` for the backlight and `playerctl` for music and video players.
+
+### Volume over 100%
+
+The volume goes on to 130%, for quiet speakers or a quiet video: over 100% PipeWire or PulseAudio amplify the sound in software, which can distort loud parts. The volume sliders of the quick settings, the volume flyout and the Sound page of the settings and the volume popup go on past a mark at 100%, the part past it tinted amber like the brightness over 100% (theme key `flyout.boost`); the volume keys, `tilewin-media volume up` and the scroll wheel on the volume icon go on past 100% in their steps and stop at 130%. The volume of single apps in the flyout and on the Sound page stays at 100% at most, as on Windows. With ALSA alone (`amixer`) the volume ends at 100%.
 
 ### Brightness over 100%
 
@@ -99,7 +104,7 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 
 ## Quick settings
 
-`Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness (on to 130%, past a mark at 100%, see [Brightness over 100%](#brightness-over-100)), the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
+`Win+A` (or `tilewinmsg panel quicksettings`) opens quick settings like on Windows 11: buttons for Wi-Fi, Bluetooth, airplane mode, do not disturb, night light and tile mode, sliders for volume and brightness (on to 130%, past a mark at 100%, see [Volume over 100%](#volume-over-100) and [Brightness over 100%](#brightness-over-100)), the battery and a link to the settings. The arrows next to Wi-Fi, Bluetooth and the volume open their own flyouts. In the Windows 11 theme the network, volume and battery icons of the taskbar open it too (theme key `panel.quick_settings`, or `quick_settings yes|no` on those widgets).
 
 Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
 

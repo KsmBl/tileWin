@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "settings.h"
+#include "tw_volume.h"
 
 /*
  * Sound page: the output and input device with their volume, and the volume of
@@ -219,19 +220,27 @@ static void show_devices(struct sound_page *p, GtkWidget *dd, GtkWidget *scale, 
 static void on_app_volume(GtkRange *range, gpointer data);
 static void on_app_mute(GtkToggleButton *button, gpointer data);
 
-static GtkWidget *volume_box(GtkWidget **scale, GtkWidget **mute) {
+static GtkWidget *volume_box_max(GtkWidget **scale, GtkWidget **mute, int max) {
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	*mute = gtk_toggle_button_new();
 	gtk_button_set_icon_name(GTK_BUTTON(*mute), "audio-volume-high-symbolic");
 	gtk_widget_set_tooltip_text(*mute, "Mute");
 	gtk_widget_add_css_class(*mute, "flat");
 	gtk_box_append(GTK_BOX(box), *mute);
-	*scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
+	*scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, max, 1);
 	gtk_scale_set_draw_value(GTK_SCALE(*scale), TRUE);
 	gtk_scale_set_value_pos(GTK_SCALE(*scale), GTK_POS_RIGHT);
+	if (max > 100) {
+		// past the mark the sound system amplifies: the filled part turns amber there
+		gtk_scale_add_mark(GTK_SCALE(*scale), 100, GTK_POS_BOTTOM, NULL);
+	}
 	gtk_widget_set_size_request(*scale, 260, -1);
 	gtk_box_append(GTK_BOX(box), *scale);
 	return box;
+}
+
+static GtkWidget *volume_box(GtkWidget **scale, GtkWidget **mute) {
+	return volume_box_max(scale, mute, 100);
 }
 
 static void show_streams(struct sound_page *p, GPtrArray *streams) {
@@ -361,10 +370,17 @@ static void on_device(GObject *dd, GParamSpec *pspec, gpointer data) {
 
 static void on_volume(GtkRange *range, gpointer data) {
 	struct sound_page *p = data;
+	bool output = GTK_WIDGET(range) == p->out_scale;
+	if (output) {
+		if (gtk_range_get_value(range) > 100.5) {
+			gtk_widget_add_css_class(GTK_WIDGET(range), "tw-boost");
+		} else {
+			gtk_widget_remove_css_class(GTK_WIDGET(range), "tw-boost");
+		}
+	}
 	if (p->updating) {
 		return;
 	}
-	bool output = GTK_WIDGET(range) == p->out_scale;
 	*(output ? &p->out_hold : &p->in_hold) = g_get_monotonic_time() + HOLD_US;
 	pactl_percent(output ? "set-sink-volume" : "set-source-volume",
 		output ? "@DEFAULT_SINK@" : "@DEFAULT_SOURCE@", (int)gtk_range_get_value(range));
@@ -459,7 +475,8 @@ GtkWidget *sound_page_new(struct settings *s) {
 	gtk_widget_set_size_request(p->out_dd, 300, -1);
 	g_signal_connect(p->out_dd, "notify::selected", G_CALLBACK(on_device), p);
 	ui_row(out, "Play sound through", "Speakers, headphones or a screen", p->out_dd);
-	ui_row(out, "Volume", NULL, volume_box(&p->out_scale, &p->out_mute));
+	ui_row(out, "Volume", "Over 100% the sound is amplified and may distort",
+		volume_box_max(&p->out_scale, &p->out_mute, TW_VOLUME_MAX));
 	g_signal_connect(p->out_scale, "value-changed", G_CALLBACK(on_volume), p);
 	g_signal_connect(p->out_mute, "toggled", G_CALLBACK(on_mute), p);
 

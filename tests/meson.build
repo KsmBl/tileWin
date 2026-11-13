@@ -1271,6 +1271,15 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'volume-boost',
+	find_program('volume_boost.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool, pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'brightness-boost-gui',
 	find_program('brightness_boost.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

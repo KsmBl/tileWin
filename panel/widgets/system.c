@@ -15,6 +15,7 @@
 #include "panel.h"
 #include "stringop.h"
 #include "tw_brightness.h"
+#include "tw_volume.h"
 #include "tw_disks.h"
 
 /*
@@ -2139,10 +2140,19 @@ static bool volume_click(struct widget *w, struct psurface *s, struct hotspot *h
 
 static bool volume_scroll(struct widget *w, struct psurface *s, struct hotspot *hs,
 		int direction) {
+	struct volume_data *d = w->data;
 	int step = widget_conf_int(w, "step", 5);
 	char cmd[128];
-	snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %c%d%%",
-		direction < 0 ? '+' : '-', step);
+	if (d->available) {
+		// on past 100 as the sliders, but no further than they go
+		int value = d->volume + (direction < 0 ? step : -step);
+		value = value < 0 ? 0 : value > TW_VOLUME_MAX ? TW_VOLUME_MAX : value;
+		snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %d%%", value);
+		d->volume = value;
+	} else {
+		snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %c%d%%",
+			direction < 0 ? '+' : '-', step);
+	}
 	proc_spawn(cmd);
 	return true;
 }

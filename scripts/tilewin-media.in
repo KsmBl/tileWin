@@ -28,6 +28,8 @@ Examples:
   tilewin-media volume down         quieter
   tilewin-media volume up 20        louder by 20%
   tilewin-media volume 40           set the volume to 40%
+  tilewin-media volume 120          louder than 100%: the sound system amplifies
+                                    it (up to 130%)
   tilewin-media mute                mute, or unmute when muted
   tilewin-media unmute              unmute
   tilewin-media mic                 mute or unmute the microphone
@@ -151,8 +153,15 @@ audio_mute() {
 	esac
 }
 
+# Over 100% PipeWire and PulseAudio amplify in software, up to 130% here as the
+# sliders of tileWin go; ALSA's mixer ends at 100%.
+VOLUME_MAX=130
+
 volume_set() {
-	percent=$(clamp "$1" 0 100)
+	case "$BACKEND" in
+	amixer) percent=$(clamp "$1" 0 100) ;;
+	*) percent=$(clamp "$1" 0 "$VOLUME_MAX") ;;
+	esac
 	case "$BACKEND" in
 	wpctl) wpctl set-volume "$WP_SINK" "$percent%" ;;
 	pactl) pactl set-sink-volume "$PA_SINK" "$percent%" ;;

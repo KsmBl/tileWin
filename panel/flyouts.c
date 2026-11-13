@@ -21,6 +21,7 @@
 #include "tw_battery.h"
 #include "stringop.h"
 #include "tw_brightness.h"
+#include "tw_volume.h"
 #include "wifi_caps.h"
 
 /*
@@ -2067,6 +2068,11 @@ void flyout_volume_changed(struct panel *panel) {
 
 static void vol_apply_drag(struct volume_flyout *f, bool now);
 
+/* The end of the slider dragged: the output goes on past 100, an app does not. */
+static int vol_slider_max(const struct volume_flyout *f) {
+	return f->drag_id < 0 ? TW_VOLUME_MAX : 100;
+}
+
 static void vol_drag_timer(void *data) {
 	struct volume_flyout *f = vol_current;
 	if (!f) {
@@ -2140,7 +2146,10 @@ static void vol_render(struct popup *p, cairo_t *cr) {
 		psurface_add_hotspot(p->surface, mute.x, mute.y, mute.width, mute.height, NULL,
 			VOL_HS_MUTE, -1, NULL);
 		struct pbox slider = { x0 + 38, y + 14, cw - 38 - 46, 36 };
-		draw_slider(cr, &st, slider, volume);
+		// on past a mark at 100, tinted there as the brightness over 100
+		uint32_t boost = tw_theme_color(p->panel->theme, "flyout.boost",
+			st.style == PS_CLASSIC ? 0xc08000ff : 0xf0a030ff);
+		draw_slider_max(cr, &st, slider, volume, TW_VOLUME_MAX, boost);
 		psurface_add_hotspot(p->surface, slider.x, slider.y, slider.width, slider.height, NULL,
 			VOL_HS_SLIDER, -1, NULL);
 		psurface_hotspot_is_slider(p->surface);
@@ -2240,7 +2249,7 @@ static void vol_button(struct popup *p, double x, double y, uint32_t button, boo
 		f->dragging = true;
 		f->drag_id = hs->id;
 		f->drag_box = hs->box;
-		f->drag_value = slider_value(hs->box, x);
+		f->drag_value = slider_value_max(hs->box, x, vol_slider_max(f));
 		vol_apply_drag(f, false);
 		popup_set_dirty(p);
 		break;
@@ -2293,7 +2302,7 @@ static void vol_motion(struct popup *p, double x, double y) {
 	struct volume_flyout *f = p->data;
 	flyout_motion(p, x, y);
 	if (f->dragging) {
-		f->drag_value = slider_value(f->drag_box, x);
+		f->drag_value = slider_value_max(f->drag_box, x, vol_slider_max(f));
 		vol_apply_drag(f, false);
 	}
 }
@@ -2318,7 +2327,8 @@ static void vol_axis(struct popup *p, double x, double y, int direction) {
 		}
 	}
 	f->drag_value = current + (direction < 0 ? 5 : -5);
-	f->drag_value = f->drag_value < 0 ? 0 : f->drag_value > 100 ? 100 : f->drag_value;
+	int max = vol_slider_max(f);
+	f->drag_value = f->drag_value < 0 ? 0 : f->drag_value > max ? max : f->drag_value;
 	vol_apply_drag(f, false);
 	vol_query_later(f);
 	popup_set_dirty(p);
