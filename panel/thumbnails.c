@@ -58,11 +58,13 @@ struct thumb {
 	struct ext_image_copy_capture_frame_v1 *frame;
 	uint32_t width, height;
 	bool argb, xrgb, abgr, xbgr; // the formats the compositor offers
+	bool rgb, bgr;               // three bytes a pixel, without the unused one
 	uint32_t format;
+	uint32_t stride;
 	struct wl_buffer *buffer;
 	void *data;
 	size_t size;
-	uint32_t buffer_width, buffer_height;
+	uint32_t buffer_width, buffer_height, buffer_format;
 	cairo_surface_t *image;
 	struct loop_timer *timer;
 	struct pbox box, close;
@@ -245,13 +247,20 @@ static void free_buffer(struct thumb *t) {
 	}
 }
 
+static bool three_bytes(uint32_t format) {
+	return format == WL_SHM_FORMAT_RGB888 || format == WL_SHM_FORMAT_BGR888;
+}
+
 static bool ensure_buffer(struct thumb *t) {
-	if (t->buffer && t->buffer_width == t->width && t->buffer_height == t->height) {
+	if (t->buffer && t->buffer_width == t->width && t->buffer_height == t->height &&
+			t->buffer_format == t->format) {
 		return true;
 	}
 	free_buffer(t);
 	struct panel *panel = tn.panel;
-	size_t size = (size_t)t->width * t->height * 4;
+	// rows of whole 32-bit words, also with three bytes a pixel
+	t->stride = three_bytes(t->format) ? (t->width * 3 + 3) & ~3u : t->width * 4;
+	size_t size = (size_t)t->stride * t->height;
 	int fd = memfd_create("tilewin-thumbnail", MFD_CLOEXEC);
 	if (fd < 0) {
 		return false;
@@ -266,13 +275,14 @@ static bool ensure_buffer(struct thumb *t) {
 		return false;
 	}
 	struct wl_shm_pool *pool = wl_shm_create_pool(panel->shm, fd, size);
-	t->buffer = wl_shm_pool_create_buffer(pool, 0, t->width, t->height, t->width * 4,
+	t->buffer = wl_shm_pool_create_buffer(pool, 0, t->width, t->height, t->stride,
 		t->format);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 	t->data = data;
 	t->size = size;
 	t->buffer_width = t->width;
+	t->buffer_format = t->format;
 	t->buffer_height = t->height;
 	return true;
 }
@@ -293,6 +303,26 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *fram
 	struct thumb *t = data;
 	ext_image_copy_capture_frame_v1_destroy(t->frame);
 	t->frame = NULL;
+	// three bytes a pixel (what a GPU may hand over) become cairo's four
+	uint32_t *pixels = NULL;
+	if (three_bytes(t->format)) {
+		pixels = malloc((size_t)t->width * t->height * 4);
+		if (!pixels) {
+			schedule_capture(t, REFRESH_MS);
+			return;
+		}
+		// in memory BGR888 is red, green, blue, RGB888 blue, green, red
+		bool red_first = t->format == WL_SHM_FORMAT_BGR888;
+		for (uint32_t y = 0; y < t->height; y++) {
+			const uint8_t *in = (const uint8_t *)t->data + (size_t)y * t->stride;
+			uint32_t *out = pixels + (size_t)y * t->width;
+			for (uint32_t x = 0; x < t->width; x++, in += 3) {
+				uint32_t r = red_first ? in[0] : in[2];
+				uint32_t b = red_first ? in[2] : in[0];
+				out[x] = 0xff000000u | r << 16 | (uint32_t)in[1] << 8 | b;
+			}
+		}
+	}
 	bool bgr = t->format == WL_SHM_FORMAT_ABGR8888 || t->format == WL_SHM_FORMAT_XBGR8888;
 	if (bgr) {
 		// red and blue change places: cairo wants the order of ARGB
@@ -303,7 +333,8 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *fram
 		}
 	}
 	bool alpha = t->format == WL_SHM_FORMAT_ARGB8888 || t->format == WL_SHM_FORMAT_ABGR8888;
-	cairo_surface_t *src = cairo_image_surface_create_for_data(t->data,
+	cairo_surface_t *src = cairo_image_surface_create_for_data(
+		pixels ? (unsigned char *)pixels : t->data,
 		alpha ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
 		t->width, t->height, t->width * 4);
 	double scale = (double)THUMB_W / t->width;
@@ -322,6 +353,7 @@ static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *fram
 	cairo_paint(cr);
 	cairo_destroy(cr);
 	cairo_surface_destroy(src);
+	free(pixels);
 	if (t->image) {
 		cairo_surface_destroy(t->image);
 	}
@@ -377,6 +409,9 @@ static void session_shm_format(void *data, struct ext_image_copy_capture_session
 	// a compositor drawing with the GPU hands the pixels over in its order
 	t->abgr |= format == WL_SHM_FORMAT_ABGR8888;
 	t->xbgr |= format == WL_SHM_FORMAT_XBGR8888;
+	// and with Mesa's GL_RGB reads it may be three bytes a pixel only
+	t->bgr |= format == WL_SHM_FORMAT_BGR888;
+	t->rgb |= format == WL_SHM_FORMAT_RGB888;
 }
 
 static void session_dmabuf_device(void *data, struct ext_image_copy_capture_session_v1 *session,
@@ -390,7 +425,8 @@ static void session_dmabuf_format(void *data, struct ext_image_copy_capture_sess
 static void session_done(void *data, struct ext_image_copy_capture_session_v1 *session) {
 	struct thumb *t = data;
 	t->format = t->argb ? WL_SHM_FORMAT_ARGB8888 : t->xrgb ? WL_SHM_FORMAT_XRGB8888 :
-		t->abgr ? WL_SHM_FORMAT_ABGR8888 : t->xbgr ? WL_SHM_FORMAT_XBGR8888 : 0;
+		t->abgr ? WL_SHM_FORMAT_ABGR8888 : t->xbgr ? WL_SHM_FORMAT_XBGR8888 :
+		t->bgr ? WL_SHM_FORMAT_BGR888 : t->rgb ? WL_SHM_FORMAT_RGB888 : 0;
 	capture(t);
 }
 
