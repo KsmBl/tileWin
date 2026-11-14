@@ -1666,7 +1666,20 @@ void container_raise_floating(struct sway_container *con) {
 		// surfaces
 		wlr_scene_node_raise_to_top(&floater->scene_tree->node);
 
-		list_move_to_end(floater->pending.workspace->floating, floater);
+		list_t *floating = floater->pending.workspace->floating;
+		list_move_to_end(floating, floater);
+		// its dialogs stay on top of it, as on Windows: a window raised (clicked,
+		// focused by an app starting) does not cover the dialog it has open
+		int count = floating->length;
+		for (int i = 0, seen = 0; seen < count && i < floating->length; seen++) {
+			struct sway_container *other = floating->items[i];
+			if (other != floater && container_is_transient_for(other, floater)) {
+				wlr_scene_node_raise_to_top(&other->scene_tree->node);
+				list_move_to_end(floating, other); // the next one moved into place i
+			} else {
+				i++;
+			}
+		}
 		tw_raise_above_windows(floater->pending.workspace);
 		node_set_dirty(&floater->pending.workspace->node);
 	}
