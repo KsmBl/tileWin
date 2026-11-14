@@ -2570,8 +2570,7 @@ static void power_read(struct power_flyout *f) {
 				f->backlight = true;
 				f->backlight_set = (int)((current * 100 + max / 2) / max);
 				f->brightness_max = tw_boost_available() ? TW_BOOST_MAX : 100;
-				f->brightness = f->brightness_max > 100 ?
-					tw_brightness_shown(f->backlight_set) : f->backlight_set;
+				f->brightness = tw_brightness_shown(f->backlight_set);
 				break;
 			}
 		}
@@ -2671,7 +2670,8 @@ static void power_apply_drag(struct power_flyout *f, bool now) {
 		return;
 	}
 	f->drag_dirty = false;
-	int value = f->drag_value < 1 ? 1 : f->drag_value; // never switch the screen off
+	// 0 is shown for the lowest the backlight goes: tw_brightness_split keeps it on
+	int value = f->drag_value < 0 ? 0 : f->drag_value;
 	// over 100 the backlight stays at full and the night light adds the rest
 	int backlight = tw_brightness_split(value);
 	if (backlight != f->backlight_set) {
@@ -2918,7 +2918,7 @@ static void power_axis(struct popup *p, double x, double y, int direction) {
 	}
 	int value = f->brightness + (direction < 0 ? 5 : -5);
 	int max = power_brightness_max(f);
-	f->drag_value = value < 1 ? 1 : value > max ? max : value;
+	f->drag_value = value < 0 ? 0 : value > max ? max : value;
 	power_apply_drag(f, false);
 	popup_set_dirty(p);
 }

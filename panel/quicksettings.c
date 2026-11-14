@@ -140,8 +140,7 @@ static void read_sysfs(struct qs *q) {
 			q->backlight = true;
 			q->backlight_set = (int)((atol(cur) * 100 + atol(max) / 2) / atol(max));
 			q->brightness_max = tw_boost_available() ? TW_BOOST_MAX : 100;
-			q->brightness = q->brightness_max > 100 ?
-				tw_brightness_shown(q->backlight_set) : q->backlight_set;
+			q->brightness = tw_brightness_shown(q->backlight_set);
 			break;
 		}
 	}
@@ -643,7 +642,8 @@ static void apply_drag(struct qs *q, bool now) {
 		snprintf(cmd, sizeof(cmd), "pactl set-sink-volume @DEFAULT_SINK@ %d%%", q->drag_value);
 		q->volume = q->drag_value;
 	} else if (q->drag == QD_BRIGHTNESS) {
-		int value = q->drag_value < 1 ? 1 : q->drag_value; // never turn the screen off
+		// 0 is shown for the lowest the backlight goes: tw_brightness_split keeps it on
+		int value = q->drag_value < 0 ? 0 : q->drag_value;
 		// over 100 the backlight stays at full and the night light adds the rest
 		int backlight = tw_brightness_split(value);
 		q->brightness = value;

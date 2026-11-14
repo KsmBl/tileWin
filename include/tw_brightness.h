@@ -13,6 +13,11 @@
  */
 
 #define TW_BOOST_MAX 130
+/*
+ * The lowest the backlight is set to, in percent: never off. It is shown as
+ * 0%, so the brightness goes 0, 5, 10 ... and not 1, 6, 11.
+ */
+#define TW_BACKLIGHT_LOWEST 1
 /* The exponent at TW_BOOST_MAX: out = in ^ (1 / gamma). */
 #define TW_BOOST_GAMMA 1.6
 
@@ -38,15 +43,15 @@ bool tw_boost_write(int boost);
 bool tw_boost_available(void);
 
 /*
- * The brightness to show for a backlight of that percentage: the boost
- * while the backlight is at full and the night light applies it.
+ * The brightness to show for a backlight of that percentage: 0 at its lowest,
+ * the boost while the backlight is at full and the night light applies it.
  */
 int tw_brightness_shown(int backlight);
 
 /*
  * Sets a brightness of 0..TW_BOOST_MAX: writes the boost (100 for anything
  * up to 100, and when the night light does not run) and returns the
- * percentage the backlight is to be set to.
+ * percentage the backlight is to be set to, TW_BACKLIGHT_LOWEST at least.
  */
 int tw_brightness_split(int percent);
 

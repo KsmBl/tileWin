@@ -1362,7 +1362,7 @@ static gboolean apply_brightness(gpointer data) {
 	int backlight = tw_brightness_split(
 		(int)lround(gtk_range_get_value(GTK_RANGE(p->brightness_scale))));
 	char value[16];
-	snprintf(value, sizeof(value), "%d%%", backlight < 1 ? 1 : backlight);
+	snprintf(value, sizeof(value), "%d%%", backlight); // never below the lowest, never off
 	const char *argv[] = { "brightnessctl", "-q", "set", value, NULL };
 	GError *error = NULL;
 	if (!g_spawn_async(NULL, (char **)argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &error)) {
@@ -1956,11 +1956,8 @@ void screen_page_refresh(struct settings *s) {
 		long max = read_long_file(p->backlight, "max_brightness");
 		long cur = read_long_file(p->backlight, "brightness");
 		if (max > 0 && cur >= 0) {
-			double value = cur * 100.0 / max;
-			if (gtk_adjustment_get_upper(gtk_range_get_adjustment(
-					GTK_RANGE(p->brightness_scale))) > 100) {
-				value = tw_brightness_shown((int)lround(value));
-			}
+			// 0 at the lowest, the boost over 100
+			double value = tw_brightness_shown((int)lround(cur * 100.0 / max));
 			gtk_range_set_value(GTK_RANGE(p->brightness_scale), value);
 		}
 	}
@@ -2113,7 +2110,7 @@ GtkWidget *screen_page_new(struct settings *s) {
 		GtkWidget *group = ui_group(content, "Brightness", NULL);
 		// over 100 % only while the night light runs, which holds the gamma tables
 		bool boost = tw_boost_available();
-		p->brightness_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 1,
+		p->brightness_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0,
 			boost ? TW_BOOST_MAX : 100, 1);
 		gtk_widget_set_size_request(p->brightness_scale, 280, -1);
 		gtk_scale_set_draw_value(GTK_SCALE(p->brightness_scale), TRUE);

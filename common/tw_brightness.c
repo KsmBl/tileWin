@@ -91,6 +91,9 @@ bool tw_boost_available(void) {
 }
 
 int tw_brightness_shown(int backlight) {
+	if (backlight <= TW_BACKLIGHT_LOWEST) {
+		return 0; // the lowest the backlight goes is shown as 0, so steps of 5 land on 5
+	}
 	if (backlight < 100) {
 		return backlight;
 	}
@@ -103,5 +106,6 @@ int tw_brightness_split(int percent) {
 		return 100;
 	}
 	tw_boost_write(100);
-	return percent < 0 ? 0 : percent > 100 ? 100 : percent;
+	// never off: 0 is the lowest the backlight goes
+	return percent < TW_BACKLIGHT_LOWEST ? TW_BACKLIGHT_LOWEST : percent > 100 ? 100 : percent;
 }

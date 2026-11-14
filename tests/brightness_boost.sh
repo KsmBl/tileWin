@@ -197,6 +197,20 @@ tilewin-media --no-popup brightness down >/dev/null
 tilewin-media --no-popup brightness | grep -q 'Brightness: 120%' ||
 	fail "tilewin-media does not show 120%: $(tilewin-media --no-popup brightness)"
 
+# ---- the bottom: 0% shown, the backlight on at 1%, and up again to 5, not 6
+tilewin-media --no-popup brightness 10 >/dev/null
+tilewin-media --no-popup brightness down >/dev/null
+tilewin-media --no-popup brightness down >/dev/null
+[ "$(cat "$work/backlight/test_bl/brightness")" = 1 ] ||
+	fail "the lowest brightness put the backlight at $(cat "$work/backlight/test_bl/brightness"), not 1"
+tilewin-media --no-popup brightness | grep -q 'Brightness: 0%' ||
+	fail "the lowest brightness is not shown as 0%: $(tilewin-media --no-popup brightness)"
+tilewin-media --no-popup brightness down >/dev/null
+[ "$(cat "$work/backlight/test_bl/brightness")" = 1 ] || fail "down from 0% turned the backlight off"
+tilewin-media --no-popup brightness up >/dev/null
+[ "$(cat "$work/backlight/test_bl/brightness")" = 5 ] ||
+	fail "up from 0% gave $(cat "$work/backlight/test_bl/brightness")%, not 5%"
+
 # ---- the slider of the battery flyout goes on past 100 % too
 tilewin-media --no-popup brightness 100 >/dev/null
 ipc theme win11 >/dev/null 2>&1 # where the flyout and its slider are

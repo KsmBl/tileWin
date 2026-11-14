@@ -294,8 +294,13 @@ backlight_get() {
 }
 
 # the backlight, plus the boost while it is at full
+# The brightness as shown: 0 for the lowest the backlight goes (1%, never off),
+# so the steps go 0, 5, 10; the boost over 100.
 brightness_get() {
 	value=$(backlight_get)
+	if [ -n "$value" ] && [ "$value" -le 1 ]; then
+		value=0
+	fi
 	if [ -n "$value" ] && [ "$value" -ge 100 ]; then
 		boost=$(boost_get)
 		is_number "$boost" && [ "$boost" -gt 100 ] && value=$boost
@@ -304,8 +309,7 @@ brightness_get() {
 }
 
 brightness_set() {
-	# never turn the backlight off completely
-	percent=$(clamp "$1" 1 "$BOOST_MAX")
+	percent=$(clamp "$1" 0 "$BOOST_MAX")
 	boost=100
 	if [ "$percent" -gt 100 ]; then
 		# the backlight at full, the night light does the rest
@@ -319,6 +323,8 @@ brightness_set() {
 	if [ "$boost" = 100 ] && have tilewin-nightlight; then
 		tilewin-nightlight boost 100 2>/dev/null
 	fi
+	# 0 is shown for the lowest: the backlight stays on at 1%
+	[ "$percent" -lt 1 ] && percent=1
 	if have brightnessctl; then
 		brightnessctl -q set "$percent%"
 	elif have light; then

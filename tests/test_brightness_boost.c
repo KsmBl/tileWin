@@ -112,6 +112,13 @@ static void state(const char *dir) {
 	CHECK(tw_brightness_shown(80) == 80, "shown is not the backlight below full");
 	CHECK(tw_brightness_split(500) == 100 && tw_boost_read() == TW_BOOST_MAX, "not clamped");
 	CHECK(tw_brightness_split(60) == 60, "the backlight is not 60");
+	// the bottom: 0 is shown for the lowest, and the backlight never goes off
+	CHECK(tw_brightness_shown(1) == 0, "the lowest backlight is not shown as 0");
+	CHECK(tw_brightness_shown(0) == 0, "an off backlight is not shown as 0");
+	CHECK(tw_brightness_shown(5) == 5, "5 is not shown as 5");
+	CHECK(tw_brightness_split(0) == TW_BACKLIGHT_LOWEST, "0 turns the backlight off");
+	CHECK(tw_brightness_split(-5) == TW_BACKLIGHT_LOWEST, "below 0 is not the lowest");
+	CHECK(tw_brightness_split(5) == 5, "the backlight is not 5");
 	CHECK(tw_boost_read() == 100, "the boost stays below 100");
 	tw_boost_write(3);
 	CHECK(tw_boost_read() == 100, "boost below 100");
