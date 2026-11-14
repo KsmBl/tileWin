@@ -595,8 +595,10 @@ static void desk_menu(struct desk_surface *ds, double x, double y) {
 	free(cmd);
 	reset->disabled = !ds->placed;
 	list_add(items, reset);
-	list_add(items, menu_item_new("Desktop widget settings",
-		"exec tilewin-settings --page desktop"));
+	// the settings of this widget on the desktop, over the Desktop page
+	char *settings = widget_settings_command(w);
+	list_add(items, menu_item_new("Widget settings", settings));
+	free(settings);
 	list_add(items, menu_item_separator());
 	list_add(items, menu_item_new("Refresh", "panel desktop refresh"));
 	menu_items_default_icons(items);

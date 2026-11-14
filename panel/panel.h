@@ -349,6 +349,11 @@ bool widget_handle_button(struct panel *panel, struct psurface *s, struct hotspo
 void widget_handle_scroll(struct panel *panel, struct psurface *s, struct hotspot *hs,
 	int direction);
 void widget_destroy(struct widget *w);
+/*
+ * The command that opens the settings of this widget where it is: its dialog
+ * over the Taskbar page, or for a widget on the desktop over the Desktop page.
+ */
+char *widget_settings_command(struct widget *w);
 const char *widget_conf(struct widget *w, const char *key, const char *fallback);
 int widget_conf_int(struct widget *w, const char *key, int fallback);
 bool widget_conf_bool(struct widget *w, const char *key, bool fallback);

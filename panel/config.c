@@ -683,6 +683,14 @@ static bool theme_widget_key(const char *key) {
 	return strncmp(key, "format", 6) == 0 || strcmp(key, "icons") == 0;
 }
 
+char *widget_settings_command(struct widget *w) {
+	char *name = g_shell_quote(w && w->name ? w->name : "");
+	char *command = format_str("exec tilewin-settings --widget %s%s", name,
+		w && w->desk ? " --desktop" : "");
+	g_free(name);
+	return command;
+}
+
 const char *widget_conf(struct widget *w, const char *key, const char *fallback) {
 	// a theme can give widgets formats and icons, e.g. cpu { format "CPU {usage}%" }
 	const char *themed = NULL;

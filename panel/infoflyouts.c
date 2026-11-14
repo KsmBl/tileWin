@@ -979,7 +979,9 @@ static void custom_sample(struct info_flyout *f) {
 		add_row(f, "Nothing yet", NULL);
 	}
 	add_action(f, "Run it again", NULL, custom_again);
-	add_action(f, "Taskbar settings", "exec tilewin-settings --page taskbar", NULL);
+	char *settings = widget_settings_command(f->widget); // this script's own
+	add_action(f, "Settings", settings, NULL);
+	free(settings);
 }
 
 /* ---------- git ---------- */
@@ -1151,12 +1153,9 @@ static void claude_sample(struct info_flyout *f) {
 		g_free(quoted);
 	}
 	// the settings of this very widget, for the place it is on
-	char *name = g_shell_quote(f->widget->name);
-	char *settings = format_str("exec tilewin-settings --widget %s%s", name,
-		f->widget->desk ? " --desktop" : "");
+	char *settings = widget_settings_command(f->widget);
 	add_action(f, "Settings", settings, NULL);
 	free(settings);
-	g_free(name);
 }
 
 static const struct info_source sources[] = {
