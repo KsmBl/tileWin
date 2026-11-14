@@ -1271,6 +1271,15 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'startmenu-closes',
+	find_program('startmenu_closes.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'settings-widget-open',
 	find_program('settings_widget_open.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

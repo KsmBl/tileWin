@@ -442,6 +442,12 @@ static void handle_window_event(struct panel *panel, json_object *event) {
 	if (!change || !json_object_object_get_ex(event, "container", &con)) {
 		return;
 	}
+	// a window that opens (a shortcut, an app of its own) closes the start menu and
+	// the launcher, as on Windows: the new window is what is used next
+	if (strcmp(change, "new") == 0 && panel->popup &&
+			(panel->popup->kind == POPUP_STARTMENU || panel->popup->kind == POPUP_LAUNCHER)) {
+		popup_close_all(panel);
+	}
 	if (strcmp(change, "new") == 0 || strcmp(change, "close") == 0 ||
 			strcmp(change, "move") == 0 || strcmp(change, "floating") == 0) {
 		schedule_tree_refresh(panel);
