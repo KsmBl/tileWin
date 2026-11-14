@@ -172,6 +172,7 @@ struct pwindow {
 	int pid;
 	bool focused, urgent, minimized, maximized, floating, above, fullscreen;
 	int order; // creation order
+	int64_t parent; // the window it is a dialog of, 0 for none
 	int x, y, width, height; // its frame, title bar included, on its output
 	int title_height;        // the title bar at the top of it
 };

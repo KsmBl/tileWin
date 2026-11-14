@@ -88,6 +88,10 @@ static list_t *collect_entries(struct widget *w, struct panel_output *output) {
 				strcmp(output->name, panel->state.main_output) == 0))) {
 			continue;
 		}
+		// a dialog has no button of its own while its window is there, as on Windows
+		if (win->parent && panel_find_window(panel, win->parent)) {
+			continue;
+		}
 		// a window of another screen counts as current on the desktop that screen shows
 		const char *shown = here ? ws_name : visible_workspace(panel, win->output);
 		if (!d->all_workspaces && shown && strcmp(win->workspace, shown) != 0) {
@@ -113,6 +117,19 @@ static list_t *collect_entries(struct widget *w, struct panel_output *output) {
 		entry->focused |= win->focused;
 		entry->urgent |= win->urgent;
 		entry->minimized &= win->minimized;
+	}
+	// a dialog in front: the button of its window is the active one
+	for (int i = 0; windows && i < windows->length; i++) {
+		struct pwindow *win = windows->items[i];
+		struct pwindow *owner = win->focused && win->parent ?
+			panel_find_window(panel, win->parent) : NULL;
+		for (int j = 0; owner && j < entries->length; j++) {
+			struct taskbar_entry *e = entries->items[j];
+			if (e->window == owner || (group && *owner->app_id &&
+					strcmp(e->window->app_id, owner->app_id) == 0)) {
+				e->focused = true;
+			}
+		}
 	}
 	return entries;
 }

@@ -2,7 +2,9 @@
 # "tilewin-settings --widget NAME --desktop", what the Settings button of a
 # widget's flyout runs: the settings open with the dialog of that widget, for
 # the desktop, on top of the window, and it stays on top when the window is
-# clicked (focused): a window raised keeps its dialogs above it.
+# clicked (focused): a window raised keeps its dialogs above it. The window
+# list names the settings as the window the dialog belongs to (transient_for),
+# which the taskbar uses to give the dialog no button of its own.
 #
 # usage: settings_widget_open.sh <build dir> <source dir>
 set -u
@@ -86,6 +88,20 @@ ipc '[title="^tileWin Settings$"] focus' >/dev/null
 sleep 0.5
 [ "$(stack)" = "tileWin Settings | Clock settings" ] ||
 	fail "focusing the settings put them over their dialog: $(stack)"
+owner=$(ipc -t get_tree | python3 -c '
+import json, sys
+ids, dialog = {}, None
+def walk(n):
+	global dialog
+	if n.get("pid"):
+		ids[n.get("name")] = n["id"]
+		if n.get("name") == "Clock settings":
+			dialog = n.get("transient_for")
+	for c in n.get("nodes", []) + n.get("floating_nodes", []):
+		walk(c)
+walk(json.load(sys.stdin))
+print("yes" if dialog and dialog == ids.get("tileWin Settings") else "no: %s" % dialog)')
+[ "$owner" = yes ] || fail "the dialog does not name the settings as its window ($owner)"
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"

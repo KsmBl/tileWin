@@ -6,6 +6,10 @@
 #include <wlr/config.h>
 #include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#if WLR_HAS_XWAYLAND
+#include <wlr/xwayland.h>
+#endif
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <xkbcommon/xkbcommon.h>
 #include "config.h"
@@ -738,6 +742,22 @@ static void ipc_json_describe_container(struct sway_container *c, json_object *o
 	json_object_object_add(object, "sticky", json_object_new_boolean(c->is_sticky));
 	json_object_object_add(object, "above", json_object_new_boolean(c->tw.above));
 	json_object_object_add(object, "minimized", json_object_new_boolean(c->pending.tw_minimized));
+	// the window a dialog belongs to: the taskbar leaves the dialog out, as Windows does
+	struct sway_view *owner = NULL;
+	if (c->view && c->view->type == SWAY_VIEW_XDG_SHELL && c->view->wlr_xdg_toplevel &&
+			c->view->wlr_xdg_toplevel->parent) {
+		owner = view_from_wlr_xdg_surface(c->view->wlr_xdg_toplevel->parent->base);
+	}
+#if WLR_HAS_XWAYLAND
+	if (c->view && c->view->type == SWAY_VIEW_XWAYLAND && c->view->wlr_xwayland_surface &&
+			c->view->wlr_xwayland_surface->parent) {
+		owner = view_from_wlr_xwayland_surface(c->view->wlr_xwayland_surface->parent);
+	}
+#endif
+	if (owner && owner->container && owner->container != c) {
+		json_object_object_add(object, "transient_for",
+			json_object_new_int64((int64_t)owner->container->node.id));
+	}
 	json_object_object_add(object, "maximized", json_object_new_boolean(c->pending.tw_maximized));
 
 	// sway doesn't track the floating reason, so we can't use "auto_on" or "user_off"

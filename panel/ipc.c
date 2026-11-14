@@ -74,6 +74,7 @@ static void update_window_from_json(struct pwindow *w, json_object *con) {
 	w->maximized = jbool(con, "maximized");
 	w->fullscreen = jint(con, "fullscreen_mode") > 0;
 	w->above = jbool(con, "above");
+	w->parent = jint(con, "transient_for");
 	w->pid = (int)jint(con, "pid");
 	const char *identifier = jstr(con, "foreign_toplevel_identifier");
 	free(w->identifier);
