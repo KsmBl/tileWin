@@ -202,11 +202,16 @@ void ui_list_net_devices(GPtrArray *values, GPtrArray *labels);
 void ui_list_batteries(GPtrArray *values, GPtrArray *labels);
 void ui_list_gpus(GPtrArray *values, GPtrArray *labels);
 /* The numbers (ending with -1) as values, each labelled with label_format. */
+/* "Default" for the value not set, then each number as label_format shows it. */
 void ui_list_numbers(GPtrArray *values, GPtrArray *labels, const char *label_format,
 	const int *numbers);
 /* The same as a choice: values[0] (labels[0]) is the default, written as nothing. */
 void ui_taskbar_choice(struct settings *s, GPtrArray *keys, GtkWidget *group, const char *key,
 	const char *title, const char *hint, const char *const *values, const char *const *labels);
+/*
+ * A flat button with an icon. data is the button's own: it is freed (g_free)
+ * with the button, so it must be allocated for this button alone.
+ */
 GtkWidget *ui_icon_button(const char *icon, const char *tooltip, bool sensitive,
 		GCallback callback, gpointer data);
 void ui_closure_free(gpointer data, GClosure *closure);

@@ -897,6 +897,30 @@ static gboolean widget_request_timeout(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+static const char *page_names(void);
+
+/* The help of --page: every page there is. */
+static const char *page_option_help(void) {
+	static char *help;
+	if (!help) {
+		help = g_strdup_printf("Page to open: %s", page_names());
+	}
+	return help;
+}
+
+/* The names of every page, "theme, wallpaper, ...", from the list the search knows. */
+static const char *page_names(void) {
+	static char *names;
+	if (!names) {
+		GString *out = g_string_new(NULL);
+		for (size_t i = 0; i < tw_settings_page_count; i++) {
+			g_string_append_printf(out, "%s%s", i ? ", " : "", tw_settings_pages[i].name);
+		}
+		names = g_string_free(out, FALSE);
+	}
+	return names;
+}
+
 static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, gpointer data) {
 	struct settings *s = data;
 	if (!s->window) {
@@ -910,7 +934,7 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 			gtk_stack_set_visible_child_name(s->stack, page);
 		} else {
 			g_application_command_line_printerr(cmdline,
-				"Unknown page '%s' (theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, datetime, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, login, about)\n", page);
+				"Unknown page '%s' (%s)\n", page, page_names());
 		}
 	}
 	if (g_variant_dict_contains(options, "welcome")) {
@@ -1018,7 +1042,7 @@ int main(int argc, char **argv) {
 	s->app = gtk_application_new("org.tilewin.Settings",
 		G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_NON_UNIQUE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
-		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, login, backup, kernel, devices or about", "PAGE");
+		page_option_help(), "PAGE");
 	g_application_add_main_option(G_APPLICATION(s->app), "widget", 0, 0, G_OPTION_ARG_STRING,
 		"Open the settings of this widget of the taskbar, e.g. claude or custom:weather", "NAME");
 	g_application_add_main_option(G_APPLICATION(s->app), "desktop", 0, 0, G_OPTION_ARG_NONE,
