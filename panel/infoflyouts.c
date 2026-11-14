@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "tw_claude_usage.h"
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -1059,6 +1060,99 @@ static void git_free(void *data) {
 	free(s);
 }
 
+/* ---------- Claude Code usage ---------- */
+
+/* One window: its share with a bar, when it resets and how long it lasts. */
+static void claude_window(struct info_flyout *f, const struct tw_claude_window *win,
+		long length, const char *name, time_t now) {
+	double used = tw_claude_window_now(win, now);
+	if (used < 0) {
+		return;
+	}
+	add_heading(f, name);
+	char value[64], span[48];
+	snprintf(value, sizeof(value), "%.0f%%", used);
+	struct info_row *row = add_row(f, "Used", value);
+	if (row) {
+		row->bar = used / 100.0;
+		row->full_is_bad = true;
+	}
+	if (win->resets_at > now) {
+		char when[32];
+		struct tm tm;
+		localtime_r(&win->resets_at, &tm);
+		strftime(when, sizeof(when), win->resets_at - now < 24 * 3600 ? "%H:%M" : "%a %H:%M", &tm);
+		tw_claude_format_span(win->resets_at - now, false, span, sizeof(span));
+		snprintf(value, sizeof(value), "%s, in %s", when, span);
+		add_row(f, "Resets", value);
+	} else {
+		add_row(f, "Resets", "has reset");
+	}
+	bool known;
+	long left = tw_claude_window_left(win, length, now, &known);
+	if (known) {
+		if (left > 0) {
+			tw_claude_format_span(left, false, span, sizeof(span));
+			snprintf(value, sizeof(value), "used up in about %s", span);
+		} else {
+			snprintf(value, sizeof(value), left == 0 ? "used up" : "lasts until it resets");
+		}
+		add_row(f, "At this pace", value);
+	}
+}
+
+static void claude_sample(struct info_flyout *f) {
+	const struct tw_claude_usage *u = claude_widget_usage(f->widget);
+	time_t now = time(NULL);
+	snprintf(f->subtitle, sizeof(f->subtitle), "Claude Code%s%s", u && u->account ? " · " : "",
+		u && u->account ? u->account : "");
+	if (!u || !u->updated) {
+		snprintf(f->title, sizeof(f->title), u && u->connected ?
+			"The limits come with the next answer of Claude Code" : "Not connected");
+	} else {
+		double five = tw_claude_window_now(&u->five_hour, now);
+		double seven = tw_claude_window_now(&u->seven_day, now);
+		if (five >= 0) {
+			snprintf(f->big, sizeof(f->big), "%.0f%%", five);
+		}
+		snprintf(f->title, sizeof(f->title), seven >= 0 ? "of the 5-hour limit, %.0f%% of the "
+			"week" : "of the 5-hour limit", seven);
+		claude_window(f, &u->five_hour, TW_CLAUDE_FIVE_HOURS, "5-hour limit", now);
+		claude_window(f, &u->seven_day, TW_CLAUDE_SEVEN_DAYS, "Weekly limit", now);
+		add_heading(f, "From");
+		char span[48], value[96];
+		long ago = (long)(now - u->updated);
+		if (ago < 90) {
+			snprintf(value, sizeof(value), "just now");
+		} else {
+			tw_claude_format_span(ago, false, span, sizeof(span));
+			snprintf(value, sizeof(value), "%s ago", span);
+		}
+		add_row(f, "Claude Code showed them", value);
+	}
+	if (u && u->dir) {
+		const char *home = getenv("HOME");
+		size_t hl = home ? strlen(home) : 0;
+		char folder[128];
+		if (home && strncmp(u->dir, home, hl) == 0 && u->dir[hl] == '/') {
+			snprintf(folder, sizeof(folder), "~%s", u->dir + hl);
+		} else {
+			snprintf(folder, sizeof(folder), "%s", u->dir);
+		}
+		add_row(f, "Folder", folder);
+	}
+	add_action(f, "Usage on claude.ai", "exec xdg-open https://claude.ai/settings/usage", NULL);
+	if (u && u->dir) {
+		char *quoted = g_shell_quote(u->dir);
+		char *command = format_str("exec tilewin-claude-usage %s %s",
+			u->connected ? "disconnect" : "connect", quoted);
+		add_action(f, u->connected ? "Disconnect" : "Connect", command, NULL);
+		free(command);
+		g_free(quoted);
+	}
+	add_action(f, "Settings", "exec tilewin-settings --page taskbar", NULL);
+}
+
 static const struct info_source sources[] = {
 	{ "disk", 1000, disk_sample, free },
 	{ "gpu", 1000, gpu_sample, gpu_free },
@@ -1069,6 +1163,7 @@ static const struct info_source sources[] = {
 	{ "title", 1000, title_sample, free },
 	{ "custom", 1000, custom_sample, free },
 	{ "git", 2000, git_sample, git_free },
+	{ "claude", 5000, claude_sample, free },
 };
 
 /* ---------- drawing ---------- */

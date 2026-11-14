@@ -675,6 +675,9 @@ void flyout_history_release(void);
 void custom_run_now(struct widget *w);
 const char *custom_output(struct widget *w);
 const char *git_widget_repo(struct widget *w);
+struct tw_claude_usage;
+/* widgets/claude.c: what the Claude widget shows, for its flyout; NULL for none. */
+const struct tw_claude_usage *claude_widget_usage(struct widget *w);
 
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);

@@ -22,6 +22,7 @@
  */
 #define _GNU_SOURCE
 #include <linux/input-event-codes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -169,9 +170,98 @@ static uint32_t level_color(struct widget *w, double used, uint32_t normal) {
 	return normal;
 }
 
+/* ---------- options of each place ---------- */
+
+/*
+ * The look of each place has its own options: on the desktop only those of its
+ * desktop_widgets entry count, so the taskbar's bar width or names do not
+ * change the card, and the other way round.
+ */
+static const char *place_conf(struct widget *w, const char *key, const char *fallback) {
+	if (w->desk) {
+		struct twconf_node *node = twconf_child(w->desk, key);
+		return node && node->argc > 0 ? node->argv[0] : fallback;
+	}
+	return widget_conf(w, key, fallback);
+}
+
+static bool place_bool(struct widget *w, const char *key, bool fallback) {
+	const char *v = place_conf(w, key, NULL);
+	if (!v) {
+		return fallback;
+	}
+	return strcmp(v, "yes") == 0 || strcmp(v, "true") == 0 || strcmp(v, "on") == 0;
+}
+
+static int place_int(struct widget *w, const char *key, int fallback, int low, int high) {
+	const char *v = place_conf(w, key, NULL);
+	int n = v ? atoi(v) : fallback;
+	return n < low ? low : n > high ? high : n;
+}
+
+/* The color of the bars: bar_color, else the accent of the theme. */
+static uint32_t bar_color(struct widget *w, uint32_t accent) {
+	const char *v = place_conf(w, "bar_color", NULL);
+	uint32_t color;
+	if (v && tw_parse_color(v, &color)) {
+		return color;
+	}
+	return accent;
+}
+
+static void fill_rgba(cairo_t *cr, uint32_t c, double alpha) {
+	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
+		(c >> 8 & 0xff) / 255.0, alpha);
+}
+
+/* A bar of the share used, on its track. */
+static void draw_share_bar(cairo_t *cr, double x, double y, double w, double h, double share,
+		uint32_t track, double track_alpha, uint32_t fill, double radius) {
+	double r = radius > h / 2 ? h / 2 : radius;
+	pd_rounded(cr, x, y, w, h, r);
+	fill_rgba(cr, track, track_alpha);
+	cairo_fill(cr);
+	if (share > 0) {
+		double fw = w * share / 100.0;
+		pd_rounded(cr, x, y, fw < 2 * r ? 2 * r : fw, h, r);
+		fill_rgba(cr, fill, 1);
+		cairo_fill(cr);
+	}
+}
+
+/* The long name of an item, as the desktop and the flyout say it. */
+static const char *long_name(const struct tw_claude_item *item, bool brief) {
+	if (brief) {
+		return item->label;
+	}
+	switch (item->kind) {
+	case TW_CLAUDE_USAGE:
+		return item->seven_day ? "Weekly limit" : "5-hour limit";
+	case TW_CLAUDE_RESET:
+		return item->seven_day ? "Weekly limit resets" : "5-hour limit resets";
+	case TW_CLAUDE_LEFT:
+		return item->seven_day ? "Weekly limit lasts" : "5-hour limit lasts";
+	}
+	return item->label;
+}
+
 /* ---------- the taskbar ---------- */
 
 static const char *not_connected_text = "Claude: click to connect";
+
+static bool show_connect(struct claude_state *c) {
+	return !c->have && !c->usage.connected;
+}
+
+/* The taskbar look: bars yes|no, bar_width, labels short|none. */
+static int taskbar_bar_width(struct widget *w) {
+	return place_bool(w, "bars", true) ? place_int(w, "bar_width", BAR_W, 8, 200) : 0;
+}
+
+static bool taskbar_labels(struct widget *w) {
+	const char *v = place_conf(w, "labels", "short");
+	return strcmp(v, "none") != 0 && strcmp(v, "no") != 0;
+}
 
 /* The width of one item: its name, a bar for a usage, its value. */
 static int item_width(struct widget *w, struct render_ctx *ctx, const struct tw_claude_item *item) {
@@ -179,16 +269,15 @@ static int item_width(struct widget *w, struct render_ctx *ctx, const struct tw_
 	const char *font = bar_font(ctx->panel);
 	char value[64];
 	double share = item_value(c, item, true, value, sizeof(value));
-	int width = render_text_width(ctx, font, item->label) + 4 +
-		render_text_width(ctx, font, value);
-	if (share >= 0) {
-		width += BAR_W + 4;
+	int width = render_text_width(ctx, font, value);
+	if (taskbar_labels(w)) {
+		width += render_text_width(ctx, font, item->label) + 4;
+	}
+	int bar = taskbar_bar_width(w);
+	if (share >= 0 && bar > 0) {
+		width += bar + 4;
 	}
 	return width;
-}
-
-static bool show_connect(struct claude_state *c) {
-	return !c->have && !c->usage.connected;
 }
 
 static int claude_measure(struct widget *w, struct render_ctx *ctx) {
@@ -213,34 +302,31 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	const char *font = bar_font(ctx->panel);
 	uint32_t fg = widget_fg(ctx->panel, "claude");
 	uint32_t dim = (fg & 0xffffff00) | 0xa0;
-	uint32_t accent = tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff) | 0xff;
+	uint32_t accent = bar_color(w,
+		tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff) | 0xff);
 	double x = b.x + 8, end = b.x + b.width - 8;
 	if (show_connect(c)) {
 		pd_text(ctx->cairo, font, not_connected_text, x, b.y, end - x, b.height, dim, PD_LEFT);
 		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 		return;
 	}
+	int bar = taskbar_bar_width(w);
+	int bar_h = place_int(w, "bar_height", 6, 2, 24);
+	bool labels = taskbar_labels(w);
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = show_list(w, items);
 	for (int i = 0; i < count && x < end; i++) {
 		char value[64];
 		double share = item_value(c, items[i], true, value, sizeof(value));
-		int lw = render_text_width(ctx, font, items[i]->label);
-		pd_text(ctx->cairo, font, items[i]->label, x, b.y, lw, b.height, dim, PD_LEFT);
-		x += lw + 4;
-		if (share >= 0) {
-			double by = b.y + b.height / 2.0 - 3;
-			cairo_t *cr = ctx->cairo;
-			cairo_rectangle(cr, x, by, BAR_W, 6);
-			cairo_set_source_rgba(cr, (fg >> 24 & 0xff) / 255.0, (fg >> 16 & 0xff) / 255.0,
-				(fg >> 8 & 0xff) / 255.0, 0.22);
-			cairo_fill(cr);
-			uint32_t color = level_color(w, share, accent);
-			cairo_rectangle(cr, x, by, BAR_W * share / 100.0, 6);
-			cairo_set_source_rgba(cr, (color >> 24 & 0xff) / 255.0, (color >> 16 & 0xff) / 255.0,
-				(color >> 8 & 0xff) / 255.0, 1);
-			cairo_fill(cr);
-			x += BAR_W + 4;
+		if (labels) {
+			int lw = render_text_width(ctx, font, items[i]->label);
+			pd_text(ctx->cairo, font, items[i]->label, x, b.y, lw, b.height, dim, PD_LEFT);
+			x += lw + 4;
+		}
+		if (share >= 0 && bar > 0) {
+			draw_share_bar(ctx->cairo, x, b.y + (b.height - bar_h) / 2.0, bar, bar_h, share,
+				fg, 0.22, level_color(w, share, accent), 1);
+			x += bar + 4;
 		}
 		int vw = render_text_width(ctx, font, value);
 		uint32_t color = share >= 0 ? level_color(w, share, fg) : fg;
@@ -251,78 +337,248 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
 }
 
-/* ---------- the desktop: a line for each item ---------- */
+/* ---------- the desktop: list, bars and rings ---------- */
 
-static bool claude_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal) {
-	if (!ctx->style || strcmp(ctx->style, "list") != 0) {
-		return false;
+/*
+ * The desktop look, from its desktop_widgets entry: title yes|no (the account
+ * at the top), updated yes|no (how old the values are), bars yes|no,
+ * bar_height (pixels at a cell of 100), bar_color, text_size (pixels at a
+ * cell of 100), labels long|short.
+ */
+struct desk_look {
+	char font[224], bold[224], small[224];
+	double sc, pad, text, bar_h;
+	bool title, updated, bars, brief;
+	uint32_t fill;
+};
+
+static void desk_look(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		struct desk_look *l) {
+	l->sc = ctx->scale;
+	l->pad = 12 * l->sc;
+	int size = place_int(w, "text_size", 13, 8, 40);
+	l->text = size * l->sc;
+	snprintf(l->font, sizeof(l->font), "%s %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->bold, sizeof(l->bold), "%s Bold %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->small, sizeof(l->small), "%s %dpx", pal->family, (int)(l->text * 0.85 + 0.5));
+	l->title = place_bool(w, "title", true);
+	l->updated = place_bool(w, "updated", true);
+	l->bars = place_bool(w, "bars", true);
+	l->bar_h = place_int(w, "bar_height", 0, 0, 60) * l->sc; // 0: from the room there is
+	l->brief = strcmp(place_conf(w, "labels", "long"), "short") == 0;
+	l->fill = bar_color(w, pal->accent);
+}
+
+/* The account at the top; returns where the rest starts. */
+static double desk_title(struct claude_state *c, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l) {
+	double y = l->pad;
+	if (!l->title) {
+		return y;
 	}
-	struct claude_state *c = w->data;
-	cairo_t *cr = ctx->cairo;
-	double sc = ctx->scale, pad = 12 * sc;
-	char font[224], bold[224];
-	snprintf(font, sizeof(font), "%s %dpx", pal->family, (int)(13 * sc + 0.5));
-	snprintf(bold, sizeof(bold), "%s Bold %dpx", pal->family, (int)(13 * sc + 0.5));
-	double y = pad;
-	// the account at the top
 	char title[160];
 	snprintf(title, sizeof(title), "Claude Code%s%s", c->usage.account ? " · " : "",
 		c->usage.account ? c->usage.account : "");
-	pd_text(cr, bold, title, pad, y, ctx->width - 2 * pad, 18 * sc, pal->fg, PD_LEFT);
-	y += 24 * sc;
-	if (show_connect(c)) {
-		pd_text(cr, font, "Not connected: click to let Claude Code show its limits here",
-			pad, y, ctx->width - 2 * pad, 36 * sc, pal->dim, PD_LEFT);
-		return true;
+	pd_text(ctx->cairo, l->bold, title, l->pad, y, ctx->width - 2 * l->pad, l->text * 1.4,
+		pal->fg, PD_LEFT);
+	return y + l->text * 1.8;
+}
+
+/* "As of ... ago" at the bottom; returns the room it takes. */
+static double desk_foot(struct claude_state *c, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l) {
+	if (!l->updated || !c->have || !c->usage.updated) {
+		return 0;
 	}
+	double h = l->text * 1.3;
+	char when[64];
+	long ago = (long)(time(NULL) - c->usage.updated);
+	if (ago < 90) {
+		snprintf(when, sizeof(when), "As of just now");
+	} else {
+		char span[48];
+		tw_claude_format_span(ago, false, span, sizeof(span));
+		snprintf(when, sizeof(when), "As of %s ago", span);
+	}
+	pd_text(ctx->cairo, l->small, when, l->pad, ctx->height - l->pad - h,
+		ctx->width - 2 * l->pad, h, pal->dim, PD_LEFT);
+	return h;
+}
+
+/* A line for each item, a bar under each usage. */
+static void desk_list(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct desk_look *l, double y, double bottom) {
+	struct claude_state *c = w->data;
+	cairo_t *cr = ctx->cairo;
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = show_list(w, items);
-	double foot = c->have && c->usage.updated ? 18 * sc : 0;
-	double row = count > 0 ? (ctx->height - y - pad - foot) / count : 0;
+	double row = count > 0 ? (bottom - y) / count : 0;
 	for (int i = 0; i < count; i++) {
 		char value[64];
-		double share = item_value(c, items[i], false, value, sizeof(value));
-		const char *name = items[i]->kind == TW_CLAUDE_USAGE ?
-			(items[i]->seven_day ? "Weekly limit" : "5-hour limit") :
-			items[i]->kind == TW_CLAUDE_RESET ?
-			(items[i]->seven_day ? "Weekly limit resets" : "5-hour limit resets") :
-			(items[i]->seven_day ? "Weekly limit lasts" : "5-hour limit lasts");
-		double line = share >= 0 ? row * 0.62 : row;
-		pd_text(cr, font, name, pad, y, ctx->width * 0.6, line, pal->dim, PD_LEFT);
+		double share = item_value(c, items[i], l->brief, value, sizeof(value));
+		bool bar = share >= 0 && l->bars;
+		double bh = l->bar_h > 0 ? l->bar_h : fmax(row * 0.18, 4 * l->sc);
+		double line = bar ? fmin(row - bh - 2 * l->sc, row * 0.62) : row;
+		pd_text(cr, l->font, long_name(items[i], l->brief), l->pad, y, ctx->width * 0.6, line,
+			pal->dim, PD_LEFT);
 		uint32_t color = share >= 0 ? level_color(w, share, pal->fg) : pal->fg;
-		pd_text(cr, bold, value, pad, y, ctx->width - 2 * pad, line, color, PD_RIGHT);
-		if (share >= 0) {
-			double bh = row * 0.18 < 4 * sc ? 4 * sc : row * 0.18;
-			double by = y + line;
-			double bw = ctx->width - 2 * pad;
-			cairo_rectangle(cr, pad, by, bw, bh);
-			cairo_set_source_rgba(cr, (pal->track >> 24 & 0xff) / 255.0,
-				(pal->track >> 16 & 0xff) / 255.0, (pal->track >> 8 & 0xff) / 255.0,
-				(pal->track & 0xff) / 255.0);
-			cairo_fill(cr);
-			uint32_t fill = level_color(w, share, pal->accent);
-			cairo_rectangle(cr, pad, by, bw * share / 100.0, bh);
-			cairo_set_source_rgba(cr, (fill >> 24 & 0xff) / 255.0, (fill >> 16 & 0xff) / 255.0,
-				(fill >> 8 & 0xff) / 255.0, 1);
-			cairo_fill(cr);
+		pd_text(cr, l->bold, value, l->pad, y, ctx->width - 2 * l->pad, line, color, PD_RIGHT);
+		if (bar) {
+			draw_share_bar(cr, l->pad, y + line, ctx->width - 2 * l->pad, bh, share, pal->track,
+				(pal->track & 0xff) / 255.0, level_color(w, share, l->fill), 2 * l->sc);
 		}
 		y += row;
 	}
-	if (foot > 0) {
-		char when[64];
-		long ago = (long)(time(NULL) - c->usage.updated);
-		if (ago < 90) {
-			snprintf(when, sizeof(when), "As of just now");
-		} else {
-			char span[48];
-			tw_claude_format_span(ago, false, span, sizeof(span));
-			snprintf(when, sizeof(when), "As of %s ago", span);
+}
+
+/*
+ * A big bar for each window with a usage ticked, its other ticked items (when
+ * it resets, how long it lasts) in a line under it.
+ */
+static void desk_bars(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct desk_look *l, double y, double bottom) {
+	struct claude_state *c = w->data;
+	cairo_t *cr = ctx->cairo;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = show_list(w, items);
+	int windows = 0;
+	bool seven[2] = { false, false };
+	for (int i = 0; i < count && windows < 2; i++) {
+		if (items[i]->kind == TW_CLAUDE_USAGE) {
+			seven[windows++] = items[i]->seven_day;
 		}
-		char small[224];
-		snprintf(small, sizeof(small), "%s %dpx", pal->family, (int)(11 * sc + 0.5));
-		pd_text(cr, small, when, pad, ctx->height - pad - foot, ctx->width - 2 * pad, foot,
+	}
+	if (windows == 0) {
+		desk_list(w, ctx, pal, l, y, bottom); // nothing to make a bar of: the lines
+		return;
+	}
+	double block = (bottom - y) / windows;
+	for (int k = 0; k < windows; k++) {
+		const struct tw_claude_item *usage = tw_claude_item_find(seven[k] ? "usage_7d" : "usage_5h");
+		char value[64];
+		double share = item_value(c, usage, false, value, sizeof(value));
+		double head = l->text * 1.4;
+		pd_text(cr, l->font, long_name(usage, l->brief), l->pad, y, ctx->width * 0.6, head,
 			pal->dim, PD_LEFT);
+		pd_text(cr, l->bold, value, l->pad, y, ctx->width - 2 * l->pad, head,
+			level_color(w, share, pal->fg), PD_RIGHT);
+		double bh = l->bar_h > 0 ? l->bar_h : fmax(block * 0.28, 8 * l->sc);
+		if (l->bars) {
+			draw_share_bar(cr, l->pad, y + head + 2 * l->sc, ctx->width - 2 * l->pad, bh, share,
+				pal->track, (pal->track & 0xff) / 255.0, level_color(w, share, l->fill),
+				3 * l->sc);
+		}
+		// the window's other items, after one another
+		GString *more = g_string_new(NULL);
+		for (int i = 0; i < count; i++) {
+			if (items[i]->seven_day != seven[k] || items[i]->kind == TW_CLAUDE_USAGE) {
+				continue;
+			}
+			char v[64];
+			item_value(c, items[i], l->brief, v, sizeof(v));
+			g_string_append_printf(more, "%s%s %s", more->len ? " · " : "",
+				items[i]->kind == TW_CLAUDE_RESET ? "resets" : "lasts", v);
+		}
+		if (more->len) {
+			pd_text(cr, l->small, more->str, l->pad, y + head + bh + 4 * l->sc,
+				ctx->width - 2 * l->pad, l->text * 1.3, pal->dim, PD_LEFT);
+		}
+		g_string_free(more, TRUE);
+		y += block;
+	}
+}
+
+/* A ring for each window with a usage ticked, side by side, its other items under it. */
+static void desk_rings(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct desk_look *l, double y, double bottom) {
+	struct claude_state *c = w->data;
+	cairo_t *cr = ctx->cairo;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = show_list(w, items);
+	int windows = 0;
+	bool seven[2] = { false, false };
+	for (int i = 0; i < count && windows < 2; i++) {
+		if (items[i]->kind == TW_CLAUDE_USAGE) {
+			seven[windows++] = items[i]->seven_day;
+		}
+	}
+	if (windows == 0) {
+		desk_list(w, ctx, pal, l, y, bottom);
+		return;
+	}
+	double col = (ctx->width - 2 * l->pad) / windows;
+	for (int k = 0; k < windows; k++) {
+		const struct tw_claude_item *usage = tw_claude_item_find(seven[k] ? "usage_7d" : "usage_5h");
+		char value[64];
+		double share = item_value(c, usage, false, value, sizeof(value));
+		int extras = 0;
+		for (int i = 0; i < count; i++) {
+			extras += items[i]->seven_day == seven[k] && items[i]->kind != TW_CLAUDE_USAGE;
+		}
+		double below = l->text * 1.3 * (1 + extras);
+		double room = fmin(col - 8 * l->sc, bottom - y - below);
+		double r = room / 2 - 2 * l->sc;
+		if (r < 8 * l->sc) {
+			r = 8 * l->sc;
+		}
+		double cx = l->pad + col * k + col / 2, cy = y + r + 2 * l->sc;
+		double thick = l->bar_h > 0 ? l->bar_h : fmax(r * 0.2, 4 * l->sc);
+		cairo_set_line_width(cr, thick);
+		cairo_new_path(cr);
+		cairo_arc(cr, cx, cy, r - thick / 2, 0, 2 * M_PI);
+		fill_rgba(cr, pal->track, (pal->track & 0xff) / 255.0);
+		cairo_stroke(cr);
+		if (share > 0 && l->bars) {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx, cy, r - thick / 2, -M_PI / 2, -M_PI / 2 + 2 * M_PI * share / 100.0);
+			fill_rgba(cr, level_color(w, share, l->fill), 1);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+			cairo_stroke(cr);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+		}
+		pd_text(cr, l->bold, value, cx - r, cy - l->text, 2 * r, 2 * l->text,
+			level_color(w, share, pal->fg), PD_CENTER);
+		double ty = cy + r + 4 * l->sc;
+		pd_text(cr, l->small, long_name(usage, true), cx - col / 2, ty, col, l->text * 1.3,
+			pal->dim, PD_CENTER);
+		for (int i = 0; i < count; i++) {
+			if (items[i]->seven_day != seven[k] || items[i]->kind == TW_CLAUDE_USAGE) {
+				continue;
+			}
+			char v[64], line[96];
+			item_value(c, items[i], false, v, sizeof(v)); // "in 2 d 23 h", "about 31 min"
+			snprintf(line, sizeof(line), "%s %s",
+				items[i]->kind == TW_CLAUDE_RESET ? "resets" : "lasts", v);
+			ty += l->text * 1.3;
+			pd_text(cr, l->small, line, cx - col / 2, ty, col, l->text * 1.3, pal->dim, PD_CENTER);
+		}
+	}
+}
+
+static bool claude_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal) {
+	const char *style = ctx->style ? ctx->style : "";
+	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0,
+		rings = strcmp(style, "ring") == 0;
+	if (!list && !bars && !rings) {
+		return false; // compact and tile: the taskbar look
+	}
+	struct claude_state *c = w->data;
+	struct desk_look l;
+	desk_look(w, ctx, pal, &l);
+	double y = desk_title(c, ctx, pal, &l);
+	if (show_connect(c)) {
+		pd_text(ctx->cairo, l.font, "Not connected: click to let Claude Code show its limits "
+			"here", l.pad, y, ctx->width - 2 * l.pad, 40 * l.sc, pal->dim, PD_LEFT);
+		return true;
+	}
+	double bottom = ctx->height - l.pad - desk_foot(c, ctx, pal, &l);
+	if (list) {
+		desk_list(w, ctx, pal, &l, y, bottom);
+	} else if (bars) {
+		desk_bars(w, ctx, pal, &l, y, bottom);
+	} else {
+		desk_rings(w, ctx, pal, &l, y, bottom);
 	}
 	return true;
 }
@@ -386,7 +642,17 @@ static char *claude_tooltip(struct widget *w, struct hotspot *hs) {
 static bool claude_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
 	struct claude_state *c = w->data;
-	if (button != BTN_LEFT || !show_connect(c) || !c->usage.dir) {
+	if (button != BTN_LEFT) {
+		return false;
+	}
+	if (!show_connect(c)) {
+		// the limits in full, in a flyout in the look of the theme
+		struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+		anchor.right_align = true;
+		info_flyout_toggle(w, anchor);
+		return true;
+	}
+	if (!c->usage.dir) {
 		return false;
 	}
 	char *quoted = g_shell_quote(c->usage.dir);
@@ -413,6 +679,15 @@ static bool claude_sample(struct widget *w, struct widget_sample *out) {
 	out->warning = out->percent >= widget_conf_int(w, "warning", 80);
 	out->critical = out->percent >= widget_conf_int(w, "critical", 95);
 	return true;
+}
+
+/* What the widget shows, for its flyout; NULL when nothing was written down yet. */
+const struct tw_claude_usage *claude_widget_usage(struct widget *w) {
+	struct claude_state *c = w && w->impl == &widget_claude ? w->data : NULL;
+	if (c) {
+		reload(w); // the newest, as the flyout opens or reads again
+	}
+	return c && c->usage.dir ? &c->usage : NULL;
 }
 
 /* ---------- life ---------- */

@@ -31,6 +31,38 @@ static const struct tw_widget_option opts_claude[] = {
 	{ 0 },
 };
 
+static const char *const choice_labels_taskbar[] = { "short", "none", NULL };
+static const char *const choice_labels_desktop[] = { "long", "short", NULL };
+static const char *const choice_bar_width[] = { "20", "34", "50", "80", "120", NULL };
+static const char *const choice_bar_height[] = { "2", "4", "6", "8", "10", "14", NULL };
+static const char *const choice_desk_bar[] = { "4", "6", "8", "12", "16", "24", NULL };
+static const char *const choice_text_size[] = { "10", "11", "13", "15", "18", "22", NULL };
+
+/* How the Claude widget looks on the taskbar: in its widget block. */
+const struct tw_widget_option tw_claude_taskbar_look[] = {
+	{ "bars", "Bars", "A bar beside each usage", choice_yes_no },
+	{ "bar_width", "Bar width", "Pixels, 34 by default", choice_bar_width },
+	{ "bar_height", "Bar height", "Pixels, 6 by default", choice_bar_height },
+	{ "bar_color", "Bar color", "e.g. #d97757; the accent of the theme by default", NULL },
+	{ "labels", "Names", "short: 5h and 7d before each value; none: the values alone",
+		choice_labels_taskbar },
+	{ 0 },
+};
+
+/* How it looks on the desktop: in its desktop_widgets entry, apart from the taskbar. */
+const struct tw_widget_option tw_claude_desktop_look[] = {
+	{ "title", "Title", "Claude Code and the account at the top", choice_yes_no },
+	{ "updated", "How old", "\"As of ... ago\" at the bottom", choice_yes_no },
+	{ "bars", "Bars and rings", "The bar under each usage, the ring of the Ring style",
+		choice_yes_no },
+	{ "bar_height", "Bar thickness", "Pixels at a cell of 100; from the room there is by default",
+		choice_desk_bar },
+	{ "bar_color", "Bar color", "e.g. #d97757; the accent of the theme by default", NULL },
+	{ "text_size", "Text size", "Pixels at a cell of 100, 13 by default", choice_text_size },
+	{ "labels", "Names", "long: 5-hour limit, Weekly limit; short: 5h, 7d", choice_labels_desktop },
+	{ 0 },
+};
+
 static const struct tw_widget_option opts_git[] = {
 	{ "show_tag", "Show the newest tag", "The tag git describe reaches from HEAD, e.g. v1.0.7",
 		choice_yes_no },

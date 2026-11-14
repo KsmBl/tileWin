@@ -887,6 +887,14 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	}
 	if (strcmp(type, "claude") == 0) {
 		show_editor_attach(s, content, name, desktop); // what it shows comes first
+		// and how it looks there, apart for each place
+		GtkWidget *look = ui_group(content, desktop ? "Look on the desktop" :
+			"Look on the taskbar", desktop ? "Only for the desktop: the taskbar keeps its own." :
+			"Only for the taskbar: the desktop keeps its own.");
+		for (const struct tw_widget_option *opt = desktop ? tw_claude_desktop_look :
+				tw_claude_taskbar_look; opt->key; opt++) {
+			add_option_row(s, look, name, opt, desktop);
+		}
 	}
 	const struct tw_widget_info *info = tw_widget_find(type);
 	bool quick = strcmp(type, "quicklaunch") == 0;

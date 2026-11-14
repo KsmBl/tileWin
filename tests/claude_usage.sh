@@ -7,7 +7,8 @@
 #    hands it, runs the old status line with the same input and shows its output;
 #  - a window not in the input keeps what was written down before;
 #  - "disconnect" gives back the old status line and forgets the values;
-#  - the widget on the taskbar draws the values, and again when they change.
+#  - the widget on the taskbar draws the values, and again when they change;
+#  - a click on it opens its flyout.
 #
 # usage: claude_usage.sh <build dir> <source dir>
 set -u
@@ -18,8 +19,9 @@ tool=$build/claude/tilewin-claude-usage
 compositor=$build/sway/tilewin
 msg=$build/swaymsg/tilewinmsg
 panel=$build/panel/tilewin-panel
+pointer=$build/tests/pointer-tool
 
-for needed in "$tool" "$compositor" "$msg" "$panel"; do
+for needed in "$tool" "$compositor" "$msg" "$panel" "$pointer"; do
 	if [ ! -x "$needed" ]; then
 		echo "$needed was not built: skipping"
 		exit 77
@@ -129,6 +131,14 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":97,"resets_at":%d},"seven
 # the widget looks again every five seconds
 wait_until 12 sh -c "[ \"\$(grim -g '600,680 680x40' - 2>/dev/null | md5sum)\" != '$before' ]" ||
 	fail "the taskbar did not show the new values"
+
+# ---- a click opens the flyout above the taskbar
+above() { grim -g "600,200 680x470" - 2>/dev/null | md5sum; }
+wait_still 5 above
+closed=$(above)
+"$pointer" 1280 720 click 925 700 >/dev/null 2>&1 # the widget, first in the right section
+wait_until 5 sh -c "[ \"\$(grim -g '600,200 680x470' - 2>/dev/null | md5sum)\" != '$closed' ]" ||
+	fail "a click on the widget opened no flyout"
 
 # ---- disconnect
 "$tool" disconnect "$claude" >/dev/null || fail "disconnect failed"
