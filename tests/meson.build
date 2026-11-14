@@ -38,6 +38,18 @@ test(
 )
 
 test(
+	'textedit',
+	executable(
+		'test-textedit',
+		'test_textedit.c',
+		include_directories: [sway_inc],
+		dependencies: [cairo, pango, pangocairo, xkbcommon],
+		link_with: [lib_sway_common],
+	),
+	suite: 'unit',
+)
+
+test(
 	'shortcuts-text',
 	executable(
 		'test-shortcuts-text',

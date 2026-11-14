@@ -24,6 +24,7 @@
 #include "pool-buffer.h"
 #include "sessions.h"
 #include "tw_desktop.h"
+#include "tw_textedit.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -140,6 +141,7 @@ static struct {
 
 	char name[256];
 	size_t name_len;
+	struct text_cursor name_tc, password_tc; // the cursor and the selection of each field
 	char password[512];
 	size_t password_len;
 	bool reveal;
@@ -172,6 +174,7 @@ static long idle_seconds(void) {
 static void clear_secret(void) {
 	explicit_bzero(g.password, sizeof(g.password));
 	g.password_len = 0;
+	g.password_tc.cursor = g.password_tc.anchor = 0;
 	g.reveal = false;
 }
 
@@ -267,6 +270,7 @@ static void read_users(void) {
 	if (!found && wanted[0] && g.user_count == 0) {
 		snprintf(g.name, sizeof(g.name), "%s", wanted);
 		g.name_len = strlen(g.name);
+		text_cursor_end(g.name, &g.name_tc, false);
 	}
 	g.focus = g.user_sel < g.user_count || g.name_len > 0 ? AREA_PASSWORD : AREA_NAME;
 }
@@ -516,33 +520,40 @@ static void draw_avatar(cairo_t *cr, const struct user *u, double cx, double cy,
 	cairo_restore(cr);
 }
 
+/* A field's text with its cursor and selection, as every text field has them. */
+static void draw_field_text(cairo_t *cr, const char *text, const struct text_cursor *tc,
+		bool focused, bool mask, const char *glyph, double x, double y, double w, double h) {
+	struct text_style ts = {
+		.font = g.font,
+		.fg = g.field_fg,
+		.selection_bg = g.accent | 0xff,
+		.selection_fg = 0xffffffff,
+		.caret = focused && g.stage != STAGE_CHECKING && g.stage != STAGE_DONE,
+		.mask = mask,
+		.mask_glyph = glyph,
+	};
+	// the selection shows in the field that has the focus only
+	struct text_cursor shown = *tc;
+	if (!focused) {
+		shown.anchor = shown.cursor;
+	}
+	text_draw(cr, &ts, text, &shown, x, y, w, h);
+}
+
 /* Dots, stars or nothing, or the text itself with the reveal button or a question. */
 static void draw_secret(cairo_t *cr, double x, double y, double w, double h) {
 	const char *style = dm_config_str(g.config, "password_style");
-	size_t chars = 0;
-	for (size_t i = 0; i < g.password_len; i++) {
-		chars += ((unsigned char)g.password[i] & 0xc0) != 0x80;
-	}
 	bool plain = g.reveal || (g.stage == STAGE_PROMPT && !g.prompt_secret);
-	if (plain) {
-		text_in(cr, g.font, g.password, x, y, w, h, g.field_fg, LEFT);
-	} else if (strcmp(style, "hidden") == 0) {
-		return;
-	} else if (strcmp(style, "stars") == 0) {
-		char stars[64];
-		size_t n = chars < sizeof(stars) - 1 ? chars : sizeof(stars) - 1;
-		memset(stars, '*', n);
-		stars[n] = '\0';
-		text_in(cr, g.font, stars, x, y, w, h, g.field_fg, LEFT);
-	} else {
-		color(cr, g.field_fg);
-		double dx = x + 4;
-		for (size_t i = 0; i < chars && dx < x + w - 4; i++, dx += 13) {
-			cairo_new_path(cr);
-			cairo_arc(cr, dx, y + h / 2, 3.6, 0, 2 * M_PI);
-			cairo_fill(cr);
-		}
-	}
+	const char *glyph = strcmp(style, "hidden") == 0 ? "" :
+		strcmp(style, "stars") == 0 ? "*" : NULL;
+	draw_field_text(cr, g.password, &g.password_tc, g.focus == AREA_PASSWORD, !plain, glyph,
+		x, y, w, h);
+}
+
+/* The cursor in an empty field, before its grey hint. */
+static void draw_empty_caret(cairo_t *cr, bool focused, double x, double y, double h) {
+	struct text_cursor none = { 0 };
+	draw_field_text(cr, "", &none, focused, false, NULL, x, y, 4, h);
 }
 
 static void draw_eye(cairo_t *cr, double cx, double cy, uint32_t c, bool crossed) {
@@ -705,10 +716,12 @@ static void draw_card(struct output *o, cairo_t *cr, double W, double H) {
 	if (typing_name()) {
 		field_frame(cr, x, y, w, FIELD_H, g.focus == AREA_NAME);
 		if (g.name_len) {
-			text_in(cr, g.font, g.name, x + 10, y, w - 20, FIELD_H, g.field_fg, LEFT);
+			draw_field_text(cr, g.name, &g.name_tc, g.focus == AREA_NAME, false, NULL,
+				x + 10, y, w - 20, FIELD_H);
 		} else {
 			text_in(cr, g.font, "User name", x + 10, y, w - 20, FIELD_H,
 				(g.field_fg & 0xffffff00) | 0x80, LEFT);
+			draw_empty_caret(cr, g.focus == AREA_NAME, x + 10, y, FIELD_H);
 		}
 		add_hit(o, x, y, w, FIELD_H, AREA_NAME, 0);
 		y += FIELD_H + 10;
@@ -722,6 +735,7 @@ static void draw_card(struct output *o, cairo_t *cr, double W, double H) {
 	if (g.password_len == 0) {
 		const char *hint = g.stage == STAGE_PROMPT ? g.prompt : "Password";
 		text_in(cr, g.font, hint, x + 10, y, w - 44, FIELD_H, (g.field_fg & 0xffffff00) | 0x80, LEFT);
+		draw_empty_caret(cr, g.focus == AREA_PASSWORD, x + 10, y, FIELD_H);
 	} else {
 		draw_secret(cr, x + 10, y, w - 48, FIELD_H);
 	}
@@ -881,6 +895,7 @@ static int render_to_file(const char *path, int w, int h) {
 	cairo_scale(cr, scale, scale);
 	snprintf(g.password, sizeof(g.password), "secret");
 	g.password_len = 6;
+	text_cursor_end(g.password, &g.password_tc, false);
 	g.focus = AREA_PASSWORD;
 	draw_scene(&o, cr, virtual_w, h / scale);
 	cairo_destroy(cr);
@@ -1186,36 +1201,49 @@ static void click(struct output *o, double x, double y) {
 	}
 }
 
-static void type_text(const char *utf8) {
-	if (g.focus != AREA_NAME && g.focus != AREA_PASSWORD) {
+static uint32_t edit_mods(void) {
+	uint32_t mods = 0;
+	if (xkb_state_mod_name_is_active(g.state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= TEXT_MOD_CTRL;
+	}
+	if (xkb_state_mod_name_is_active(g.state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= TEXT_MOD_SHIFT;
+	}
+	if (xkb_state_mod_name_is_active(g.state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= TEXT_MOD_ALT;
+	}
+	return mods;
+}
+
+/*
+ * A key for the name or the password field, as every text field takes them:
+ * the arrows, Home and End with Shift to select, Ctrl+A, words with Ctrl,
+ * BackSpace and Delete, and typing, which replaces the selection. Typing
+ * elsewhere goes to the password. False when it is not an editing key.
+ */
+static bool edit_key(xkb_keysym_t sym, const char *utf8) {
+	bool in_field = g.focus == AREA_NAME || g.focus == AREA_PASSWORD;
+	bool typing = utf8 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f;
+	if (!in_field && !typing) {
+		return false;
+	}
+	if (!in_field) {
 		g.focus = AREA_PASSWORD;
 	}
 	bool name = g.focus == AREA_NAME && typing_name() && g.stage == STAGE_IDLE;
 	char *buffer = name ? g.name : g.password;
 	size_t *len = name ? &g.name_len : &g.password_len;
 	size_t size = name ? sizeof(g.name) : sizeof(g.password);
-	size_t add = strlen(utf8);
-	if (add > 0 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f && *len + add < size - 1) {
-		memcpy(buffer + *len, utf8, add);
-		*len += add;
-		buffer[*len] = '\0';
+	struct text_cursor *tc = name ? &g.name_tc : &g.password_tc;
+	enum text_key_result r = text_key(buffer, size, tc, sym, utf8, edit_mods());
+	*len = strlen(buffer);
+	if (r == TEXT_KEY_CHANGED) {
 		g.message[0] = '\0';
+	}
+	if (r != TEXT_KEY_IGNORED) {
 		g.dirty = true;
 	}
-}
-
-static void erase_char(void) {
-	bool name = g.focus == AREA_NAME && typing_name();
-	char *buffer = name ? g.name : g.password;
-	size_t *len = name ? &g.name_len : &g.password_len;
-	while (*len > 0) {
-		unsigned char c = buffer[--*len];
-		buffer[*len] = '\0';
-		if ((c & 0xc0) != 0x80) {
-			break;
-		}
-	}
-	g.dirty = true;
+	return r != TEXT_KEY_IGNORED;
 }
 
 static void handle_key(xkb_keysym_t sym, const char *utf8) {
@@ -1261,25 +1289,17 @@ static void handle_key(xkb_keysym_t sym, const char *utf8) {
 	case XKB_KEY_Right:
 		if (g.focus == AREA_SESSION_NEXT) {
 			next_session(sym == XKB_KEY_Left ? -1 : 1);
+			return;
 		} else if (g.focus == AREA_LAYOUT) {
 			switch_layout();
+			return;
 		}
-		return;
-	case XKB_KEY_BackSpace:
-		erase_char();
-		return;
+		break; // in a field: the cursor
 	}
 	if (g.stage == STAGE_CHECKING || g.stage == STAGE_DONE) {
 		return;
 	}
-	if (xkb_state_mod_name_is_active(g.state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0) {
-		if (sym == XKB_KEY_u || sym == XKB_KEY_U) {
-			clear_secret();
-			g.dirty = true;
-		}
-		return;
-	}
-	type_text(utf8);
+	edit_key(sym, utf8);
 }
 
 static void keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd,

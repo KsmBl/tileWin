@@ -37,6 +37,7 @@
 #include "pool-buffer.h"
 #include "stringop.h"
 #include "tw_desktop.h"
+#include "tw_textedit.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
 #if HAVE_FINGERPRINT
@@ -86,6 +87,7 @@ static struct {
 	enum view view;
 	char password[256];
 	size_t password_len;
+	struct text_cursor tc; // the cursor and the selection in the password field
 	bool checking;
 	pid_t auth_pid;
 	int auth_fd;
@@ -111,6 +113,7 @@ static long ms_since(const struct timespec *t) {
 static void clear_password(void) {
 	explicit_bzero(lock.password, sizeof(lock.password));
 	lock.password_len = 0;
+	lock.tc.cursor = lock.tc.anchor = 0;
 }
 
 static void set_message(const char *text) {
@@ -406,17 +409,17 @@ static void render_output(struct lock_output *o) {
 			pango_cairo_show_layout(cr, layout);
 			g_object_unref(layout);
 		}
-		// one dot per character (bytes of UTF-8 sequences are counted once)
-		size_t chars = 0;
-		for (size_t i = 0; i < lock.password_len; i++) {
-			chars += ((unsigned char)lock.password[i] & 0xc0) != 0x80;
-		}
-		double dot_x = fx + 16;
-		cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-		for (size_t i = 0; i < chars && dot_x < fx + fw - bw - 10; i++, dot_x += 13) {
-			cairo_arc(cr, dot_x, fy + fh / 2, 3.6, 0, 2 * M_PI);
-			cairo_fill(cr);
-		}
+		// a dot per character, with a cursor that moves and a selection, as in
+		// every other text field (tw_textedit.c)
+		struct text_style ts = {
+			.font = "Noto Sans, Sans 13",
+			.fg = 0x1a1a1aff,
+			.selection_bg = lock.accent | 0xff,
+			.selection_fg = 0xffffffff,
+			.caret = !lock.checking,
+			.mask = true,
+		};
+		text_draw(cr, &ts, lock.password, &lock.tc, fx + 10, fy, fw - bw - 18, fh);
 		double my = fy + fh + 18;
 		const char *msg = lock.checking ? "Checking the password..." : lock.message;
 		if (msg && *msg) {
@@ -598,35 +601,30 @@ static void handle_key(xkb_keysym_t sym, const char *utf8) {
 		lock.view = VIEW_CLOCK;
 		lock.dirty = true;
 		return;
-	case XKB_KEY_BackSpace:
-		while (lock.password_len > 0) {
-			unsigned char c = lock.password[--lock.password_len];
-			lock.password[lock.password_len] = '\0';
-			if ((c & 0xc0) != 0x80) {
-				break;
-			}
-		}
-		lock.dirty = true;
-		return;
 	}
+	// the arrows, Home and End with Shift to select, Ctrl+A, words with Ctrl,
+	// BackSpace and Delete, and typing, which replaces the selection; a key that
+	// only woke the screen up still counts as typing
+	uint32_t mods = 0;
 	if (xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CTRL,
 			XKB_STATE_MODS_EFFECTIVE) > 0) {
-		if (sym == XKB_KEY_u || sym == XKB_KEY_U) {
-			clear_password();
-			lock.dirty = true;
-		}
-		return;
+		mods |= TEXT_MOD_CTRL;
 	}
-	size_t add = strlen(utf8);
-	if (add > 0 && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f &&
-			lock.password_len + add < sizeof(lock.password) - 1) {
-		// a key that only woke the screen up still counts as typing
-		memcpy(lock.password + lock.password_len, utf8, add);
-		lock.password_len += add;
-		lock.password[lock.password_len] = '\0';
+	if (xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_SHIFT,
+			XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= TEXT_MOD_SHIFT;
+	}
+	if (xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_ALT,
+			XKB_STATE_MODS_EFFECTIVE) > 0) {
+		mods |= TEXT_MOD_ALT;
+	}
+	enum text_key_result r = text_key(lock.password, sizeof(lock.password), &lock.tc, sym,
+		utf8, mods);
+	lock.password_len = strlen(lock.password);
+	if (r == TEXT_KEY_CHANGED) {
 		lock.message[0] = '\0';
-		lock.dirty = true;
-	} else if (was_clock) {
+	}
+	if (r != TEXT_KEY_IGNORED || was_clock) {
 		lock.dirty = true;
 	}
 }

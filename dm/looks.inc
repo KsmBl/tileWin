@@ -129,6 +129,7 @@ static void password_field(struct output *o, cairo_t *cr, double x, double y, do
 	if (g.password_len == 0) {
 		const char *hint = g.stage == STAGE_PROMPT ? g.prompt : "Password";
 		text_in(cr, g.font, hint, x + 10, y, inner, h, (g.field_fg & 0xffffff00) | 0x88, LEFT);
+		draw_empty_caret(cr, g.focus == AREA_PASSWORD, x + 10, y, h);
 	} else {
 		draw_secret(cr, x + 10, y, inner - (reveal ? 24 : 0), h);
 	}
@@ -157,8 +158,14 @@ static void name_field(struct output *o, cairo_t *cr, double x, double y, double
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
 	}
-	text_in(cr, g.font, g.name_len ? g.name : "User name", x + 10, y, w - 20, h,
-		g.name_len ? g.field_fg : (g.field_fg & 0xffffff00) | 0x88, LEFT);
+	if (g.name_len) {
+		draw_field_text(cr, g.name, &g.name_tc, g.focus == AREA_NAME, false, NULL, x + 10, y,
+			w - 20, h);
+	} else {
+		text_in(cr, g.font, "User name", x + 10, y, w - 20, h, (g.field_fg & 0xffffff00) | 0x88,
+			LEFT);
+		draw_empty_caret(cr, g.focus == AREA_NAME, x + 10, y, h);
+	}
 	add_hit(o, x, y, w, h, AREA_NAME, 0);
 }
 

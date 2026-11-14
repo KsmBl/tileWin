@@ -165,7 +165,8 @@ shot "$work/refused.ppm"
 same "$work/empty.ppm" "$work/refused.ppm" && fail "the greeter shows nothing after a wrong password"
 
 # ---- the right one: the field holds the name, the focus is on the password
-type_into_greeter text rightword key none return
+# typed with a slip, mended with the cursor: "rightwrd", two to the left, "o"
+type_into_greeter text rightwrd key none left key none left text o key none return
 wait_for "the right password started no session: $(cat "$work/backend.log")" has_env
 gone || fail "the greeter is still up in the session"
 grep -q "^USER=sam$" "$work/session.env" || fail "the session is not of sam: $(cat "$work/session.env")"
