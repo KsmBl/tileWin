@@ -214,9 +214,58 @@ static void fill_rgba(cairo_t *cr, uint32_t c, double alpha) {
 		(c >> 8 & 0xff) / 255.0, alpha);
 }
 
+/*
+ * How bars look in the theme: smooth, or in blocks as the progress bars of
+ * Windows 95 (in a sunken field) and XP were, as the flyouts and the other
+ * desktop widgets draw them.
+ */
+enum bar_look { BAR_SMOOTH, BAR_BLOCKS, BAR_BLOCKS_SUNKEN };
+
 /* A bar of the share used, on its track. */
 static void draw_share_bar(cairo_t *cr, double x, double y, double w, double h, double share,
-		uint32_t track, double track_alpha, uint32_t fill, double radius) {
+		uint32_t track, double track_alpha, uint32_t fill, double radius, enum bar_look look,
+		bool dark) {
+	if (look != BAR_SMOOTH) {
+		// as the Bar style of the other widgets draws it in these themes: a white field
+		// (dark in the dark scheme), sunken in Windows 95, framed and round in XP, and
+		// the share in whole blocks two apart
+		if (look == BAR_BLOCKS_SUNKEN) {
+			pd_rect(cr, x, y, w, h, dark ? 0x2c2c2cff : 0xffffffff);
+			pd_bevel(cr, x, y, w, h, true);
+		} else {
+			cairo_new_path(cr);
+			pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, h > 8 ? 3 : 1);
+			pd_color(cr, dark ? 0x0a1a40ff : 0xffffffff);
+			cairo_fill_preserve(cr);
+			pd_color(cr, dark ? 0x3c78e6ff : 0x686868ff);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+		}
+		double inset = h >= 10 ? 3 : 2;
+		double bh = h - 2 * inset;
+		double chunk = fmax(h * (look == BAR_BLOCKS_SUNKEN ? 0.55 : 0.45), 4), gap = 2;
+		double bx = x + inset;
+		double end = bx + (w - 2 * inset) * (share < 0 ? 0 : share > 100 ? 100 : share) / 100.0;
+		while (bh > 0 && bx + chunk <= end + 0.5) {
+			cairo_rectangle(cr, bx, y + inset, chunk, bh);
+			if (look == BAR_BLOCKS) {
+				// the glossy blocks of XP: lighter at the top
+				cairo_pattern_t *g = cairo_pattern_create_linear(0, y + inset, 0, y + inset + bh);
+				cairo_pattern_add_color_stop_rgb(g, 0, ((fill >> 24 & 0xff) + 255) / 510.0,
+					((fill >> 16 & 0xff) + 255) / 510.0, ((fill >> 8 & 0xff) + 255) / 510.0);
+				cairo_pattern_add_color_stop_rgb(g, 1, (fill >> 24 & 0xff) / 255.0,
+					(fill >> 16 & 0xff) / 255.0, (fill >> 8 & 0xff) / 255.0);
+				cairo_set_source(cr, g);
+				cairo_fill(cr);
+				cairo_pattern_destroy(g);
+			} else {
+				fill_rgba(cr, fill, 1);
+				cairo_fill(cr);
+			}
+			bx += chunk + gap;
+		}
+		return;
+	}
 	double r = radius > h / 2 ? h / 2 : radius;
 	pd_rounded(cr, x, y, w, h, r);
 	fill_rgba(cr, track, track_alpha);
@@ -302,8 +351,9 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 	const char *font = bar_font(ctx->panel);
 	uint32_t fg = widget_fg(ctx->panel, "claude");
 	uint32_t dim = (fg & 0xffffff00) | 0xa0;
-	uint32_t accent = bar_color(w,
-		tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff) | 0xff);
+	// the color of the bars of the flyouts (navy in Windows 95), else the taskbar's accent
+	uint32_t accent = bar_color(w, tw_theme_color(ctx->panel->theme, "flyout.accent",
+		tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff)) | 0xff);
 	double x = b.x + 8, end = b.x + b.width - 8;
 	if (show_connect(c)) {
 		pd_text(ctx->cairo, font, not_connected_text, x, b.y, end - x, b.height, dim, PD_LEFT);
@@ -311,7 +361,8 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 		return;
 	}
 	int bar = taskbar_bar_width(w);
-	int bar_h = place_int(w, "bar_height", 6, 2, 24);
+	bool blocks = ctx->style == PSV_CLASSIC || ctx->style == PSV_LUNA;
+	int bar_h = place_int(w, "bar_height", blocks ? 10 : 6, 2, 24); // blocks need room
 	bool labels = taskbar_labels(w);
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = show_list(w, items);
@@ -324,8 +375,10 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 			x += lw + 4;
 		}
 		if (share >= 0 && bar > 0) {
+			enum bar_look look = ctx->style == PSV_CLASSIC ? BAR_BLOCKS_SUNKEN :
+				ctx->style == PSV_LUNA ? BAR_BLOCKS : BAR_SMOOTH;
 			draw_share_bar(ctx->cairo, x, b.y + (b.height - bar_h) / 2.0, bar, bar_h, share,
-				fg, 0.22, level_color(w, share, accent), 1);
+				fg, 0.22, level_color(w, share, accent), 1, look, false);
 			x += bar + 4;
 		}
 		int vw = render_text_width(ctx, font, value);
@@ -350,6 +403,7 @@ struct desk_look {
 	double sc, pad, text, bar_h;
 	bool title, updated, bars, brief;
 	uint32_t fill;
+	enum bar_look look;
 };
 
 static void desk_look(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
@@ -367,6 +421,8 @@ static void desk_look(struct widget *w, struct gadget_ctx *ctx, const struct gad
 	l->bar_h = place_int(w, "bar_height", 0, 0, 60) * l->sc; // 0: from the room there is
 	l->brief = strcmp(place_conf(w, "labels", "long"), "short") == 0;
 	l->fill = bar_color(w, pal->accent);
+	l->look = pal->look == GADGET_CLASSIC ? BAR_BLOCKS_SUNKEN :
+		pal->look == GADGET_LUNA ? BAR_BLOCKS : BAR_SMOOTH;
 }
 
 /* The account at the top; returns where the rest starts. */
@@ -417,7 +473,8 @@ static void desk_list(struct widget *w, struct gadget_ctx *ctx, const struct gad
 		char value[64];
 		double share = item_value(c, items[i], l->brief, value, sizeof(value));
 		bool bar = share >= 0 && l->bars;
-		double bh = l->bar_h > 0 ? l->bar_h : fmax(row * 0.18, 4 * l->sc);
+		double bh = l->bar_h > 0 ? l->bar_h :
+			fmax(row * 0.18, (l->look == BAR_SMOOTH ? 4 : 15) * l->sc); // blocks need room
 		double line = bar ? fmin(row - bh - 2 * l->sc, row * 0.62) : row;
 		pd_text(cr, l->font, long_name(items[i], l->brief), l->pad, y, ctx->width * 0.6, line,
 			pal->dim, PD_LEFT);
@@ -425,7 +482,8 @@ static void desk_list(struct widget *w, struct gadget_ctx *ctx, const struct gad
 		pd_text(cr, l->bold, value, l->pad, y, ctx->width - 2 * l->pad, line, color, PD_RIGHT);
 		if (bar) {
 			draw_share_bar(cr, l->pad, y + line, ctx->width - 2 * l->pad, bh, share, pal->track,
-				(pal->track & 0xff) / 255.0, level_color(w, share, l->fill), 2 * l->sc);
+				(pal->track & 0xff) / 255.0, level_color(w, share, l->fill), 2 * l->sc, l->look,
+				pal->dark);
 		}
 		y += row;
 	}
@@ -466,7 +524,7 @@ static void desk_bars(struct widget *w, struct gadget_ctx *ctx, const struct gad
 		if (l->bars) {
 			draw_share_bar(cr, l->pad, y + head + 2 * l->sc, ctx->width - 2 * l->pad, bh, share,
 				pal->track, (pal->track & 0xff) / 255.0, level_color(w, share, l->fill),
-				3 * l->sc);
+				3 * l->sc, l->look, pal->dark);
 		}
 		// the window's other items, after one another
 		GString *more = g_string_new(NULL);
@@ -524,11 +582,26 @@ static void desk_rings(struct widget *w, struct gadget_ctx *ctx, const struct ga
 		double cx = l->pad + col * k + col / 2, cy = y + r + 2 * l->sc;
 		double thick = l->bar_h > 0 ? l->bar_h : fmax(r * 0.2, 4 * l->sc);
 		cairo_set_line_width(cr, thick);
-		cairo_new_path(cr);
-		cairo_arc(cr, cx, cy, r - thick / 2, 0, 2 * M_PI);
-		fill_rgba(cr, pal->track, (pal->track & 0xff) / 255.0);
-		cairo_stroke(cr);
-		if (share > 0 && l->bars) {
+		if (l->look != BAR_SMOOTH) {
+			// in blocks, as the ring of the other widgets in these themes
+			int blocks = 20;
+			double gap = 0.035;
+			for (int b = 0; b < blocks; b++) {
+				cairo_new_path(cr);
+				cairo_arc(cr, cx, cy, r - thick / 2, -M_PI / 2 + 2 * M_PI * b / blocks + gap,
+					-M_PI / 2 + 2 * M_PI * (b + 1) / blocks - gap);
+				bool on = l->bars && (b + 0.5) / blocks <= share / 100.0;
+				fill_rgba(cr, on ? level_color(w, share, l->fill) : pal->track,
+					on ? 1 : (pal->track & 0xff) / 255.0);
+				cairo_stroke(cr);
+			}
+		} else {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx, cy, r - thick / 2, 0, 2 * M_PI);
+			fill_rgba(cr, pal->track, (pal->track & 0xff) / 255.0);
+			cairo_stroke(cr);
+		}
+		if (share > 0 && l->bars && l->look == BAR_SMOOTH) {
 			cairo_new_path(cr);
 			cairo_arc(cr, cx, cy, r - thick / 2, -M_PI / 2, -M_PI / 2 + 2 * M_PI * share / 100.0);
 			fill_rgba(cr, level_color(w, share, l->fill), 1);
