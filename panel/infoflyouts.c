@@ -1150,7 +1150,13 @@ static void claude_sample(struct info_flyout *f) {
 		free(command);
 		g_free(quoted);
 	}
-	add_action(f, "Settings", "exec tilewin-settings --page taskbar", NULL);
+	// the settings of this very widget, for the place it is on
+	char *name = g_shell_quote(f->widget->name);
+	char *settings = format_str("exec tilewin-settings --widget %s%s", name,
+		f->widget->desk ? " --desktop" : "");
+	add_action(f, "Settings", settings, NULL);
+	free(settings);
+	g_free(name);
 }
 
 static const struct info_source sources[] = {

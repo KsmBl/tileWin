@@ -1271,6 +1271,14 @@ if gdk_pixbuf.found()
 endif
 
 test(
+	'settings-widget-open',
+	find_program('settings_widget_open.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'settings-claude',
 	find_program('settings_claude.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

@@ -262,7 +262,7 @@ GTK 3 apps show their message dialogs as tileWin's, in the look of the theme tha
 
 ## Settings app
 
-`tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you. Type anywhere in the window (or press Ctrl+F) to search all settings; a result opens its page and highlights the setting.
+`tilewin-settings` (Super+I in window mode, "Settings" in the start menu, "Taskbar settings" in the taskbar menu) edits the config files for you. `tilewin-settings --widget NAME` opens the settings of one widget of the taskbar over the Taskbar page, with `--desktop` those of the widget on the desktop over the Desktop page; the Settings link of a widget's flyout does that. Type anywhere in the window (or press Ctrl+F) to search all settings; a result opens its page and highlights the setting.
 
 
 | Page | What you can change |

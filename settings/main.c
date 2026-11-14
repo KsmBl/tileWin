@@ -852,6 +852,51 @@ static void on_startup(GApplication *app, gpointer data) {
 	settings_apply_theme();
 }
 
+/*
+ * --widget: its dialog once the compositor has the window, so the dialog stays
+ * on top of it. A parent the compositor has not mapped yet does not count as
+ * one, and the bigger window, mapped after its small dialog, would cover it:
+ * the window becoming active (the compositor focuses mapped windows only) says
+ * it is there; after two seconds without, the dialog comes anyway.
+ */
+struct widget_request {
+	struct settings *s;
+	char *name;
+	bool desktop;
+	gulong handler;
+	guint timeout;
+	bool done;
+};
+
+static void widget_request_open(struct widget_request *r) {
+	if (r->done) {
+		return;
+	}
+	r->done = true;
+	if (r->handler) {
+		g_signal_handler_disconnect(r->s->window, r->handler);
+	}
+	if (r->timeout) {
+		g_source_remove(r->timeout);
+	}
+	widget_dialog_open(r->s, r->name, r->desktop);
+	g_free(r->name);
+	g_free(r);
+}
+
+static void on_active_for_widget(GObject *window, GParamSpec *pspec, gpointer data) {
+	if (gtk_window_is_active(GTK_WINDOW(window))) {
+		widget_request_open(data);
+	}
+}
+
+static gboolean widget_request_timeout(gpointer data) {
+	struct widget_request *r = data;
+	r->timeout = 0;
+	widget_request_open(r);
+	return G_SOURCE_REMOVE;
+}
+
 static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, gpointer data) {
 	struct settings *s = data;
 	if (!s->window) {
@@ -872,7 +917,28 @@ static int on_command_line(GApplication *app, GApplicationCommandLine *cmdline, 
 		welcome_show(s); // the settings stay hidden until asked for
 		return 0;
 	}
+	// --widget NAME [--desktop]: the settings of one widget, over the page it is on
+	const char *widget = NULL;
+	bool desktop = g_variant_dict_contains(options, "desktop");
+	if (g_variant_dict_lookup(options, "widget", "&s", &widget) && *widget) {
+		const char *on = desktop ? "desktop" : "taskbar";
+		lazy_build_named(on);
+		gtk_stack_set_visible_child_name(s->stack, on);
+	}
 	gtk_window_present(s->window);
+	if (widget && *widget) {
+		struct widget_request *r = g_new0(struct widget_request, 1);
+		r->s = s;
+		r->name = g_strdup(widget);
+		r->desktop = desktop;
+		if (gtk_window_is_active(s->window)) {
+			widget_request_open(r);
+		} else {
+			r->handler = g_signal_connect(s->window, "notify::is-active",
+				G_CALLBACK(on_active_for_widget), r);
+			r->timeout = g_timeout_add_seconds(2, widget_request_timeout, r);
+		}
+	}
 	return 0;
 }
 
@@ -953,6 +1019,10 @@ int main(int argc, char **argv) {
 		G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_NON_UNIQUE);
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
 		"Page to open: theme, wallpaper, desktop, animations, windows, screen, screensaver, sound, bluetooth, network, dns, taskbar, startmenu, launcher, keyboard, mouse, apps, account, login, backup, kernel, devices or about", "PAGE");
+	g_application_add_main_option(G_APPLICATION(s->app), "widget", 0, 0, G_OPTION_ARG_STRING,
+		"Open the settings of this widget of the taskbar, e.g. claude or custom:weather", "NAME");
+	g_application_add_main_option(G_APPLICATION(s->app), "desktop", 0, 0, G_OPTION_ARG_NONE,
+		"With --widget: the widget on the desktop, its desktop look and place", NULL);
 	g_application_add_main_option(G_APPLICATION(s->app), "welcome", 0, 0, G_OPTION_ARG_NONE,
 		"Show the first-run window: a theme, a mode and the keys worth knowing", NULL);
 	g_signal_connect(s->app, "startup", G_CALLBACK(on_startup), s);
