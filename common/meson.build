@@ -19,6 +19,7 @@ lib_sway_common = static_library(
 		'tw_claude_usage.c',
 		'tw_grid.c',
 		'tw_search.c',
+		'tw_textedit.c',
 		'tw_widgets.c',
 		'twconf.c',
 		'tw_theme.c',
@@ -34,6 +35,7 @@ lib_sway_common = static_library(
 		rsvg,
 		pango,
 		pangocairo,
+		xkbcommon,
 		wayland_client.partial_dependency(compile_args: true)
 	],
 	include_directories: sway_inc
