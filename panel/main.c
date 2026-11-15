@@ -84,6 +84,32 @@ bool panel_atari(struct panel *p) {
 	return p && p->theme && p->theme->style && strcmp(p->theme->style, "atari") == 0;
 }
 
+bool panel_console(struct panel *p) {
+	return p && p->theme && p->theme->style && strcmp(p->theme->style, "console") == 0;
+}
+
+uint32_t panel_console_color(struct panel *p, int index) {
+	static const uint32_t fallback[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
+		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+	const char *spec = p && p->theme ? tw_theme_str(p->theme, "palette.colors", NULL) : NULL;
+	uint32_t colors[16];
+	int count = 0;
+	if (spec) {
+		char *copy = strdup(spec), *save = NULL;
+		for (char *tok = strtok_r(copy, " ,", &save); tok && count < 16;
+				tok = strtok_r(NULL, " ,", &save)) {
+			if (tw_parse_color(tok, &colors[count])) {
+				count++;
+			}
+		}
+		free(copy);
+	}
+	if (count == 0) {
+		return fallback[((index % 7) + 7) % 7];
+	}
+	return colors[((index % count) + count) % count];
+}
+
 static void bars_set_dirty(struct panel *p) {
 	struct panel_output *output;
 	wl_list_for_each(output, &p->outputs, link) {

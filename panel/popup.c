@@ -495,9 +495,11 @@ void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,
 	}
 	uint32_t border = tw_theme_color(t, key, style == PS_LUNA ? 0x8a867aff :
 		style == PS_AERO ? 0x979797ff : style == PS_FLUENT ? 0x00000024 : 0xccccccff);
-	pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
+	// the console: a frame two pixels thick
+	double lw = panel_console(panel) ? 2 : 1;
+	pd_rounded(cr, x + lw / 2, y + lw / 2, w - lw, h - lw, r);
 	pd_color(cr, border);
-	cairo_set_line_width(cr, 1);
+	cairo_set_line_width(cr, lw);
 	cairo_stroke(cr);
 }
 
@@ -515,6 +517,7 @@ struct menu {
 	int *ys, *hs;
 	int item_h, sep_h, pad, margin, icon_col, arrow_col;
 	bool classic_start;
+	enum menu_look look; // GEM's or the console's, in any theme
 	int banner_w;
 	bool above;
 	struct loop_timer *submenu_timer;
@@ -568,6 +571,19 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 	int M = m->margin;
 
 	popup_draw_frame(panel, cr, w, h, M, "menu");
+	// a look of another theme brings its own box: black with an orange frame for
+	// the console's blocks, white with one black line for GEM's words
+	if (m->look == MENU_LOOK_CONSOLE && !panel_console(panel)) {
+		pd_rounded(cr, M + 1, M + 1, w - 2 * M - 2, h - 2 * M - 2, 12);
+		pd_color(cr, 0x000000ff);
+		cairo_fill_preserve(cr);
+		pd_color(cr, panel_console_color(panel, 0));
+		cairo_set_line_width(cr, 2);
+		cairo_stroke(cr);
+	} else if (m->look == MENU_LOOK_GEM && !panel_atari(panel)) {
+		pd_rect(cr, M, M, w - 2 * M, h - 2 * M, 0x000000ff);
+		pd_rect(cr, M + 1, M + 1, w - 2 * M - 2, h - 2 * M - 2, 0xffffffff);
+	}
 
 	int content_x = M + m->pad + m->banner_w;
 	int content_w = w - 2 * M - 2 * m->pad - m->banner_w;
@@ -598,20 +614,58 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 	}
 
 	uint32_t fg = tw_theme_color(t, "menu.fg", 0x000000ff);
+	bool foreign_gem = m->look == MENU_LOOK_GEM && !panel_atari(panel);
+	if (foreign_gem) {
+		fg = 0x000000ff;
+	}
 	uint32_t hl_bg = tw_theme_color(t, "menu.hl_bg", style == PS_CLASSIC ? 0x000080ff :
 		style == PS_LUNA ? 0x316ac5ff : style == PS_AERO ? 0xd9e8fbff :
 		style == PS_FLUENT ? 0x0000000f : 0xdadadaff);
 	uint32_t hl_fg = tw_theme_color(t, "menu.hl_fg",
 		style == PS_CLASSIC || style == PS_LUNA ? 0xffffffff : 0x000000ff);
 	uint32_t disabled = tw_theme_color(t, "menu.disabled_fg", 0x808080ff);
-	int icon_size = m->classic_start ? 24 : tw_theme_int(t, "menu.icon_size", 16);
+	if (foreign_gem) {
+		hl_bg = 0x000000ff;
+		hl_fg = 0xffffffff;
+		disabled = 0x808080ff;
+	}
+	int icon_size = m->classic_start && m->look == MENU_LOOK_THEME ? 24 :
+		tw_theme_int(t, "menu.icon_size", 16);
 
+	if (m->look == MENU_LOOK_CONSOLE) {
+		// blocks of colour with a round left end, the word in capitals at the
+		// right end, the chosen one peach; a gap between groups
+		for (int i = 0; i < m->items->length; i++) {
+			struct menu_item *item = m->items->items[i];
+			int y = m->ys[i], ih = m->hs[i];
+			if (item->separator) {
+				continue;
+			}
+			bool sel = i == m->selected && selectable(item);
+			uint32_t color = item->disabled ? 0x5a4a3aff : sel ? panel_console_color(panel, 1) :
+				panel_console_color(panel, 2 + i % 5);
+			pd_console_block(cr, content_x, y + 2, content_w, ih - 4, true, false, color);
+			char *upper = g_utf8_strup(item->label ? item->label : "", -1);
+			pd_text(cr, tw_theme_str(t, "menu.bold_font", bar_bold_font(panel)), upper,
+				content_x + m->icon_col, y + 2, content_w - m->icon_col - 10, ih - 4,
+				0x000000ff, PD_RIGHT);
+			g_free(upper);
+			if (item->checked) {
+				draw_check(cr, content_x + 6, y + (ih - 12) / 2.0, 12, 0x000000ff);
+			} else if (item->children) {
+				pd_glyph_arrow(cr, content_x + 6, y + (ih - 12) / 2.0, 12, 0, 0x000000ff);
+			}
+			psurface_add_hotspot(p->surface, content_x, y, content_w, ih, NULL,
+				MENU_HS_ITEM, i, NULL);
+		}
+		return;
+	}
 	for (int i = 0; i < m->items->length; i++) {
 		struct menu_item *item = m->items->items[i];
 		int y = m->ys[i], ih = m->hs[i];
 		if (item->separator) {
 			double sy = y + ih / 2.0;
-			if (panel_atari(panel)) {
+			if (m->look == MENU_LOOK_GEM) {
 				// a line of dashes, as GEM greys out a row of them
 				for (double dx = content_x + 2; dx < content_x + content_w - 2; dx += 2) {
 					pd_rect(cr, dx, floor(sy), 1, 1, fg);
@@ -649,7 +703,7 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 			}
 		}
 		uint32_t color = item->disabled ? disabled : sel ? hl_fg : fg;
-		if (item->icon && !panel_atari(panel)) {
+		if (item->icon && m->look != MENU_LOOK_GEM) {
 			cairo_surface_t *icon = apps_icon(panel, item->icon, icon_size * p->surface->scale);
 			if (icon) {
 				pd_icon(cr, icon, content_x + (m->icon_col - icon_size) / 2.0,
@@ -954,9 +1008,11 @@ static const struct popup_vtable menu_vtable = {
 	.destroy = menu_destroy,
 };
 
+static const struct popup_vtable menu_vtable;
+
 static struct popup *menu_create(struct panel *panel, struct popup *parent,
 		struct panel_output *output, list_t *items, bool owns, int x, int y,
-		bool above, const char *context_id, bool classic_start) {
+		bool above, const char *context_id, bool classic_start, enum menu_look look) {
 	if (!items || items->length == 0) {
 		if (owns) {
 			menu_items_free(items);
@@ -972,22 +1028,37 @@ static struct popup *menu_create(struct panel *panel, struct popup *parent,
 	m->selected = -1;
 	m->pending_submenu = -1;
 	m->classic_start = classic_start;
+	// the theme's own look, or what the start menu asked for; a submenu as its parent
+	m->look = look != MENU_LOOK_THEME ? look : panel_atari(panel) ? MENU_LOOK_GEM :
+		panel_console(panel) ? MENU_LOOK_CONSOLE : MENU_LOOK_THEME;
+	if (parent && parent->vtable == &menu_vtable) {
+		m->look = ((struct menu *)parent->data)->look;
+	}
+
 	m->margin = popup_shadow_margin(panel);
 	m->pad = style == PS_CLASSIC ? 3 : style == PS_FLUENT ? 5 : 3;
 	int default_item_h = style == PS_CLASSIC ? 20 : style == PS_LUNA ? 22 :
 		style == PS_AERO ? 24 : 32;
-	m->item_h = classic_start ? tw_theme_int(t, "startmenu.item_height", 32) :
+	m->item_h = classic_start && (look == MENU_LOOK_THEME || panel_atari(panel) ||
+		panel_console(panel)) ? tw_theme_int(t, "startmenu.item_height", 32) :
 		tw_theme_int(t, "menu.item_height", default_item_h);
 	m->sep_h = style == PS_CLASSIC ? 9 : style == PS_FLAT || style == PS_FLUENT ? 11 : 8;
 	m->icon_col = classic_start ? 36 : style == PS_AERO ? 30 : 26;
 	m->arrow_col = 20;
-	if (panel_atari(panel)) {
+	if (m->look == MENU_LOOK_CONSOLE) {
+		// a column of blocks of colour, a little apart
+		m->icon_col = 22;
+		m->pad = 6;
+		m->sep_h = 8;
+	}
+	if (m->look == MENU_LOOK_GEM) {
 		// the menus of GEM: words alone, two characters in, a check mark in front
 		m->icon_col = 18;
 		m->pad = 1;
 		m->sep_h = tw_theme_int(t, "menu.item_height", 18);
 	}
-	m->banner_w = classic_start ? tw_theme_int(t, "startmenu.banner_width", 22) : 0;
+	m->banner_w = classic_start && m->look == MENU_LOOK_THEME ?
+		tw_theme_int(t, "startmenu.banner_width", 22) : 0;
 
 	cairo_t *cr = popup_scratch_cairo();
 	int max_text = 60;
@@ -1028,13 +1099,14 @@ static struct popup *menu_create(struct panel *panel, struct popup *parent,
 struct popup *menu_open_at(struct panel *panel, struct popup *parent,
 		struct panel_output *output, list_t *items, bool owns, int x, int y,
 		bool above, const char *context_id) {
-	return menu_create(panel, parent, output, items, owns, x, y, above, context_id, false);
+	return menu_create(panel, parent, output, items, owns, x, y, above, context_id, false,
+		MENU_LOOK_THEME);
 }
 
 void menu_open(struct panel *panel, list_t *items, bool owns,
 		struct popup_anchor anchor, const char *context_id) {
 	struct popup *p = menu_create(panel, NULL, anchor.output, items, owns, anchor.x,
-		anchor.y, anchor.above, context_id, false);
+		anchor.y, anchor.above, context_id, false, MENU_LOOK_THEME);
 	if (p && anchor.right_align) {
 		int nx = anchor.x - p->width;
 		zwlr_layer_surface_v1_set_margin(p->surface->layer_surface, p->y, 0, 0, nx < 0 ? 0 : nx);
@@ -1044,8 +1116,8 @@ void menu_open(struct panel *panel, list_t *items, bool owns,
 }
 
 void menu_open_start_classic(struct panel *panel, struct panel_output *output,
-		list_t *items, int x, int y, bool above) {
-	menu_create(panel, NULL, output, items, true, x, y, above, NULL, true);
+		list_t *items, int x, int y, bool above, enum menu_look look) {
+	menu_create(panel, NULL, output, items, true, x, y, above, NULL, true, look);
 }
 
 bool power_command_available(const char *command) {
@@ -1212,6 +1284,15 @@ static void save_history(list_t *list, const char *entry) {
 static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, double y,
 		double w, double h, const char *label, bool is_default) {
 	enum pstyle style = panel_style(panel);
+	if (panel_console(panel)) {
+		// a block with round ends, the default one orange
+		pd_console_block(cr, x, y, w, h, true, true, is_default ?
+			panel_console_color(panel, 0) : panel_console_color(panel, 3));
+		char *upper = g_utf8_strup(label, -1);
+		pd_text(cr, bar_bold_font(panel), upper, x + 4, y, w - 8, h, 0x000000ff, PD_CENTER);
+		g_free(upper);
+		return;
+	}
 	if (panel_atari(panel)) {
 		pd_atari_button(cr, x, y, w, h, bar_font(panel), label, is_default, false,
 			tw_theme_color(panel->theme, "dialog.fg", 0x000000ff),
@@ -1263,6 +1344,37 @@ static void draw_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, 
 	int M = popup_shadow_margin(panel);
 	int w = p->surface->width - 2 * M, h = p->surface->height - 2 * M;
 	cairo_translate(cr, M, M);
+	if (panel_console(panel)) {
+		// the top bar of the console: the elbow, a bar, the title in capitals and a
+		// close block at the right end; a line down the left side
+		uint32_t frame = panel_console_color(panel, 0);
+		int bar = 22;
+		pd_rounded(cr, 0, 0, w, h, 14);
+		pd_color(cr, tw_theme_color(panel->theme, "dialog.bg", 0x000000ff));
+		cairo_fill(cr);
+		pd_console_block(cr, 0, 0, 90, bar, true, false, frame);
+		pd_rect(cr, 0, bar / 2.0, 8, h - bar, frame);
+		pd_console_block(cr, 0, h - 8, 90, 8, false, false, frame);
+		double cbw = 62, cbx = w - cbw;
+		pd_console_block(cr, cbx, 0, cbw, bar, false, true, panel_console_color(panel, 6));
+		pd_text(cr, "Antonio, Nimbus Sans Narrow, Sans Condensed Bold 8", "CLOSE", cbx + 4,
+			bar / 2.0, cbw - 14, bar / 2.0, 0x000000ff, PD_LEFT);
+		psurface_add_hotspot(p->surface, M + cbx, M, cbw, bar, NULL, close_kind, 0, NULL);
+		char *upper = g_utf8_strup(title, -1);
+		int tw = 0;
+		pd_text_size(cr, bar_bold_font(panel), upper, &tw, NULL);
+		double tx = cbx - 10 - tw;
+		pd_text(cr, bar_bold_font(panel), upper, tx, 0, tw + 2, bar, frame, PD_LEFT);
+		if (tx - 10 > 94) {
+			pd_console_block(cr, 94, 0, tx - 10 - 94, bar, false, false,
+				panel_console_color(panel, 2));
+		}
+		g_free(upper);
+		*width = w;
+		*height = h;
+		*content_y = bar + 4;
+		return;
+	}
 	if (panel_atari(panel)) {
 		// a window of GEM: one black line, the dotted title bar with the close
 		// box on the left

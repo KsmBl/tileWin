@@ -338,7 +338,7 @@ static void scan_theme_dir(list_t *names, const char *dir) {
  */
 static int theme_order(const void *a, const void *b) {
 	static const char *const order[] = { "win1", "atari", "win3", "win95", "win2000", "winxp",
-		"winxp-dark", "vista", "win7", "win8", "win10", "win11", "sway" };
+		"winxp-dark", "vista", "win7", "win8", "win10", "win11", "console", "sway" };
 	const char *x = *(const char **)a, *y = *(const char **)b;
 	int rx = 100, ry = 100;
 	for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); i++) {

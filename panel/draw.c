@@ -783,3 +783,29 @@ void pd_atari_alert_icon(cairo_t *cr, double x, double y, double size, char kind
 	}
 	cairo_restore(cr);
 }
+
+/* ---------- the Starship Console theme ---------- */
+
+void pd_console_block(cairo_t *cr, double x, double y, double w, double h, bool round_left,
+		bool round_right, uint32_t color) {
+	double r = h / 2;
+	if (w < h) {
+		round_left = round_right = false;
+	}
+	cairo_new_path(cr);
+	if (round_left) {
+		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
+	} else {
+		cairo_move_to(cr, x, y + h);
+		cairo_line_to(cr, x, y);
+	}
+	if (round_right) {
+		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
+	} else {
+		cairo_line_to(cr, x + w, y);
+		cairo_line_to(cr, x + w, y + h);
+	}
+	cairo_close_path(cr);
+	pd_color(cr, color);
+	cairo_fill(cr);
+}

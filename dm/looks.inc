@@ -928,6 +928,122 @@ static void draw_atari(struct output *o, cairo_t *cr, double W, double H) {
 		AREA_LOGIN, 0);
 }
 
+/* ---------- Starship Console ---------- */
+
+static const uint32_t console_colors[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
+	0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+
+/* A block with round ends where asked. */
+static void console_block(cairo_t *cr, double x, double y, double w, double h, bool left,
+		bool right, uint32_t c) {
+	double r = h / 2;
+	cairo_new_path(cr);
+	if (left) {
+		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
+	} else {
+		cairo_move_to(cr, x, y + h);
+		cairo_line_to(cr, x, y);
+	}
+	if (right) {
+		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
+	} else {
+		cairo_line_to(cr, x + w, y);
+		cairo_line_to(cr, x + w, y + h);
+	}
+	cairo_close_path(cr);
+	color(cr, c);
+	cairo_fill(cr);
+}
+
+static void console_button(struct output *o, cairo_t *cr, double x, double y, double w,
+		double h, const char *label, uint32_t c, enum area area, int index) {
+	console_block(cr, x, y, w, h, true, true, c);
+	text_in(cr, g.bold, label, x + h / 2, y, w - h, h, 0x000000ff, MIDDLE);
+	add_hit(o, x, y, w, h, area, index);
+}
+
+/*
+ * The screen of the console: a bracket round it (a bar along the top turning
+ * down the left side into the bar along the bottom), ACCESS and the name of
+ * the computer in the top bar, the fields with round ends, the buttons blocks.
+ */
+static void draw_console(struct output *o, cairo_t *cr, double W, double H) {
+	cairo_rectangle(cr, 0, 0, W, H);
+	color(cr, 0x000000ff);
+	cairo_fill(cr);
+	double m = 24, bar = 30, side = 40, inner = 24;
+	uint32_t frame = console_colors[0];
+	cairo_new_path(cr);
+	cairo_move_to(cr, m, m + 60);
+	cairo_arc(cr, m + 60, m + 60, 60, M_PI, 3 * M_PI / 2);
+	cairo_line_to(cr, W * 0.45, m);
+	cairo_line_to(cr, W * 0.45, m + bar);
+	cairo_line_to(cr, m + side + inner, m + bar);
+	cairo_arc_negative(cr, m + side + inner, m + bar + inner, inner, -M_PI / 2, M_PI);
+	cairo_line_to(cr, m + side, H - m - bar - inner);
+	cairo_arc_negative(cr, m + side + inner, H - m - bar - inner, inner, M_PI, M_PI / 2);
+	cairo_line_to(cr, W * 0.45, H - m - bar);
+	cairo_line_to(cr, W * 0.45, H - m);
+	cairo_line_to(cr, m + 60, H - m);
+	cairo_arc(cr, m + 60, H - m - 60, 60, M_PI / 2, M_PI);
+	cairo_close_path(cr);
+	color(cr, frame);
+	cairo_fill(cr);
+	// the bars that go on along the top and the bottom
+	console_block(cr, W * 0.45 + 6, m, W * 0.2, bar, false, false, console_colors[2]);
+	console_block(cr, W * 0.65 + 12, m, W - m - W * 0.65 - 12, bar, false, true,
+		console_colors[3]);
+	console_block(cr, W * 0.45 + 6, H - m - bar, W * 0.3, bar, false, false, console_colors[4]);
+	console_block(cr, W * 0.75 + 12, H - m - bar, W - m - W * 0.75 - 12, bar, false, true,
+		console_colors[5]);
+	char title[256];
+	card_title(title, sizeof(title));
+	char *upper = g_utf8_strup(title, -1);
+	text_in(cr, g.bold, "ACCESS", m + 80, m, 200, bar, 0x000000ff, LEFT);
+	text_in(cr, g.bold, upper, W * 0.65 + 24, m, W - m - W * 0.65 - 50, bar, 0x000000ff, RIGHT);
+	g_free(upper);
+
+	double w = 420, x = round((W - w) / 2), y = round(H / 2 - 110);
+	text_in(cr, "Antonio, Nimbus Sans Narrow, Sans Condensed Bold 28", "IDENTIFY", x, y, w, 44,
+		frame, LEFT);
+	y += 56;
+	if (typing_name()) {
+		name_field(o, cr, x, y, w, 36, 18);
+	} else {
+		box_path(cr, x, y, w, 36, 18);
+		color(cr, g.field_bg);
+		cairo_fill(cr);
+		text_in(cr, g.bold, g.users[g.user_sel].name, x + 18, y, w - 50, 36, g.fg, LEFT);
+		text_in(cr, g.font, "\xe2\x96\xbe", x + w - 34, y, 18, 36, g.fg, MIDDLE);
+		add_hit(o, x, y, w, 36, AREA_USER, (g.user_sel + 1) % (g.user_count + 1));
+	}
+	y += 46;
+	password_field(o, cr, x, y, w, 36, 18, false);
+	y += 46;
+	if (sessions_shown()) {
+		session_row(o, cr, x, y, w, 26, g.fg);
+		y += 32;
+	}
+	if (has_layouts()) {
+		layout_row(o, cr, x, y, w, 22, g.fg);
+		y += 28;
+	}
+	text_in(cr, g.font, status_line(), x, y, w, 24, g.message_error ? console_colors[6] : g.fg,
+		LEFT);
+	y += 32;
+	console_button(o, cr, x, y, 160, 34, g.stage == STAGE_PROMPT ? "GO ON" : "LOG ON",
+		console_colors[0], AREA_LOGIN, 0);
+	double bx = x + 170;
+	static const char *const words[] = { "HIBERNATE", "SLEEP", "RESTART", "SHUT DOWN" };
+	for (int i = POWER_REBOOT; i <= POWER_POWEROFF; i++) {
+		if (power_on(i) && bx + 120 <= W - m - 10) {
+			console_button(o, cr, bx, H - m - bar - 50, 120, 34, words[i],
+				console_colors[2 + i % 5], AREA_POWER, i);
+			bx += 128;
+		}
+	}
+}
+
 /* ---------- sway ---------- */
 
 /* The ring of swaylock: it lights up a little further with each key. */
@@ -1002,6 +1118,9 @@ static void draw_login(struct output *o, cairo_t *cr, double W, double H) {
 		break;
 	case LOOK_ATARI:
 		draw_atari(o, cr, W, H);
+		break;
+	case LOOK_CONSOLE:
+		draw_console(o, cr, W, H);
 		break;
 	case LOOK_SWAY:
 		draw_ring(o, cr, W, H);

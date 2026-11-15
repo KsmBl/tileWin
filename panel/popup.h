@@ -53,8 +53,10 @@ void popup_set_dirty(struct popup *p);
 struct popup *menu_open_at(struct panel *panel, struct popup *parent,
 	struct panel_output *output, list_t *items, bool owns, int x, int y,
 	bool above, const char *context_id);
+/* How a menu looks: as its theme, as GEM's (words alone), as the console's (blocks). */
+enum menu_look { MENU_LOOK_THEME, MENU_LOOK_GEM, MENU_LOOK_CONSOLE };
 void menu_open_start_classic(struct panel *panel, struct panel_output *output,
-	list_t *items, int x, int y, bool above);
+	list_t *items, int x, int y, bool above, enum menu_look look);
 cairo_t *popup_scratch_cairo(void);
 /* Background, border and shadow shared by menus and flyouts. */
 void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,

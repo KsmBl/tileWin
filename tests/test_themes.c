@@ -103,6 +103,23 @@ int main(void) {
 		tw_theme_free(st);
 	}
 
+	// Starship Console: always dark (its colours also in the dark block, so the
+	// dark ones of Windows 10, which it inherits, never show), black, orange
+	// frames, its own blocks for the start menu and its own icons
+	struct tw_theme *sc = load("console");
+	if (sc) {
+		if (!sc->style || strcmp(sc->style, "console") != 0) {
+			fail("console", "does not draw in the console style", sc->style);
+		}
+		check_str(sc, "scheme", "dark");
+		check_color(sc, "wallpaper.color", 0x000000ff);
+		check_color(sc, "decoration.active.title_bg", 0xff9c3aff);
+		check_color(sc, "menu.bg", 0x000000ff);
+		check_str(sc, "startmenu.layout", "blocks");
+		check_str(sc, "icons.set", "console");
+		tw_theme_free(sc);
+	}
+
 	// Windows 3.1 came without a wallpaper: the light grey of "Windows Default"
 	struct tw_theme *t = load("win3");
 	if (t) {

@@ -62,6 +62,7 @@ enum era {
 	ERA_WIN8,
 	ERA_WIN10,
 	ERA_WIN11,
+	ERA_CONSOLE, // Starship Console: blocks of colour on black, in its frame
 };
 
 enum hit {
@@ -349,6 +350,22 @@ static void button(cairo_t *cr, double x, double y, double w, double h, const ch
 		bool primary, bool hover, bool pressed) {
 	bool dark = agent.dark;
 	switch (agent.era) {
+	case ERA_CONSOLE: {
+		// a block with round ends, the default orange; the word in capitals
+		double r = h / 2;
+		cairo_new_path(cr);
+		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
+		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
+		cairo_close_path(cr);
+		uint32_t c = pressed ? 0xffcf99ff : primary ? agent.accent : hover ? 0x8fc8ffff : 0x8f9bffff;
+		cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
+			(c >> 8 & 0xff) / 255.0, 1);
+		cairo_fill(cr);
+		char *upper = g_utf8_strup(label, -1);
+		button_label(cr, upper, x, y, w, h, 0x000000ff, 0);
+		g_free(upper);
+		return;
+	}
 	case ERA_ATARI:
 		// GEM: one black line, three round the default button, inverted while pressed
 		box(cr, x, y, w, h, 0, pressed ? agent.fg : agent.body);
@@ -1631,7 +1648,7 @@ static enum era era_of(const struct tw_theme *t) {
 		const char *name;
 		enum era era;
 	} eras[] = {
-		{ "atari", ERA_ATARI },
+		{ "atari", ERA_ATARI }, { "console", ERA_CONSOLE },
 		{ "win1", ERA_WIN1 }, { "win3", ERA_WIN3 }, { "win31", ERA_WIN3 },
 		{ "win95", ERA_WIN95 }, { "classic", ERA_WIN95 }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
@@ -1654,7 +1671,7 @@ static void load_theme(void) {
 	free(name);
 	const struct tw_theme *t = agent.theme;
 	enum era era = agent.era = era_of(t);
-	agent.framed = era <= ERA_WIN8;
+	agent.framed = era <= ERA_WIN8 || era == ERA_CONSOLE;
 	agent.dither = era <= ERA_WIN95;
 	agent.accent = tw_theme_color(t, "flyout.accent",
 		tw_theme_color(t, "taskbar.indicator", 0x0078d4ff));
@@ -1670,6 +1687,21 @@ static void load_theme(void) {
 	agent.no_label = old ? "Cancel" : "No";
 
 	switch (era) {
+	case ERA_CONSOLE:
+		agent.body = 0x000000ff;
+		agent.fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
+		agent.instruction = tw_theme_color(t, "dialog.heading_fg", 0xff9c3aff);
+		agent.dim = 0xc896d8ff;
+		agent.field_bg = tw_theme_color(t, "dialog.field_bg", 0x1a1208ff);
+		agent.field_fg = agent.fg;
+		agent.field_line = 0xc896d8ff;
+		agent.field_focus = 0xff9c3aff;
+		agent.error = 0xd4707aff;
+		agent.dark = true;
+		agent.question = "A program needs the password of an administrator.";
+		agent.yes_label = "Allow";
+		agent.no_label = "Deny";
+		return;
 	case ERA_ATARI:
 		// the theme's own black and white, turned round in its dark scheme
 		agent.body = tw_theme_color(t, "dialog.bg", 0xffffffff);

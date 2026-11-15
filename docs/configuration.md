@@ -210,7 +210,7 @@ All styles and their sizes are listed with the widgets in `common/tw_widgets.c`;
 - `menu window` adds entries to the menu of taskbar buttons. `{id}` is replaced with the window's con_id.
 - `menu desktop` adds entries to the right-click menu of the empty desktop.
 
-The `startmenu { }` block sets the style of the menu (`layout theme|classic|twocolumn|list|tiles|centered`, `theme` being the one the current theme asks for), pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
+The `startmenu { }` block sets the style of the menu (`layout theme|classic|twocolumn|list|tiles|centered|progman|desk|blocks`, `theme` being the one the current theme asks for; `desk` is the Desk menu of the Atari ST, words alone in black on white, and `blocks` the column of coloured blocks of Starship Console, both in any theme), pinned apps (`pinned <desktop ids>`), `place "Label" <icon> <command>` links and `power "Label" <command>` entries.
 
 ### Accent color
 

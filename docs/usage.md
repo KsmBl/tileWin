@@ -339,6 +339,7 @@ Window mode and tile mode each remember their own theme: switching the mode (Sup
 | `win8` | Colored window frames with centered titles, translucent blue taskbar, a start screen of colored tiles over the whole screen |
 | `win10` | Flat white title bars, dark taskbar with search box, list start menu |
 | `win11` | Rounded light title bars, centered taskbar, grid start menu |
+| `console` | Starship Console, in the style of the touch screens of science fiction starships (an original design, without the names, logos or artwork of any film or series): black, windows framed by a thick bar down the left that turns at round elbows into the bar along the top and the line along the bottom, the title in narrow capitals at the right end of the top bar, MIN, MAX and CLOSE as blocks of colour; the taskbar a row of blocks from MENU at its round left end to the clock at its round right end, the windows in the colours of their apps; the start menu a column of blocks (**Blocks**, also on the Start menu page for any theme); dialogs, the shutdown screen, the login and lock screens and the settings in its bars and blocks, its own icons in its colours. Always dark. The narrow font is Antonio or Oswald when installed, else Nimbus Sans Narrow |
 | `sway` | A sway + waybar desktop: dark Catppuccin-like colors, 3px lavender borders and gaps in tile mode, a floating bar with rounded groups and colored widgets, GoMono Nerd Font |
 
 Your own themes, and every key a theme can set: [docs/configuration.md](configuration.md#your-own-themes-themeconf).

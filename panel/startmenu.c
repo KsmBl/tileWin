@@ -19,6 +19,8 @@
 /*
  * Start menu with four theme-dependent layouts:
  *   classic   - Windows 95 cascading menu with a side banner
+ *   desk      - the Desk menu of GEM (Atari ST): words alone, dropping from the bar
+ *   blocks    - a column of blocks of colour (Starship Console)
  *   twocolumn - Windows XP / 7: pinned apps left, places right
  *   list      - Windows 10: side strip + alphabetical list
  *   centered  - Windows 11: search box, pinned grid, footer
@@ -323,7 +325,8 @@ static const char *category_label(const struct tw_desktop_entry *e, const char *
 	return "Other";
 }
 
-static void open_classic(struct panel *panel, struct panel_output *output) {
+static void open_classic(struct panel *panel, struct panel_output *output,
+		enum menu_look look) {
 	list_t *apps = load_apps();
 	struct startmenu tmp = { .apps = apps };
 	load_config(panel, &tmp);
@@ -419,7 +422,7 @@ static void open_classic(struct panel *panel, struct panel_output *output) {
 	// up from a taskbar at the bottom, down from one at the top (the menu bar of
 	// the Atari ST theme, where it drops from Desk)
 	menu_open_start_classic(panel, output, items, 2, bottom ? output->height - bar + 2 : bar,
-		bottom);
+		bottom, look);
 }
 
 /* ---------- drawing helpers ---------- */
@@ -1904,6 +1907,12 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	if (chosen && strcmp(chosen, "theme") != 0) {
 		layout_name = chosen;
 	}
+	// GEM's Desk menu and the console's column of blocks: the classic menu
+	// with another look, in any theme
+	if (strcmp(layout_name, "desk") == 0 || strcmp(layout_name, "blocks") == 0) {
+		open_classic(panel, output, layout_name[0] == 'd' ? MENU_LOOK_GEM : MENU_LOOK_CONSOLE);
+		return;
+	}
 	enum sm_layout layout = strcmp(layout_name, "classic") == 0 ? SM_CLASSIC :
 		strcmp(layout_name, "twocolumn") == 0 ? SM_TWOCOLUMN :
 		strcmp(layout_name, "list") == 0 ? SM_LIST :
@@ -1912,7 +1921,7 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 	bool foreign = strcmp(layout_name, theme_layout) != 0;
 	palette_init(panel, foreign);
 	if (layout == SM_CLASSIC) {
-		open_classic(panel, output);
+		open_classic(panel, output, MENU_LOOK_THEME);
 		return;
 	}
 

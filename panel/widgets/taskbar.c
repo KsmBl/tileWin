@@ -281,6 +281,33 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 	int icon = 16;
 	double inner_x = b.x + 6;
 
+	if (panel_console(panel)) {
+		// a block of colour: orange for the active window, the others each in the
+		// colour of their app; the title in capitals at its right end
+		char label[512];
+		if (e->count > 1) {
+			snprintf(label, sizeof(label), "%s %d", apps_display_name(e->window->app_id),
+				e->count);
+		} else {
+			snprintf(label, sizeof(label), "%s", e->window->title);
+		}
+		unsigned hash = 5381;
+		for (const char *c = e->window->app_id ? e->window->app_id : ""; *c; c++) {
+			hash = hash * 33 + (unsigned char)*c;
+		}
+		uint32_t color = active || pressed ? tw_theme_color(t, "taskbar.active_bg", 0xff9c3aff) :
+			panel_console_color(panel, 1 + hash % 6);
+		if (hover && !active) {
+			color = (color & 0xffffff00) | 0xd0;
+		}
+		pd_console_block(cr, b.x + 2, b.y + 5, b.width - 4, b.height - 10, false, false, color);
+		char *upper = g_utf8_strup(label, -1);
+		pd_text(cr, bar_bold_font(panel), upper, b.x + 10, b.y + 5, b.width - 20, b.height - 10,
+			0x000000ff, PD_RIGHT);
+		g_free(upper);
+		draw_progress(ctx, e, b);
+		return;
+	}
 	if (panel_atari(panel)) {
 		// a title of the menu bar: the active window's inverted
 		char label[512];
@@ -714,6 +741,9 @@ const struct widget_impl widget_taskbar = {
 static int start_measure(struct widget *w, struct render_ctx *ctx) {
 	const struct tw_theme *t = ctx->panel->theme;
 	int fallback;
+	if (panel_console(ctx->panel)) {
+		return widget_conf_int(w, "width", tw_theme_int(t, "start.width", 100));
+	}
 	if (panel_atari(ctx->panel)) {
 		// "Desk", the first title of GEM's menu bar
 		const char *label = widget_conf(w, "label", tw_theme_str(t, "start.label", "Desk"));
@@ -763,6 +793,16 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 		return;
 	}
 
+	if (panel_console(panel)) {
+		// the round end of the bar, the word at its right end
+		uint32_t bg = pressed ? panel_console_color(panel, 1) : hover ?
+			panel_console_color(panel, 5) : tw_theme_color(t, "start.bg", 0xff9c3aff);
+		pd_console_block(cr, b.x + 4, b.y + 5, b.width - 6, b.height - 10, true, false, bg);
+		pd_text(cr, bar_bold_font(panel), label, b.x + 8, b.y + 5, b.width - 18, b.height - 10,
+			fg, PD_RIGHT);
+		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+		return;
+	}
 	if (panel_atari(panel)) {
 		draw_menu_title(ctx, label, b.x, b.y + 1, b.width, b.height - 2, pressed, fg,
 			tw_theme_color(t, "panel.bg", 0xffffffff));

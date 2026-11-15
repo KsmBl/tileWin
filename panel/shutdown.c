@@ -892,6 +892,45 @@ static void render_luna(struct shutdown *sd, cairo_t *cr, double W, double H) {
 		HS_CANCEL, 0, NULL);
 }
 
+/*
+ * The Starship Console theme: the screen darkened, a panel framed by the
+ * console's bars, every choice a block of colour with its word in capitals at
+ * the right end, Cancel last.
+ */
+static void render_console(struct shutdown *sd, cairo_t *cr, double W, double H) {
+	struct panel *panel = sd->panel;
+	pd_rect(cr, 0, 0, W, H, 0x000000c8);
+	const char *bold = bar_bold_font(panel);
+	double row = 34, gap = 6, pw = 380, ph = 46 + (sd->count + 1) * (row + gap) + 20;
+	double px = round((W - pw) / 2), py = round((H - ph) / 2);
+	uint32_t frame = panel_console_color(panel, 0);
+	pd_rounded(cr, px, py, pw, ph, 18);
+	pd_color(cr, 0x000000ff);
+	cairo_fill(cr);
+	// the bracket: a bar across the top turning down the left side
+	pd_console_block(cr, px, py, 130, 26, true, false, frame);
+	pd_rect(cr, px, py + 13, 12, ph - 26, frame);
+	pd_console_block(cr, px, py + ph - 12, 130, 12, false, false, frame);
+	pd_text(cr, bold, "POWER", px + 140, py, pw - 150, 26, frame, PD_LEFT);
+	pd_console_block(cr, px + pw - 90, py, 90, 26, false, true, panel_console_color(panel, 2));
+	double bx = px + 30, bw = pw - 50, by = py + 46;
+	for (int i = 0; i < sd->count; i++) {
+		bool on = hot(sd, HS_ACTION, i) || sd->selected == i;
+		uint32_t color = on ? panel_console_color(panel, 1) : panel_console_color(panel, 2 + i % 5);
+		pd_console_block(cr, bx, by, bw, row, true, false, color);
+		char *upper = g_utf8_strup(action_label(sd, sd->actions[i]), -1);
+		pd_text(cr, bold, upper, bx + row, by, bw - row - 12, row, 0x000000ff, PD_RIGHT);
+		g_free(upper);
+		psurface_add_hotspot(sd->popup->surface, bx, by, bw, row, NULL, HS_ACTION, i, NULL);
+		by += row + gap;
+	}
+	by += 6;
+	pd_console_block(cr, bx, by, bw, row, true, true, hot(sd, HS_CANCEL, 0) ?
+		panel_console_color(panel, 1) : panel_console_color(panel, 6));
+	pd_text(cr, bold, "CANCEL", bx + row, by, bw - 2 * row, row, 0x000000ff, PD_RIGHT);
+	psurface_add_hotspot(sd->popup->surface, bx, by, bw, row, NULL, HS_CANCEL, 0, NULL);
+}
+
 static void render_security(struct shutdown *sd, cairo_t *cr, double W, double H) {
 	struct panel *panel = sd->panel;
 	const struct tw_theme *t = panel->theme;
@@ -986,7 +1025,11 @@ static void sd_render(struct popup *p, cairo_t *cr) {
 		render_luna(sd, cr, W, H);
 		break;
 	case SD_SECURITY:
-		render_security(sd, cr, W, H);
+		if (panel_console(sd->panel)) {
+			render_console(sd, cr, W, H);
+		} else {
+			render_security(sd, cr, W, H);
+		}
 		break;
 	case SD_TILES:
 		render_tiles(sd, cr, W, H);

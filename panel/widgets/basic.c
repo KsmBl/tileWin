@@ -123,7 +123,7 @@ static int clock_measure(struct widget *w, struct render_ctx *ctx) {
 	struct clock_data *d = w->data;
 	int tw = 0;
 	pd_text_size(ctx->cairo, bar_font(ctx->panel), d->text, &tw, NULL);
-	return tw + (ctx->style == PSV_CLASSIC ? 12 : 20);
+	return tw + (ctx->style == PSV_CLASSIC ? 12 : panel_console(ctx->panel) ? 44 : 20);
 }
 
 static void clock_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
@@ -131,6 +131,15 @@ static void clock_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 	bool hover = render_hover(ctx, b);
 	if (ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) {
 		render_item_bg(ctx, b, false, hover, render_pressed(ctx, b));
+	}
+	if (panel_console(ctx->panel)) {
+		// the round end of the bar on the right: the time on a block
+		pd_console_block(ctx->cairo, b.x + 2, b.y + 5, b.width - 6, b.height - 10, false, true,
+			hover ? panel_console_color(ctx->panel, 5) : panel_console_color(ctx->panel, 1));
+		pd_text(ctx->cairo, bar_bold_font(ctx->panel), d->text, b.x + 6, b.y + 5,
+			b.width - 6 - b.height / 2.0, b.height - 10, 0x000000ff, PD_RIGHT);
+		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+		return;
 	}
 	const char *align = tw_theme_str(ctx->panel->theme, "clock.align", "center");
 	pd_text(ctx->cairo, bar_font(ctx->panel), d->text, b.x + 6, b.y, b.width - 12, b.height,

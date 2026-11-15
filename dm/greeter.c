@@ -69,6 +69,7 @@ enum look {
 	LOOK_DIALOG,
 	LOOK_OLD,
 	LOOK_ATARI, // a form of GEM, the Atari ST's desktop
+	LOOK_CONSOLE, // the bars and blocks of the Starship Console
 	LOOK_SWAY,
 };
 
@@ -345,6 +346,7 @@ static void read_theme(void) {
 		strcmp(style, "winxp") == 0 ? LOOK_XP :
 		strcmp(style, "win1") == 0 || strcmp(style, "win3") == 0 ? LOOK_OLD :
 		strcmp(style, "atari") == 0 ? LOOK_ATARI :
+		strcmp(style, "console") == 0 ? LOOK_CONSOLE :
 		strcmp(style, "win95") == 0 ? LOOK_DIALOG : LOOK_CARD;
 	// white fields on all that have them, whatever the menus of the theme say
 	if (g.look != LOOK_CARD && g.look != LOOK_DIALOG && g.look != LOOK_SWAY) {
@@ -366,6 +368,13 @@ static void read_theme(void) {
 		g.field_bg = g.card_bg;
 		g.field_fg = g.fg;
 		g.accent = g.card_bg;
+	}
+	if (g.look == LOOK_CONSOLE) {
+		g.card_bg = 0x000000ff;
+		g.fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
+		g.field_bg = tw_theme_color(t, "dialog.field_bg", 0x1a1208ff);
+		g.field_fg = g.fg;
+		g.accent = tw_theme_color(t, "accent.color", 0xff9c3aff);
 	}
 	if (g.look == LOOK_SWAY) {
 		g.field_bg = 0x313244ff;

@@ -450,6 +450,124 @@ static void render_atari(cairo_t *cr, double W, double H, bool sign_in,
 	flat_text(cr, font, "OK", bx + bw / 2, by + 5, 1, ink);
 }
 
+/* ---------- the Starship Console theme ---------- */
+
+static void console_block(cairo_t *cr, double x, double y, double w, double h, bool left,
+		bool right, uint32_t c) {
+	double r = h / 2;
+	cairo_new_path(cr);
+	if (left) {
+		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
+	} else {
+		cairo_move_to(cr, x, y + h);
+		cairo_line_to(cr, x, y);
+	}
+	if (right) {
+		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
+	} else {
+		cairo_line_to(cr, x + w, y);
+		cairo_line_to(cr, x + w, y + h);
+	}
+	cairo_close_path(cr);
+	set_u32(cr, c);
+	cairo_fill(cr);
+}
+
+/*
+ * The lock screen of the Starship Console: the bracket round the screen, the
+ * time in large orange figures; signing in, the password in a field with round
+ * ends and UNLOCK on a block.
+ */
+static void render_console(cairo_t *cr, double W, double H, bool sign_in,
+		const char *clock_text, const char *date_text) {
+	const struct tw_theme *t = lock.theme;
+	static const uint32_t colors[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
+		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+	uint32_t fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
+	const char *bold = tw_theme_str(t, "menu.bold_font", "Nimbus Sans Narrow, Sans Condensed Bold 11");
+	set_u32(cr, 0x000000ff);
+	cairo_paint(cr);
+	double m = 24, bar = 30, side = 40, inner = 24;
+	cairo_new_path(cr);
+	cairo_move_to(cr, m, m + 60);
+	cairo_arc(cr, m + 60, m + 60, 60, M_PI, 3 * M_PI / 2);
+	cairo_line_to(cr, W * 0.45, m);
+	cairo_line_to(cr, W * 0.45, m + bar);
+	cairo_line_to(cr, m + side + inner, m + bar);
+	cairo_arc_negative(cr, m + side + inner, m + bar + inner, inner, -M_PI / 2, M_PI);
+	cairo_line_to(cr, m + side, H - m - bar - inner);
+	cairo_arc_negative(cr, m + side + inner, H - m - bar - inner, inner, M_PI, M_PI / 2);
+	cairo_line_to(cr, W * 0.45, H - m - bar);
+	cairo_line_to(cr, W * 0.45, H - m);
+	cairo_line_to(cr, m + 60, H - m);
+	cairo_arc(cr, m + 60, H - m - 60, 60, M_PI / 2, M_PI);
+	cairo_close_path(cr);
+	set_u32(cr, colors[0]);
+	cairo_fill(cr);
+	console_block(cr, W * 0.45 + 6, m, W * 0.2, bar, false, false, colors[2]);
+	console_block(cr, W * 0.65 + 12, m, W - m - W * 0.65 - 12, bar, false, true, colors[3]);
+	console_block(cr, W * 0.45 + 6, H - m - bar, W * 0.3, bar, false, false, colors[4]);
+	console_block(cr, W * 0.75 + 12, H - m - bar, W - m - W * 0.75 - 12, bar, false, true,
+		colors[5]);
+	flat_text(cr, bold, "LOCKED", m + 80, m + 6, 0, 0x000000ff);
+	char *date = g_utf8_strup(date_text, -1);
+	flat_text(cr, bold, date, W - m - 30, m + 6, 2, 0x000000ff);
+	g_free(date);
+
+	double x = round(W / 2 - 210), y = round(H / 2 - 120);
+	char big[96];
+	snprintf(big, sizeof(big), "Antonio, Nimbus Sans Narrow, Sans Condensed Bold %d",
+		(int)(H / 10 < 40 ? 40 : H / 10));
+	int th = flat_text(cr, big, clock_text, x, y - 40, 0, colors[0]);
+	y += th - 20;
+	const char *name = lock.full_name && *lock.full_name ? lock.full_name : lock.user;
+	char *who = g_utf8_strup(name ? name : "", -1);
+	flat_text(cr, bold, who, x, y, 0, colors[2]);
+	g_free(who);
+	y += 34;
+	if (!sign_in) {
+		flat_text(cr, bold, "PRESS A KEY OR TOUCH THE SCREEN", x, y, 0, fg);
+		return;
+	}
+	double fw = 420, fh = 38;
+	cairo_new_path(cr);
+	cairo_arc(cr, x + fh / 2, y + fh / 2, fh / 2, M_PI / 2, 3 * M_PI / 2);
+	cairo_arc(cr, x + fw - fh / 2, y + fh / 2, fh / 2, -M_PI / 2, M_PI / 2);
+	cairo_close_path(cr);
+	set_u32(cr, tw_theme_color(t, "dialog.field_bg", 0x1a1208ff));
+	cairo_fill_preserve(cr);
+	set_u32(cr, colors[0]);
+	cairo_set_line_width(cr, 2);
+	cairo_stroke(cr);
+	struct text_style ts = {
+		.font = tw_theme_str(t, "menu.font", "Nimbus Sans Narrow, Sans Condensed 12"),
+		.fg = fg,
+		.selection_bg = colors[0],
+		.selection_fg = 0x000000ff,
+		.caret = !lock.checking,
+		.mask = true,
+	};
+	text_draw(cr, &ts, lock.password, &lock.tc, x + 18, y, fw - 36, fh);
+	y += fh + 14;
+	const char *msg = lock.checking ? "CHECKING..." : lock.message;
+	if (lock.xkb_state && xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CAPS,
+			XKB_STATE_MODS_LOCKED) > 0 && !(msg && *msg)) {
+		msg = "CAPS LOCK IS ON";
+	}
+	if (msg && *msg) {
+		flat_text(cr, bold, msg, x, y, 0, colors[6]);
+	} else if (lock.fingerprint) {
+		flat_text(cr, bold, "OR TOUCH THE FINGERPRINT READER", x, y, 0, fg);
+	}
+	y += 34;
+	console_block(cr, x, y, 160, 34, true, true, colors[0]);
+	flat_text(cr, bold, "UNLOCK", x + 80, y + 8, 1, 0x000000ff);
+}
+
+static bool console_theme(void) {
+	return lock.theme && lock.theme->style && strcmp(lock.theme->style, "console") == 0;
+}
+
 static bool atari_theme(void) {
 	return lock.theme && lock.theme->style && strcmp(lock.theme->style, "atari") == 0;
 }
@@ -487,6 +605,8 @@ static void render_output(struct lock_output *o) {
 	strftime(date_text, sizeof(date_text), "%A, %e %B", &tm);
 	if (atari_theme()) {
 		render_atari(cr, W, H, sign_in, clock_text, date_text);
+	} else if (console_theme()) {
+		render_console(cr, W, H, sign_in, clock_text, date_text);
 	} else {
 		cairo_set_source_rgba(cr, 0, 0, 0, sign_in ? 0.55 : 0.25);
 		cairo_paint(cr);

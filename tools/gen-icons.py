@@ -18,12 +18,17 @@ import os
 import re
 import sys
 
-THEMES = ['win95', 'winxp', 'win7', 'win10', 'win11', 'atari', 'atari-dark']
+THEMES = ['win95', 'winxp', 'win7', 'win10', 'win11', 'atari', 'atari-dark', 'console']
 
 # themes drawn as another one, then turned to black and white
 MONO = {'atari': 'win95', 'atari-dark': 'win95'}
 # and black and white swapped: the dark scheme of the Atari ST theme
 INVERTED = {'atari-dark'}
+# themes drawn as another one, then every colour turned to the nearest of a
+# palette: the Starship Console's soft colours, on black
+PALETTE = {'console': ('win10', {
+    'orange': '#ff9c3a', 'peach': '#ffcf99', 'lilac': '#c896d8', 'periwinkle': '#8f9bff',
+    'sky': '#8fc8ff', 'sand': '#e8c070', 'rose': '#d4707a'})}
 # where a set goes: themes/<theme>/<folder>
 OUT = {'atari-dark': ('atari', 'icons-dark')}
 
@@ -75,6 +80,9 @@ class Icon:
         # a black and white theme draws its shapes as the theme it is based on
         self.mono = theme in MONO
         self.inverted = theme in INVERTED
+        self.palette = PALETTE[theme][1] if theme in PALETTE else None
+        if self.palette:
+            theme = PALETTE[theme][0]
         theme = MONO.get(theme, theme)
         self.t = theme
         self.p = dict(STYLES[theme])
@@ -131,8 +139,28 @@ class Icon:
                     dots.append('M%d %dh1v1h-1z' % (x, y))
         return white + '<path clip-path="url(#%s)" fill="#000000" d="%s"/>' % (cid, ''.join(dots))
 
+    def palette_color(self, color):
+        """A colour as the nearest of the palette: by its hue, greys by lightness."""
+        if not self.palette or color is None or not color.startswith('#'):
+            return color
+        import colorsys
+        r, g, b = rgb(color[:7])
+        h, l, sat = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+        if sat < .25 or l > .92 or l < .08:
+            return self.palette['peach'] if l > .55 else self.palette['lilac']
+        hues = {'rose': 355, 'orange': 28, 'sand': 45, 'sky': 205, 'periwinkle': 235,
+                'lilac': 290}
+        deg = h * 360
+        best = min(hues, key=lambda k: min(abs(deg - hues[k]), 360 - abs(deg - hues[k])))
+        # green has no place on the console: it turns sand
+        if 70 < deg < 170:
+            best = 'sand'
+        return self.palette[best]
+
     def line_color(self, color):
         """Lines are not dithered: black unless they are near white."""
+        if self.palette:
+            return self.palette_color(color)
         if not self.mono or not color.startswith('#'):
             return color
         r, g, b = rgb(color[:7])
@@ -142,6 +170,8 @@ class Icon:
     def fill(self, color, flat=False, grad=None):
         if color is None:
             return 'none'
+        if self.palette:
+            return self.palette_color(color)
         if self.mono:
             return self.mono_color(color)
         g = grad if grad is not None else self.p['grad']

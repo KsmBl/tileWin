@@ -105,4 +105,8 @@ void pd_atari_outline(cairo_t *cr, double x, double y, double w, double h, uint3
 void pd_atari_alert_icon(cairo_t *cr, double x, double y, double size, char kind, uint32_t ink,
 	uint32_t paper);
 
+/* The Starship Console theme: a block of colour, with a half circle at either end. */
+void pd_console_block(cairo_t *cr, double x, double y, double w, double h, bool round_left,
+	bool round_right, uint32_t color);
+
 #endif

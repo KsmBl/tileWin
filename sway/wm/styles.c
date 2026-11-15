@@ -25,6 +25,7 @@ enum style {
 	STYLE_WIN8,
 	STYLE_WIN10,
 	STYLE_WIN11,
+	STYLE_CONSOLE, // Starship Console: bars and elbows of colour on black
 };
 
 enum glyph {
@@ -36,6 +37,7 @@ enum glyph {
 
 struct metrics {
 	int top, side, bottom, grab, radius;
+	int left; // the border on the left, wider than the others in the console style
 };
 
 static enum style get_style(const struct tw_theme *theme) {
@@ -56,6 +58,8 @@ static enum style get_style(const struct tw_theme *theme) {
 		return STYLE_WIN8;
 	} else if (strcasecmp(s, "win11") == 0 || strcasecmp(s, "fluent") == 0) {
 		return STYLE_WIN11;
+	} else if (strcasecmp(s, "console") == 0) {
+		return STYLE_CONSOLE;
 	}
 	return STYLE_WIN10;
 }
@@ -73,6 +77,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		[STYLE_WIN8] = { 30, 22, 8, 0, 0 },
 		[STYLE_WIN10] = { 31, 30, 1, 6, 0 },
 		[STYLE_WIN11] = { 33, 32, 1, 8, 8 },
+		[STYLE_CONSOLE] = { 30, 26, 3, 6, 0 },
 	};
 	enum style s = get_style(t);
 	int border = tw_theme_int(t, "decoration.border_width", defaults[s].border);
@@ -87,6 +92,8 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		m->grab = tw_theme_int(t, "decoration.grab_margin", defaults[s].grab);
 		m->radius = tw_theme_int(t, "decoration.corner_radius", defaults[s].radius);
 	}
+	// the console: the thick bar down the left side, where the elbows are
+	m->left = s == STYLE_CONSOLE && !maximized ? m->side + 10 : m->side;
 }
 
 void tw_style_insets(const struct tw_theme *theme, bool maximized,
@@ -94,7 +101,8 @@ void tw_style_insets(const struct tw_theme *theme, bool maximized,
 	struct metrics m;
 	get_metrics(theme, maximized, &m);
 	insets->top = m.top;
-	insets->left = insets->right = m.side;
+	insets->left = m.left;
+	insets->right = m.side;
 	insets->bottom = m.bottom;
 	if (grab_margin) {
 		*grab_margin = m.grab;
@@ -176,6 +184,15 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 		b->close = (struct wlr_box){ right - cw, 0, cw, bh };
 		b->maximize = (struct wlr_box){ b->close.x - bw, 0, bw, bh };
 		b->minimize = (struct wlr_box){ b->maximize.x - bw, 0, bw, bh };
+		break;
+	}
+	case STYLE_CONSOLE: {
+		// blocks at the right end of the top bar, the last with a round end
+		int bh = m.top - 6;
+		int right = width - m.side;
+		b->close = (struct wlr_box){ right - 62, 0, 62, bh };
+		b->maximize = (struct wlr_box){ b->close.x - 4 - 48, 0, 48, bh };
+		b->minimize = (struct wlr_box){ b->maximize.x - 4 - 48, 0, 48, bh };
 		break;
 	}
 	case STYLE_WIN10:
@@ -549,6 +566,172 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 			tw_theme_color(t, "decoration.glyph", 0x000000ff));
 	}
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+}
+
+/* ---------- Starship Console ---------- */
+
+/* The colour of a block: the theme's palette, in turn. */
+static uint32_t console_color(const struct tw_theme *t, int index) {
+	static const uint32_t fallback[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
+		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+	const char *spec = tw_theme_str(t, "palette.colors", NULL);
+	if (spec) {
+		char *copy = strdup(spec), *save = NULL;
+		int count = 0;
+		uint32_t colors[16];
+		for (char *tok = strtok_r(copy, " ,", &save); tok && count < 16;
+				tok = strtok_r(NULL, " ,", &save)) {
+			if (tw_parse_color(tok, &colors[count])) {
+				count++;
+			}
+		}
+		free(copy);
+		if (count > 0) {
+			return colors[((index % count) + count) % count];
+		}
+	}
+	return fallback[index % 7];
+}
+
+/* A colour a little darker, for a window without the focus. */
+static uint32_t console_dim(uint32_t c, bool focused) {
+	if (focused) {
+		return c;
+	}
+	uint32_t out = c & 0xff;
+	for (int shift = 8; shift < 32; shift += 8) {
+		out |= (uint32_t)(((c >> shift) & 0xff) * 0.45) << shift;
+	}
+	return out;
+}
+
+/* A block with round ends where asked: as high as it is, a half circle. */
+static void console_block(cairo_t *cr, double x, double y, double w, double h, bool round_left,
+		bool round_right, uint32_t color) {
+	double r = h / 2;
+	cairo_new_path(cr);
+	if (round_left) {
+		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
+	} else {
+		cairo_move_to(cr, x, y + h);
+		cairo_line_to(cr, x, y);
+	}
+	if (round_right) {
+		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
+	} else {
+		cairo_line_to(cr, x + w, y);
+		cairo_line_to(cr, x + w, y + h);
+	}
+	cairo_close_path(cr);
+	cairo_set_source_u32(cr, color);
+	cairo_fill(cr);
+}
+
+static void draw_console(cairo_t *cr, const struct tw_theme *t,
+		const struct tw_frame *f, const struct metrics *m) {
+	int W = f->width, H = f->height;
+	bool on = f->focused;
+	uint32_t frame = state_color(t, f, "frame", 0xff9c3aff, 0x7a5a3cff);
+	uint32_t accent = state_color(t, f, "accent", 0xc896d8ff, 0x6a5070ff);
+	double bar = m->top - 6, L = m->left, s = m->side;
+	double elbow = W > 400 ? 120 : W / 4.0, outer = 22, inner = 10;
+
+	// black behind it all
+	cairo_rectangle(cr, 0, 0, W, H);
+	cairo_set_source_u32(cr, tw_theme_color(t, "decoration.face", 0x000000ff));
+	cairo_fill(cr);
+
+	cairo_new_path(cr);
+	if (L > s) {
+		// the bracket: the top bar turns down into the thick bar on the left, which
+		// turns into the line along the bottom, round outside, hollowed inside
+		cairo_move_to(cr, 0, outer);
+		cairo_arc(cr, outer, outer, outer, M_PI, 3 * M_PI / 2);
+		cairo_line_to(cr, elbow, 0);
+		cairo_line_to(cr, elbow, bar);
+		cairo_line_to(cr, L + inner, bar);
+		cairo_arc_negative(cr, L + inner, bar + inner, inner, -M_PI / 2, M_PI);
+		cairo_line_to(cr, L, H - s - inner);
+		cairo_arc_negative(cr, L + inner, H - s - inner, inner, M_PI, M_PI / 2);
+		cairo_line_to(cr, W, H - s);
+		cairo_line_to(cr, W, H);
+		cairo_line_to(cr, outer, H);
+		cairo_arc(cr, outer, H - outer, outer, M_PI / 2, M_PI);
+		cairo_close_path(cr);
+	} else {
+		// filling the screen: the top bar alone, round at its left end
+		cairo_arc(cr, bar / 2, bar / 2, bar / 2, M_PI / 2, 3 * M_PI / 2);
+		cairo_line_to(cr, elbow, 0);
+		cairo_line_to(cr, elbow, bar);
+		cairo_close_path(cr);
+	}
+	cairo_set_source_u32(cr, frame);
+	cairo_fill(cr);
+	// the line down the right side
+	if (s > 0) {
+		cairo_rectangle(cr, W - s, bar + 6, s, H - bar - 6);
+		cairo_set_source_u32(cr, frame);
+		cairo_fill(cr);
+	}
+
+	struct tw_buttons b;
+	frame_buttons(t, f, W, &b);
+	double end = b.minimize.width > 0 ? b.minimize.x : b.close.x;
+	// the title, in capitals, at the right end of the bar before the buttons
+	const char *font = tw_theme_str(t, "decoration.title_font",
+		"Antonio, Nimbus Sans Narrow, Sans Condensed Bold 11");
+	double title_end = end - 10, title_w = 0;
+	if (f->title && *f->title) {
+		char *upper = g_utf8_strup(f->title, -1);
+		double room = title_end - (elbow + 14);
+		if (room > 20) {
+			PangoLayout *layout = make_layout(cr, font, upper, room);
+			int tw, th;
+			pango_layout_get_pixel_size(layout, &tw, &th);
+			g_object_unref(layout);
+			title_w = tw < room ? tw : room;
+			draw_text(cr, font, upper, title_end - title_w, 0, title_w + 1, bar,
+				state_color(t, f, "title_fg", 0xff9c3aff, 0xa08060ff), false, TEXT_PLAIN, 0);
+		}
+		g_free(upper);
+	}
+	// the bar from the elbow to the title, in the second colour
+	double bar_end = title_end - title_w - 10;
+	if (bar_end > elbow + 8) {
+		console_block(cr, elbow + 4, 0, bar_end - elbow - 4, bar, false, false, accent);
+	}
+
+	struct {
+		const struct wlr_box *box;
+		const char *label;
+		int color;
+		enum tw_hit hit;
+	} blocks[] = {
+		{ &b.minimize, "MIN", 4, TW_HIT_MINIMIZE },
+		{ &b.maximize, f->maximized ? "RESTORE" : "MAX", 2, TW_HIT_MAXIMIZE },
+		{ &b.close, "CLOSE", 6, TW_HIT_CLOSE },
+	};
+	const char *small = "Antonio, Nimbus Sans Narrow, Sans Condensed Bold 8";
+	for (size_t i = 0; i < sizeof(blocks) / sizeof(blocks[0]); i++) {
+		const struct wlr_box *box = blocks[i].box;
+		if (box->width <= 0) {
+			continue;
+		}
+		uint32_t c = console_dim(console_color(t, blocks[i].color), on);
+		bool hover = f->hover == blocks[i].hit, pressed = hover && f->pressed == blocks[i].hit;
+		console_block(cr, box->x, box->y, box->width, box->height, false,
+			blocks[i].hit == TW_HIT_CLOSE, c);
+		if (hover || pressed) {
+			console_block(cr, box->x, box->y, box->width, box->height, false,
+				blocks[i].hit == TW_HIT_CLOSE, tw_theme_color(t, pressed ?
+				"decoration.button.pressed" : "decoration.button.hover",
+				pressed ? 0x00000040 : 0xffffff40));
+		}
+		// the word at the lower right of the block, as the consoles write it
+		draw_text(cr, small, blocks[i].label, box->x + 4, box->y + box->height / 2.0,
+			box->width - (blocks[i].hit == TW_HIT_CLOSE ? 14 : 6), box->height / 2.0,
+			0x000000ff, false, TEXT_PLAIN, 0);
+	}
 }
 
 /* ---------- Atari ST (GEM) ---------- */
@@ -1324,6 +1507,9 @@ void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 	switch (get_style(theme)) {
 	case STYLE_ATARI:
 		draw_atari(cr, theme, frame, &m);
+		break;
+	case STYLE_CONSOLE:
+		draw_console(cr, theme, frame, &m);
 		break;
 	case STYLE_WIN1:
 		draw_win1(cr, theme, frame, &m);

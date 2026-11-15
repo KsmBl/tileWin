@@ -82,6 +82,7 @@ void settings_apply_color_scheme(bool dark) {
 
 static bool glossy; // XP to 7: the icons with a shine, flat before and after
 static bool atari;  // the Atari ST: the black and white icons of GEM's alert boxes
+static bool console; // Starship Console: blocks of colour with the sign in black
 
 /* Newer Windows put the buttons on the right of a band below the text; XP and
  * 7 have glossy icons. */
@@ -101,6 +102,7 @@ static bool buttons_on_the_right(void) {
 	glossy = g_ascii_strcasecmp(style, "winxp") == 0 || g_ascii_strcasecmp(style, "luna") == 0 ||
 		g_ascii_strcasecmp(style, "win7") == 0 || g_ascii_strcasecmp(style, "aero") == 0;
 	atari = g_ascii_strcasecmp(style, "atari") == 0;
+	console = g_ascii_strcasecmp(style, "console") == 0;
 	tw_theme_free(t);
 	return right;
 }
@@ -194,6 +196,24 @@ static void mark(cairo_t *cr, const char *text, double cx, double cy, double siz
 static void draw_icon(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data) {
 	enum icon icon = GPOINTER_TO_INT(data);
 	double s = w < h ? w : h, c = s / 2;
+	if (console && icon != ICON_NONE) {
+		// a block with round corners in the colour of what it says, the sign black
+		double r = s * 0.3;
+		cairo_new_sub_path(cr);
+		cairo_arc(cr, s - r, r, r, -G_PI / 2, 0);
+		cairo_arc(cr, s - r, s - r, r, 0, G_PI / 2);
+		cairo_arc(cr, r, s - r, r, G_PI / 2, G_PI);
+		cairo_arc(cr, r, r, r, G_PI, 3 * G_PI / 2);
+		cairo_close_path(cr);
+		double c4[4][3] = { { 0.83, 0.44, 0.48 }, { 0.91, 0.75, 0.44 }, { 0.56, 0.78, 1 },
+			{ 0.78, 0.59, 0.85 } };
+		int k = icon == ICON_ERROR ? 0 : icon == ICON_WARNING ? 1 : icon == ICON_INFO ? 2 : 3;
+		cairo_set_source_rgb(cr, c4[k][0], c4[k][1], c4[k][2]);
+		cairo_fill(cr);
+		mark(cr, icon == ICON_ERROR ? "\xc3\x97" : icon == ICON_QUESTION ? "?" :
+			icon == ICON_INFO ? "i" : "!", c, c, s * 0.62, 0, 0, 0);
+		return;
+	}
 	if (atari && icon != ICON_NONE) {
 		// GEM: a black box with ! or ?, the stop sign for an error
 		if (icon == ICON_ERROR) {

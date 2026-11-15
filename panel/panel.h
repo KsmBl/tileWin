@@ -456,6 +456,13 @@ enum pstyle panel_style(struct panel *panel);
  * which some parts draw in GEM's own way (the menu bar, its menus, alerts).
  */
 bool panel_atari(struct panel *panel);
+/*
+ * The Starship Console theme: the flat look (PS_FLAT) on black, its buttons and
+ * menus drawn as blocks of colour with round ends; panel_console_color gives
+ * the colours of its palette (palette.colors) in turn.
+ */
+bool panel_console(struct panel *panel);
+uint32_t panel_console_color(struct panel *panel, int index);
 /* Whether the start button and the windows sit in the middle of the taskbar
  * (Windows 11), as taskbar.conf's alignment or the theme has it. */
 bool panel_centered(struct panel *panel);

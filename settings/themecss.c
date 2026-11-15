@@ -7,6 +7,9 @@
  *   atari               GEM of the Atari ST: white, everything outlined by one
  *                       black line, the default button by three, what is chosen
  *                       or pressed inverted, no rounding, no gradients
+ *   console             Starship Console: black, the buttons, fields, switches
+ *                       and the chosen row blocks of colour with round ends,
+ *                       the groups framed in lilac, the headings orange
  *   win1, win3, win95   the grey 3D face with bevelled buttons and sunken fields
  *   winxp               Luna: the beige dialog face, round buttons that glow
  *                       orange, the blue task pane on the left
@@ -22,7 +25,7 @@
 #include "settings.h"
 #include "tw_theme.h"
 
-enum era { ERA_ATARI, ERA_CLASSIC, ERA_XP, ERA_WIN7, ERA_FLAT, ERA_WIN11 };
+enum era { ERA_ATARI, ERA_CLASSIC, ERA_XP, ERA_WIN7, ERA_FLAT, ERA_WIN11, ERA_CONSOLE };
 
 static enum era era_of(const struct tw_theme *t) {
 	const char *s = t && t->style ? t->style : "win10";
@@ -30,7 +33,7 @@ static enum era era_of(const struct tw_theme *t) {
 		const char *name;
 		enum era era;
 	} eras[] = {
-		{ "atari", ERA_ATARI },
+		{ "atari", ERA_ATARI }, { "console", ERA_CONSOLE },
 		{ "win1", ERA_CLASSIC }, { "win3", ERA_CLASSIC }, { "win31", ERA_CLASSIC },
 		{ "win95", ERA_CLASSIC }, { "classic", ERA_CLASSIC }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
@@ -294,6 +297,74 @@ static void add_atari(GString *css, const struct tw_theme *t) {
 		C(paper), C(ink), line,
 		C(ink),
 		C(ink));
+}
+
+/* ---------- Starship Console ---------- */
+
+static void add_console(GString *css, const struct tw_theme *t) {
+	uint32_t bg = 0x000000ff;
+	uint32_t fg = tw_theme_color(t, "menu.fg", 0xffcf99ff) | 0xff;
+	uint32_t orange = tw_theme_color(t, "accent.color", 0xff9c3aff) | 0xff;
+	uint32_t field = tw_theme_color(t, "menu.field_bg", 0x1a1208ff) | 0xff;
+	struct palette p = { .bg = bg, .fg = fg, .dim = 0xc896d8ff, .base = bg, .base_fg = fg,
+		.border = 0x3a2a50ff, .accent = orange, .accent_fg = 0x000000ff, .hl = orange,
+		.hl_fg = 0x000000ff, .side = bg, .dark = true };
+	add_common(css, &p);
+	g_string_append_printf(css,
+		"window * { text-shadow: none; }\n"
+		".tw-title { color: %s; font-weight: bold; }\n"
+		".tw-heading { color: %s; font-weight: bold; }\n"
+		".tw-side { border-right: 10px solid %s; border-top-right-radius: 0; }\n"
+		".navigation-sidebar > row { border-radius: 9999px; margin: 2px 8px; }\n"
+		".navigation-sidebar > row:hover { background-color: #2a1e10; }\n"
+		".navigation-sidebar > row:selected, .navigation-sidebar > row:selected:hover, "
+		"flowboxchild:selected, flowboxchild.tw-card:selected { background-color: %s; "
+		"color: #000000; }\n"
+		"list.tw-group { background-color: %s; border: 2px solid #c896d8; border-radius: 18px; }\n"
+		"list.tw-group > row { border-color: #3a2a50; }\n"
+		"button, dropdown > button.toggle { background: #8f9bff; color: #000000; border: none; "
+		"border-radius: 9999px; box-shadow: none; padding: 3px 16px; min-height: 22px; "
+		"font-weight: bold; }\n"
+		"button label, dropdown > button.toggle label { color: #000000; }\n"
+		"button:hover, dropdown > button.toggle:hover { background: #8fc8ff; }\n"
+		"button:active, button:checked { background: #ffcf99; }\n"
+		"button.suggested-action { background: %s; }\n"
+		"button.destructive-action { background: #d4707a; }\n"
+		"button.flat { background: transparent; color: %s; }\n"
+		"button.flat label { color: %s; }\n"
+		"button.flat:hover { background: #2a1e10; }\n"
+		"button:disabled { background: #3a2a50; }\n"
+		"button:disabled label { color: #806850; }\n"
+		"dropdown > button.toggle arrow { color: #000000; }\n"
+		"entry, spinbutton, searchbar entry { background: %s; color: %s; border: 2px solid %s; "
+		"border-radius: 9999px; box-shadow: none; }\n"
+		"spinbutton > button { background: transparent; color: %s; }\n"
+		"spinbutton > text, entry > text { background: transparent; color: %s; }\n"
+		"switch { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"switch:checked { background: %s; }\n"
+		"switch > slider { background: #ffcf99; border: none; border-radius: 9999px; "
+		"box-shadow: none; }\n"
+		"check, radio { background: %s; border: 2px solid #c896d8; color: #000000; "
+		"box-shadow: none; }\n"
+		"check:checked, radio:checked { background: %s; border-color: %s; }\n"
+		"scale > trough { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"scale > trough > highlight { background: %s; border-radius: 9999px; }\n"
+		"scale > trough > slider { background: #ffcf99; border: none; border-radius: 9999px; "
+		"box-shadow: none; }\n"
+		"progressbar > trough { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"progressbar > trough > progress { background: %s; border-radius: 9999px; }\n"
+		"scrollbar > range > trough > slider { background: #c896d8; border-radius: 9999px; }\n"
+		"popover > contents { background: %s; color: %s; border: 2px solid %s; "
+		"border-radius: 16px; }\n"
+		"tooltip, tooltip.background { background: %s; color: %s; border: 2px solid #c896d8; "
+		"border-radius: 10px; }\n"
+		"tooltip > * { color: %s; }\n"
+		"separator { background-color: #3a2a50; }\n",
+		C(orange), C(orange), C(orange), C(orange), C(bg),
+		C(orange), C(fg), C(fg),
+		C(field), C(fg), C(orange), C(fg), C(fg),
+		C(orange), C(bg), C(orange), C(orange), C(orange), C(orange),
+		C(bg), C(fg), C(orange), C(bg), C(fg), C(fg));
 }
 
 /* ---------- Windows XP: Luna ---------- */
@@ -668,6 +739,9 @@ char *settings_theme_css(const struct tw_theme *t) {
 	switch (era) {
 	case ERA_ATARI:
 		add_atari(css, t);
+		break;
+	case ERA_CONSOLE:
+		add_console(css, t);
 		break;
 	case ERA_CLASSIC:
 		add_classic(css, t);

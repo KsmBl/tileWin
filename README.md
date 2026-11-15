@@ -7,7 +7,7 @@ tileWin is a Wayland compositor with two modes you can switch between at any tim
   - floating windows with themed title bars and minimize/maximize/close buttons
   - drag-to-edge snapping, Alt+Tab and Windows keyboard shortcuts
 
-It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are thirteen built-in themes, from **Windows 1** to **Windows 11**, the **Atari ST** and **sway**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live.
+It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are fourteen built-in themes, from **Windows 1** to **Windows 11**, the **Atari ST**, the science-fiction **Starship Console** and **sway**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live.
 
 tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are written in C without GTK/Qt and use no CPU when idle; only the optional settings app uses GTK4 and runs only while it is open.
 
@@ -40,8 +40,8 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | Windows 1 | Atari ST, its menu bar along the top |
 |---|---|
 | ![Windows 1](docs/screenshots/theme-win1.png) | ![Atari ST](docs/screenshots/theme-atari.png) |
-| **Windows 3** | |
-| ![Windows 3](docs/screenshots/theme-win3.png) | |
+| **Windows 3** | **Starship Console**, bars and elbows of colour on black |
+| ![Windows 3](docs/screenshots/theme-win3.png) | ![Starship Console](docs/screenshots/theme-console.png) |
 | **Windows 95** | **Windows 2000** |
 | ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows 2000](docs/screenshots/theme-win2000.png) |
 | **Windows XP** | **Windows XP (dark)** |
@@ -65,7 +65,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Search** in the start menu and the launcher: apps, settings pages (`dark mode`, `wifi`), files and folders in your home, and sums (`6*7`).
 - **Help when you need it:** a welcome at the first start, `Super+/` for the keys of the current mode, and a word on how to get back after switching the mode.
 - **A desktop** with icons, and widgets as clocks, charts and gauges.
-- **13 themes**, Windows 1 to Windows 11, the Atari ST and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
+- **14 themes**, Windows 1 to Windows 11, the Atari ST, Starship Console and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
 - **Little helpers:** clipboard history, a snipping tool that also reads text, an emoji picker, sticky notes, screen savers, night light and a lock screen.
 - **Login pages of public Wi-Fi** accepted by themselves: the terms ticked, not the newsletter, and the right button pressed, also on pages made by scripts (with Chromium); a page that wants your email or room number opens for you instead.
 - **Fingerprint** on the lock screen, as Windows Hello does it, the fingers added and removed in the settings.
