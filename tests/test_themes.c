@@ -56,10 +56,10 @@ int main(void) {
 		}
 		tw_theme_free(t);
 	}
-	// in the order Windows came out
-	if (names && names->length > 1 && (strcmp(names->items[0], "win1") != 0 ||
-			strcmp(names->items[1], "win3") != 0)) {
-		fail("themes", "are not in the order Windows came out", names->items[0]);
+	// in the order they came out: Windows 1 and the Atari ST in 1985, then Windows 3
+	if (names && names->length > 2 && (strcmp(names->items[0], "win1") != 0 ||
+			strcmp(names->items[1], "atari") != 0 || strcmp(names->items[2], "win3") != 0)) {
+		fail("themes", "are not in the order they came out", names->items[0]);
 	}
 	if (names) {
 		list_free_items_and_destroy(names);
@@ -77,6 +77,30 @@ int main(void) {
 			fail("win1", "does not draw its windows in the style of Windows 1", w1->style);
 		}
 		tw_theme_free(w1);
+	}
+
+	// the Atari ST: the green desktop, the menu bar along the top, black lines on
+	// white (the bevels of the classic look are one black line), its own icons,
+	// turned round in the dark scheme
+	struct tw_theme *st = load("atari");
+	if (st) {
+		if (!st->style || strcmp(st->style, "atari") != 0) {
+			fail("atari", "does not draw in the style of GEM", st->style);
+		}
+		check_color(st, "wallpaper.color", 0x00c000ff);
+		check_str(st, "layout.window.position", "top");
+		check_str(st, "start.label", "Desk");
+		check_color(st, "decoration.highlight", 0x000000ff);
+		check_color(st, "decoration.dark", 0x000000ff);
+		check_color(st, "decoration.light", 0xffffffff);
+		check_color(st, "menu.hl_bg", 0x000000ff);
+		check_str(st, "icons.set", "atari");
+		char *icons = tw_theme_icon_dir(st);
+		if (!icons || !strstr(icons, "themes/atari/icons")) {
+			fail("atari", "has no icons of its own", icons);
+		}
+		free(icons);
+		tw_theme_free(st);
 	}
 
 	// Windows 3.1 came without a wallpaper: the light grey of "Windows Default"

@@ -81,6 +81,10 @@ static void tick(void *data) {
 
 /* The color of the state, from the theme where it has one. */
 static uint32_t kind_color(struct widget *w, enum tw_kernel_auto_kind kind, uint32_t accent) {
+	if (panel_atari(w->panel)) {
+		// black and white: the sign in the shield says the state
+		return tw_theme_color(w->panel->theme, "menu.fg", 0x000000ff);
+	}
 	switch (kind) {
 	case TW_KA_OK:
 	case TW_KA_FIXED:

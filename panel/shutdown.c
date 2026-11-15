@@ -753,6 +753,39 @@ static void render_classic(struct shutdown *sd, cairo_t *cr, double W, double H)
 	classic_button(sd, cr, bx + bw + 10, by, bw, bh, "No", HS_CANCEL, false);
 }
 
+/*
+ * The Atari ST theme: an alert box of GEM in the middle of the screen, double
+ * outlined, the question mark on the left, the choices as GEM's radio buttons
+ * (boxes, the one chosen inverted) and OK, the default, drawn thicker.
+ */
+static void render_atari(struct shutdown *sd, cairo_t *cr, double W, double H) {
+	struct panel *panel = sd->panel;
+	const struct tw_theme *t = panel->theme;
+	uint32_t ink = tw_theme_color(t, "dialog.fg", 0x000000ff);
+	uint32_t paper = tw_theme_color(t, "dialog.bg", 0xffffffff);
+	const char *font = bar_font(panel);
+	double row_h = 24, dw = 540, dh = 28 + 36 + sd->count * (row_h + 4) + 16 + 26 + 18;
+	double dx = round((W - dw) / 2), dy = round((H - dh) / 3);
+	pd_atari_outline(cr, dx, dy, dw, dh, ink, paper, true);
+	pd_atari_alert_icon(cr, dx + 20, dy + 22, 32, '?', ink, paper);
+	pd_text(cr, font, "What do you want to do?", dx + 70, dy + 20, dw - 90, 24, ink, PD_LEFT);
+	double bx = dx + 70, bw = dw - 90;
+	for (int i = 0; i < sd->count; i++) {
+		double oy = dy + 28 + 36 + i * (row_h + 4);
+		bool on = i == sd->selected;
+		pd_atari_button(cr, bx, oy, bw, row_h, font, action_label(sd, sd->actions[i]), false,
+			on, ink, paper);
+		psurface_add_hotspot(sd->popup->surface, bx, oy, bw, row_h, NULL, HS_OPTION, i, NULL);
+	}
+	double cw = 90, ch = 26, cy = dy + dh - 18 - ch;
+	double ok_x = dx + dw - 20 - 2 * cw - 12, cancel_x = dx + dw - 20 - cw;
+	pd_atari_button(cr, ok_x, cy, cw, ch, font, "OK", true, pressed(sd, HS_YES, 0), ink, paper);
+	psurface_add_hotspot(sd->popup->surface, ok_x, cy, cw, ch, NULL, HS_YES, 0, NULL);
+	pd_atari_button(cr, cancel_x, cy, cw, ch, font, "Cancel", false, pressed(sd, HS_CANCEL, 0),
+		ink, paper);
+	psurface_add_hotspot(sd->popup->surface, cancel_x, cy, cw, ch, NULL, HS_CANCEL, 0, NULL);
+}
+
 static void luna_button(struct shutdown *sd, cairo_t *cr, int index, double cx, double cy,
 		double k, double dx, double dy) {
 	enum sd_action action = sd->actions[index];
@@ -943,7 +976,11 @@ static void sd_render(struct popup *p, cairo_t *cr) {
 	double W = p->surface->width, H = p->surface->height;
 	switch (sd->style) {
 	case SD_CLASSIC:
-		render_classic(sd, cr, W, H);
+		if (panel_atari(sd->panel)) {
+			render_atari(sd, cr, W, H);
+		} else {
+			render_classic(sd, cr, W, H);
+		}
 		break;
 	case SD_LUNA:
 		render_luna(sd, cr, W, H);

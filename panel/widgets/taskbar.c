@@ -253,6 +253,22 @@ static bool badge_urgent(struct taskbar_entry *e) {
 	return badges_for_app(e->window->app_id, &badge) && badge.urgent;
 }
 
+/*
+ * A title of the menu bar of GEM (the Atari ST theme): its text alone, inverted
+ * from end to end while its menu is open or its window active. Returns its width.
+ */
+static double draw_menu_title(struct render_ctx *ctx, const char *label, double x, double y,
+		double max_width, double height, bool inverted, uint32_t fg, uint32_t bg) {
+	const char *font = bar_font(ctx->panel);
+	int tw = render_text_width(ctx, font, label);
+	double width = tw + 16 < max_width ? tw + 16 : max_width;
+	if (inverted) {
+		pd_rect(ctx->cairo, x, y, width, height, fg);
+	}
+	pd_text(ctx->cairo, font, label, x + 8, y, width - 16, height, inverted ? bg : fg, PD_LEFT);
+	return width;
+}
+
 static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 		struct taskbar_entry *e, struct pbox b) {
 	cairo_t *cr = ctx->cairo;
@@ -264,6 +280,24 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 	uint32_t fg = tw_theme_color(t, active ? "taskbar.active_fg" : "taskbar.fg", bar_fg(panel));
 	int icon = 16;
 	double inner_x = b.x + 6;
+
+	if (panel_atari(panel)) {
+		// a title of the menu bar: the active window's inverted
+		char label[512];
+		if (e->count > 1) {
+			snprintf(label, sizeof(label), "%s (%d)", apps_display_name(e->window->app_id),
+				e->count);
+		} else {
+			snprintf(label, sizeof(label), "%s", e->window->title);
+		}
+		uint32_t text = tw_theme_color(t, "taskbar.fg", bar_fg(panel));
+		uint32_t paper = tw_theme_color(t, "taskbar.bg", tw_theme_color(t, "panel.bg",
+			0xffffffff));
+		draw_menu_title(ctx, label, b.x, b.y + 1, b.width, b.height - 2, active || pressed,
+			text, paper);
+		draw_progress(ctx, e, b);
+		return;
+	}
 
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
@@ -680,6 +714,11 @@ const struct widget_impl widget_taskbar = {
 static int start_measure(struct widget *w, struct render_ctx *ctx) {
 	const struct tw_theme *t = ctx->panel->theme;
 	int fallback;
+	if (panel_atari(ctx->panel)) {
+		// "Desk", the first title of GEM's menu bar
+		const char *label = widget_conf(w, "label", tw_theme_str(t, "start.label", "Desk"));
+		return widget_conf_int(w, "width", render_text_width(ctx, bar_font(ctx->panel), label) + 16);
+	}
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
 		const char *label = widget_conf(w, "label", tw_theme_str(t, "start.label", "Start"));
@@ -724,6 +763,12 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 		return;
 	}
 
+	if (panel_atari(panel)) {
+		draw_menu_title(ctx, label, b.x, b.y + 1, b.width, b.height - 2, pressed, fg,
+			tw_theme_color(t, "panel.bg", 0xffffffff));
+		psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+		return;
+	}
 	switch (ctx->style) {
 	case PSV_CLASSIC: {
 		struct pbox bb = { b.x + 2, b.y + 4, b.width - 3, b.height - 6 };

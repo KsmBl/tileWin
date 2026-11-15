@@ -1733,7 +1733,7 @@ static void draw_hero_shield(GtkDrawingArea *area, cairo_t *cr, int width, int h
 	struct kernel_page *p = data;
 	double size = MIN(width, height);
 	tw_kernel_auto_draw_shield(cr, (width - size) / 2, (height - size) / 2, size, p->hero_kind,
-		state_color(p->hero_kind), settings_theme_classic());
+		settings_theme_atari() ? 0x000000ff : state_color(p->hero_kind), settings_theme_classic());
 }
 
 /* When the next run is: "today at 03:00", "tomorrow at 03:00", "Friday at 21:30". */

@@ -218,7 +218,8 @@ static void layout_section(struct render_ctx *ctx, list_t *widgets, list_t *out,
 }
 
 static void render_group_background(struct render_ctx *ctx, list_t *placed, int start_x) {
-	if (ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) {
+	// the menu bar of the Atari ST has no notification area of its own
+	if ((ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) || panel_atari(ctx->panel)) {
 		return;
 	}
 	int x = start_x, group_start = -1, group_end = -1;

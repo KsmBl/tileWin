@@ -451,6 +451,11 @@ enum pstyle {
 	PS_FLUENT,
 };
 enum pstyle panel_style(struct panel *panel);
+/*
+ * The Atari ST theme: the classic look (PS_CLASSIC) with flat black outlines,
+ * which some parts draw in GEM's own way (the menu bar, its menus, alerts).
+ */
+bool panel_atari(struct panel *panel);
 /* Whether the start button and the windows sit in the middle of the taskbar
  * (Windows 11), as taskbar.conf's alignment or the theme has it. */
 bool panel_centered(struct panel *panel);
@@ -633,6 +638,7 @@ struct gadget_palette {
 	uint32_t warning, critical;
 	double radius;
 	bool shadow;       // text gets a shadow: glass, or no card behind it
+	bool mono;         // the Atari ST: the paper and the ink alone, no greys or red
 	char family[160]; // font family, without a size
 };
 /* w picks the color of a Windows 8 tile and may be NULL. */

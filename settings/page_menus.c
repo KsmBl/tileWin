@@ -364,6 +364,7 @@ static const struct choice action_choices[] = {
 	{ "Log off", "system-log-out", "panel shutdown logoff" },
 	{ "Shut down or sign out", "system-shutdown", "panel shutdown" },
 	{ "Restart tileWin", "system-reboot", "restart" },
+	{ "Theme: Atari ST", "preferences-desktop-theme", "exec tilewin-theme set atari" },
 	{ "Theme: Windows 3", "preferences-desktop-theme", "exec tilewin-theme set win3" },
 	{ "Theme: Windows 95", "preferences-desktop-theme", "exec tilewin-theme set win95" },
 	{ "Theme: Windows XP", "preferences-desktop-theme", "exec tilewin-theme set winxp" },

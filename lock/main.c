@@ -327,6 +327,133 @@ static void draw_avatar(cairo_t *cr, double cx, double cy, double r) {
 	cairo_restore(cr);
 }
 
+/* ---------- the Atari ST theme: GEM ---------- */
+
+static void set_u32(cairo_t *cr, uint32_t c) {
+	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
+		(c >> 8 & 0xff) / 255.0, (c & 0xff) / 255.0);
+}
+
+/* Black (or the theme's ink) text, without the shadow of the other looks. */
+static int flat_text(cairo_t *cr, const char *font, const char *str, double x, double y,
+		int align, uint32_t color) {
+	PangoLayout *layout = pango_cairo_create_layout(cr);
+	PangoFontDescription *desc = pango_font_description_from_string(font);
+	pango_layout_set_font_description(layout, desc);
+	pango_font_description_free(desc);
+	pango_layout_set_text(layout, str, -1);
+	int w, h;
+	pango_layout_get_pixel_size(layout, &w, &h);
+	set_u32(cr, color);
+	cairo_move_to(cr, align == 1 ? x - w / 2.0 : align == 2 ? x - w : x, y);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+	return h;
+}
+
+/* A box of paper with GEM's double black line. */
+static void atari_box(cairo_t *cr, double x, double y, double w, double h, uint32_t ink,
+		uint32_t paper) {
+	cairo_rectangle(cr, x, y, w, h);
+	set_u32(cr, paper);
+	cairo_fill(cr);
+	set_u32(cr, ink);
+	cairo_set_line_width(cr, 1);
+	cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+	cairo_rectangle(cr, x + 3.5, y + 3.5, w - 7, h - 7);
+	cairo_stroke(cr);
+}
+
+/*
+ * The lock screen of the Atari ST theme: the desktop with its white menu bar
+ * (the clock on the right), an alert box saying it is locked; signing in, a
+ * form of GEM with the password on its line of underscores.
+ */
+static void render_atari(cairo_t *cr, double W, double H, bool sign_in,
+		const char *clock_text, const char *date_text) {
+	const struct tw_theme *t = lock.theme;
+	uint32_t ink = tw_theme_color(t, "dialog.fg", 0x000000ff);
+	uint32_t paper = tw_theme_color(t, "dialog.bg", 0xffffffff);
+	const char *font = tw_theme_str(t, "menu.font", "Terminus, DejaVu Sans Mono, Monospace 10");
+	const char *bold = tw_theme_str(t, "menu.bold_font", font);
+	cairo_rectangle(cr, 0, 0, W, 22);
+	set_u32(cr, paper);
+	cairo_fill(cr);
+	cairo_rectangle(cr, 0, 21, W, 1);
+	set_u32(cr, ink);
+	cairo_fill(cr);
+	char bar[160];
+	snprintf(bar, sizeof(bar), "%s  %s", date_text, clock_text);
+	flat_text(cr, font, "Locked", 10, 3, 0, ink);
+	flat_text(cr, font, bar, W - 10, 3, 2, ink);
+
+	const char *name = lock.full_name && *lock.full_name ? lock.full_name : lock.user;
+	double w = 440, x = round((W - w) / 2);
+	if (!sign_in) {
+		double h = 120, y = round((H - h) / 2);
+		atari_box(cr, x, y, w, h, ink, paper);
+		cairo_rectangle(cr, x + 22, y + 26, 32, 32);
+		set_u32(cr, ink);
+		cairo_fill(cr);
+		flat_text(cr, "Terminus, DejaVu Sans Mono, Monospace Bold 20", "!", x + 38, y + 28, 1,
+			paper);
+		flat_text(cr, font, "This computer is locked.", x + 74, y + 26, 0, ink);
+		char line[200];
+		snprintf(line, sizeof(line), "%s is signed in.", name ? name : "Someone");
+		flat_text(cr, font, line, x + 74, y + 46, 0, ink);
+		flat_text(cr, font, "Press a key or click to unlock.", x + 74, y + 78, 0, ink);
+		return;
+	}
+	double h = 190, y = round((H - h) / 2);
+	atari_box(cr, x, y, w, h, ink, paper);
+	flat_text(cr, bold, "Unlock", x + w / 2, y + 20, 1, ink);
+	char who[200];
+	snprintf(who, sizeof(who), "User:     %s", name ? name : "");
+	flat_text(cr, font, who, x + 24, y + 54, 0, ink);
+	flat_text(cr, font, "Password:", x + 24, y + 84, 0, ink);
+	double fx = x + 134, fy = y + 78, fw = w - 134 - 24, fh = 24;
+	set_u32(cr, ink);
+	for (double dx = fx; dx + 7 <= fx + fw; dx += 9) {
+		cairo_rectangle(cr, dx, fy + fh - 3, 7, 1);
+	}
+	cairo_fill(cr);
+	struct text_style ts = {
+		.font = font,
+		.fg = ink,
+		.selection_bg = ink,
+		.selection_fg = paper,
+		.caret = !lock.checking,
+		.mask = true,
+		.mask_glyph = "*",
+	};
+	text_draw(cr, &ts, lock.password, &lock.tc, fx + 2, fy, fw - 4, fh - 3);
+	const char *msg = lock.checking ? "Checking the password..." : lock.message;
+	if (lock.xkb_state && xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CAPS,
+			XKB_STATE_MODS_LOCKED) > 0 && !(msg && *msg)) {
+		msg = "Caps Lock is on";
+	}
+	if (msg && *msg) {
+		flat_text(cr, font, msg, x + 24, y + 116, 0, ink);
+	} else if (lock.fingerprint) {
+		flat_text(cr, font, "Or touch the fingerprint reader.", x + 24, y + 116, 0, ink);
+	}
+	// OK, the default: Return
+	double bw = 84, bh = 26, bx = x + w - 24 - bw, by = y + h - 22 - bh;
+	cairo_rectangle(cr, bx, by, bw, bh);
+	set_u32(cr, paper);
+	cairo_fill(cr);
+	set_u32(cr, ink);
+	for (int i = 0; i < 3; i++) {
+		cairo_rectangle(cr, bx + i + 0.5, by + i + 0.5, bw - 2 * i - 1, bh - 2 * i - 1);
+	}
+	cairo_stroke(cr);
+	flat_text(cr, font, "OK", bx + bw / 2, by + 5, 1, ink);
+}
+
+static bool atari_theme(void) {
+	return lock.theme && lock.theme->style && strcmp(lock.theme->style, "atari") == 0;
+}
+
 static void render_output(struct lock_output *o) {
 	if (!o->configured || o->width <= 0 || o->height <= 0) {
 		return;
@@ -352,91 +479,94 @@ static void render_output(struct lock_output *o) {
 	cairo_scale(cr, o->scale, o->scale);
 	double W = o->width, H = o->height;
 	bool sign_in = lock.view == VIEW_SIGN_IN;
-	cairo_set_source_rgba(cr, 0, 0, 0, sign_in ? 0.55 : 0.25);
-	cairo_paint(cr);
-
 	time_t now = time(NULL);
 	struct tm tm;
 	localtime_r(&now, &tm);
 	char clock_text[32], date_text[96];
 	strftime(clock_text, sizeof(clock_text), "%H:%M", &tm);
 	strftime(date_text, sizeof(date_text), "%A, %e %B", &tm);
-
-	if (!sign_in) {
-		double size = H / 9.0 < 40 ? 40 : H / 9.0;
-		char font[96];
-		snprintf(font, sizeof(font), "Segoe UI Light, Noto Sans Light, Sans %d", (int)size);
-		int tw = 0, th = 0;
-		text(cr, font, clock_text, W * 0.045, H - size * 3.1, 1, 0, &tw, &th);
-		snprintf(font, sizeof(font), "Segoe UI, Noto Sans, Sans %d", (int)(size / 3.2));
-		text(cr, font, date_text, W * 0.045 + size * 0.06, H - size * 3.1 + th, 1, 0, NULL, NULL);
+	if (atari_theme()) {
+		render_atari(cr, W, H, sign_in, clock_text, date_text);
 	} else {
-		double cx = W / 2, cy = H / 2 - 90;
-		double r = H / 10 < 60 ? 60 : H / 10 > 100 ? 100 : H / 10;
-		draw_avatar(cr, cx, cy - r * 0.2, r);
-		int th = 0;
-		const char *name = lock.full_name && *lock.full_name ? lock.full_name : lock.user;
-		text(cr, "Segoe UI Semilight, Noto Sans, Sans 26", name, cx, cy + r * 0.95, 1, 1, NULL, &th);
-		double fy = cy + r * 0.95 + th + 22, fw = 300, fh = 38;
-		double fx = cx - fw / 2;
-		// password field with a submit button, like the Windows sign-in
-		rounded(cr, fx, fy, fw, fh, 4);
-		cairo_set_source_rgba(cr, 1, 1, 1, lock.checking ? 0.55 : 0.92);
-		cairo_fill(cr);
-		double bw = fh;
-		rounded(cr, fx + fw - bw, fy, bw, fh, 4);
-		cairo_set_source_rgba(cr, (lock.accent >> 24 & 0xff) / 255.0,
-			(lock.accent >> 16 & 0xff) / 255.0, (lock.accent >> 8 & 0xff) / 255.0, 1);
-		cairo_fill(cr);
-		cairo_set_source_rgb(cr, 1, 1, 1);
-		cairo_set_line_width(cr, 2.2);
-		cairo_move_to(cr, fx + fw - bw + 12, fy + fh / 2);
-		cairo_line_to(cr, fx + fw - 12, fy + fh / 2);
-		cairo_move_to(cr, fx + fw - 19, fy + fh / 2 - 7);
-		cairo_line_to(cr, fx + fw - 12, fy + fh / 2);
-		cairo_line_to(cr, fx + fw - 19, fy + fh / 2 + 7);
-		cairo_stroke(cr);
-		if (lock.password_len == 0 && !lock.checking) {
-			PangoLayout *layout = pango_cairo_create_layout(cr);
-			PangoFontDescription *desc = pango_font_description_from_string("Noto Sans, Sans 11");
-			pango_layout_set_font_description(layout, desc);
-			pango_font_description_free(desc);
-			pango_layout_set_text(layout, "Password", -1);
-			int lw, lh;
-			pango_layout_get_pixel_size(layout, &lw, &lh);
-			cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
-			cairo_move_to(cr, fx + 12, fy + (fh - lh) / 2.0);
-			pango_cairo_show_layout(cr, layout);
-			g_object_unref(layout);
+		cairo_set_source_rgba(cr, 0, 0, 0, sign_in ? 0.55 : 0.25);
+		cairo_paint(cr);
+
+		if (!sign_in) {
+			double size = H / 9.0 < 40 ? 40 : H / 9.0;
+			char font[96];
+			snprintf(font, sizeof(font), "Segoe UI Light, Noto Sans Light, Sans %d", (int)size);
+			int tw = 0, th = 0;
+			text(cr, font, clock_text, W * 0.045, H - size * 3.1, 1, 0, &tw, &th);
+			snprintf(font, sizeof(font), "Segoe UI, Noto Sans, Sans %d", (int)(size / 3.2));
+			text(cr, font, date_text, W * 0.045 + size * 0.06, H - size * 3.1 + th, 1, 0, NULL, NULL);
+		} else {
+			double cx = W / 2, cy = H / 2 - 90;
+			double r = H / 10 < 60 ? 60 : H / 10 > 100 ? 100 : H / 10;
+			draw_avatar(cr, cx, cy - r * 0.2, r);
+			int th = 0;
+			const char *name = lock.full_name && *lock.full_name ? lock.full_name : lock.user;
+			text(cr, "Segoe UI Semilight, Noto Sans, Sans 26", name, cx, cy + r * 0.95, 1, 1, NULL, &th);
+			double fy = cy + r * 0.95 + th + 22, fw = 300, fh = 38;
+			double fx = cx - fw / 2;
+			// password field with a submit button, like the Windows sign-in
+			rounded(cr, fx, fy, fw, fh, 4);
+			cairo_set_source_rgba(cr, 1, 1, 1, lock.checking ? 0.55 : 0.92);
+			cairo_fill(cr);
+			double bw = fh;
+			rounded(cr, fx + fw - bw, fy, bw, fh, 4);
+			cairo_set_source_rgba(cr, (lock.accent >> 24 & 0xff) / 255.0,
+				(lock.accent >> 16 & 0xff) / 255.0, (lock.accent >> 8 & 0xff) / 255.0, 1);
+			cairo_fill(cr);
+			cairo_set_source_rgb(cr, 1, 1, 1);
+			cairo_set_line_width(cr, 2.2);
+			cairo_move_to(cr, fx + fw - bw + 12, fy + fh / 2);
+			cairo_line_to(cr, fx + fw - 12, fy + fh / 2);
+			cairo_move_to(cr, fx + fw - 19, fy + fh / 2 - 7);
+			cairo_line_to(cr, fx + fw - 12, fy + fh / 2);
+			cairo_line_to(cr, fx + fw - 19, fy + fh / 2 + 7);
+			cairo_stroke(cr);
+			if (lock.password_len == 0 && !lock.checking) {
+				PangoLayout *layout = pango_cairo_create_layout(cr);
+				PangoFontDescription *desc = pango_font_description_from_string("Noto Sans, Sans 11");
+				pango_layout_set_font_description(layout, desc);
+				pango_font_description_free(desc);
+				pango_layout_set_text(layout, "Password", -1);
+				int lw, lh;
+				pango_layout_get_pixel_size(layout, &lw, &lh);
+				cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+				cairo_move_to(cr, fx + 12, fy + (fh - lh) / 2.0);
+				pango_cairo_show_layout(cr, layout);
+				g_object_unref(layout);
+			}
+			// a dot per character, with a cursor that moves and a selection, as in
+			// every other text field (tw_textedit.c)
+			struct text_style ts = {
+				.font = "Noto Sans, Sans 13",
+				.fg = 0x1a1a1aff,
+				.selection_bg = lock.accent | 0xff,
+				.selection_fg = 0xffffffff,
+				.caret = !lock.checking,
+				.mask = true,
+			};
+			text_draw(cr, &ts, lock.password, &lock.tc, fx + 10, fy, fw - bw - 18, fh);
+			double my = fy + fh + 18;
+			const char *msg = lock.checking ? "Checking the password..." : lock.message;
+			if (msg && *msg) {
+				text(cr, "Noto Sans, Sans 12", msg, cx, my, 1, 1, NULL, NULL);
+				my += 26;
+			}
+			if (lock.fingerprint && !(msg && *msg)) {
+				text(cr, "Noto Sans, Sans 11", "Or touch the fingerprint reader", cx, my, 0.85, 1,
+					NULL, NULL);
+				my += 24;
+			}
+			if (lock.xkb_state && xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CAPS,
+					XKB_STATE_MODS_LOCKED) > 0) {
+				text(cr, "Noto Sans, Sans 11", "Caps Lock is on", cx, my, 0.85, 1, NULL, NULL);
+			}
+			// the time stays visible in the corner
+			text(cr, "Noto Sans, Sans 14", clock_text, W - 28, H - 48, 0.9, 2, NULL, NULL);
 		}
-		// a dot per character, with a cursor that moves and a selection, as in
-		// every other text field (tw_textedit.c)
-		struct text_style ts = {
-			.font = "Noto Sans, Sans 13",
-			.fg = 0x1a1a1aff,
-			.selection_bg = lock.accent | 0xff,
-			.selection_fg = 0xffffffff,
-			.caret = !lock.checking,
-			.mask = true,
-		};
-		text_draw(cr, &ts, lock.password, &lock.tc, fx + 10, fy, fw - bw - 18, fh);
-		double my = fy + fh + 18;
-		const char *msg = lock.checking ? "Checking the password..." : lock.message;
-		if (msg && *msg) {
-			text(cr, "Noto Sans, Sans 12", msg, cx, my, 1, 1, NULL, NULL);
-			my += 26;
-		}
-		if (lock.fingerprint && !(msg && *msg)) {
-			text(cr, "Noto Sans, Sans 11", "Or touch the fingerprint reader", cx, my, 0.85, 1,
-				NULL, NULL);
-			my += 24;
-		}
-		if (lock.xkb_state && xkb_state_mod_name_is_active(lock.xkb_state, XKB_MOD_NAME_CAPS,
-				XKB_STATE_MODS_LOCKED) > 0) {
-			text(cr, "Noto Sans, Sans 11", "Caps Lock is on", cx, my, 0.85, 1, NULL, NULL);
-		}
-		// the time stays visible in the corner
-		text(cr, "Noto Sans, Sans 14", clock_text, W - 28, H - 48, 0.9, 2, NULL, NULL);
 	}
 	cairo_restore(cr);
 

@@ -4,6 +4,9 @@
  * the colours, and up to XP the font) on top of GTK's own. It is made again when the
  * theme or the colour scheme changes, so the window follows at once.
  *
+ *   atari               GEM of the Atari ST: white, everything outlined by one
+ *                       black line, the default button by three, what is chosen
+ *                       or pressed inverted, no rounding, no gradients
  *   win1, win3, win95   the grey 3D face with bevelled buttons and sunken fields
  *   winxp               Luna: the beige dialog face, round buttons that glow
  *                       orange, the blue task pane on the left
@@ -19,7 +22,7 @@
 #include "settings.h"
 #include "tw_theme.h"
 
-enum era { ERA_CLASSIC, ERA_XP, ERA_WIN7, ERA_FLAT, ERA_WIN11 };
+enum era { ERA_ATARI, ERA_CLASSIC, ERA_XP, ERA_WIN7, ERA_FLAT, ERA_WIN11 };
 
 static enum era era_of(const struct tw_theme *t) {
 	const char *s = t && t->style ? t->style : "win10";
@@ -27,6 +30,7 @@ static enum era era_of(const struct tw_theme *t) {
 		const char *name;
 		enum era era;
 	} eras[] = {
+		{ "atari", ERA_ATARI },
 		{ "win1", ERA_CLASSIC }, { "win3", ERA_CLASSIC }, { "win31", ERA_CLASSIC },
 		{ "win95", ERA_CLASSIC }, { "classic", ERA_CLASSIC }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
@@ -217,6 +221,79 @@ static void add_classic(GString *css, const struct tw_theme *t) {
 		C(tw_theme_color(t, "tooltip.fg", 0x000000ff)),
 		C(tw_theme_color(t, "tooltip.border", 0x000000ff)),
 		C(tw_theme_color(t, "tooltip.fg", 0x000000ff)));
+}
+
+/* ---------- Atari ST: GEM ---------- */
+
+/*
+ * The classic sheet (its bevels are black lines in the theme's colours), then
+ * GEM on top: one black line around buttons, fields, lists and menus, three
+ * around the default button, inverted while pressed or chosen, the switches
+ * as GEM's boxes.
+ */
+static void add_atari(GString *css, const struct tw_theme *t) {
+	add_classic(css, t);
+	uint32_t paper = tw_theme_color(t, "menu.bg", 0xffffffff) | 0xff;
+	uint32_t ink = tw_theme_color(t, "menu.fg", 0x000000ff) | 0xff;
+	uint32_t dim = tw_theme_color(t, "menu.disabled_fg", 0x808080ff) | 0xff;
+	char line[64];
+	snprintf(line, sizeof(line), "border: 1px solid %s; box-shadow: none;", C(ink));
+	g_string_append_printf(css,
+		"window * { border-radius: 0; }\n"
+		"window.background, window, .tw-side, list.tw-group, popover > contents "
+		"{ background-color: %s; color: %s; }\n"
+		".tw-side { border-right: 1px solid %s; }\n"
+		".tw-side .navigation-sidebar { background: transparent; border: none; box-shadow: none; "
+		"margin: 4px 6px; }\n"
+		".navigation-sidebar > row:selected, .navigation-sidebar > row:selected:hover, "
+		"flowboxchild:selected, flowboxchild.tw-card:selected, popover row:selected, "
+		"popover row:hover, list.tw-group row:selected { background-color: %s; color: %s; }\n"
+		"list.tw-group { %s }\n"
+		"list.tw-group > row { border-color: %s; }\n"
+		"button, dropdown > button.toggle { background: %s; color: %s; %s padding: 2px 10px; "
+		"min-height: 18px; }\n"
+		"button:hover { background: %s; }\n"
+		"button:active, button:checked, button:active label, button:checked label "
+		"{ background: %s; color: %s; }\n"
+		"button.suggested-action { border-width: 3px; outline: none; padding: 0 8px; }\n"
+		"button.flat { border-color: transparent; }\n"
+		"button.flat:hover { border-color: %s; }\n"
+		"button:disabled, button:disabled label { color: %s; text-shadow: none; }\n"
+		"entry, spinbutton, searchbar entry { background: %s; color: %s; %s }\n"
+		"spinbutton > button { border: none; border-left: 1px solid %s; }\n"
+		"dropdown > button.toggle arrow { background: transparent; border: none; box-shadow: none; "
+		"color: %s; }\n"
+		// the switches as the boxes GEM chose with: inverted when on
+		"switch { background: %s; %s min-width: 36px; min-height: 16px; }\n"
+		"switch:checked { background: %s; }\n"
+		"switch > slider { background: %s; %s min-width: 16px; margin: 0; }\n"
+		"check, radio { background: %s; color: %s; %s }\n"
+		"check:checked, radio:checked { background: %s; color: %s; }\n"
+		"scale > trough { background: %s; %s }\n"
+		"scale > trough > slider { background: %s; %s }\n"
+		"progressbar > trough { background: %s; %s }\n"
+		"progressbar > trough > progress { background: %s; }\n"
+		"scrollbar { background-color: %s; border-left: 1px solid %s; }\n"
+		"scrollbar > range > trough > slider { background: %s; %s }\n"
+		"popover > contents { %s padding: 1px; }\n"
+		"tooltip, tooltip.background { background: %s; color: %s; %s }\n"
+		"separator { background-color: %s; }\n"
+		"expander-widget title, expander title { color: %s; }\n",
+		C(paper), C(ink), C(ink),
+		C(ink), C(paper),
+		line, C(ink),
+		C(paper), C(ink), line, C(paper), C(ink), C(paper),
+		C(ink), C(dim),
+		C(paper), C(ink), line, C(ink), C(ink),
+		C(paper), line, C(ink), C(paper), line,
+		C(paper), C(ink), line, C(ink), C(paper),
+		C(paper), line, C(paper), line,
+		C(paper), line, C(ink),
+		C(paper), C(ink), C(paper), line,
+		line,
+		C(paper), C(ink), line,
+		C(ink),
+		C(ink));
 }
 
 /* ---------- Windows XP: Luna ---------- */
@@ -589,6 +666,9 @@ char *settings_theme_css(const struct tw_theme *t) {
 		add_font(css, t);
 	}
 	switch (era) {
+	case ERA_ATARI:
+		add_atari(css, t);
+		break;
 	case ERA_CLASSIC:
 		add_classic(css, t);
 		break;
@@ -619,6 +699,12 @@ bool settings_theme_classic(void) {
 	return classic;
 }
 
+static bool atari;
+
+bool settings_theme_atari(void) {
+	return atari;
+}
+
 void settings_apply_theme(void) {
 	char *name = settings_current_theme();
 	char *error = NULL;
@@ -626,7 +712,8 @@ void settings_apply_theme(void) {
 	free(error);
 	g_free(name);
 	char *css = settings_theme_css(t);
-	classic = t && era_of(t) == ERA_CLASSIC;
+	classic = t && (era_of(t) == ERA_CLASSIC || era_of(t) == ERA_ATARI);
+	atari = t && era_of(t) == ERA_ATARI;
 	if (t) {
 		settings_apply_color_scheme(t->dark);
 	}

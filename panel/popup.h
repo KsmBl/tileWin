@@ -54,7 +54,7 @@ struct popup *menu_open_at(struct panel *panel, struct popup *parent,
 	struct panel_output *output, list_t *items, bool owns, int x, int y,
 	bool above, const char *context_id);
 void menu_open_start_classic(struct panel *panel, struct panel_output *output,
-	list_t *items, int x, int y);
+	list_t *items, int x, int y, bool above);
 cairo_t *popup_scratch_cairo(void);
 /* Background, border and shadow shared by menus and flyouts. */
 void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,

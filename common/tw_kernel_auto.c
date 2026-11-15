@@ -429,7 +429,11 @@ void tw_kernel_auto_draw_shield(cairo_t *cr, double x, double y, double s, enum 
 	cairo_stroke(cr);
 
 	double cx = x + s / 2, cy = y + s * 0.5, u = s / 10;
-	cairo_set_source_rgb(cr, 1, 1, 1);
+	// the sign white, or black on a light shield (the dark scheme of the Atari ST)
+	double light = ((color >> 24 & 0xff) * 0.299 + (color >> 16 & 0xff) * 0.587 +
+		(color >> 8 & 0xff) * 0.114) / 255;
+	double sign = light > 0.7 ? 0 : 1;
+	cairo_set_source_rgb(cr, sign, sign, sign);
 	cairo_set_line_width(cr, fmax(1.4, s / 9));
 	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);

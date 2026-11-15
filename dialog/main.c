@@ -81,6 +81,7 @@ void settings_apply_color_scheme(bool dark) {
 }
 
 static bool glossy; // XP to 7: the icons with a shine, flat before and after
+static bool atari;  // the Atari ST: the black and white icons of GEM's alert boxes
 
 /* Newer Windows put the buttons on the right of a band below the text; XP and
  * 7 have glossy icons. */
@@ -91,14 +92,15 @@ static bool buttons_on_the_right(void) {
 	free(error);
 	g_free(name);
 	const char *style = t && t->style ? t->style : "win10";
-	static const char *const centred[] = { "win1", "win3", "win31", "win95", "classic",
-		"winxp", "luna" };
+	static const char *const centred[] = { "atari", "win1", "win3", "win31", "win95",
+		"classic", "winxp", "luna" };
 	bool right = true;
 	for (size_t i = 0; i < G_N_ELEMENTS(centred); i++) {
 		right = right && g_ascii_strcasecmp(style, centred[i]) != 0;
 	}
 	glossy = g_ascii_strcasecmp(style, "winxp") == 0 || g_ascii_strcasecmp(style, "luna") == 0 ||
 		g_ascii_strcasecmp(style, "win7") == 0 || g_ascii_strcasecmp(style, "aero") == 0;
+	atari = g_ascii_strcasecmp(style, "atari") == 0;
 	tw_theme_free(t);
 	return right;
 }
@@ -192,6 +194,30 @@ static void mark(cairo_t *cr, const char *text, double cx, double cy, double siz
 static void draw_icon(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data) {
 	enum icon icon = GPOINTER_TO_INT(data);
 	double s = w < h ? w : h, c = s / 2;
+	if (atari && icon != ICON_NONE) {
+		// GEM: a black box with ! or ?, the stop sign for an error
+		if (icon == ICON_ERROR) {
+			double k = s * 0.29;
+			cairo_move_to(cr, k, 0);
+			cairo_line_to(cr, s - k, 0);
+			cairo_line_to(cr, s, k);
+			cairo_line_to(cr, s, s - k);
+			cairo_line_to(cr, s - k, s);
+			cairo_line_to(cr, k, s);
+			cairo_line_to(cr, 0, s - k);
+			cairo_line_to(cr, 0, k);
+			cairo_close_path(cr);
+			cairo_set_source_rgb(cr, 0, 0, 0);
+			cairo_fill(cr);
+			mark(cr, "STOP", c, c, s * 0.28, 1, 1, 1);
+		} else {
+			cairo_rectangle(cr, 0, 0, s, s);
+			cairo_set_source_rgb(cr, 0, 0, 0);
+			cairo_fill(cr);
+			mark(cr, icon == ICON_QUESTION ? "?" : "!", c, c, s * 0.75, 1, 1, 1);
+		}
+		return;
+	}
 	switch (icon) {
 	case ICON_ERROR:
 		cairo_arc(cr, c, c, c - 1, 0, 2 * G_PI);

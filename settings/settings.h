@@ -128,6 +128,8 @@ char *settings_theme_css(const struct tw_theme *theme);
 void settings_apply_theme(void);
 /* Whether the theme that is on is drawn flat with bevels, as Windows 95 (the last one applied). */
 bool settings_theme_classic(void);
+/* Whether it is the Atari ST theme: black and white, no colours of states. */
+bool settings_theme_atari(void);
 
 /* ui.c */
 /* A setting found by the search of the settings window. */

@@ -65,8 +65,10 @@ enum pstyle panel_style(struct panel *p) {
 	if (!style) {
 		style = p->theme && p->theme->style ? p->theme->style : "win10";
 	}
+	// the Atari ST is the classic look with its bevels in black lines (panel_atari)
 	if (strcmp(style, "classic") == 0 || strcmp(style, "win95") == 0 ||
-			strcmp(style, "win3") == 0 || strcmp(style, "win1") == 0) {
+			strcmp(style, "win3") == 0 || strcmp(style, "win1") == 0 ||
+			strcmp(style, "atari") == 0) {
 		return PS_CLASSIC;
 	} else if (strcmp(style, "luna") == 0 || strcmp(style, "winxp") == 0) {
 		return PS_LUNA;
@@ -76,6 +78,10 @@ enum pstyle panel_style(struct panel *p) {
 		return PS_FLUENT;
 	}
 	return PS_FLAT;
+}
+
+bool panel_atari(struct panel *p) {
+	return p && p->theme && p->theme->style && strcmp(p->theme->style, "atari") == 0;
 }
 
 static void bars_set_dirty(struct panel *p) {

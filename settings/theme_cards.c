@@ -14,6 +14,8 @@ struct card_look {
 	bool sideways;  // from left to right, as Windows 95 to 2000 have it
 	bool rounded;
 	bool has_start;
+	bool bar_top; // the taskbar along the top (the menu bar of the Atari ST, sway)
+	bool dotted;  // the title bar of the active window dotted, as GEM has it
 };
 
 static void look_free(gpointer data) {
@@ -72,7 +74,10 @@ static void read_look(struct card_look *look, const struct tw_theme *t) {
 	look->start = tw_theme_color(t, "taskbar.indicator", accent);
 	const char *style = tw_theme_str(t, "style", "");
 	look->rounded = strcmp(style, "win11") == 0 || strcmp(style, "sway") == 0;
-	look->has_start = strcmp(style, "win1") != 0 && strcmp(style, "win3") != 0;
+	look->has_start = strcmp(style, "win1") != 0 && strcmp(style, "win3") != 0 &&
+		strcmp(style, "atari") != 0;
+	look->bar_top = strcmp(tw_theme_str(t, "layout.window.position", "bottom"), "top") == 0;
+	look->dotted = strcmp(style, "atari") == 0;
 }
 
 static void rect(cairo_t *cr, double x, double y, double w, double h, double r) {
@@ -116,6 +121,20 @@ static void draw_look(GtkDrawingArea *area, cairo_t *cr, int W, int H, gpointer 
 		cairo_rectangle(cr, wx, wy, ww, tit);
 		cairo_fill(cr);
 	}
+	if (look->dotted) {
+		source(cr, look->frame);
+		for (double y = wy + 1; y < wy + tit - 1; y += 2) {
+			for (double x = wx + ((int)(y - wy) / 2 % 2); x < wx + ww; x += 2) {
+				cairo_rectangle(cr, x, y, 1, 1);
+			}
+		}
+		cairo_fill(cr);
+		cairo_rectangle(cr, wx, wy + tit - 1, ww, 1);
+		cairo_fill(cr);
+		source(cr, look->title);
+		cairo_rectangle(cr, wx + ww * 0.3, wy, ww * 0.4, tit - 1);
+		cairo_fill(cr);
+	}
 	cairo_restore(cr);
 	source(cr, look->title_fg);
 	cairo_rectangle(cr, wx + 4, wy + tit * 0.4, ww * 0.34, tit * 0.22);
@@ -125,10 +144,16 @@ static void draw_look(GtkDrawingArea *area, cairo_t *cr, int W, int H, gpointer 
 		cairo_fill(cr);
 	}
 	// the taskbar and its start button
+	double bar_y = look->bar_top ? 0 : H - bar_h;
 	source(cr, look->bar);
-	cairo_rectangle(cr, 0, H - bar_h, W, bar_h);
+	cairo_rectangle(cr, 0, bar_y, W, bar_h);
 	cairo_fill(cr);
-	if (look->has_start) {
+	if (look->bar_top) {
+		source(cr, look->frame);
+		cairo_rectangle(cr, 0, bar_h - 1, W, 1);
+		cairo_fill(cr);
+	}
+	if (look->has_start && !look->bar_top) {
 		source(cr, look->start);
 		cairo_rectangle(cr, 3, H - bar_h + 2, bar_h * 1.4, bar_h - 4);
 		cairo_fill(cr);

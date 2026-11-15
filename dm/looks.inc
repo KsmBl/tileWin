@@ -817,6 +817,117 @@ static void draw_dialog(struct output *o, cairo_t *cr, double W, double H) {
 	old_button(o, cr, bx, cy, bw, bh, g.stage == STAGE_PROMPT ? "Go on" : "OK", true, AREA_LOGIN, 0);
 }
 
+/* ---------- the Atari ST: a form of GEM ---------- */
+
+/* A button of GEM: one black line, three round the default one. */
+static void atari_button(struct output *o, cairo_t *cr, double x, double y, double w, double h,
+		const char *label, bool is_default, enum area area, int index) {
+	cairo_rectangle(cr, x, y, w, h);
+	color(cr, g.card_bg);
+	cairo_fill(cr);
+	color(cr, g.fg);
+	cairo_set_line_width(cr, 1);
+	for (int i = 0; i < (is_default ? 3 : 1); i++) {
+		cairo_rectangle(cr, x + i + 0.5, y + i + 0.5, w - 2 * i - 1, h - 2 * i - 1);
+		cairo_stroke(cr);
+	}
+	text_in(cr, g.font, label, x, y, w, h, g.fg, MIDDLE);
+	add_hit(o, x, y, w, h, area, index);
+}
+
+/* The line of underscores an editable field of GEM is drawn as. */
+static void atari_underscores(cairo_t *cr, double x, double y, double w, double h) {
+	color(cr, g.fg);
+	for (double dx = x; dx + 7 <= x + w; dx += 9) {
+		cairo_rectangle(cr, dx, y + h - 3, 7, 1);
+	}
+	cairo_fill(cr);
+}
+
+/*
+ * The form in the middle of the screen, double outlined as GEM's were: the
+ * title, the fields as underscores with the text on them, the buttons with OK
+ * drawn thick; above it all the white menu bar of the desktop.
+ */
+static void draw_atari(struct output *o, cairo_t *cr, double W, double H) {
+	// the menu bar
+	cairo_rectangle(cr, 0, 0, W, 22);
+	color(cr, g.card_bg);
+	cairo_fill(cr);
+	cairo_rectangle(cr, 0, 21, W, 1);
+	color(cr, g.fg);
+	cairo_fill(cr);
+	char title[256];
+	card_title(title, sizeof(title));
+	text_in(cr, g.font, title, 10, 0, W / 2, 22, g.fg, LEFT);
+
+	bool sessions = sessions_shown(), layouts = has_layouts();
+	const char *greeting = dm_config_str(g.config, "greeting");
+	double w = 460, label_w = 110;
+	double rows = 2 + (sessions ? 1 : 0) + (layouts ? 1 : 0);
+	double h = 20 + 26 + (*greeting ? 24 : 0) + rows * 32 + 28 + 34 + 22;
+	double x = round(column_x(W, w)), y = round((H - h) / 2);
+	cairo_rectangle(cr, x, y, w, h);
+	color(cr, g.card_bg);
+	cairo_fill(cr);
+	color(cr, g.fg);
+	cairo_set_line_width(cr, 1);
+	cairo_rectangle(cr, x + 0.5, y + 0.5, w - 1, h - 1);
+	cairo_stroke(cr);
+	cairo_rectangle(cr, x + 3.5, y + 3.5, w - 7, h - 7);
+	cairo_stroke(cr);
+
+	double cy = y + 20, left = x + 22, field_x = left + label_w, field_w = x + w - 22 - field_x;
+	text_in(cr, g.bold, "Log on", x, cy, w, 22, g.fg, MIDDLE);
+	cy += 30;
+	if (*greeting) {
+		text_in(cr, g.font, greeting, left, cy, x + w - 22 - left, 20, g.fg, LEFT);
+		cy += 24;
+	}
+	text_in(cr, g.font, "Name:", left, cy, label_w, 24, g.fg, LEFT);
+	if (typing_name()) {
+		name_field(o, cr, field_x, cy, field_w, 24, 0);
+	} else {
+		text_in(cr, g.font, g.users[g.user_sel].name, field_x + 10, cy, field_w - 30, 24, g.fg,
+			LEFT);
+		text_in(cr, g.font, "\xe2\x96\xbe", field_x + field_w - 22, cy, 18, 24, g.fg, MIDDLE);
+		add_hit(o, field_x, cy, field_w, 24, AREA_USER, (g.user_sel + 1) % (g.user_count + 1));
+	}
+	atari_underscores(cr, field_x, cy, field_w, 24);
+	cy += 32;
+	text_in(cr, g.font, g.stage == STAGE_PROMPT ? g.prompt : "Password:", left, cy, label_w, 24,
+		g.fg, LEFT);
+	password_field(o, cr, field_x, cy, field_w, 24, 0, false);
+	atari_underscores(cr, field_x, cy, field_w, 24);
+	cy += 32;
+	if (sessions) {
+		text_in(cr, g.font, "Session:", left, cy, label_w, 24, g.fg, LEFT);
+		session_row(o, cr, field_x, cy, field_w, 24, g.fg);
+		cy += 32;
+	}
+	if (layouts) {
+		layout_row(o, cr, field_x, cy, field_w, 24, g.fg);
+		cy += 32;
+	}
+	text_in(cr, g.font, status_line(), left, cy, x + w - 22 - left, 22, g.fg, LEFT);
+	cy += 28;
+
+	double bw = 84, bh = 26, bx = x + w - 22;
+	static const char *const words[] = { "Hibernate", "Sleep", "Restart", "Shut Down" };
+	for (int i = POWER_POWEROFF; i >= POWER_REBOOT; i--) {
+		if (power_on(i)) {
+			bx -= bw;
+			atari_button(o, cr, bx, cy, bw, bh, words[i], false, AREA_POWER, i);
+			bx -= 8;
+		}
+	}
+	bx -= bw;
+	atari_button(o, cr, bx, cy, bw, bh, "Cancel", false, AREA_CANCEL, 0);
+	bx -= 8 + bw;
+	atari_button(o, cr, bx, cy, bw, bh, g.stage == STAGE_PROMPT ? "Go on" : "OK", true,
+		AREA_LOGIN, 0);
+}
+
 /* ---------- sway ---------- */
 
 /* The ring of swaylock: it lights up a little further with each key. */
@@ -888,6 +999,9 @@ static void draw_login(struct output *o, cairo_t *cr, double W, double H) {
 	case LOOK_DIALOG:
 	case LOOK_OLD:
 		draw_dialog(o, cr, W, H);
+		break;
+	case LOOK_ATARI:
+		draw_atari(o, cr, W, H);
 		break;
 	case LOOK_SWAY:
 		draw_ring(o, cr, W, H);

@@ -677,3 +677,109 @@ void pd_share_bar(cairo_t *cr, double x, double y, double w, double h, double sh
 	}
 }
 
+
+/* ---------- the Atari ST theme (GEM) ---------- */
+
+void pd_atari_title_bar(cairo_t *cr, double x, double y, double w, double h, const char *font,
+		const char *title, uint32_t ink, uint32_t paper, bool closer, bool active) {
+	cairo_save(cr);
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	pd_rect(cr, x, y, w, h, paper);
+	if (active) {
+		for (int yy = 1; yy < h; yy += 2) {
+			for (int xx = (yy / 2) % 2; xx < w; xx += 2) {
+				pd_rect(cr, x + xx, y + yy, 1, 1, ink);
+			}
+		}
+	}
+	pd_rect(cr, x, y + h, w, 1, ink);
+	double left = x;
+	if (closer) {
+		// the close box: a small window with its corner filled
+		pd_rect(cr, x, y, h, h, paper);
+		pd_rect(cr, x + h - 1, y, 1, h, ink);
+		double r = floor((h - 1) / 3.0), cx = x + floor((h - 1) / 2.0), cy = y + floor(h / 2.0);
+		pd_rect(cr, cx - r, cy - r, 2 * r + 1, 1, ink);
+		pd_rect(cr, cx - r, cy + r, 2 * r + 1, 1, ink);
+		pd_rect(cr, cx - r, cy - r, 1, 2 * r + 1, ink);
+		pd_rect(cr, cx + r, cy - r, 1, 2 * r + 1, ink);
+		pd_rect(cr, cx - r, cy - r, r + 1, r + 1, ink);
+		left = x + h;
+	}
+	cairo_restore(cr);
+	if (title && *title) {
+		int tw = 0;
+		pd_text_size(cr, font, title, &tw, NULL);
+		double room = x + w - left - 12;
+		double box_w = tw + 12 < room ? tw + 12 : room;
+		double box_x = floor(left + 6 + (room - box_w) / 2);
+		pd_rect(cr, box_x, y, box_w, h, paper);
+		pd_text(cr, font, title, box_x + 6, y, box_w - 12, h, ink, PD_CENTER);
+	}
+}
+
+void pd_atari_button(cairo_t *cr, double x, double y, double w, double h, const char *font,
+		const char *label, bool is_default, bool pressed, uint32_t ink, uint32_t paper) {
+	cairo_save(cr);
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	pd_rect(cr, x, y, w, h, pressed ? ink : paper);
+	// one black line, three for the button Return presses
+	int lines = is_default ? 3 : 1;
+	for (int i = 0; i < lines; i++) {
+		pd_rect(cr, x + i, y + i, w - 2 * i, 1, ink);
+		pd_rect(cr, x + i, y + h - 1 - i, w - 2 * i, 1, ink);
+		pd_rect(cr, x + i, y + i, 1, h - 2 * i, ink);
+		pd_rect(cr, x + w - 1 - i, y + i, 1, h - 2 * i, ink);
+	}
+	cairo_restore(cr);
+	pd_text(cr, font, label, x, y, w, h, pressed ? paper : ink, PD_CENTER);
+}
+
+void pd_atari_outline(cairo_t *cr, double x, double y, double w, double h, uint32_t ink,
+		uint32_t paper, bool double_line) {
+	cairo_save(cr);
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	pd_rect(cr, x, y, w, h, paper);
+	int insets[] = { 0, 3 };
+	for (int k = 0; k < (double_line ? 2 : 1); k++) {
+		int i = insets[k];
+		pd_rect(cr, x + i, y + i, w - 2 * i, 1, ink);
+		pd_rect(cr, x + i, y + h - 1 - i, w - 2 * i, 1, ink);
+		pd_rect(cr, x + i, y + i, 1, h - 2 * i, ink);
+		pd_rect(cr, x + w - 1 - i, y + i, 1, h - 2 * i, ink);
+	}
+	cairo_restore(cr);
+}
+
+void pd_atari_alert_icon(cairo_t *cr, double x, double y, double size, char kind, uint32_t ink,
+		uint32_t paper) {
+	cairo_save(cr);
+	cairo_new_path(cr);
+	if (kind == 's') {
+		// the stop sign: an octagon, the word in it
+		double c = size * 0.29;
+		cairo_move_to(cr, x + c, y);
+		cairo_line_to(cr, x + size - c, y);
+		cairo_line_to(cr, x + size, y + c);
+		cairo_line_to(cr, x + size, y + size - c);
+		cairo_line_to(cr, x + size - c, y + size);
+		cairo_line_to(cr, x + c, y + size);
+		cairo_line_to(cr, x, y + size - c);
+		cairo_line_to(cr, x, y + c);
+		cairo_close_path(cr);
+		pd_color(cr, ink);
+		cairo_fill(cr);
+		char font[64];
+		snprintf(font, sizeof(font), "Terminus, DejaVu Sans Mono, Monospace Bold %dpx",
+			(int)(size * 0.3));
+		pd_text(cr, font, "STOP", x, y, size, size, paper, PD_CENTER);
+	} else {
+		// a black box, the sign white in it
+		pd_rect(cr, x, y, size, size, ink);
+		char font[64];
+		snprintf(font, sizeof(font), "Terminus, DejaVu Sans Mono, Monospace Bold %dpx",
+			(int)(size * 0.8));
+		pd_text(cr, font, kind == '?' ? "?" : "!", x, y, size, size, paper, PD_CENTER);
+	}
+	cairo_restore(cr);
+}

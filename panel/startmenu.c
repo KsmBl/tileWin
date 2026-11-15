@@ -416,7 +416,10 @@ static void open_classic(struct panel *panel, struct panel_output *output) {
 
 	int bar = output->bar ? output->bar->height : 28;
 	bool bottom = panel->config->layouts[panel->layout].bottom;
-	menu_open_start_classic(panel, output, items, 2, bottom ? output->height - bar + 2 : bar + 300);
+	// up from a taskbar at the bottom, down from one at the top (the menu bar of
+	// the Atari ST theme, where it drops from Desk)
+	menu_open_start_classic(panel, output, items, 2, bottom ? output->height - bar + 2 : bar,
+		bottom);
 }
 
 /* ---------- drawing helpers ---------- */

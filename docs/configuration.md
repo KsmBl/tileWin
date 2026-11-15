@@ -289,7 +289,7 @@ What the service is doing is in `/run/tilewin-dns/status`, the names it prefetch
 A theme is a directory with:
 - `theme.conf`: decorations, taskbar, menus, start menu, Alt+Tab, wallpaper
 - `tile.conf`: sway `client.*` colors and font for tile mode
-- `icons/`: the theme's own icons (optional)
+- `icons/`: the theme's own icons (optional); `icons { set <theme> }` takes those of another theme, `icons { dir <folder> }` another folder of the set, e.g. `dark { icons { dir icons-dark } }` for the dark scheme (the Atari ST theme's white-on-black icons)
 
 To make your own:
 1. Create `~/.config/tileWin/themes/mytheme/theme.conf` starting with `inherit win10`.

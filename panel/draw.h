@@ -87,4 +87,22 @@ void pd_share_bar(cairo_t *cr, double x, double y, double w, double h, double sh
 	uint32_t track, double track_alpha, uint32_t fill, double radius, enum pd_bar_look look,
 	bool dark);
 
+/*
+ * The Atari ST theme (GEM): a title bar of h pixels at y (dotted while active)
+ * with the line under it, the close box at its left end, the title on white in
+ * the middle; a button outlined in black, three lines for the default one,
+ * inverted while pressed; a box filled with paper and outlined, twice (the
+ * double border of GEM's alert boxes) with double_line.
+ */
+void pd_atari_title_bar(cairo_t *cr, double x, double y, double w, double h, const char *font,
+	const char *title, uint32_t ink, uint32_t paper, bool closer, bool active);
+void pd_atari_button(cairo_t *cr, double x, double y, double w, double h, const char *font,
+	const char *label, bool is_default, bool pressed, uint32_t ink, uint32_t paper);
+void pd_atari_outline(cairo_t *cr, double x, double y, double w, double h, uint32_t ink,
+	uint32_t paper, bool double_line);
+
+/* The icons of GEM's alert boxes: '!' a note, '?' a question, 's' the stop sign. */
+void pd_atari_alert_icon(cairo_t *cr, double x, double y, double size, char kind, uint32_t ink,
+	uint32_t paper);
+
 #endif

@@ -332,9 +332,12 @@ static void scan_theme_dir(list_t *names, const char *dir) {
 	closedir(d);
 }
 
-/* Built-in themes in the order Windows came out, then all others by name. */
+/*
+ * Built-in themes in the order they came out (the Atari ST's GEM desktop in
+ * the same year as Windows 1), then all others by name.
+ */
 static int theme_order(const void *a, const void *b) {
-	static const char *const order[] = { "win1", "win3", "win95", "win2000", "winxp",
+	static const char *const order[] = { "win1", "atari", "win3", "win95", "win2000", "winxp",
 		"winxp-dark", "vista", "win7", "win8", "win10", "win11", "sway" };
 	const char *x = *(const char **)a, *y = *(const char **)b;
 	int rx = 100, ry = 100;
@@ -448,7 +451,12 @@ char *tw_theme_icon_dir(const struct tw_theme *theme) {
 	if (!dir) {
 		return NULL;
 	}
-	char *icons = format_str("%s/icons", dir);
+	// icons.dir: another folder of the set, e.g. the icons of its dark scheme
+	const char *sub = tw_theme_str(theme, "icons.dir", "icons");
+	if (!*sub || strchr(sub, '/') || sub[0] == '.') {
+		sub = "icons";
+	}
+	char *icons = format_str("%s/%s", dir, sub);
 	free(dir);
 	struct stat st;
 	if (stat(icons, &st) != 0 || !S_ISDIR(st.st_mode)) {

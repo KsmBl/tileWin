@@ -140,8 +140,9 @@ install_deps() {
 			pixman libdrm cairo pango gdk-pixbuf2 librsvg gtk4 json-c pcre2 \
 			xcb-util-wm xorg-xwayland systemd-libs polkit curl \
 			grim slurp wl-clipboard xdg-utils
+		# terminus-font: the pixel font of the Atari ST theme
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal xdg-desktop-portal-gtk \
-			tesseract tesseract-data-eng libpulse || \
+			tesseract tesseract-data-eng libpulse terminus-font || \
 			warn "optional packages could not be installed"
 		local more
 		more=$(extras brightnessctl pipewire pipewire-pulse wireplumber)
@@ -175,8 +176,9 @@ install_deps() {
 				libxcb-xfixes0-dev libxcb-errors-dev libffi-dev libexpat1-dev libxml2-dev bison || \
 				warn "some packages wlroots needs could not be installed"
 		fi
+		# fonts-terminus-otb: the pixel font of the Atari ST theme
 		sudo apt-get install -y scdoc pavucontrol xfce4-terminal xdg-desktop-portal-gtk \
-			tesseract-ocr tesseract-ocr-eng libpulse-dev || \
+			tesseract-ocr tesseract-ocr-eng libpulse-dev fonts-terminus-otb || \
 			warn "optional packages could not be installed"
 		local more
 		more=$(extras brightnessctl pipewire-pulse wireplumber)

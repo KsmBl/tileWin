@@ -68,6 +68,7 @@ enum look {
 	LOOK_XP,
 	LOOK_DIALOG,
 	LOOK_OLD,
+	LOOK_ATARI, // a form of GEM, the Atari ST's desktop
 	LOOK_SWAY,
 };
 
@@ -343,6 +344,7 @@ static void read_theme(void) {
 		strcmp(style, "win8") == 0 ? LOOK_WIN8 : strcmp(style, "win7") == 0 ? LOOK_AERO :
 		strcmp(style, "winxp") == 0 ? LOOK_XP :
 		strcmp(style, "win1") == 0 || strcmp(style, "win3") == 0 ? LOOK_OLD :
+		strcmp(style, "atari") == 0 ? LOOK_ATARI :
 		strcmp(style, "win95") == 0 ? LOOK_DIALOG : LOOK_CARD;
 	// white fields on all that have them, whatever the menus of the theme say
 	if (g.look != LOOK_CARD && g.look != LOOK_DIALOG && g.look != LOOK_SWAY) {
@@ -355,6 +357,15 @@ static void read_theme(void) {
 		g.accent = 0x000000ff;
 		g.field_bg = 0xffffffff;
 		g.field_fg = 0x000000ff;
+	}
+	if (g.look == LOOK_ATARI) {
+		// black on white (white on black in the dark scheme); the fields of GEM
+		// have no frame to light up: the caret says where the keys go
+		g.card_bg = tw_theme_color(t, "dialog.bg", 0xffffffff);
+		g.fg = tw_theme_color(t, "dialog.fg", 0x000000ff);
+		g.field_bg = g.card_bg;
+		g.field_fg = g.fg;
+		g.accent = g.card_bg;
 	}
 	if (g.look == LOOK_SWAY) {
 		g.field_bg = 0x313244ff;

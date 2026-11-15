@@ -38,6 +38,7 @@ Each theme looks as that Windows did when it asked who you are, drawn from scrat
 | Windows 95 | A dialog with keys on the wallpaper |
 | Windows 2000 | The same dialog with a banner on top |
 | Windows 1, 3 | A plain dialog in the frame of those days |
+| Atari ST | A form of GEM with a double border, the fields as lines of underscores, under a white menu bar |
 | sway | The ring of swaylock |
 
 `card_style window` or `plain` is a card instead, on any theme.

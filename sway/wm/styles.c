@@ -16,6 +16,7 @@
  */
 
 enum style {
+	STYLE_ATARI,
 	STYLE_WIN1,
 	STYLE_WIN3,
 	STYLE_WIN95,
@@ -39,7 +40,9 @@ struct metrics {
 
 static enum style get_style(const struct tw_theme *theme) {
 	const char *s = theme && theme->style ? theme->style : "win10";
-	if (strcasecmp(s, "win1") == 0) {
+	if (strcasecmp(s, "atari") == 0) {
+		return STYLE_ATARI;
+	} else if (strcasecmp(s, "win1") == 0) {
 		return STYLE_WIN1;
 	} else if (strcasecmp(s, "win3") == 0 || strcasecmp(s, "win31") == 0) {
 		return STYLE_WIN3;
@@ -61,6 +64,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 	static const struct {
 		int top, max_top, border, grab, radius;
 	} defaults[] = {
+		[STYLE_ATARI] = { 20, 20, 1, 4, 0 },
 		[STYLE_WIN1] = { 21, 20, 1, 4, 0 },
 		[STYLE_WIN3] = { 24, 19, 4, 2, 0 },
 		[STYLE_WIN95] = { 23, 19, 4, 2, 0 },
@@ -102,6 +106,16 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 	struct metrics m;
 	get_metrics(t, maximized, &m);
 	switch (get_style(t)) {
+	case STYLE_ATARI: {
+		// GEM: the close box at the left end of the title bar, the full box at
+		// the right end and the iconify box of the later TOS before it, square
+		// boxes as high as the bar
+		int bh = m.top - m.side - 1;
+		b->close = (struct wlr_box){ m.side, m.side, bh, bh };
+		b->maximize = (struct wlr_box){ width - m.side - bh, m.side, bh, bh };
+		b->minimize = (struct wlr_box){ b->maximize.x - bh, m.side, bh, bh };
+		break;
+	}
 	case STYLE_WIN1: {
 		// only the zoom box at the right end, which maximizes; the system box on
 		// the left opens the window menu and closes on a double click
@@ -533,6 +547,124 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 		int off = pressed ? 1 : 0;
 		draw_95_glyph(cr, buttons[i].glyph, box.x + off, box.y + off,
 			tw_theme_color(t, "decoration.glyph", 0x000000ff));
+	}
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+}
+
+/* ---------- Atari ST (GEM) ---------- */
+
+/* A box of a GEM title bar: white, a black line towards the title, its sign. */
+static void atari_box(cairo_t *cr, const struct wlr_box *b, enum glyph glyph, bool pressed,
+		bool line_right, uint32_t paper, uint32_t ink) {
+	if (b->width <= 0) {
+		return;
+	}
+	uint32_t bg = pressed ? ink : paper, fg = pressed ? paper : ink;
+	fill_rect(cr, b->x, b->y, b->width, b->height, bg);
+	fill_rect(cr, line_right ? b->x + b->width - 1 : b->x, b->y, 1, b->height, ink);
+	int inner = b->width - 1;
+	int x0 = line_right ? b->x : b->x + 1;
+	int cx = x0 + inner / 2, cy = b->y + b->height / 2;
+	switch (glyph) {
+	case GLYPH_CLOSE: {
+		// a small window whose corner is filled: it goes back into its folder
+		int r = inner / 3;
+		fill_rect(cr, cx - r, cy - r, 2 * r + 1, 1, fg);
+		fill_rect(cr, cx - r, cy + r, 2 * r + 1, 1, fg);
+		fill_rect(cr, cx - r, cy - r, 1, 2 * r + 1, fg);
+		fill_rect(cr, cx + r, cy - r, 1, 2 * r + 1, fg);
+		fill_rect(cr, cx - r, cy - r, r + 1, r + 1, fg);
+		break;
+	}
+	case GLYPH_MAXIMIZE:
+	case GLYPH_RESTORE: {
+		// a diamond, filled while the window fills the screen
+		int r = inner / 3;
+		for (int i = 0; i <= r; i++) {
+			if (glyph == GLYPH_RESTORE) {
+				fill_rect(cr, cx - i, cy - r + i, 2 * i + 1, 1, fg);
+				fill_rect(cr, cx - i, cy + r - i, 2 * i + 1, 1, fg);
+			} else {
+				fill_rect(cr, cx - i, cy - r + i, 1, 1, fg);
+				fill_rect(cr, cx + i, cy - r + i, 1, 1, fg);
+				fill_rect(cr, cx - i, cy + r - i, 1, 1, fg);
+				fill_rect(cr, cx + i, cy + r - i, 1, 1, fg);
+			}
+		}
+		break;
+	}
+	case GLYPH_MINIMIZE: {
+		// a bar at the bottom: the window becomes an icon
+		int r = inner / 3;
+		fill_rect(cr, cx - r, cy + r - 2, 2 * r + 1, 3, fg);
+		break;
+	}
+	}
+}
+
+static void draw_atari(cairo_t *cr, const struct tw_theme *t,
+		const struct tw_frame *f, const struct metrics *m) {
+	uint32_t ink = tw_theme_color(t, "decoration.dark", 0x000000ff);
+	uint32_t paper = tw_theme_color(t, "decoration.face", 0xffffffff);
+	uint32_t frame = state_color(t, f, "frame", ink, ink);
+	int W = f->width, H = f->height;
+	int s = m->side, bar_h = m->top - s - 1;
+
+	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
+	// one black line around the window, and under the title bar
+	fill_rect(cr, 0, 0, W, s, frame);
+	fill_rect(cr, 0, H - s, W, s, frame);
+	fill_rect(cr, 0, 0, s, H, frame);
+	fill_rect(cr, W - s, 0, s, H, frame);
+	if (m->side == 0) {
+		fill_rect(cr, 0, 0, W, 1, frame); // maximized: still the line at the top
+	}
+	fill_rect(cr, s, s + bar_h, W - 2 * s, 1, ink);
+
+	// the bar: white, dotted while the window is the active one
+	fill_rect(cr, s, s, W - 2 * s, bar_h, state_color(t, f, "title_bg", paper, paper));
+	if (f->focused) {
+		for (int y = 1; y < bar_h; y += 2) {
+			for (int x = (y / 2) % 2; x < W - 2 * s; x += 2) {
+				fill_rect(cr, s + x, s + y, 1, 1, ink);
+			}
+		}
+	}
+
+	struct tw_buttons b;
+	frame_buttons(t, f, W, &b);
+	struct {
+		const struct wlr_box *box;
+		enum glyph glyph;
+		enum tw_hit hit;
+		bool line_right;
+	} boxes[] = {
+		{ &b.close, GLYPH_CLOSE, TW_HIT_CLOSE, true },
+		{ &b.minimize, GLYPH_MINIMIZE, TW_HIT_MINIMIZE, false },
+		{ &b.maximize, f->maximized ? GLYPH_RESTORE : GLYPH_MAXIMIZE, TW_HIT_MAXIMIZE, false },
+	};
+	for (size_t i = 0; i < sizeof(boxes) / sizeof(boxes[0]); i++) {
+		bool pressed = f->pressed == boxes[i].hit && f->hover == boxes[i].hit;
+		atari_box(cr, boxes[i].box, boxes[i].glyph, pressed, boxes[i].line_right, paper, ink);
+	}
+
+	// the title in the middle, on white of its own over the dots
+	const char *font = tw_theme_str(t, "decoration.title_font",
+		"Terminus, DejaVu Sans Mono, Monospace Bold 10");
+	double left = b.close.x + b.close.width + 6;
+	double right = b.minimize.width > 0 ? b.minimize.x - 6 : W - s - 6;
+	double room = right - left;
+	if (f->title && *f->title && room > 12) {
+		PangoLayout *layout = make_layout(cr, font, f->title, room - 12);
+		int tw, th;
+		pango_layout_get_pixel_size(layout, &tw, &th);
+		g_object_unref(layout);
+		double box_w = tw + 12 < room ? tw + 12 : room;
+		double box_x = floor(left + (room - box_w) / 2);
+		fill_rect(cr, box_x, s, box_w, bar_h, state_color(t, f, "title_bg", paper, paper));
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+		draw_text(cr, font, f->title, box_x + 6, s, box_w - 12, bar_h,
+			state_color(t, f, "title_fg", ink, ink), true, TEXT_PLAIN, 0);
 	}
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 }
@@ -1190,6 +1322,9 @@ void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 	struct metrics m;
 	get_metrics(theme, frame->maximized, &m);
 	switch (get_style(theme)) {
+	case STYLE_ATARI:
+		draw_atari(cr, theme, frame, &m);
+		break;
 	case STYLE_WIN1:
 		draw_win1(cr, theme, frame, &m);
 		break;
@@ -1245,7 +1380,8 @@ void tw_style_draw_alttab(cairo_t *cr, const struct tw_theme *t,
 		const struct tw_alttab_item *items, int count, int selected,
 		int width, int height, int columns) {
 	enum style style = get_style(t);
-	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3 || style == STYLE_WIN1;
+	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3 || style == STYLE_WIN1 ||
+		style == STYLE_ATARI;
 	double radius = tw_theme_int(t, "alttab.radius",
 		style == STYLE_WIN11 ? 8 : style == STYLE_WINXP ? 6 : style == STYLE_WIN7 ? 6 : 0);
 	uint32_t bg = tw_theme_color(t, "alttab.bg",
@@ -1257,7 +1393,15 @@ void tw_style_draw_alttab(cairo_t *cr, const struct tw_theme *t,
 	uint32_t border = tw_theme_color(t, "alttab.border",
 		classic ? 0x000000ff : style == STYLE_WIN10 ? 0x00000000 : 0xffffff60);
 
-	if (classic) {
+	if (style == STYLE_ATARI) {
+		// an alert box of GEM: white with a double black line
+		fill_rect(cr, 0, 0, width, height, bg);
+		cairo_set_source_u32(cr, border);
+		cairo_set_line_width(cr, 1);
+		cairo_rectangle(cr, 0.5, 0.5, width - 1, height - 1);
+		cairo_rectangle(cr, 3.5, 3.5, width - 7, height - 7);
+		cairo_stroke(cr);
+	} else if (classic) {
 		struct wlr_box box = { 0, 0, width, height };
 		bevel(cr, &box, false, bg, 0xdfdfdfff, 0xffffffff, 0x808080ff, 0x000000ff);
 	} else {
@@ -1320,7 +1464,8 @@ uint32_t tw_style_alttab_wash(const struct tw_theme *theme) {
 void tw_style_draw_alttab_title(cairo_t *cr, const struct tw_theme *t,
 		const char *title, int width, int height) {
 	enum style style = get_style(t);
-	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3 || style == STYLE_WIN1;
+	bool classic = style == STYLE_WIN95 || style == STYLE_WIN3 || style == STYLE_WIN1 ||
+		style == STYLE_ATARI;
 	uint32_t fg = tw_theme_color(t, "alttab.fg", classic ? 0x000000ff : 0xffffffff);
 	const char *font = tw_theme_str(t, "alttab.font",
 		classic ? "Tahoma, Noto Sans 8" : "Segoe UI, Noto Sans 12");

@@ -6,15 +6,26 @@
 Every icon is described once as simple shapes; each theme turns the shapes
 into its own look (Windows 95: pixel grid with black outlines, XP: glossy
 diagonal gradients, 7: glass highlights, 10: flat, 11: soft fluent
-gradients). The generated files are committed, so building tileWin does not
-need Python. All artwork is original.
+gradients, Atari ST: the pixel grid of Windows 95 in black and white, the
+tones between them dithered as on a monochrome screen). The generated files
+are committed, so building tileWin does not need Python. All artwork is
+original.
+
+    tools/gen-icons.py --theme atari [ICON...]   only that theme
 """
 import math
 import os
 import re
 import sys
 
-THEMES = ['win95', 'winxp', 'win7', 'win10', 'win11']
+THEMES = ['win95', 'winxp', 'win7', 'win10', 'win11', 'atari', 'atari-dark']
+
+# themes drawn as another one, then turned to black and white
+MONO = {'atari': 'win95', 'atari-dark': 'win95'}
+# and black and white swapped: the dark scheme of the Atari ST theme
+INVERTED = {'atari-dark'}
+# where a set goes: themes/<theme>/<folder>
+OUT = {'atari-dark': ('atari', 'icons-dark')}
 
 STYLES = {
     'win95': dict(k=32 / 48, crisp=True, round=0, outline='black', grad=None,
@@ -61,6 +72,10 @@ NUM = re.compile(r'-?\d+(?:\.\d+)?')
 
 class Icon:
     def __init__(self, theme, tray=False):
+        # a black and white theme draws its shapes as the theme it is based on
+        self.mono = theme in MONO
+        self.inverted = theme in INVERTED
+        theme = MONO.get(theme, theme)
         self.t = theme
         self.p = dict(STYLES[theme])
         # Windows 95 tray icons are 16 px pixel art
@@ -86,10 +101,49 @@ class Icon:
         self.ids += 1
         return '%s%d' % (prefix, self.ids)
 
+    # black and white ------------------------------------------------
+    def mono_color(self, color):
+        """A color as black, white or a dither of them (DITHER1: a quarter of the
+        pixels black, DITHER2: half), by its lightness."""
+        if not self.mono or color is None or not color.startswith('#'):
+            return color
+        r, g, b = rgb(color[:7])
+        light = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        if light >= .72:
+            return '#ffffff'
+        if light <= .28:
+            return '#000000'
+        return 'DITHER2' if light < .5 else 'DITHER1'
+
+    def dither(self, el):
+        """A shape with a dithered fill: white, then black pixels clipped to it.
+        No <pattern>: GTK's own SVG renderer, which draws icons in GTK 4 apps,
+        does not know it."""
+        level = 2 if 'fill="DITHER2"' in el else 1
+        white = el.replace('fill="DITHER%d"' % level, 'fill="#ffffff"')
+        cid = self.uid('c')
+        self.defs.append('<clipPath id="%s">%s</clipPath>' % (cid, white))
+        dots = []
+        for y in range(self.size):
+            for x in range(self.size):
+                on = (x + y) % 2 == 0 if level == 2 else (x % 2 == 0 and y % 2 == 0)
+                if on:
+                    dots.append('M%d %dh1v1h-1z' % (x, y))
+        return white + '<path clip-path="url(#%s)" fill="#000000" d="%s"/>' % (cid, ''.join(dots))
+
+    def line_color(self, color):
+        """Lines are not dithered: black unless they are near white."""
+        if not self.mono or not color.startswith('#'):
+            return color
+        r, g, b = rgb(color[:7])
+        return '#ffffff' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 >= .72 else '#000000'
+
     # paint -----------------------------------------------------------
     def fill(self, color, flat=False, grad=None):
         if color is None:
             return 'none'
+        if self.mono:
+            return self.mono_color(color)
         g = grad if grad is not None else self.p['grad']
         if flat or not g:
             return color
@@ -173,7 +227,8 @@ class Icon:
         self.els.append(
             '<polyline points="%s" fill="none" stroke="%s" stroke-width="%s" '
             'stroke-linecap="%s" stroke-linejoin="round"%s/>' % (
-                self.pts(points, odd), color, w, 'square' if self.p['crisp'] else cap, extra))
+                self.pts(points, odd), self.line_color(color), w,
+                'square' if self.p['crisp'] else cap, extra))
 
     def arc(self, cx, cy, r, a0, a1, color, width, steps=24, cap='round'):
         pts = []
@@ -225,11 +280,17 @@ class Icon:
 
     def svg(self):
         size = self.size
+        if self.mono:
+            self.els = [self.dither(el) if 'fill="DITHER' in el else el for el in self.els]
         head = ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
                 'viewBox="0 0 %d %d"%s>' % (size, size, size, size,
                                            ' shape-rendering="crispEdges"' if self.p['crisp'] else ''))
         defs = '<defs>%s</defs>' % ''.join(self.defs) if self.defs else ''
-        return head + defs + ''.join(self.els) + '</svg>\n'
+        body = defs + ''.join(self.els)
+        if self.inverted:
+            body = body.replace('#000000', '#@@@').replace('#ffffff', '#000000') \
+                .replace('#@@@', '#ffffff').replace('#000"', '#fff"')
+        return head + body + '</svg>\n'
 
 
 # ---------------------------------------------------------------- palette per theme
@@ -698,7 +759,8 @@ def browser(ic):
     ic.shadow(rx=16)
     emblem_globe(ic, 24, 24, 36)
     if t in ('winxp', 'win7', 'win95'):
-        ring = pick(ic, win95='#ffff00', winxp='#f2b233', win7='#e8a83a')
+        # a black ring in black and white: a white one would vanish on the paper
+        ring = '#000000' if ic.mono else pick(ic, win95='#ffff00', winxp='#f2b233', win7='#e8a83a')
         ic.els.append('<ellipse cx="%s" cy="%s" rx="%s" ry="%s" fill="none" stroke="%s" stroke-width="%s" '
                       'transform="rotate(-28 %s %s)"/>' % (
                           ic.n(24), ic.n(24), ic.n(23), ic.n(8.5), ring, ic.n(3.2) if t != 'win95' else 2,
@@ -1348,11 +1410,15 @@ def aliases_text():
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     only = sys.argv[1:]
+    themes = THEMES
+    if only[:1] == ['--theme']:
+        themes, only = [only[1]], only[2:]
     canonical = {}
     for name, fn in ICONS.items():
         canonical.setdefault(fn, name)
-    for theme in THEMES:
-        out = os.path.join(root, 'themes', theme, 'icons')
+    for theme in themes:
+        folder = OUT.get(theme, (theme, 'icons'))
+        out = os.path.join(root, 'themes', folder[0], folder[1])
         os.makedirs(out, exist_ok=True)
         for name in os.listdir(out):
             if name.endswith('.svg') and not os.path.isdir(os.path.join(out, name)):
@@ -1380,7 +1446,7 @@ def main():
             f.write(aliases_text())
             for target, name in extra:
                 f.write('%s %s\n' % (target, name))
-    print('%d icons and %d tray icons x %d themes' % (len(canonical), len(TRAY_ICONS), len(THEMES)))
+    print('%d icons and %d tray icons x %d themes' % (len(canonical), len(TRAY_ICONS), len(themes)))
 
 
 if __name__ == '__main__':

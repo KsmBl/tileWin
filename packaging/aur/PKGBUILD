@@ -29,6 +29,7 @@ optdepends=(
 	'xfce4-terminal: the terminal of the default config'
 	'thunar: a file manager, when none is installed (tileWin opens the one that is)'
 	'xdg-desktop-portal-gtk: file dialogs and dark mode for apps'
+	'terminus-font: the pixel font of the Atari ST theme'
 )
 backup=(
 	'etc/pam.d/tilewin-lock'

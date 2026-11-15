@@ -53,6 +53,7 @@
 
 /* Which Windows the theme looks like, as the compositor's frames tell them. */
 enum era {
+	ERA_ATARI, // GEM of the Atari ST: black lines on white
 	ERA_WIN1,
 	ERA_WIN3,
 	ERA_WIN95, // also Windows 2000
@@ -348,6 +349,14 @@ static void button(cairo_t *cr, double x, double y, double w, double h, const ch
 		bool primary, bool hover, bool pressed) {
 	bool dark = agent.dark;
 	switch (agent.era) {
+	case ERA_ATARI:
+		// GEM: one black line, three round the default button, inverted while pressed
+		box(cr, x, y, w, h, 0, pressed ? agent.fg : agent.body);
+		for (int i = 0; i < (primary ? 3 : 1); i++) {
+			outline(cr, x + i, y + i, w - 2 * i, h - 2 * i, 0, 1, agent.fg);
+		}
+		button_label(cr, label, x, y, w, h, pressed ? agent.body : agent.fg, 0);
+		return;
 	case ERA_WIN1:
 		box(cr, x, y, w, h, 5, pressed ? 0x000000ff : 0xffffffff);
 		outline(cr, x, y, w, h, 5, primary ? 2 : 1, 0x000000ff);
@@ -1622,6 +1631,7 @@ static enum era era_of(const struct tw_theme *t) {
 		const char *name;
 		enum era era;
 	} eras[] = {
+		{ "atari", ERA_ATARI },
 		{ "win1", ERA_WIN1 }, { "win3", ERA_WIN3 }, { "win31", ERA_WIN3 },
 		{ "win95", ERA_WIN95 }, { "classic", ERA_WIN95 }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
@@ -1660,6 +1670,17 @@ static void load_theme(void) {
 	agent.no_label = old ? "Cancel" : "No";
 
 	switch (era) {
+	case ERA_ATARI:
+		// the theme's own black and white, turned round in its dark scheme
+		agent.body = tw_theme_color(t, "dialog.bg", 0xffffffff);
+		agent.fg = agent.instruction = agent.dim = tw_theme_color(t, "dialog.fg", 0x000000ff);
+		agent.field_bg = tw_theme_color(t, "dialog.field_bg", agent.body);
+		agent.field_fg = tw_theme_color(t, "dialog.field_fg", agent.fg);
+		agent.field_line = agent.field_focus = agent.fg;
+		agent.error = agent.fg;
+		agent.dark = false;
+		agent.question = "A program needs the password of an administrator.";
+		return;
 	case ERA_WIN1:
 	case ERA_WIN3:
 		agent.body = 0xffffffff;

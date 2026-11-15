@@ -101,7 +101,7 @@ static enum gadget_look look_of(const struct tw_theme *t) {
 		enum gadget_look look;
 	} names[] = {
 		{ "classic", GADGET_CLASSIC }, { "win95", GADGET_CLASSIC }, { "win3", GADGET_CLASSIC },
-		{ "win1", GADGET_CLASSIC },
+		{ "win1", GADGET_CLASSIC }, { "atari", GADGET_CLASSIC },
 		{ "luna", GADGET_LUNA }, { "winxp", GADGET_LUNA },
 		{ "aero", GADGET_AERO }, { "win7", GADGET_AERO },
 		{ "metro", GADGET_METRO }, { "win8", GADGET_METRO },
@@ -123,6 +123,7 @@ void gadget_palette(struct panel *panel, struct widget *w, bool card,
 	memset(pal, 0, sizeof(*pal));
 	pal->look = look_of(t);
 	pal->dark = t->dark;
+	pal->mono = panel_atari(panel);
 	const struct look_colors *d = &look_defaults[pal->look][pal->dark];
 	uint32_t tint = pal->look == GADGET_METRO ? metro_tint(w) : d->bg;
 	if (pal->look == GADGET_METRO && pal->dark) {
@@ -601,11 +602,14 @@ static void draw_gauge(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 			vertical_gradient(cr, cy - r, 2 * r, pal->dark ? 0x2a4a8aff : 0xffffffff,
 				pal->dark ? 0x0a1a40ff : 0xdce7f7ff);
 		} else {
-			pd_color(cr, pal->dark ? 0x2c2c2cff : 0xdfdfdfff);
+			pd_color(cr, pal->mono ? pal->face : pal->dark ? 0x2c2c2cff : 0xdfdfdfff);
 		}
 		cairo_fill(cr);
 		// the rim
 		double rim = fmax(r * 0.06, 2);
+		if (pal->mono) {
+			rim = 1;
+		}
 		cairo_new_path(cr);
 		circle(cr, cx, cy, r - rim / 2);
 		cairo_set_line_width(cr, rim);
@@ -619,6 +623,9 @@ static void draw_gauge(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 			cairo_stroke(cr);
 		} else if (pal->look == GADGET_LUNA) {
 			pd_color(cr, pal->border);
+			cairo_stroke(cr);
+		} else if (pal->mono) {
+			pd_color(cr, ink); // the Atari ST: one line
 			cairo_stroke(cr);
 		} else {
 			// Windows 95: light at the upper left, shadow at the lower right
@@ -634,7 +641,7 @@ static void draw_gauge(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		cairo_arc(cr, cx, cy, r * 0.8, GAUGE_START + GAUGE_SWEEP * 0.8,
 			GAUGE_START + GAUGE_SWEEP);
 		cairo_set_line_width(cr, fmax(r * 0.05, 1.5));
-		pd_color(cr, alpha(pal->critical, 0xc0));
+		pd_color(cr, pal->mono ? ink : alpha(pal->critical, 0xc0));
 		cairo_stroke(cr);
 		// ticks, and the numbers when there is room for them
 		for (int i = 0; i <= 20; i++) {
@@ -675,8 +682,8 @@ static void draw_gauge(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 	// the needle
 	double needle = dial ? r * 0.78 : r * 0.62;
 	uint32_t needle_color = pal->look == GADGET_AERO ? 0xff3a2aff :
-		pal->look == GADGET_LUNA ? 0xc03030ff : pal->look == GADGET_CLASSIC ?
-		(pal->dark ? 0xe0e0e0ff : 0x000000ff) : pal->fg;
+		pal->look == GADGET_LUNA ? 0xc03030ff : pal->mono ? pal->fg :
+		pal->look == GADGET_CLASSIC ? (pal->dark ? 0xe0e0e0ff : 0x000000ff) : pal->fg;
 	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 	cairo_move_to(cr, cx - cos(angle) * r * 0.12, cy - sin(angle) * r * 0.12);
 	cairo_line_to(cr, cx + cos(angle) * needle, cy + sin(angle) * needle);
@@ -962,6 +969,18 @@ static void draw_analog(struct gadget_ctx *ctx, const struct gadget_palette *pal
 	bool numbers = r >= 40 && pal->look != GADGET_METRO && pal->look != GADGET_FLUENT;
 	switch (pal->look) {
 	case GADGET_CLASSIC:
+		if (pal->mono) {
+			// the Atari ST: a white face, one black line round it, black hands
+			cairo_new_path(cr);
+			circle(cr, cx, cy, r);
+			pd_color(cr, pal->face);
+			cairo_fill_preserve(cr);
+			cairo_set_line_width(cr, 1);
+			pd_color(cr, ink);
+			cairo_stroke(cr);
+			second_color = ink;
+			break;
+		}
 		cairo_new_path(cr);
 		circle(cr, cx, cy, r);
 		pd_color(cr, pal->dark ? 0x2c2c2cff : 0xdfdfdfff);
