@@ -428,7 +428,11 @@ static void topology_load(struct cpu_topology *t) {
 		snprintf(path, sizeof(path), "/sys/devices/system/cpu/types/%s/cpulist", de->d_name);
 		if (read_file(path, buf, sizeof(buf))) {
 			size_t len = strlen(efficiency);
-			snprintf(efficiency + len, sizeof(efficiency) - len, "%s%s", len ? "," : "", buf);
+			if (len + strlen(buf) + 2 > sizeof(efficiency)) {
+				continue; // a list longer than this computer has CPUs
+			}
+			snprintf(efficiency + len, sizeof(efficiency) - len, "%s%.*s", len ? "," : "",
+				(int)(sizeof(efficiency) - len - 2), buf);
 		}
 	}
 	if (types) {
@@ -1027,8 +1031,8 @@ struct nm_state {
 
 static bool nm_counters(const char *device, unsigned long long *rx, unsigned long long *tx) {
 	char path[256], buf[64];
-	snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/rx_bytes", device);
-	if (!read_file(path, buf, sizeof(buf))) {
+	if (snprintf(path, sizeof(path), "/sys/class/net/%s/statistics/rx_bytes", device) >=
+			(int)sizeof(path) || !read_file(path, buf, sizeof(buf))) {
 		return false;
 	}
 	*rx = strtoull(buf, NULL, 10);

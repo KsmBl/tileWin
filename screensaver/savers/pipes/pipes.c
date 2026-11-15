@@ -207,7 +207,7 @@ static void render(struct pipes *p, const struct shape *s, const double color[3]
 		for (int x = x0; x < x1; x++) {
 			double d[3] = { (x + 0.5 - p->width / 2.0) / p->focal,
 				-(y + 0.5 - p->height / 2.0) / p->focal, 1 };
-			double t, n[3];
+			double t, n[3] = { 0, 0, 1 }; // hit() sets it whenever it hits
 			if (!hit(s, o, d, &t, n) || t >= p->depth[y * p->width + x]) {
 				continue;
 			}

@@ -552,11 +552,12 @@ static void load_config(void) {
 			}
 		} else if (strcmp(p, "doh") == 0) {
 			// doh SERVER URL: the server is asked over HTTPS at that address
+			// one more than fits, so an address too long is refused, not cut short
 			char server[80], url[DOH_URL_MAX + 1];
-			if (sscanf(rest, "%79s %200s", server, url) == 2 && doh_url_valid(url) &&
-					c->ndoh < MAX_SERVERS) {
+			if (sscanf(rest, "%79s %200s", server, url) == 2 && strlen(url) < DOH_URL_MAX &&
+					doh_url_valid(url) && c->ndoh < MAX_SERVERS) {
 				snprintf(c->doh[c->ndoh].server, sizeof(c->doh[0].server), "%s", server);
-				snprintf(c->doh[c->ndoh].url, sizeof(c->doh[0].url), "%s", url);
+				memcpy(c->doh[c->ndoh].url, url, strlen(url) + 1);
 				c->ndoh++;
 			} else {
 				logmsg("%s: 'doh %s' left out: a server and an https:// address", d.conf_path,

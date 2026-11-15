@@ -153,8 +153,13 @@ running() {
 not_running() {
 	! running
 }
-# ends the saver: a pointer that moves (twice: a new one loses its first motion)
+# ends the saver: a pointer that moves (twice: a new one loses its first motion),
+# once its first second is over, in which it takes input for the input that
+# started it (GRACE_MS)
 end_saver() {
+	while [ $(($(date +%s) - started)) -lt 2 ]; do
+		sleep 0.2
+	done
 	"$pointer" 1280 720 move 900 100 move 940 140 move 980 180 >/dev/null 2>&1
 	wait_until 2 not_running || fail "moving the mouse did not end $1"
 }

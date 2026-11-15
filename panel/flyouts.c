@@ -1216,10 +1216,10 @@ static bool default_route_iface(char *out, size_t size) {
 		return false; // just the header, or nothing
 	}
 	while (fgets(line, sizeof(line), file)) {
-		char name[IFNAMSIZ + 1], dest[16];
+		char name[IFNAMSIZ], dest[16]; // a name has 15 characters at most
 		unsigned flags;
 		int metric;
-		if (sscanf(line, "%16s %15s %*s %x %*d %*d %d", name, dest, &flags, &metric) != 4) {
+		if (sscanf(line, "%15s %15s %*s %x %*d %*d %d", name, dest, &flags, &metric) != 4) {
 			continue;
 		}
 		if (strcmp(dest, "00000000") == 0 && (flags & 1) && strcmp(name, "lo") != 0 &&
@@ -1241,9 +1241,9 @@ static bool default_route6_iface(char *out, size_t size) {
 	char line[256];
 	bool found = false;
 	while (!found && fgets(line, sizeof(line), file)) {
-		char dest[40], name[IFNAMSIZ + 1];
+		char dest[40], name[IFNAMSIZ];
 		unsigned prefix;
-		if (sscanf(line, "%39s %x %*s %*s %*s %*s %*s %*s %*s %16s", dest, &prefix, name) == 3 &&
+		if (sscanf(line, "%39s %x %*s %*s %*s %*s %*s %*s %*s %15s", dest, &prefix, name) == 3 &&
 				prefix == 0 && strspn(dest, "0") == strlen(dest) && strcmp(name, "lo") != 0) {
 			snprintf(out, size, "%s", name);
 			found = true;

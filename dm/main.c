@@ -241,8 +241,8 @@ static void remember_look(const char *user) {
 	if (asprintf(&dir, "%s/shared", dm.state_dir) < 0) {
 		return;
 	}
-	if (theme && plain_word(theme)) {
-		snprintf(file, sizeof(file), "%s\n", theme);
+	if (theme && plain_word(theme) && snprintf(file, sizeof(file), "%s\n", theme) <
+			(int)sizeof(file)) {
 		write_state(dir, "last-theme", file);
 	}
 	if (scheme && (strcmp(scheme, "dark") == 0 || strcmp(scheme, "light") == 0)) {
@@ -660,7 +660,12 @@ static void make_socket(void) {
 	unlink(dm.socket_path);
 	dm.listen_fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
-	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", dm.socket_path);
+	size_t len = strlen(dm.socket_path);
+	if (len >= sizeof(addr.sun_path)) {
+		logmsg("the socket path %s is too long", dm.socket_path);
+		exit(1);
+	}
+	memcpy(addr.sun_path, dm.socket_path, len + 1);
 	mode_t old = umask(0077);
 	if (dm.listen_fd < 0 || bind(dm.listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
 			listen(dm.listen_fd, 2) != 0) {

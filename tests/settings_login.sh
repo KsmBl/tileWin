@@ -103,12 +103,23 @@ if [ ! -s "$work/display" ]; then
 	exit 1
 fi
 export WAYLAND_DISPLAY=$(cat "$work/display")
-attempt=0
-while ! ipc -t get_tree | grep -q '"name": "tileWin Settings"' && [ $attempt -lt 50 ]; do
-	sleep 0.2
-	attempt=$((attempt + 1))
-done
-ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
+# under the load of the whole suite the settings may take a while to come up,
+# and every click below needs them to fill the screen
+settings_up() { ipc -t get_tree | grep -q '"name": "tileWin Settings"'; }
+wait_until 40 settings_up || fail "the settings never came up"
+fullscreen() {
+	ipc '[title="tileWin Settings"] fullscreen enable' >/dev/null
+	ipc -t get_tree | python3 -c '
+import json, sys
+def walk(n):
+	if n.get("name") == "tileWin Settings":
+		sys.exit(0 if n.get("fullscreen_mode") else 1)
+	for c in n.get("nodes", []) + n.get("floating_nodes", []):
+		walk(c)
+walk(json.load(sys.stdin))
+sys.exit(1)'
+}
+wait_until 10 fullscreen || fail "the settings do not fill the screen"
 "$pointer" 1280 800 move 640 400
 # the page and the picture on top drawn to the end, before anything is compared with it
 screen_sum() { grim -t ppm - | cksum; }
@@ -139,30 +150,30 @@ sys.exit(0 if r > 170 and g < 80 and b < 60 else 1)'
 
 bar_up && fail "the Save bar shows with nothing changed"
 picture_sum() { thumb - | cksum; }
-wait_still 5 picture_sum
+wait_still 10 picture_sum
 thumb "$work/before.png"
 
 # the card to the right, and dark: the picture follows at once, nothing is saved yet
 "$pointer" 1280 800 click 1197 690
 sleep 0.5
 "$pointer" 1280 800 click 1199 360
-wait_until 5 looks_unlike "$work/before.png" || fail "the picture does not follow the settings"
-wait_until 5 bar_up || fail "no Save bar after a change"
+wait_until 15 looks_unlike "$work/before.png" || fail "the picture does not follow the settings"
+wait_until 15 bar_up || fail "no Save bar after a change"
 if grep -q '^write$' "$work/calls"; then
 	fail "something was saved before Save"
 fi
 
 # Discard: back as it was, the bar goes
 "$pointer" 1280 800 click 1128 743
-wait_until 5 bar_down || fail "the Save bar stayed after Discard"
-wait_until 5 looks_like "$work/before.png" || fail "Discard did not bring the picture back"
+wait_until 15 bar_down || fail "the Save bar stayed after Discard"
+wait_until 15 looks_like "$work/before.png" || fail "Discard did not bring the picture back"
 
 # Save: what changed, what the file said, and no defaults
 "$pointer" 1280 800 click 1197 690
-wait_until 5 bar_up # Save is there to press
+wait_until 15 bar_up # Save is there to press
 "$pointer" 1280 800 click 1213 743
-wait_until 5 grep -q '^write$' "$work/calls" || fail "Save did not reach the helper: $(cat "$work/calls")"
-wait_until 5 test -s "$work/written"
+wait_until 15 grep -q '^write$' "$work/calls" || fail "Save did not reach the helper: $(cat "$work/calls")"
+wait_until 15 test -s "$work/written"
 grep -q '^card_position right$' "$work/written" 2>/dev/null || fail "the change was not saved: $(cat "$work/written" 2>/dev/null)"
 grep -q '^theme "win7"$' "$work/written" 2>/dev/null || fail "the theme of the file got lost"
 grep -q '^vt 4$' "$work/written" 2>/dev/null || fail "a number of the file got lost"
@@ -170,14 +181,14 @@ grep -q '^env FOO=bar$' "$work/written" 2>/dev/null || fail "an env line of the 
 if grep -q 'remember_user' "$work/written" 2>/dev/null; then
 	fail "a default was written out"
 fi
-wait_until 5 bar_down || fail "the Save bar stayed after saving"
+wait_until 15 bar_down || fail "the Save bar stayed after saving"
 
 # a helper that refuses: the banner, and the change is still there to save
 touch "$work/refuse"
 "$pointer" 1280 800 click 1133 690
-wait_until 5 bar_up # Save is there to press
+wait_until 15 bar_up # Save is there to press
 "$pointer" 1280 800 click 1213 743
-wait_until 5 banner_up || fail "a refusal shows no banner"
+wait_until 15 banner_up || fail "a refusal shows no banner"
 bar_up || fail "after a refusal the change was taken for saved"
 rm -f "$work/refuse"
 "$pointer" 1280 800 click 1251 24

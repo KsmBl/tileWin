@@ -14,7 +14,9 @@ const char *tw_power_supply_dir(void) {
 
 static bool read_value(const char *dir, const char *name, char *buf, size_t size) {
 	char path[512];
-	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	if (snprintf(path, sizeof(path), "%s/%s", dir, name) >= (int)sizeof(path)) {
+		return false;
+	}
 	FILE *f = fopen(path, "r");
 	if (!f) {
 		return false;
