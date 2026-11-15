@@ -121,6 +121,16 @@ int main(void) {
 	tw_kernel_auto_release("7.4.0-tilewin1", rel, sizeof(rel));
 	CHECK(strcmp(rel, "7.4") == 0, "release of 7.4.0-tilewin1: %s", rel);
 
+	char words[96];
+	put("/etc/tilewin/kernel-auto.conf", "enabled=yes\nwhen=wed\ntime=21:30\n");
+	tw_kernel_auto_read(&ka);
+	tw_kernel_auto_schedule_words(&ka, words, sizeof(words));
+	CHECK(!ka.timer_on && strstr(words, "Update now"), "the timer off: only Update now: %s", words);
+	put("/etc/systemd/system/timers.target.wants/tilewin-kernel-auto.timer", "");
+	tw_kernel_auto_read(&ka);
+	tw_kernel_auto_schedule_words(&ka, words, sizeof(words));
+	CHECK(ka.timer_on && strcmp(words, "every Wednesday at 21:30") == 0, "the timer on: %s", words);
+
 	put("/etc/tilewin/kernel-auto.conf", "enabled=no\n");
 	tw_kernel_auto_read(&ka);
 	tw_kernel_auto_summarize(&ka, now, &s);

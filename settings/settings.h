@@ -126,6 +126,8 @@ void settings_apply_color_scheme(bool dark);
 struct tw_theme;
 char *settings_theme_css(const struct tw_theme *theme);
 void settings_apply_theme(void);
+/* Whether the theme that is on is drawn flat with bevels, as Windows 95 (the last one applied). */
+bool settings_theme_classic(void);
 
 /* ui.c */
 /* A setting found by the search of the settings window. */

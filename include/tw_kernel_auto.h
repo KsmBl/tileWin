@@ -15,6 +15,8 @@
  *   /var/lib/tilewin/kernel-auto/build/fixes    how far the live fixes are
  *   /var/lib/tilewin/kernel-auto/log            what was done, newest last
  *   /run/tilewin-kernel-auto.lock               held while a run goes on
+ *   /etc/systemd/system/timers.target.wants/tilewin-kernel-auto.timer
+ *                                               there while the timer is on
  *
  * TILEWIN_KERNEL_AUTO_ROOT puts all of them below another folder (the tests).
  */
@@ -38,6 +40,7 @@ struct tw_kernel_auto {
 	bool catchup;          // a time the computer was off at is made up at the next start
 	bool native, battery;
 	bool busy;        // a run goes on now
+	bool timer_on;    // its timer is enabled: it runs at the time set
 	char state[16];   // idle, fixes, building, applying, installing, off
 	char message[192], error[256], arm_error[256];
 	char running[96]; // the kernel that runs
@@ -86,7 +89,10 @@ struct tw_kernel_auto_summary {
 void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 	struct tw_kernel_auto_summary *out);
 
-/* When the updates run: "every day at 03:00", "every Monday at 21:30". */
+/*
+ * When the updates run: "every day at 03:00", "every Monday at 21:30", or
+ * "only at Update now" while the timer is off.
+ */
 void tw_kernel_auto_schedule_words(const struct tw_kernel_auto *ka, char *out, size_t size);
 
 /* The release of a kernel name: "7.3.6" of "7.3.6-tilewin2". */

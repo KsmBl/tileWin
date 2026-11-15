@@ -765,11 +765,15 @@ cat > "$work/rbin/insmod" <<INSMOD
 echo "insmod \$*" >> $calls
 d=$sb/sys/kernel/livepatch/\$(basename "\$1" .ko)
 mkdir -p "\$d"; echo 1 > "\$d/enabled"; echo 0 > "\$d/transition"
-[ -n "\${TW_OOPS:-}" ] && echo "BUG: unable to handle page fault for address: 0" >> $work/dmesg
+# a full ring buffer: the oldest line goes for the new one
+[ -n "\${TW_OOPS:-}" ] && sed -i 1d $work/dmesg && echo "[99999.123456] BUG: unable to handle page fault for address: 0" >> $work/dmesg
 exit 0
 INSMOD
 chmod +x "$work/rbin"/*
-: > "$work/dmesg"
+# a full ring buffer: as many lines as before, the oldest gone, but with time stamps
+for i in $(seq 20); do echo "[    $i.000000] an old line"; done > "$work/dmesg"
+echo "50.0 100.0" > "$work/uptime"
+export TILEWIN_KERNEL_UPTIME=$work/uptime
 mkdir -p "$sb/var/lib" "$sb/home" "$sb/proc/sys/kernel/random" "$sb/sys/kernel/livepatch"
 echo boot-1 > "$sb/proc/sys/kernel/random/boot_id"
 # the builds run inline, with root's PATH: the stand-ins of the builds too
@@ -839,22 +843,36 @@ check "  nothing waits for the next start" test -z "$(status next)"
 # the fixes of kernel.org for it (9.9.3), with a kernel that complains at once
 : > "$calls"
 : > "$work/notes"
+# the kernel's log is full: its oldest line goes for the new one
 TW_OOPS=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "the fixes are made for the running kernel" test "$(cat "$akernels/$a1/livepatches/security_9_9_3.state" 2>/dev/null)" = built
 check "  applied" grep -q "^insmod .*livepatch_security_9_9_3.ko" "$calls"
 check "  and taken out again when the kernel complains right after" grep -qx "rmmod livepatch_security_9_9_3" "$calls"
 check "  not tried again" grep -qx security_9_9_3 "$auto/bad"
 check "  and the user is told" bash -c "grep -q '^critical	Kernel fixes taken out again' '$work/notes'"
-rm -f "$auto/bad"
 : > "$calls"
 : > "$work/notes"
 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "  not even at the timer's next run" bash -c "! grep -q '^insmod' '$calls'"
+echo "100000.0 100.0" > "$work/uptime" # later: the old complaint is past
+TILEWIN_KERNEL_AUTO_MANUAL=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "fixes the kernel takes well stay" test -d "$sb/sys/kernel/livepatch/livepatch_security_9_9_3"
 check "  and are applied at every start of it" test -f "$sb/usr/lib/modules/$a1/livepatch/livepatch_security_9_9_3.ko"
 check "  the status names them and what needs a restart" bash -c "[ '$(status fixes)' = 9.9.3 ] && [ '$(status fixes_left)' = 2 ]"
 check "  and the user is told" bash -c "grep -q 'Kernel fixed without a restart' '$work/notes'"
 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "  once" test "$(grep -c 'Kernel fixed' "$work/notes")" = 1
+
+# the check at the start leaves it to a run that goes on
+exec 7> "$sb/run/tilewin-kernel-auto.lock"
+flock 7
+: > "$calls"
+echo boot-1b > "$sb/proc/sys/kernel/random/boot_id"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
+check "the check at the start leaves it to a run that holds the lock" bash -c "! grep -q bootctl '$calls'"
+TILEWIN_KERNEL_LOCK_WAIT=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "  and a second run waits for it, then gives up" grep -q "running already" "$work/out"
+exec 7>&-
 
 # a new release of the series: built for the next start
 mk_tree 9.9.4 "$work/trees"
@@ -894,8 +912,10 @@ a3=9.9.5-tilewin1
 check "the release after it is built and set" test "$(status next)" = "$a3"
 check "  the one that did not start is taken off" test ! -e "$sb/usr/lib/modules/$a2" -a ! -e "$akernels/$a2"
 echo boot-5 > "$sb/proc/sys/kernel/random/boot_id"
+rm -rf "$sb/sys/kernel/livepatch"/* # a restart: the livepatches of the kernel before are gone
 TILEWIN_KERNEL_RUNNING=$a3 R auto-boot > /dev/null 2>&1
 TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "after a restart into it the fixes of the kernel before are not named" test -z "$(status fixes)"
 check "once it started well, the one before is taken off and deleted, with its tree" \
 	test ! -e "$sb/usr/lib/modules/$a1" -a ! -e "$akernels/$a1" -a ! -e "$astore/cache/tileWin/kernel/build/$a1"
 check "  the running kernel stays" test -f "$sb/usr/lib/modules/$a3/.tilewin-kernel"
@@ -914,13 +934,41 @@ rm -f "$astore/cache/tileWin/kernel/releases.json"
 TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
 check "at the end of the series the newest series is built" test "$(status next)" = 9.10.2-tilewin1
 
+# Stop while a kernel builds: the run and its build end, and say so
+mk_tree 9.10.4 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.10.4.tar.xz" linux-9.10.4)
+(cd "$mirror/v9.x" && sha256sum linux-9.10.4.tar.xz >> sha256sums.asc)
+sed -i 's/"9.10.2"/"9.10.4"/g' "$work/releases.json"
+rm -f "$astore/cache/tileWin/kernel/releases.json"
+: > "$calls"
+TW_FAKE_SLOW=1 TILEWIN_KERNEL_RUNNING=$a3 bash "$root_tool" auto-run > "$work/out" 2>&1 &
+runner=$!
+# what systemctl stop does: SIGTERM to every process of the run
+tree() { local c; for c in $(ps -o pid= --ppid "$1"); do tree "$c"; done; echo "$1"; }
+for _ in $(seq 100); do
+	grep -q "phase=compile" "$auto/build/kernel" 2>/dev/null && break
+	sleep 0.1
+done
+kill -TERM $(tree "$runner") 2>/dev/null
+wait "$runner" 2>/dev/null
+for _ in $(seq 50); do
+	[ "$(cat "$akernels/9.10.4-tilewin1/state" 2>/dev/null)" = cancelled ] && break
+	sleep 0.1
+done
+check "Stop: the run says so in what was done" bash -c "tail -n 1 '$auto/log' | grep -q 'Stopped before it was done'"
+check "  is idle again" test "$(status state)" = idle
+check "  and stops the builds too" grep -q "^systemctl stop --no-block tilewin-kernel-auto-build@fixes.service" "$calls"
+check "  the build is cancelled" test "$(cat "$akernels/9.10.4-tilewin1/state" 2>/dev/null)" = cancelled
+TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "  and the next run builds it again" test "$(cat "$akernels/9.10.4-tilewin1/state" 2>/dev/null)" = built
+
 # on battery: no build
 mkdir -p "$sb/sys/class/power_supply/BAT0" "$sb/sys/class/power_supply/AC"
 echo Battery > "$sb/sys/class/power_supply/BAT0/type"
 echo Mains > "$sb/sys/class/power_supply/AC/type"
 echo 0 > "$sb/sys/class/power_supply/AC/online"
 before_build=$(ls "$akernels" | sort)
-sed -i 's/"9.10.2"/"9.10.3"/' "$work/releases.json"
+sed -i 's/"9.10.4"/"9.10.5"/' "$work/releases.json"
 rm -f "$astore/cache/tileWin/kernel/releases.json"
 TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
 check "on battery nothing is built" test "$(ls "$akernels" | sort)" = "$before_build"

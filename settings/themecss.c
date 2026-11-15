@@ -613,6 +613,11 @@ char *settings_theme_css(const struct tw_theme *t) {
 }
 
 static GtkCssProvider *provider;
+static bool classic;
+
+bool settings_theme_classic(void) {
+	return classic;
+}
 
 void settings_apply_theme(void) {
 	char *name = settings_current_theme();
@@ -621,6 +626,7 @@ void settings_apply_theme(void) {
 	free(error);
 	g_free(name);
 	char *css = settings_theme_css(t);
+	classic = t && era_of(t) == ERA_CLASSIC;
 	if (t) {
 		settings_apply_color_scheme(t->dark);
 	}

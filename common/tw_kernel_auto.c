@@ -166,6 +166,10 @@ bool tw_kernel_auto_read(struct tw_kernel_auto *ka) {
 	read_pairs("/var/lib/tilewin/kernel-auto/build/fixes", build_pair, &ka->fixes_build);
 	read_log(ka);
 	ka->busy = run_going_on();
+	char timer[1024];
+	path_of(timer, sizeof(timer),
+		"/etc/systemd/system/timers.target.wants/tilewin-kernel-auto.timer");
+	ka->timer_on = access(timer, F_OK) == 0;
 	return true;
 }
 
@@ -173,6 +177,10 @@ void tw_kernel_auto_schedule_words(const struct tw_kernel_auto *ka, char *out, s
 	static const char *const days[][2] = { { "mon", "Monday" }, { "tue", "Tuesday" },
 		{ "wed", "Wednesday" }, { "thu", "Thursday" }, { "fri", "Friday" },
 		{ "sat", "Saturday" }, { "sun", "Sunday" } };
+	if (!ka->timer_on) {
+		snprintf(out, size, "only at Update now (the timer is off)");
+		return;
+	}
 	const char *at = ka->time[0] ? ka->time : "03:00";
 	for (size_t i = 0; i < sizeof(days) / sizeof(days[0]); i++) {
 		if (strcmp(ka->when, days[i][0]) == 0) {
@@ -273,7 +281,7 @@ void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 		struct tw_kernel_auto_summary *out) {
 	memset(out, 0, sizeof(*out));
 	out->percent = -1;
-	char next[64], running[64];
+	char next[32], running[32];
 	tw_kernel_auto_release(ka->next, next, sizeof(next));
 	tw_kernel_auto_release(ka->running, running, sizeof(running));
 	if (!ka->configured || !ka->enabled) {

@@ -1733,7 +1733,7 @@ static void draw_hero_shield(GtkDrawingArea *area, cairo_t *cr, int width, int h
 	struct kernel_page *p = data;
 	double size = MIN(width, height);
 	tw_kernel_auto_draw_shield(cr, (width - size) / 2, (height - size) / 2, size, p->hero_kind,
-		state_color(p->hero_kind), false);
+		state_color(p->hero_kind), settings_theme_classic());
 }
 
 /* When the next run is: "today at 03:00", "tomorrow at 03:00", "Friday at 21:30". */
@@ -1801,6 +1801,9 @@ static void auto_show(struct kernel_page *p) {
 			tw_kernel_auto_ago(ka.checked, time(NULL), checked, sizeof(checked));
 		}
 		when = ka.busy ? g_strdup("Working on it now. You can keep using the computer.") :
+			!ka.timer_on ? g_strdup_printf("%s%s%sThe timer is off: updates run only when you "
+			"press Update now. Turning automatic updates off and on starts it again.",
+			ka.checked ? "Last update " : "", checked, ka.checked ? " · " : "") :
 			g_strdup_printf("%s%s%sNext automatic update: %s", ka.checked ? "Last update " : "",
 			checked, ka.checked ? " · " : "", next);
 		g_free(next);
@@ -1990,6 +1993,15 @@ static gboolean auto_save(gpointer data) {
 	run_root_argv(p, on_auto_done, args);
 	g_ptr_array_unref(opts);
 	return G_SOURCE_REMOVE;
+}
+
+/* Leaving the page or closing the window: what was changed is saved now. */
+static void on_page_unmap(GtkWidget *widget, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->auto_save_timer) {
+		g_source_remove(p->auto_save_timer);
+		auto_save(p);
+	}
 }
 
 static void on_auto_option(GObject *object, GParamSpec *pspec, gpointer data) {
@@ -2191,6 +2203,7 @@ static void auto_sections(struct kernel_page *p, GtkWidget *content) {
 	}
 
 	p->activity_list = ui_group(content, "Recent activity", NULL);
+	g_signal_connect(content, "unmap", G_CALLBACK(on_page_unmap), p);
 	auto_show(p);
 }
 

@@ -159,8 +159,11 @@ static struct info_row *add_row(struct info_flyout *f, const char *label, const 
 	}
 	struct info_row *row = &f->rows[f->row_count++];
 	memset(row, 0, sizeof(*row));
-	snprintf(row->label, sizeof(row->label), "%s", label ? label : "");
-	snprintf(row->value, sizeof(row->value), "%s", value ? value : "");
+	// cut to the room of a row, as the drawing would cut them anyway
+	snprintf(row->label, sizeof(row->label), "%.*s", (int)sizeof(row->label) - 1,
+		label ? label : "");
+	snprintf(row->value, sizeof(row->value), "%.*s", (int)sizeof(row->value) - 1,
+		value ? value : "");
 	row->bar = -1;
 	return row;
 }
@@ -205,7 +208,7 @@ static void format_bytes(char *out, size_t size, double bytes) {
 }
 
 static void format_rate(char *out, size_t size, double bytes_per_second) {
-	char amount[32];
+	char amount[16]; // "999.9 MB" and the like
 	format_bytes(amount, sizeof(amount), bytes_per_second);
 	snprintf(out, size, "%s/s", amount);
 }
@@ -1073,7 +1076,7 @@ static void claude_window(struct info_flyout *f, const struct tw_claude_window *
 		return;
 	}
 	add_heading(f, name);
-	char value[64], span[48];
+	char value[128], span[48];
 	snprintf(value, sizeof(value), "%.0f%%", used);
 	struct info_row *row = add_row(f, "Used", value);
 	if (row) {
@@ -1183,7 +1186,7 @@ static void kernel_sample(struct info_flyout *f) {
 	case TW_KA_ERROR: sub = sum.detail; break;
 	default: sub = "In the background, at the lowest priority"; break;
 	}
-	snprintf(f->subtitle, sizeof(f->subtitle), "%s", sub);
+	snprintf(f->subtitle, sizeof(f->subtitle), "%.*s", (int)sizeof(f->subtitle) - 1, sub);
 	if (!ka->configured || !ka->enabled) {
 		char *settings = format_str("exec tilewin-settings --page kernel");
 		add_action(f, "Switch on…", settings, NULL);

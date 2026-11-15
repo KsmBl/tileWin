@@ -814,6 +814,49 @@ kernel_log() {
 	fi
 }
 
+# Seconds since the start, as the kernel stamps its log.
+uptime_now() {
+	cut -d' ' -f1 "${TILEWIN_KERNEL_UPTIME:-/proc/uptime}" 2>/dev/null || echo 0
+}
+
+# What the kernel logged after a moment (uptime_now) and a count of lines: by
+# the time stamps, which the ring buffer keeps when it is full and drops its
+# oldest lines; by the count only for lines without one (printk.time=0).
+kernel_log_since() { # seconds lines
+	kernel_log | awk -v since="$1" -v count="$2" '
+		match($0, /^\[ *[0-9]+\.[0-9]+\]/) {
+			t = substr($0, RSTART + 1, RLENGTH - 2) + 0
+			if (t > since) print
+			next
+		}
+		NR > count { print }'
+}
+
+# The fixes the running kernel has, as the kernel says (after a restart the
+# status still names those of the kernel before): the newest security
+# livepatch loaded, what of it needs a restart.
+auto_fixes_state() {
+	local d name="" n
+	for d in "$livepatch_sys"/livepatch_security_*; do
+		[[ -d $d ]] || continue
+		n=${d##*/livepatch_}
+		name=$(printf '%s\n%s\n' "$name" "$n" | sort -V | tail -n 1)
+	done
+	if [[ -z $name ]]; then
+		st fixes ""
+		st fixes_left ""
+		st fixes_applied ""
+		return 0
+	fi
+	local to=${name#security_}
+	to=${to//_/.}
+	if [[ $(sed -n 's/^fixes=//p' "$auto_state/status" 2>/dev/null) != "$to" ]]; then
+		st fixes_applied "" # applied at the start, not lately
+	fi
+	st fixes "$to"
+	st fixes_left "$(grep -c . "$(auto_kernels)/$running/livepatches/$name.left" 2>/dev/null || echo 0)"
+}
+
 # The newest fixes made for the running kernel, applied, checked and set for
 # every start of it.
 auto_fixes() {
@@ -825,6 +868,7 @@ auto_fixes() {
 		[[ -f $n && $(cat "$n") == built && -f ${n%.state}.ko ]] || continue
 		name=$(basename "$n" .state)
 		listed bad "$name" && continue
+		listed apply_failed "$name" && continue
 		best=$(printf '%s\n%s\n' "$best" "$name" | sort -V | tail -n 1)
 	done
 	[[ -n $best ]] || return 0
@@ -839,12 +883,14 @@ auto_fixes() {
 	fi
 	st state applying
 	st message "Applying the fixes of Linux $to"
-	local before out
+	local before since out
 	before=$(kernel_log | wc -l)
+	since=$(uptime_now)
 	if ! out=$( (livepatch_apply "$kver" "$name" "$store") 2>&1); then
-		echo "$name" >> "$auto_state/bad"
+		# tried again at Update now, not at every timer's run
+		echo "$name" >> "$auto_state/apply_failed"
 		auto_log "The kernel did not take the fixes of Linux $to: $out"
-		notify "Kernel fixes not applied" "The kernel did not take the fixes of Linux $to. Restart into the newest kernel to get them." critical
+		notify "Kernel fixes not applied" "The kernel did not take the fixes of Linux $to. Update now tries again; restarting into the newest kernel gets them too." critical
 		return 1
 	fi
 	# the change goes through task by task; then a while to see that all is well
@@ -855,7 +901,7 @@ auto_fixes() {
 	done
 	sleep "${TILEWIN_KERNEL_SETTLE:-20}"
 	local trouble
-	trouble=$(kernel_log | tail -n +"$((before + 1))" |
+	trouble=$(kernel_log_since "$since" "$before" |
 		grep -E -m1 'Oops|BUG:|general protection|kernel panic|Call Trace|WARNING: CPU|livepatch: .*(fail|error)')
 	if [[ -n $trouble ]]; then
 		(livepatch_undo "$name") >/dev/null 2>&1
@@ -1043,7 +1089,13 @@ auto_run() {
 	auto_on || { st state off; return 0; }
 	mkdir -p "$root/run"
 	exec 8> "$root/run/tilewin-kernel-auto.lock"
-	flock -n 8 || { echo "The automatic updates are running already"; return 0; }
+	# the check at the start takes a moment; another run would take long
+	flock -w "${TILEWIN_KERNEL_LOCK_WAIT:-120}" 8 ||
+		{ echo "The automatic updates are running already"; return 0; }
+	# Stop: the builds too, and the status and the log say so
+	trap 'systemctl stop --no-block tilewin-kernel-auto-build@fixes.service \
+		tilewin-kernel-auto-build@kernel.service >/dev/null 2>&1
+		st state idle; st message ""; auto_log "Stopped before it was done"; exit 143' TERM INT
 	auto_uid=$(id -u "$auto_user" 2>/dev/null)
 	if [[ -z $auto_uid ]]; then
 		[[ -n ${TILEWIN_KERNEL_AUTO_INLINE:-} ]] || die "There is no user $auto_user: switch the automatic updates on again"
@@ -1054,6 +1106,7 @@ auto_run() {
 	st error ""
 	# "Update now": what failed or was stopped before is tried again at once
 	if [[ -n ${TILEWIN_KERNEL_AUTO_MANUAL:-} ]]; then
+		rm -f "$auto_state/apply_failed" "$auto_state/bad"
 		local k rel state
 		while IFS=$'\t' read -r k rel state; do
 			case $state in
@@ -1068,10 +1121,10 @@ auto_run() {
 		st message "Looking for fixes of kernel.org"
 		auto_unit fixes ||
 			st error "The fixes could not be made: $(sed -n 's/^text=//p' "$auto_state/build/fixes" 2>/dev/null)"
+		auto_fixes_state
 		auto_fixes
 	else
-		st fixes ""
-		st fixes_left ""
+		auto_fixes_state
 	fi
 	if on_mains || [[ $(auto_get battery) == yes ]]; then
 		st power ""
@@ -1093,7 +1146,13 @@ auto_run() {
 # At start: how the start went, and the next one armed again.
 auto_boot() {
 	auto_on || return 0
+	mkdir -p "$root/run"
+	exec 8> "$root/run/tilewin-kernel-auto.lock"
+	# a run that goes on (the timer's, made up at the start) checks and arms
+	# itself when it begins
+	flock -n 8 || return 0
 	auto_uid=$(id -u "$auto_user" 2>/dev/null)
+	auto_fixes_state
 	st running "$running"
 	st running_auto "$([[ -d $(auto_kernels)/$running ]] && echo yes || echo no)"
 	auto_verdict
@@ -1201,6 +1260,7 @@ auto_enable() { # user profile native series [key=value...]
 	fi
 	st state idle
 	st error ""
+	rm -f "$auto_state/armed" # of a start long ago: no miss to count
 	auto_log "The automatic updates were switched on"
 	# nothing is downloaded or built now: at the time set, or at "Update now"
 	schedule_write

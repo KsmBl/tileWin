@@ -14,7 +14,8 @@
  * On the desktop the styles "card" (the shield, what goes on and the rest in
  * lines), "list" (a line for each: running, live fixes, next start, last
  * check), "ring" (how far it is, the shield in the middle) and "bar" draw it
- * their own way. A click opens a flyout with all of it, Check now and Restart.
+ * their own way. A click opens a flyout with all of it, Update now (Stop while it
+ * runs, Restart when a kernel waits).
  * It reads the files tw_kernel_auto.h names, every two seconds while something
  * goes on and every fifteen otherwise.
  */
@@ -37,6 +38,7 @@ struct kernel_state {
 	struct tw_kernel_auto ka;
 	struct tw_kernel_auto_summary sum;
 	struct loop_timer *timer;
+	long minute; // drawn last in this minute: "Checked ... ago" moves on
 };
 
 static void reload(struct widget *w) {
@@ -69,7 +71,9 @@ static void tick(void *data) {
 	snprintf(before, sizeof(before), "%s", k->sum.brief);
 	enum tw_kernel_auto_kind kind = k->sum.kind;
 	reload(w);
-	if (kind != k->sum.kind || strcmp(before, k->sum.brief) != 0) {
+	long minute = (long)(time(NULL) / 60);
+	if (kind != k->sum.kind || strcmp(before, k->sum.brief) != 0 || minute != k->minute) {
+		k->minute = minute;
 		widget_set_dirty(w);
 	}
 	k->timer = loop_add_timer_lazy(w->panel->loop, busy(&k->sum) ? BUSY_MS : IDLE_MS, tick, w);
@@ -475,8 +479,15 @@ static bool kernel_click(struct widget *w, struct psurface *s, struct hotspot *h
 static bool kernel_sample(struct widget *w, struct widget_sample *out) {
 	struct kernel_state *k = w->data;
 	out->percent = k->sum.percent >= 0 ? k->sum.percent : busy(&k->sum) ? 0 : 100;
-	snprintf(out->value, sizeof(out->value), "%s", k->sum.brief);
-	snprintf(out->detail, sizeof(out->detail), "%s", k->sum.title);
+	// the short words where there is little room: the share, else the state
+	if (k->sum.percent >= 0) {
+		snprintf(out->value, sizeof(out->value), "%d%%", k->sum.percent);
+	} else {
+		snprintf(out->value, sizeof(out->value), "%.*s", (int)sizeof(out->value) - 1,
+			k->sum.brief);
+	}
+	snprintf(out->detail, sizeof(out->detail), "%.*s", (int)sizeof(out->detail) - 1,
+		k->sum.title);
 	out->warning = k->sum.kind == TW_KA_RESTART || k->sum.kind == TW_KA_WAITING;
 	out->critical = k->sum.kind == TW_KA_ERROR;
 	return true;
