@@ -63,6 +63,46 @@ const struct tw_widget_option tw_claude_desktop_look[] = {
 	{ 0 },
 };
 
+static const struct tw_widget_option opts_kernel[] = {
+	{ "ok_fg", "Color when all is well", "The shield, e.g. #2e9e4f (green) by default", NULL },
+	{ "warning_fg", "Color of a waiting restart", "e.g. #e8952a by default", NULL },
+	{ "critical_fg", "Color of a failure", "e.g. #d83b3b by default", NULL },
+	{ 0 },
+};
+
+static const char *const choice_kernel_text[] = { "full", "short", "none", NULL };
+static const char *const choice_kernel_bar[] = { "24", "40", "60", "90", "120", NULL };
+
+/* How the kernel widget looks on the taskbar. */
+static const struct tw_widget_option kernel_taskbar_look[] = {
+	{ "text", "Text", "full: \"Building 7.3.6 · 69%\"; short: \"69%\" or the release waiting "
+		"for the restart; none: the shield alone", choice_kernel_text },
+	{ "progress", "Progress bar", "A bar while something is downloaded or built", choice_yes_no },
+	{ "bar_width", "Bar width", "Pixels, 40 by default", choice_kernel_bar },
+	{ "bar_height", "Bar height", "Pixels, 6 by default", choice_bar_height },
+	{ "hide_idle", "Hide when up to date", "Only there while something goes on or waits",
+		choice_yes_no },
+	{ 0 },
+};
+
+/* How it looks on the desktop. */
+static const struct tw_widget_option kernel_desktop_look[] = {
+	{ "facts", "Facts", "The lines of the Card style: running, live fixes, next start, checked",
+		choice_yes_no },
+	{ "text_size", "Text size", "Pixels at a cell of 100, 13 by default", choice_text_size },
+	{ 0 },
+};
+
+const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
+	if (type && strcmp(type, "claude") == 0) {
+		return desktop ? tw_claude_desktop_look : tw_claude_taskbar_look;
+	}
+	if (type && strcmp(type, "kernel") == 0) {
+		return desktop ? kernel_desktop_look : kernel_taskbar_look;
+	}
+	return NULL;
+}
+
 static const struct tw_widget_option opts_git[] = {
 	{ "show_tag", "Show the newest tag", "The tag git describe reaches from HEAD, e.g. v1.0.7",
 		choice_yes_no },
@@ -311,6 +351,15 @@ static const struct tw_widget_style styles_claude[] = {
 	{ "bar", "Bar of the 5-hour limit", 3, 1 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_kernel[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "card", "Card with what goes on", 3, 2 },
+	{ "list", "A line for each fact", 3, 2 },
+	{ "ring", "Ring of how far it is", 2, 2 },
+	{ "bar", "Bar of how far it is", 3, 1 },
+	{ "tile", "Tile with its name", 2, 2 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_meter[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "chart", "Chart of the last measurements", 3, 2 },
@@ -380,6 +429,9 @@ const struct tw_widget_info tw_widgets[] = {
 		STATUS, opts_git, styles_plain },
 	{ "claude", "Claude Code usage", "The 5-hour and weekly usage limits of a Claude Code "
 		"account, when they reset and how long they last", STATUS, opts_claude, styles_claude },
+	{ "kernel", "Kernel updates", "The automatic kernel updates: fixes applied live, a new "
+		"kernel downloaded and built, ready for the next restart", STATUS, opts_kernel,
+		styles_kernel },
 	{ "clock", "Clock", "Time and date with a calendar", STATUS, opts_clock, styles_clock },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history",
 		STATUS, opts_notifications, styles_plain },
@@ -401,6 +453,7 @@ const char *tw_widget_desktop_style(const char *type) {
 		const char *type, *style;
 	} own[] = {
 		{ "claude", "list" },
+		{ "kernel", "card" },
 	};
 	for (size_t i = 0; type && i < sizeof(own) / sizeof(own[0]); i++) {
 		if (strcmp(own[i].type, type) == 0) {

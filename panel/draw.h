@@ -77,4 +77,14 @@ void pd_glyph_disk(cairo_t *cr, double x, double y, double size, bool active,
 	uint32_t color);
 void pd_glyph_generic_app(cairo_t *cr, double x, double y, double size);
 
+/*
+ * How bars look in the theme: smooth, or in blocks as the progress bars of
+ * Windows 95 (in a sunken field) and XP were.
+ */
+enum pd_bar_look { PD_BAR_SMOOTH, PD_BAR_BLOCKS, PD_BAR_BLOCKS_SUNKEN };
+/* A bar of a share (0 to 100) on its track, in that look. */
+void pd_share_bar(cairo_t *cr, double x, double y, double w, double h, double share,
+	uint32_t track, double track_alpha, uint32_t fill, double radius, enum pd_bar_look look,
+	bool dark);
+
 #endif

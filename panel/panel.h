@@ -389,6 +389,7 @@ extern const struct widget_impl widget_custom;
 extern const struct widget_impl widget_notifications;
 extern const struct widget_impl widget_git;
 extern const struct widget_impl widget_claude;
+extern const struct widget_impl widget_kernel;
 
 /* ---------- panel ---------- */
 
@@ -684,6 +685,11 @@ const char *git_widget_repo(struct widget *w);
 struct tw_claude_usage;
 /* widgets/claude.c: what the Claude widget shows, for its flyout; NULL for none. */
 const struct tw_claude_usage *claude_widget_usage(struct widget *w);
+struct tw_kernel_auto;
+struct tw_kernel_auto_summary;
+/* widgets/kernel.c: the state of the kernel updates, read again now; NULL for another widget. */
+const struct tw_kernel_auto *kernel_widget_state(struct widget *w,
+	struct tw_kernel_auto_summary *sum);
 
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);

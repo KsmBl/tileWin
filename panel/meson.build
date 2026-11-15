@@ -78,6 +78,7 @@ executable(
 		'widgets/custom.c',
 		'widgets/git.c',
 		'widgets/claude.c',
+		'widgets/kernel.c',
 		'widgets/system.c',
 		'widgets/taskbar.c',
 		'widgets/tray.c',

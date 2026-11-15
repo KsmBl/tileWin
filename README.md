@@ -72,7 +72,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
-- **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup.
+- **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup; with automatic updates, security fixes applied live without a restart and each new release built in the background for the next one, shown by the Kernel updates widget.
 - **A settings app** for all of it, so no config file has to be touched. What fails says so in a banner, with a way to try again.
 - **A display manager** of its own, `tilewin-display-manager`: a login screen that looks as that Windows did for each theme, up in a blink, with about fifty settings. It stays off until you turn it on: [docs/display-manager.md](docs/display-manager.md).
 - **Updates** in one step: `tilewin-update` or the About page bring in the newest release or build the newest source, then restart tileWin with your windows open.

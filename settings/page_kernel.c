@@ -5,6 +5,7 @@
 #include <sys/utsname.h>
 #include <glib/gstdio.h>
 #include "settings.h"
+#include "tw_kernel_auto.h"
 
 /*
  * Kernel page: builds Linux kernels of kernel.org with tilewin-kernel (as the
@@ -83,7 +84,16 @@ struct kernel_page {
 	char *pending, *pending_action; // the kernel a confirmation waits for
 	guint timer;
 	bool busy; // a root helper is running
+	// the automatic updates
+	GtkWidget *auto_switch, *auto_state_row, *auto_progress, *auto_check, *auto_fixes_row;
+	GtkWidget *auto_next_row, *auto_restart, *auto_profile, *auto_series, *auto_native;
+	GtkWidget *auto_battery, *auto_log_row, *livepatch_warning;
+	bool auto_updating; // the page sets the controls: no root helper for that
+	bool auto_busy;     // auto-enable, -disable or -set is running
+	int auto_ticks;
 };
+
+static void auto_show(struct kernel_page *p);
 
 /* ---------- running the scripts ---------- */
 
@@ -1301,6 +1311,9 @@ static gboolean on_tick(gpointer data) {
 			scx_refresh(p);
 		}
 	}
+	if (gtk_widget_get_mapped(p->auto_state_row) && ++p->auto_ticks % 2 == 0) {
+		auto_show(p);
+	}
 	return G_SOURCE_CONTINUE;
 }
 
@@ -1667,6 +1680,267 @@ static void on_scx_tools(GtkButton *button, gpointer data) {
 	g_free(helper);
 }
 
+/* ---------- the automatic updates ---------- */
+
+static const char *const series_labels[] = { "When the old one ends (fewest restarts)",
+	"As soon as it is out", NULL };
+static const char *const series_values[] = { "end", "new", NULL };
+
+static int index_of(const char *const *values, const char *value) {
+	for (int i = 0; value && values[i]; i++) {
+		if (strcmp(values[i], value) == 0) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+static void auto_set_busy(struct kernel_page *p, bool busy);
+
+/* The state of the updates on the page: what goes on, the facts, the options. */
+static void auto_show(struct kernel_page *p) {
+	struct tw_kernel_auto ka;
+	struct tw_kernel_auto_summary sum;
+	bool on = tw_kernel_auto_read(&ka) && ka.enabled;
+	tw_kernel_auto_summarize(&ka, time(NULL), &sum);
+	p->auto_updating = true;
+	if (!p->auto_busy) {
+		gtk_switch_set_active(GTK_SWITCH(p->auto_switch), on);
+	}
+	if (ka.configured) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->auto_profile),
+			index_of(profile_values, ka.profile));
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(p->auto_series),
+			index_of(series_values, ka.series));
+		gtk_switch_set_active(GTK_SWITCH(p->auto_native), ka.native);
+		gtk_switch_set_active(GTK_SWITCH(p->auto_battery), ka.battery);
+	}
+	p->auto_updating = false;
+
+	char *state = sum.percent >= 0 ? g_strdup_printf("%s: %d%%. %s", sum.title, sum.percent,
+		sum.detail) : g_strdup_printf("%s. %s", sum.title, sum.detail);
+	set_subtitle(p->auto_state_row, state);
+	g_free(state);
+	gtk_widget_set_visible(p->auto_progress, sum.percent >= 0);
+	if (sum.percent >= 0) {
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(p->auto_progress), sum.percent / 100.0);
+	}
+	if (sum.kind == TW_KA_ERROR) {
+		gtk_widget_add_css_class(p->auto_state_row, "warning");
+	} else {
+		gtk_widget_remove_css_class(p->auto_state_row, "warning");
+	}
+	gtk_widget_set_visible(p->auto_check, on);
+
+	char rel[64], next[64];
+	tw_kernel_auto_release(ka.running, rel, sizeof(rel));
+	tw_kernel_auto_release(ka.next, next, sizeof(next));
+	char *fixes = !on ? g_strdup("Applied as soon as kernel.org has them, once the updates are on "
+		"and a kernel of theirs runs") :
+		!ka.running_auto ? g_strdup_printf("None yet: the running kernel (%s) is the "
+		"distribution's. Fixes go in live from the first restart into a kernel of the updates.",
+		ka.running[0] ? ka.running : "?") :
+		ka.fixes[0] ? g_strdup_printf("Linux %s runs with the fixes of Linux %s, applied without a "
+		"restart%s", rel, ka.fixes, ka.fixes_left > 0 ? "; a few changed files cannot be applied "
+		"live and come with the next kernel" : "") :
+		g_strdup_printf("Linux %s is the newest release of its series: nothing to fix yet", rel);
+	set_subtitle(p->auto_fixes_row, fixes);
+	g_free(fixes);
+	char *upcoming = next[0] ? g_strdup_printf("Linux %s starts at the next restart, whenever it "
+		"suits you; until then the running kernel gets its fixes live", next) :
+		g_strdup(on ? "The running kernel again: nothing newer waits" : "–");
+	set_subtitle(p->auto_next_row, upcoming);
+	g_free(upcoming);
+	gtk_widget_set_visible(p->auto_restart, next[0] != '\0');
+
+	GString *log = g_string_new(NULL);
+	time_t now = time(NULL);
+	for (int i = 0; i < ka.log_count && i < 4; i++) {
+		char ago[48];
+		tw_kernel_auto_ago(ka.log[i].when, now, ago, sizeof(ago));
+		g_string_append_printf(log, "%s%s (%s)", log->len ? "\n" : "", ka.log[i].text, ago);
+	}
+	set_subtitle(p->auto_log_row, log->len ? log->str : "Nothing yet");
+	g_string_free(log, TRUE);
+	gtk_widget_set_visible(p->auto_log_row, ka.configured);
+}
+
+static void on_auto_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	auto_set_busy(p, false);
+	if (!ok) {
+		set_message(p, *err ? err : "The automatic updates could not be changed");
+	} else {
+		set_note(p, out);
+	}
+	auto_show(p);
+}
+
+static void auto_set_busy(struct kernel_page *p, bool busy) {
+	p->auto_busy = busy;
+	gtk_widget_set_sensitive(p->auto_switch, !busy);
+}
+
+/* tilewin-kernel-root through pkexec, with up to five arguments. */
+static void run_root_argv(struct kernel_page *p, done_fn done, const char *const *args) {
+	char *helper = root_helper_path();
+	const char *argv[10];
+	int n = 0;
+	bool test = g_getenv("TILEWIN_KERNEL_ROOT_HELPER") != NULL;
+	argv[n++] = test ? "bash" : "pkexec";
+	argv[n++] = helper;
+	for (int i = 0; args[i] && n < 9; i++) {
+		argv[n++] = args[i];
+	}
+	argv[n] = NULL;
+	run(p, argv, done);
+	g_free(helper);
+}
+
+static void on_auto_switch(GObject *sw, GParamSpec *pspec, gpointer data) {
+	struct kernel_page *p = data;
+	if (p->auto_updating || p->auto_busy) {
+		return;
+	}
+	bool on = gtk_switch_get_active(GTK_SWITCH(sw));
+	auto_set_busy(p, true);
+	if (on) {
+		set_note(p, "Switching the automatic updates on: the programs a build needs are installed "
+			"if they are missing, then the first kernel is built in the background…");
+		guint profile = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->auto_profile));
+		guint series = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->auto_series));
+		const char *args[] = { "auto-enable", g_get_user_name(),
+			profile_values[profile < 4 ? profile : 0], gtk_switch_get_active(GTK_SWITCH(
+			p->auto_native)) ? "on" : "off", series_values[series < 2 ? series : 0], NULL };
+		run_root_argv(p, on_auto_done, args);
+	} else {
+		set_note(p, "Switching the automatic updates off…");
+		const char *args[] = { "auto-disable", NULL };
+		run_root_argv(p, on_auto_done, args);
+	}
+}
+
+/* An option changed while the updates are on: it counts from the next build. */
+static void auto_option(struct kernel_page *p, const char *key, const char *value) {
+	struct tw_kernel_auto ka;
+	if (p->auto_updating || !tw_kernel_auto_read(&ka) || !ka.enabled) {
+		return; // off: switching on takes what is chosen
+	}
+	const char *args[] = { "auto-set", key, value, NULL };
+	auto_set_busy(p, true);
+	run_root_argv(p, on_auto_done, args);
+}
+
+static void on_auto_profile(GObject *dd, GParamSpec *pspec, gpointer data) {
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+	auto_option(data, "profile", profile_values[i < 4 ? i : 0]);
+}
+
+static void on_auto_series(GObject *dd, GParamSpec *pspec, gpointer data) {
+	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+	auto_option(data, "series", series_values[i < 2 ? i : 0]);
+}
+
+static void on_auto_native(GObject *sw, GParamSpec *pspec, gpointer data) {
+	auto_option(data, "native", gtk_switch_get_active(GTK_SWITCH(sw)) ? "on" : "off");
+}
+
+static void on_auto_battery(GObject *sw, GParamSpec *pspec, gpointer data) {
+	auto_option(data, "battery", gtk_switch_get_active(GTK_SWITCH(sw)) ? "yes" : "no");
+}
+
+static void on_auto_checked(struct kernel_page *p, bool ok, const char *out, const char *err) {
+	if (!ok) {
+		set_message(p, *err ? err : "The check could not be started");
+	}
+	auto_show(p);
+}
+
+static void on_auto_check(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	const char *argv[] = { "systemctl", "start", "--no-block", "tilewin-kernel-auto.service", NULL };
+	run(p, argv, on_auto_checked);
+}
+
+static void on_auto_restart(GtkButton *button, gpointer data) {
+	struct kernel_page *p = data;
+	// the dialog of the taskbar, which asks first, as Restart of the start menu does
+	const char *argv[] = { "tilewinmsg", "panel", "shutdown", NULL };
+	run(p, argv, NULL);
+}
+
+/* Live patching on a release before 6.19: a kernel that takes livepatches, but no klp-build. */
+static void check_livepatch_version(struct kernel_page *p) {
+	guint v = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->version_dd));
+	const char *version = v < p->versions->len ? p->versions->pdata[v] : "latest";
+	if (strcmp(version, "latest") == 0 && p->versions->len > 1) {
+		version = p->versions->pdata[1];
+	}
+	int major = 0, minor = 0;
+	bool old = sscanf(version, "%d.%d", &major, &minor) == 2 &&
+		(major < 6 || (major == 6 && minor < 19));
+	gtk_widget_set_visible(p->livepatch_warning, old &&
+		gtk_switch_get_active(GTK_SWITCH(p->livepatch)));
+}
+
+static void on_livepatch_inputs(GObject *object, GParamSpec *pspec, gpointer data) {
+	check_livepatch_version(data);
+}
+
+static void auto_group(struct kernel_page *p, GtkWidget *content) {
+	GtkWidget *group = ui_group(content, "Automatic updates", "A secure kernel without restarts, "
+		"as far as Linux allows: the fixes kernel.org publishes go into the running kernel at "
+		"once, as a livepatch, and every new release is built in the background and starts "
+		"whenever you restart next. The builds run as a system user of their own at the lowest "
+		"priority and take only what kernel.org signed. Old kernels are taken off by themselves. "
+		"The boot menu's default stays your distribution's kernel: a new kernel that does not "
+		"start leaves you with that one, and is not tried again.");
+	p->auto_switch = gtk_switch_new();
+	g_signal_connect(p->auto_switch, "notify::active", G_CALLBACK(on_auto_switch), p);
+	ui_row(group, "Keep the kernel up to date", "Asks for the password once; everything after "
+		"goes by itself", p->auto_switch);
+	GtkWidget *state_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	p->auto_progress = gtk_progress_bar_new();
+	gtk_widget_set_size_request(p->auto_progress, 120, -1);
+	gtk_widget_set_valign(p->auto_progress, GTK_ALIGN_CENTER);
+	gtk_widget_set_visible(p->auto_progress, FALSE);
+	p->auto_check = gtk_button_new_with_label("Check now");
+	g_signal_connect(p->auto_check, "clicked", G_CALLBACK(on_auto_check), p);
+	gtk_box_append(GTK_BOX(state_box), p->auto_progress);
+	gtk_box_append(GTK_BOX(state_box), p->auto_check);
+	p->auto_state_row = ui_row(group, "Now", "Looking…", state_box);
+	p->auto_fixes_row = ui_row(group, "Live fixes", "", NULL);
+	p->auto_restart = gtk_button_new_with_label("Restart now");
+	g_signal_connect(p->auto_restart, "clicked", G_CALLBACK(on_auto_restart), p);
+	gtk_widget_set_visible(p->auto_restart, FALSE);
+	p->auto_next_row = ui_row(group, "Next start", "", p->auto_restart);
+	p->auto_profile = gtk_drop_down_new_from_strings(profile_labels);
+	g_signal_connect(p->auto_profile, "notify::selected", G_CALLBACK(on_auto_profile), p);
+	ui_row(group, "What goes in", "The same choice as for a kernel built by hand; \"Same as the "
+		"distribution's kernel\" is the safest", p->auto_profile);
+	p->auto_series = gtk_drop_down_new_from_strings(series_labels);
+	g_signal_connect(p->auto_series, "notify::selected", G_CALLBACK(on_auto_series), p);
+	ui_row(group, "A new series (7.4 after 7.3)", "kernel.org fixes a series for about three "
+		"months after the next one is out. Staying until then means a restart only every few "
+		"months for the new series; the releases in between get their fixes live.",
+		p->auto_series);
+	p->auto_native = gtk_switch_new();
+	g_signal_connect(p->auto_native, "notify::active", G_CALLBACK(on_auto_native), p);
+	ui_row(group, "For this processor only", "A little faster; the kernels may not start on "
+		"another computer", p->auto_native);
+	p->auto_battery = gtk_switch_new();
+	g_signal_connect(p->auto_battery, "notify::active", G_CALLBACK(on_auto_battery), p);
+	ui_row(group, "Build on battery", "Off: a new release waits for the charger. Live fixes are "
+		"made either way.", p->auto_battery);
+	p->auto_log_row = ui_row(group, "Recent", "", NULL);
+	if (g_file_test("/usr/share/libalpm/hooks/10-tilewin-keep-modules-pre.hook",
+			G_FILE_TEST_EXISTS)) {
+		ui_row(group, "Drivers after an update of the distribution's kernel", "Its modules are "
+			"kept until the next restart when pacman updates it, so a driver the running kernel "
+			"has not loaded yet (a USB stick, a VPN) still loads", NULL);
+	}
+	auto_show(p);
+}
+
 /* ---------- the page ---------- */
 
 GtkWidget *kernel_page_new(struct settings *s) {
@@ -1702,6 +1976,8 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	gtk_widget_add_css_class(p->foreign_row, "warning");
 	gtk_widget_set_visible(p->foreign_row, FALSE);
 
+	auto_group(p, content);
+
 	group = ui_group(content, "New kernel", "The source is downloaded from kernel.org and "
 		"checked against its checksums, then built here in the background. Closing the "
 		"settings does not stop it.");
@@ -1724,6 +2000,15 @@ GtkWidget *kernel_page_new(struct settings *s) {
 	ui_row(group, "Live patching", "Lets fixes be applied to the running kernel without a "
 		"restart (CONFIG_LIVEPATCH, for kpatch and livepatch modules). A whole other kernel "
 		"version cannot be patched in: that always takes a restart or Load.", p->livepatch);
+	p->livepatch_warning = ui_row(group, "Live fixes need Linux 6.19 or newer", "This version "
+		"takes livepatches, but it has no klp-build, which makes them: Security fixes and Fix "
+		"live do not work for it, and its build tree would be kept for nothing. The long-term "
+		"releases are all older; choose 6.19 or newer for live fixes, or switch live patching "
+		"off.", NULL);
+	gtk_widget_add_css_class(p->livepatch_warning, "warning");
+	gtk_widget_set_visible(p->livepatch_warning, FALSE);
+	g_signal_connect(p->livepatch, "notify::active", G_CALLBACK(on_livepatch_inputs), p);
+	g_signal_connect(p->version_dd, "notify::selected", G_CALLBACK(on_livepatch_inputs), p);
 	p->native = gtk_switch_new();
 	ui_row(group, "For this processor only", "Built for the instructions of this computer's "
 		"processor (X86_NATIVE_CPU): a little faster, but it may not start on another computer. "

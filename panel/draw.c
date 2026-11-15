@@ -608,3 +608,72 @@ void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, 
 	}
 	cairo_restore(cr);
 }
+
+static void pd_rgba(cairo_t *cr, uint32_t c, double alpha) {
+	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
+		(c >> 8 & 0xff) / 255.0, alpha);
+}
+
+/*
+ * How bars look in the theme: smooth, or in blocks as the progress bars of
+ * Windows 95 (in a sunken field) and XP were, as the flyouts and the other
+ * desktop widgets draw them.
+ */
+
+/* A bar of the share used, on its track. */
+void pd_share_bar(cairo_t *cr, double x, double y, double w, double h, double share,
+		uint32_t track, double track_alpha, uint32_t fill, double radius, enum pd_bar_look look,
+		bool dark) {
+	if (look != PD_BAR_SMOOTH) {
+		// as the Bar style of the other widgets draws it in these themes: a white field
+		// (dark in the dark scheme), sunken in Windows 95, framed and round in XP, and
+		// the share in whole blocks two apart
+		if (look == PD_BAR_BLOCKS_SUNKEN) {
+			pd_rect(cr, x, y, w, h, dark ? 0x2c2c2cff : 0xffffffff);
+			pd_bevel(cr, x, y, w, h, true);
+		} else {
+			cairo_new_path(cr);
+			pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, h > 8 ? 3 : 1);
+			pd_color(cr, dark ? 0x0a1a40ff : 0xffffffff);
+			cairo_fill_preserve(cr);
+			pd_color(cr, dark ? 0x3c78e6ff : 0x686868ff);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+		}
+		double inset = h >= 10 ? 3 : 2;
+		double bh = h - 2 * inset;
+		double chunk = fmax(h * (look == PD_BAR_BLOCKS_SUNKEN ? 0.55 : 0.45), 4), gap = 2;
+		double bx = x + inset;
+		double end = bx + (w - 2 * inset) * (share < 0 ? 0 : share > 100 ? 100 : share) / 100.0;
+		while (bh > 0 && bx + chunk <= end + 0.5) {
+			cairo_rectangle(cr, bx, y + inset, chunk, bh);
+			if (look == PD_BAR_BLOCKS) {
+				// the glossy blocks of XP: lighter at the top
+				cairo_pattern_t *g = cairo_pattern_create_linear(0, y + inset, 0, y + inset + bh);
+				cairo_pattern_add_color_stop_rgb(g, 0, ((fill >> 24 & 0xff) + 255) / 510.0,
+					((fill >> 16 & 0xff) + 255) / 510.0, ((fill >> 8 & 0xff) + 255) / 510.0);
+				cairo_pattern_add_color_stop_rgb(g, 1, (fill >> 24 & 0xff) / 255.0,
+					(fill >> 16 & 0xff) / 255.0, (fill >> 8 & 0xff) / 255.0);
+				cairo_set_source(cr, g);
+				cairo_fill(cr);
+				cairo_pattern_destroy(g);
+			} else {
+				pd_rgba(cr, fill, 1);
+				cairo_fill(cr);
+			}
+			bx += chunk + gap;
+		}
+		return;
+	}
+	double r = radius > h / 2 ? h / 2 : radius;
+	pd_rounded(cr, x, y, w, h, r);
+	pd_rgba(cr, track, track_alpha);
+	cairo_fill(cr);
+	if (share > 0) {
+		double fw = w * share / 100.0;
+		pd_rounded(cr, x, y, fw < 2 * r ? 2 * r : fw, h, r);
+		pd_rgba(cr, fill, 1);
+		cairo_fill(cr);
+	}
+}
+

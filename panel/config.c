@@ -571,6 +571,7 @@ static const struct widget_impl *impls[] = {
 	&widget_separator, &widget_spacer, &widget_custom, &widget_notifications,
 	&widget_git,
 	&widget_claude,
+	&widget_kernel,
 };
 
 const struct widget_impl *widget_impl_find(const char *type) {

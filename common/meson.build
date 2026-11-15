@@ -17,6 +17,7 @@ lib_sway_common = static_library(
 		'tw_netusage.c',
 		'tw_battery.c',
 		'tw_claude_usage.c',
+		'tw_kernel_auto.c',
 		'tw_grid.c',
 		'tw_search.c',
 		'tw_textedit.c',

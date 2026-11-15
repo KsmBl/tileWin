@@ -1040,6 +1040,7 @@ auto_run() {
 		auto_uid=$(id -u)
 	fi
 	st running "$running"
+	st running_auto "$([[ -d $(auto_kernels)/$running ]] && echo yes || echo no)"
 	st error ""
 	auto_verdict
 	if [[ -d $(auto_kernels)/$running ]]; then
@@ -1074,6 +1075,7 @@ auto_boot() {
 	auto_on || return 0
 	auto_uid=$(id -u "$auto_user" 2>/dev/null)
 	st running "$running"
+	st running_auto "$([[ -d $(auto_kernels)/$running ]] && echo yes || echo no)"
 	auto_verdict
 	auto_arm
 }

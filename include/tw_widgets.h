@@ -47,6 +47,12 @@ extern const size_t tw_widget_count;
 extern const struct tw_widget_option tw_claude_taskbar_look[];
 extern const struct tw_widget_option tw_claude_desktop_look[];
 
+/*
+ * The look of a widget that has one of its own for each place (the Claude and
+ * kernel widgets): the options of the taskbar or of the desktop; NULL for none.
+ */
+const struct tw_widget_option *tw_widget_look(const char *type, bool desktop);
+
 /* The mouse actions every widget takes. */
 extern const struct tw_widget_option tw_widget_events[];
 /* Where a widget on the desktop sits, in its block of "desktop_widgets". */

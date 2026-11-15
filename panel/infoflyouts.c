@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "tw_claude_usage.h"
+#include "tw_kernel_auto.h"
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -1158,6 +1159,84 @@ static void claude_sample(struct info_flyout *f) {
 	free(settings);
 }
 
+/* ---------- the kernel updates ---------- */
+
+static void kernel_sample(struct info_flyout *f) {
+	struct tw_kernel_auto_summary sum;
+	const struct tw_kernel_auto *ka = kernel_widget_state(f->widget, &sum);
+	if (!ka) {
+		return;
+	}
+	time_t now = time(NULL);
+	if (sum.percent >= 0) {
+		snprintf(f->big, sizeof(f->big), "%d%%", sum.percent);
+	}
+	snprintf(f->title, sizeof(f->title), "%s", sum.title);
+	const char *sub;
+	switch (sum.kind) {
+	case TW_KA_OFF: sub = "Switch them on on the Kernel page"; break;
+	case TW_KA_OK: sub = "Fixes go in live; nothing waits for a restart"; break;
+	case TW_KA_FIXED: sub = "Applied live: every program went on as it was"; break;
+	case TW_KA_RESTART: sub = "Restart whenever it suits you"; break;
+	case TW_KA_WAITING: sub = "New kernels wait for the charger"; break;
+	case TW_KA_PENDING: sub = "The first kernel is built at the next check"; break;
+	case TW_KA_ERROR: sub = sum.detail; break;
+	default: sub = "In the background, at the lowest priority"; break;
+	}
+	snprintf(f->subtitle, sizeof(f->subtitle), "%s", sub);
+	if (!ka->configured || !ka->enabled) {
+		char *settings = format_str("exec tilewin-settings --page kernel");
+		add_action(f, "Switch on…", settings, NULL);
+		free(settings);
+		return;
+	}
+	char value[96], rel[64];
+	struct info_row *row;
+	if (sum.percent >= 0) {
+		snprintf(value, sizeof(value), "%d%%", sum.percent);
+		row = add_row(f, sum.kind == TW_KA_DOWNLOADING ? "Downloaded" : "Compiled", value);
+		if (row) {
+			row->bar = sum.percent / 100.0;
+		}
+	}
+	tw_kernel_auto_release(ka->running, rel, sizeof(rel));
+	snprintf(value, sizeof(value), "Linux %s%s", rel, ka->running_auto ? "" : " (distribution)");
+	add_row(f, "Running", rel[0] ? value : "–");
+	if (ka->fixes[0]) {
+		snprintf(value, sizeof(value), "Linux %s", ka->fixes);
+	}
+	add_row(f, "Live fixes", ka->fixes[0] ? value : ka->running_auto ? "none needed" : "–");
+	if (ka->fixes_left > 0) {
+		snprintf(value, sizeof(value), "%d changed file%s", ka->fixes_left,
+			ka->fixes_left == 1 ? "" : "s");
+		add_row(f, "Need a restart", value);
+	}
+	tw_kernel_auto_release(ka->next, rel, sizeof(rel));
+	snprintf(value, sizeof(value), "Linux %s", rel);
+	add_row(f, "Next start", rel[0] ? value : "the same kernel");
+	if (ka->checked) {
+		tw_kernel_auto_ago(ka->checked, now, value, sizeof(value));
+	}
+	add_row(f, "Checked", ka->checked ? value : "not yet");
+	if (ka->log_count > 0) {
+		add_heading(f, "Recent");
+		for (int i = 0; i < ka->log_count && i < 5; i++) {
+			tw_kernel_auto_ago(ka->log[i].when, now, value, sizeof(value));
+			add_row(f, ka->log[i].text, value);
+		}
+	}
+	if (sum.kind == TW_KA_RESTART) {
+		add_action(f, "Restart…", "exec tilewinmsg panel shutdown", NULL);
+	} else {
+		add_action(f, "Check now", "exec systemctl start --no-block tilewin-kernel-auto.service",
+			NULL);
+	}
+	add_action(f, "Kernel page", "exec tilewin-settings --page kernel", NULL);
+	char *settings = widget_settings_command(f->widget);
+	add_action(f, "Settings", settings, NULL);
+	free(settings);
+}
+
 static const struct info_source sources[] = {
 	{ "disk", 1000, disk_sample, free },
 	{ "gpu", 1000, gpu_sample, gpu_free },
@@ -1169,6 +1248,7 @@ static const struct info_source sources[] = {
 	{ "custom", 1000, custom_sample, free },
 	{ "git", 2000, git_sample, git_free },
 	{ "claude", 5000, claude_sample, free },
+	{ "kernel", 2000, kernel_sample, free },
 };
 
 /* ---------- drawing ---------- */
