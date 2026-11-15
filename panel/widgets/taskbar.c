@@ -300,9 +300,9 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 		if (hover && !active) {
 			color = (color & 0xffffff00) | 0xd0;
 		}
-		pd_console_block(cr, b.x + 2, b.y + 5, b.width - 4, b.height - 10, false, false, color);
+		pd_console_block(cr, b.x + 3, b.y + 5, b.width - 6, b.height - 10, true, true, color);
 		char *upper = g_utf8_strup(label, -1);
-		pd_text(cr, bar_bold_font(panel), upper, b.x + 10, b.y + 5, b.width - 20, b.height - 10,
+		pd_text(cr, bar_bold_font(panel), upper, b.x + 14, b.y + 5, b.width - 30, b.height - 10,
 			0x000000ff, PD_RIGHT);
 		g_free(upper);
 		draw_progress(ctx, e, b);

@@ -77,7 +77,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		[STYLE_WIN8] = { 30, 22, 8, 0, 0 },
 		[STYLE_WIN10] = { 31, 30, 1, 6, 0 },
 		[STYLE_WIN11] = { 33, 32, 1, 8, 8 },
-		[STYLE_CONSOLE] = { 28, 26, 3, 6, 0 },
+		[STYLE_CONSOLE] = { 32, 30, 3, 6, 0 },
 	};
 	enum style s = get_style(t);
 	int border = tw_theme_int(t, "decoration.border_width", defaults[s].border);
@@ -93,9 +93,9 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		m->radius = tw_theme_int(t, "decoration.corner_radius", defaults[s].radius);
 	}
 	// the console: the thick bar down the left side, where the elbows are
-	m->left = s == STYLE_CONSOLE && !maximized ? 12 : m->side;
+	m->left = s == STYLE_CONSOLE && !maximized ? 20 : m->side;
 	if (s == STYLE_CONSOLE && !maximized) {
-		m->bottom = 6; // the bar along the bottom
+		m->bottom = 12; // the bar along the bottom
 		m->side = 0;   // no line on the right: the window ends in black
 	}
 }
@@ -194,9 +194,9 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 		// blocks at the right end of the top bar, the last with a round end
 		int bh = m.top - 8;
 		int right = width - m.side;
-		b->close = (struct wlr_box){ right - 64, 0, 64, bh };
-		b->maximize = (struct wlr_box){ b->close.x - 4 - 52, 0, 52, bh };
-		b->minimize = (struct wlr_box){ b->maximize.x - 4 - 52, 0, 52, bh };
+		b->close = (struct wlr_box){ right - 70, 0, 70, bh };
+		b->maximize = (struct wlr_box){ b->close.x - 6 - 60, 0, 60, bh };
+		b->minimize = (struct wlr_box){ b->maximize.x - 6 - 60, 0, 60, bh };
 		break;
 	}
 	case STYLE_WIN10:
@@ -628,9 +628,11 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 	uint32_t frame = state_color(t, f, "frame", 0xff9c3aff, 0x4d4560ff);
 	uint32_t fill = state_color(t, f, "accent", 0xc896d8ff, 0x4d4560ff);
 	double bar = m->top - 8, L = m->left, B = m->bottom;
-	double elbow = 96, outer = 24, inner = 10;
+	// the elbow of the consoles: a wide sweep outside, a softer curve inside
+	double elbow = 120, outer = 44, inner = 18;
 
-	cairo_rectangle(cr, 0, 0, W, H);
+	// black inside the frame only: outside its round corners the desktop shows
+	cairo_rectangle(cr, L, bar, W - L, H - bar - B);
 	cairo_set_source_u32(cr, tw_theme_color(t, "decoration.face", 0x000000ff));
 	cairo_fill(cr);
 
@@ -683,9 +685,10 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 		}
 		g_free(upper);
 	}
-	double to = title_end - title_w - (title_w > 0 ? 8 : 0);
-	if (to - elbow - 4 > 6) {
-		console_block(cr, elbow + 4, 0, to - elbow - 4, bar, false, false, fill);
+	// the bar ends round before the title, as the consoles end a bar at a word
+	double to = title_end - title_w - (title_w > 0 ? 10 : 0);
+	if (to - elbow - 6 > bar) {
+		console_block(cr, elbow + 6, 0, to - elbow - 6, bar, false, true, fill);
 	}
 
 	struct {
@@ -705,16 +708,15 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 		}
 		uint32_t c = on ? console_color(t, blocks[i].color) : 0x4d4560ff;
 		bool hover = f->hover == blocks[i].hit, pressed = hover && f->pressed == blocks[i].hit;
-		bool last = blocks[i].hit == TW_HIT_CLOSE;
-		console_block(cr, box->x, 0, box->width, bar, false, last, c);
+		bool last = true; // pills, round at both ends
+		console_block(cr, box->x, 0, box->width, bar, last, last, c);
 		if (hover || pressed) {
-			console_block(cr, box->x, 0, box->width, bar, false, last,
+			console_block(cr, box->x, 0, box->width, bar, last, last,
 				tw_theme_color(t, pressed ? "decoration.button.pressed" :
 				"decoration.button.hover", pressed ? 0x00000040 : 0xffffff50));
 		}
 		draw_text(cr, "Antonio, Nimbus Sans Narrow, Sans Condensed Bold 9", blocks[i].label,
-			box->x, 0, box->width - (last ? bar / 4 : 0), bar, on ? 0x000000ff : 0x8f84aaff,
-			true, TEXT_PLAIN, 0);
+			box->x, 0, box->width, bar, on ? 0x000000ff : 0x8f84aaff, true, TEXT_PLAIN, 0);
 	}
 }
 
