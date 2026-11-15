@@ -1,0 +1,4 @@
+# The user tileWin's automatic kernel updates build as: kernels and live fixes
+# are built from kernel.org's sources by it, never by a user, and only what it
+# built is put on the computer without asking for the password.
+u tilewin-kernel - "tileWin kernel builds" /var/lib/tilewin-kernel /usr/bin/nologin

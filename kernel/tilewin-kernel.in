@@ -42,6 +42,14 @@
 #                                       kernel.org has for it (the stable releases
 #                                       of its series after its own), also for a
 #                                       kernel that does not run
+#   tilewin-kernel auto-build fixes|kernel
+#                                       the automatic updates (as the system
+#                                       user tilewin-kernel, from its units):
+#                                       the fixes of kernel.org for the running
+#                                       kernel as a livepatch, or the newest
+#                                       release of its series (of the newest
+#                                       series once it ends) built for the
+#                                       next start
 #   tilewin-kernel livepatches KVER     its livepatch modules, one a line:
 #                                       NAME<tab>STATE<tab>PROGRESS<tab>START
 #                                       (START: yes when it is applied at every
@@ -71,7 +79,8 @@
 # linux/kernel), TILEWIN_KERNEL_RELEASES (releases.json), TILEWIN_KERNEL_CONFIG
 # (instead of the config of the running kernel), TILEWIN_KERNEL_LSMOD (instead
 # of lsmod), TILEWIN_KERNEL_FRAGMENTS (the profile files), TILEWIN_KERNEL_INCLUDE
-# (where the headers a build needs are looked for), TILEWIN_KERNEL_NEED_GB (the
+# (where the headers a build needs are looked for), TILEWIN_KERNEL_OFFLINE (no
+# key fetched from kernel.org), TILEWIN_KERNEL_NEED_GB (the
 # free space a build wants), TILEWIN_KERNEL_BOOT_MODULES (instead of the
 # modules of the running initramfs), TILEWIN_KERNEL_NO_BOOT_CHECK, TILEWIN_KERNEL_JOBS,
 # TILEWIN_KERNEL_MODULES (the modules folder the distribution's kernels are in),
@@ -110,6 +119,65 @@ fetch() { # url file
 	file://*) cp -- "${1#file://}" "$2" ;;
 	*) curl -fsSL --retry 2 -o "$2" -- "$1" ;;
 	esac
+}
+
+# The state of a build of the automatic updates, for the Kernel page and the
+# kernel widget: TILEWIN_KERNEL_STATUS is the file, written whole each time.
+#   kind     kernel or fixes
+#   phase    download, verify, unpack, configure, compile, modules, check,
+#            done, failed, cancelled; fixes: download, sort, build, done, failed
+#   percent  how far that phase is, -1 when it is not known
+#   version  the release it is about
+auto_status() { # kind phase percent text version
+	[[ -n ${TILEWIN_KERNEL_STATUS:-} ]] || return 0
+	{
+		echo "kind=$1"
+		echo "phase=$2"
+		echo "percent=$3"
+		echo "version=$5"
+		echo "text=$4"
+		echo "updated=$(date +%s)"
+	} > "$TILEWIN_KERNEL_STATUS.new" 2>/dev/null &&
+		mv -f "$TILEWIN_KERNEL_STATUS.new" "$TILEWIN_KERNEL_STATUS"
+}
+
+# A download that says how far it is, into the progress of the build (and the
+# status of the automatic updates) every second.
+fetch_tracked() { # url file text kind version
+	local url=$1 file=$2 text=$3 total="" pid size pct
+	case $url in
+	file://*) total=$(stat -c %s "${url#file://}" 2>/dev/null) ;;
+	*) total=$(curl -fsSIL --retry 2 -- "$url" 2>/dev/null | tr -d '\r' |
+		awk 'tolower($1) == "content-length:" { n = $2 } END { print n }') ;;
+	esac
+	fetch "$url" "$file" &
+	pid=$!
+	while kill -0 "$pid" 2>/dev/null; do
+		size=$(stat -c %s "$file" 2>/dev/null || echo 0)
+		if [[ $total =~ ^[0-9]+$ && $total -gt 0 ]]; then
+			pct=$((size * 100 / total))
+			[[ $pct -gt 99 ]] && pct=99
+			[[ -n ${dir:-} ]] && printf '%s: %d%% of %d MB\n' "$text" "$pct" \
+				$((total / 1048576)) > "$dir/progress"
+			auto_status "$4" download "$pct" "$text" "$5"
+		fi
+		sleep 1
+	done
+	wait "$pid"
+}
+
+# kernel.org signs its checksums with the key of its checksum autosigner; the
+# automatic updates (TILEWIN_KERNEL_REQUIRE_SIGNATURE) take nothing that key
+# did not sign, found once through kernel.org's Web Key Directory and pinned
+# here by its fingerprint.
+autosigner=B8868C80BA62A1FFFAF5FDA9632D3A06589DA6B1
+signed() { # file.asc
+	command -v gpg >/dev/null 2>&1 || return 1
+	if [[ -n ${TILEWIN_KERNEL_REQUIRE_SIGNATURE:-} && -z ${TILEWIN_KERNEL_OFFLINE:-} ]] &&
+			! gpg --batch --list-keys "$autosigner" >/dev/null 2>&1; then
+		gpg --batch --auto-key-locate clear,wkd --locate-keys autosigner@kernel.org >/dev/null 2>&1
+	fi
+	gpg --batch --status-fd 1 --verify "$1" 2>/dev/null | grep -q "^\[GNUPG:\] VALIDSIG $autosigner "
 }
 
 # ---------- the releases ----------
@@ -296,6 +364,21 @@ seen() {
 progress() { # text
 	printf '%s\n' "$*" > "$dir/progress"
 	printf '\n==> %s\n' "$*" >> "$dir/log"
+	local phase
+	case $* in
+	Downloading*) phase=download ;;
+	"Checking the download"*) phase=verify ;;
+	Unpacking*) phase=unpack ;;
+	Configuring*) phase=configure ;;
+	Compiling*) phase=compile ;;
+	Collecting*) phase=modules ;;
+	"Checking that"*) phase=check ;;
+	Built*) phase=done ;;
+	Cancelled*) phase=cancelled ;;
+	Failed*) phase=failed ;;
+	*) phase=build ;;
+	esac
+	auto_status kernel "$phase" -1 "$*" "${version:-}"
 }
 
 set_state() {
@@ -564,6 +647,9 @@ build() { # version profile compression livepatch native name
 		echo "livepatch=$livepatch"
 		echo "asked_native=$native"
 		[[ -z $name ]] || echo "name=$name"
+		# made by the automatic updates, which take it off again when newer
+		# ones have started well
+		[[ -z ${TILEWIN_KERNEL_AUTO:-} ]] || echo "auto=yes"
 		echo "started=$(date +%s)"
 	} > "$dir/info"
 	trap 'progress "Cancelled"; set_state cancelled; rm -f "$data/current"; rm -rf "$build"; trap - TERM; kill -TERM 0 2>/dev/null; exit 130' TERM INT
@@ -580,16 +666,18 @@ build() { # version profile compression livepatch native name
 	mkdir -p "$cache/src"
 	if [[ ! -s $tarball ]]; then
 		progress "Downloading Linux $version"
-		fetch "$mirror/v$major.x/linux-$version.tar.xz" "$tarball.part" >> "$dir/log" 2>&1 ||
+		fetch_tracked "$mirror/v$major.x/linux-$version.tar.xz" "$tarball.part" \
+			"Downloading Linux $version" kernel "$version" >> "$dir/log" 2>&1 ||
 			fail "could not download Linux $version"
 		mv "$tarball.part" "$tarball"
 	fi
 	progress "Checking the download"
 	fetch "$mirror/v$major.x/sha256sums.asc" "$cache/src/sha256sums-v$major.asc" >> "$dir/log" 2>&1 ||
 		fail "could not download the checksums of kernel.org"
-	if command -v gpg >/dev/null 2>&1 &&
-			gpg --verify "$cache/src/sha256sums-v$major.asc" >> "$dir/log" 2>&1; then
+	if signed "$cache/src/sha256sums-v$major.asc"; then
 		echo "signature=good" >> "$dir/info"
+	elif [[ -n ${TILEWIN_KERNEL_REQUIRE_SIGNATURE:-} ]]; then
+		fail "the checksums of kernel.org do not carry its signature"
 	else
 		echo "signature=unchecked" >> "$dir/info"
 	fi
@@ -623,6 +711,14 @@ build() { # version profile compression livepatch native name
 	total=$(grep -c '=[ym]$' .config)
 	progress "Compiling"
 	echo "options=$total" >> "$dir/info"
+	# how many files there are to compile: as many as the last build of this
+	# profile had, else about what the profiles have; the share stays below
+	# 100 until make is done
+	local expect
+	expect=$(cat "$cache/files-$profile" 2>/dev/null)
+	if ! [[ $expect =~ ^[0-9]+$ && $expect -gt 0 ]]; then
+		case $profile in device) expect=7000 ;; portable) expect=11000 ;; full) expect=34000 ;; *) expect=24000 ;; esac
+	fi
 	# a low priority keeps the desktop smooth while every core compiles
 	nice -n 15 ionice -c 3 make -j"$jobs" bzImage modules > >(
 		count=0
@@ -631,12 +727,25 @@ build() { # version profile compression livepatch native name
 			case $line in
 			"  CC "*|"  RUSTC "*|"  AS "*)
 				count=$((count + 1))
-				[[ $((count % 50)) -eq 0 ]] && printf 'Compiling: %d files\n' "$count" > "$dir/progress"
+				if [[ $((count % 50)) -eq 0 ]]; then
+					pct=$((count * 100 / expect))
+					[[ $pct -gt 99 ]] && pct=99
+					printf 'Compiling: %d%% (%d files)\n' "$pct" "$count" > "$dir/progress"
+					auto_status kernel compile "$pct" "Compiling Linux $version" "$version"
+				fi
 				;;
 			esac
 		done
+		echo "$count" > "$build/.files"
 	) 2>> "$dir/log" || fail "the kernel did not compile (see the log)"
 	wait
+	# the count of a build that compiled everything: not of one ccache or an
+	# earlier build left little to do for, which only says CC for what it did
+	local files
+	files=$(cat "$build/.files" 2>/dev/null)
+	if [[ $files =~ ^[0-9]+$ && $files -gt $((expect / 2)) ]]; then
+		echo "$files" > "$cache/files-$profile"
+	fi
 
 	progress "Collecting the modules"
 	rm -rf "$dir/modules"
@@ -861,6 +970,10 @@ security_build() { # kver
 	flock -n 9 || die "A kernel is being built: wait for it to finish"
 	fetch "$mirror/v$major.x/sha256sums.asc" "$sums.part" ||
 		die "could not download the checksums of kernel.org"
+	if [[ -n ${TILEWIN_KERNEL_REQUIRE_SIGNATURE:-} ]] && ! signed "$sums.part"; then
+		rm -f "$sums.part"
+		die "the checksums of kernel.org do not carry its signature"
+	fi
 	mv "$sums.part" "$sums"
 	local newest
 	newest=$(awk '{ print $2 }' "$sums" | sed -n "s/^patch-${series//./\\.}\.\([0-9][0-9]*\)\.xz$/\1/p" |
@@ -877,10 +990,17 @@ security_build() { # kver
 	local log=$lp/$name.log work=$lp/$name.work
 	: > "$log"
 	echo building > "$lp/$name.state"
-	step() { echo "$*" > "$lp/$name.progress"; echo "== $*" >> "$log"; }
+	step() {
+		echo "$*" > "$lp/$name.progress"
+		echo "== $*" >> "$log"
+		local phase=build
+		case $* in Downloading*) phase=download ;; Sorting*) phase=sort ;; esac
+		auto_status fixes "$phase" -1 "$*" "$to"
+	}
 	give_up() {
 		echo failed > "$lp/$name.state"
 		echo "Failed: $*" > "$lp/$name.progress"
+		auto_status fixes failed -1 "$*" "$to"
 		echo "$*" >> "$log"
 		rm -rf "$work" "$tree/klp-tmp"
 		die "$*"
@@ -974,6 +1094,7 @@ security_build() { # kver
 	local left
 	left=$(wc -l < "$lp/$name.left")
 	echo built > "$lp/$name.state"
+	auto_status fixes done 100 "The fixes of Linux $to are made" "$to"
 	if [[ $left -gt 0 ]]; then
 		echo "Fixes of Linux $to: ${#kept[@]} files live; $left need a restart (Log)" > "$lp/$name.progress"
 		{ echo "== Left out, they need Linux $to built and started:"; cat "$lp/$name.left"; } >> "$log"
@@ -1024,6 +1145,131 @@ foreign() {
 	done
 }
 
+# ---------- the automatic updates ----------
+#
+# tilewin-kernel-auto-build@fixes.service and @kernel.service run these, as
+# the system user tilewin-kernel, in a store of their own (XDG_DATA_HOME and
+# XDG_CACHE_HOME below the folder the root helper chose); tilewin-kernel-root
+# auto-run puts on the computer what they made. /etc/tilewin/kernel-auto.conf
+# says how (profile, native, series).
+
+auto_conf=${TILEWIN_KERNEL_AUTO_CONF:-/etc/tilewin/kernel-auto.conf}
+auto_get() { sed -n "s/^$1=//p" "$auto_conf" 2>/dev/null | tail -n 1; }
+running_kver() { echo "${TILEWIN_KERNEL_RUNNING:-$(uname -r)}"; }
+info_get() { sed -n "s/^$2=//p" "$data/$1/info" 2>/dev/null | tail -n 1; }
+
+# The version of a kernel of the store as a release: 7.3 is 7.3.0.
+release_of() { # kver
+	local v
+	v=$(info_get "$1" version)
+	[[ $v == *.*.* ]] || v=$v.0
+	echo "$v"
+}
+
+# The fixes of kernel.org for the running kernel, when it is one of these.
+auto_fixes() {
+	local kver
+	kver=$(running_kver)
+	if [[ ! -d $data/$kver ]] || ! grep -q '^klp=yes' "$data/$kver/info" 2>/dev/null; then
+		auto_status fixes none -1 "The running kernel $kver takes no live fixes of the automatic updates" ""
+		echo "$kver is not a kernel of the automatic updates: no live fixes for it"
+		return 0
+	fi
+	security_build "$kver"
+}
+
+# The release the next kernel should be: the newest of the series that runs
+# (or was built last) while kernel.org still looks after it, else, or with
+# series=new, the newest stable release. Live fixes need 6.19 or newer.
+auto_target() {
+	local list latest cur kver series line
+	list=$(branches) || return 1
+	latest=$(awk -F'\t' '$1 == "latest" { print $2 }' <<<"$list")
+	valid_version "$latest" || return 1
+	kver=$(running_kver)
+	if [[ -d $data/$kver ]]; then
+		cur=$(release_of "$kver")
+	else
+		# the newest built here, also when it has not run yet
+		local d best=""
+		for d in "$data"/*/; do
+			d=$(basename "$d")
+			[[ $(cat "$data/$d/state" 2>/dev/null) == built ]] || continue
+			best=$(printf '%s\n%s\n' "$best" "$(release_of "$d")" | sort -V | tail -n 1)
+		done
+		cur=$best
+	fi
+	if [[ -z $cur || $(auto_get series) == new ]]; then
+		echo "$latest"
+		return
+	fi
+	series=${cur%.*}
+	line=$(awk -F'\t' -v s="$series" '$1 != "latest" { split($2, a, "."); if (a[1] "." a[2] == s) print }' <<<"$list" |
+		head -n 1)
+	if [[ -n $line && -z $(cut -f3 <<<"$line") ]]; then
+		cut -f2 <<<"$line"
+	else
+		echo "$latest" # the series has ended
+	fi
+}
+
+auto_kernel() {
+	local target profile native
+	target=$(auto_target) || { auto_status kernel failed -1 "kernel.org could not be reached" ""; die "kernel.org could not be reached"; }
+	profile=$(auto_get profile)
+	native=$(auto_get native)
+	case $profile in running|device|portable|full) ;; *) profile=running ;; esac
+	[[ $native == on ]] || native=off
+	local want=$target
+	[[ $want == *.*.* ]] || want=$want.0
+	# there already, or being built: nothing to do; one that failed is tried
+	# again a day later
+	local d state
+	for d in "$data"/*/; do
+		d=$(basename "$d")
+		[[ -f $data/$d/info ]] || continue
+		[[ $(release_of "$d") == "$want" ]] || continue
+		state=$(cat "$data/$d/state" 2>/dev/null)
+		case $state in
+		built)
+			auto_status kernel done 100 "Linux $target is built" "$target"
+			echo "Linux $target is built already: $d"
+			return 0 ;;
+		building)
+			if [[ -s $cache/build.pid ]] && kill -0 "$(cat "$cache/build.pid")" 2>/dev/null; then
+				echo "Linux $target is being built"
+				return 0
+			fi ;;
+		*)
+			local started
+			started=$(info_get "$d" started)
+			if [[ $started =~ ^[0-9]+$ && $(($(date +%s) - started)) -lt 72000 ]]; then
+				auto_status kernel failed -1 "Linux $target did not build; it is tried again tomorrow" "$target"
+				echo "Linux $target failed lately: tried again tomorrow"
+				return 0
+			fi
+			rm -rf -- "${data:?}/$d" "${cache:?}/build/$d" ;;
+		esac
+	done
+	local missing
+	missing=$(check zstd | grep -v ':optional$')
+	if [[ -n $missing ]]; then
+		auto_status kernel failed -1 "Missing for building: $(cut -d: -f1 <<<"$missing" | tr '\n' ' ')" "$target"
+		die "Missing for building a kernel: $(cut -d: -f1 <<<"$missing" | tr '\n' ' ')"
+	fi
+	[[ $profile == device || $profile == portable ]] && record_modules
+	TILEWIN_KERNEL_AUTO=1 build "$target" "$profile" zstd on "$native" ""
+}
+
+auto_build() { # fixes|kernel
+	mkdir -p "$data" "$cache"
+	case $1 in
+	fixes) auto_fixes ;;
+	kernel) auto_kernel ;;
+	*) die "usage: tilewin-kernel auto-build fixes|kernel" ;;
+	esac
+}
+
 case ${1:-} in
 versions) versions ;;
 foreign) foreign ;;
@@ -1048,5 +1294,10 @@ patch-build) [[ $# -eq 3 ]] || die "usage: tilewin-kernel patch-build KVER PATCH
 security-build) [[ $# -eq 2 ]] || die "usage: tilewin-kernel security-build KVER"
 	security_build "$2" ;;
 livepatches) [[ $# -eq 2 ]] || die "usage: tilewin-kernel livepatches KVER"; livepatches "$2" ;;
-*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store|record-modules|seen|patch-build|security-build|livepatches" ;;
+auto-build) [[ $# -eq 2 ]] || die "usage: tilewin-kernel auto-build fixes|kernel"
+	if [[ $2 == kernel && -z ${TILEWIN_KERNEL_SESSION:-} ]] && command -v setsid >/dev/null 2>&1; then
+		TILEWIN_KERNEL_SESSION=1 exec setsid --wait bash "$0" "$@"
+	fi
+	auto_build "$2" ;;
+*) die "usage: tilewin-kernel versions|latest|check|build|cancel|list|delete|foreign|store|record-modules|seen|patch-build|security-build|livepatches|auto-build" ;;
 esac

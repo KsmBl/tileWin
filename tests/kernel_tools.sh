@@ -749,6 +749,205 @@ DR tools scx-scheds > "$work/out" 2>&1
 check "what Debian has no package of is said" grep -q "Debian has no package of scx-scheds" "$work/out"
 check "  and not the build tools of another list" bash -c "TILEWIN_KERNEL_PATH='$deb_path' bash '$root_tool' tools rm 2>&1 | grep -q 'not a build tool'"
 
+# ---------- the automatic updates ----------
+#
+# On systemd-boot, as the section before left it: switched on for this user,
+# a kernel built in a store of their own and set to start once; at its start
+# the fixes of kernel.org made and applied live, checked against the kernel's
+# log; a new release built and set for the next start; a kernel that does not
+# come up twice not started again; the old kernels taken off; on battery no
+# build; switched off again. The builds run inline, without systemd.
+
+R remove $k1 > /dev/null 2>&1
+printf '#!/bin/bash\necho "pacman $*" >> %s\n' "$calls" > "$work/rbin/pacman"
+cat > "$work/rbin/insmod" <<INSMOD
+#!/bin/bash
+echo "insmod \$*" >> $calls
+d=$sb/sys/kernel/livepatch/\$(basename "\$1" .ko)
+mkdir -p "\$d"; echo 1 > "\$d/enabled"; echo 0 > "\$d/transition"
+[ -n "\${TW_OOPS:-}" ] && echo "BUG: unable to handle page fault for address: 0" >> $work/dmesg
+exit 0
+INSMOD
+chmod +x "$work/rbin"/*
+: > "$work/dmesg"
+mkdir -p "$sb/var/lib" "$sb/home" "$sb/proc/sys/kernel/random" "$sb/sys/kernel/livepatch"
+echo boot-1 > "$sb/proc/sys/kernel/random/boot_id"
+# the builds run inline, with root's PATH: the stand-ins of the builds too
+export TILEWIN_KERNEL_PATH="$work/rbin:$work/bin:/usr/bin:/bin"
+export TILEWIN_KERNEL_TOOL=$tool TILEWIN_KERNEL_AUTO_INLINE=1 TILEWIN_KERNEL_SETTLE=0
+export TILEWIN_KERNEL_NOTIFY=$work/notes TILEWIN_KERNEL_DMESG=$work/dmesg
+auto=$sb/var/lib/tilewin/kernel-auto
+status() { sed -n "s/^$1=//p" "$auto/status" 2>/dev/null; }
+notes() { cat "$work/notes" 2>/dev/null; }
+
+: > "$calls"
+R auto-enable "$(id -un)" running off end > "$work/out" 2>&1
+check "auto-enable writes what to build and for whom" \
+	bash -c "grep -qx enabled=yes '$sb/etc/tilewin/kernel-auto.conf' && grep -qx profile=running '$sb/etc/tilewin/kernel-auto.conf'"
+astore=$(sed -n 's/^store=//p' "$sb/etc/tilewin/kernel-auto.conf")
+check "  a store of its own, where there is the most room" test -d "$astore/data" -a -d "$astore/gnupg"
+check "  the builds get it through a drop-in" grep -qx "ReadWritePaths=$astore" "$sb/etc/systemd/system/tilewin-kernel-auto-build@.service.d/store.conf"
+check "  the timer and the check at start are switched on" \
+	grep -qx "systemctl enable tilewin-kernel-auto.timer tilewin-kernel-auto-boot.service" "$calls"
+check "  and a first run started" grep -qx "systemctl start --no-block tilewin-kernel-auto.service" "$calls"
+R auto-enable root running off end > "$work/out" 2>&1
+check "  only for the user who asks" grep -q "only be switched on for yourself" "$work/out"
+
+akernels=$astore/data/tileWin/kernels
+: > "$calls"
+R auto-run > "$work/out" 2>&1
+a1=9.9.1-tilewin1
+check "a run builds the newest stable release" test "$(cat "$akernels/$a1/state" 2>/dev/null)" = built
+check "  marked as one of the updates" grep -qx auto=yes "$akernels/$a1/info"
+check "  and says how far it got" grep -qx "phase=done" "$auto/build/kernel"
+check "  puts it on the computer" test -f "$sb/usr/lib/modules/$a1/.tilewin-kernel"
+check "  and sets it to start once" grep -qx "bootctl set-oneshot tilewin-$a1.efi" "$calls"
+check "  the status names it for the next start" test "$(status next)" = "$a1"
+check "  and the user is told" bash -c "grep -q 'New kernel ready' '$work/notes'"
+check "  the distribution's kernel runs on without fixes" test -z "$(status fixes)"
+check "  done: idle, with the time it looked" bash -c "[ '$(status state)' = idle ] && [ -n '$(status checked)' ]"
+
+# the restart: the kernel came up
+echo boot-2 > "$sb/proc/sys/kernel/random/boot_id"
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
+check "at its start it is noted as started well" test "$(cat "$auto/good" 2>/dev/null)" = "$a1"
+check "  and set to start once again" grep -qx "bootctl set-oneshot tilewin-$a1.efi" "$calls"
+check "  nothing waits for the next start" test -z "$(status next)"
+
+# the fixes of kernel.org for it (9.9.3), with a kernel that complains at once
+: > "$calls"
+: > "$work/notes"
+TW_OOPS=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "the fixes are made for the running kernel" test "$(cat "$akernels/$a1/livepatches/security_9_9_3.state" 2>/dev/null)" = built
+check "  applied" grep -q "^insmod .*livepatch_security_9_9_3.ko" "$calls"
+check "  and taken out again when the kernel complains right after" grep -qx "rmmod livepatch_security_9_9_3" "$calls"
+check "  not tried again" grep -qx security_9_9_3 "$auto/bad"
+check "  and the user is told" bash -c "grep -q '^critical	Kernel fixes taken out again' '$work/notes'"
+rm -f "$auto/bad"
+: > "$calls"
+: > "$work/notes"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "fixes the kernel takes well stay" test -d "$sb/sys/kernel/livepatch/livepatch_security_9_9_3"
+check "  and are applied at every start of it" test -f "$sb/usr/lib/modules/$a1/livepatch/livepatch_security_9_9_3.ko"
+check "  the status names them and what needs a restart" bash -c "[ '$(status fixes)' = 9.9.3 ] && [ '$(status fixes_left)' = 2 ]"
+check "  and the user is told" bash -c "grep -q 'Kernel fixed without a restart' '$work/notes'"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "  once" test "$(grep -c 'Kernel fixed' "$work/notes")" = 1
+
+# a new release of the series: built for the next start
+mk_tree 9.9.4 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.9.4.tar.xz" linux-9.9.4)
+(cd "$mirror/v9.x" && sha256sum linux-9.9.4.tar.xz >> sha256sums.asc)
+sed -i 's/"9.9.1"/"9.9.4"/g' "$work/releases.json"
+rm -f "$XDG_CACHE_HOME/tileWin/kernel/releases.json" "$astore/cache/tileWin/kernel/releases.json"
+: > "$calls"
+: > "$work/notes"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+a2=9.9.4-tilewin1
+check "a new release of the series is built" test "$(cat "$akernels/$a2/state" 2>/dev/null)" = built
+check "  put on" test -f "$sb/usr/lib/modules/$a2/.tilewin-kernel"
+check "  and set for the next start" grep -qx "bootctl set-oneshot tilewin-$a2.efi" "$calls"
+check "  while the running one stays" test -f "$sb/usr/lib/modules/$a1/.tilewin-kernel"
+
+# it does not come up, twice
+echo boot-3 > "$sb/proc/sys/kernel/random/boot_id"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
+check "a start that missed it once sets it again" test "$(cut -d' ' -f1,3 "$auto/armed")" = "$a2 1"
+echo boot-4 > "$sb/proc/sys/kernel/random/boot_id"
+: > "$calls"
+: > "$work/notes"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
+check "twice, and it is not started again" grep -qx "$a2" "$auto/failed"
+check "  the kernel that runs is set instead" grep -qx "bootctl set-oneshot tilewin-$a1.efi" "$calls"
+check "  and the user is told" bash -c "grep -q '^critical	New kernel did not start' '$work/notes'"
+
+# the next release starts well: the old kernels go
+mk_tree 9.9.5 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.9.5.tar.xz" linux-9.9.5)
+(cd "$mirror/v9.x" && sha256sum linux-9.9.5.tar.xz >> sha256sums.asc)
+sed -i 's/"9.9.4"/"9.9.5"/g' "$work/releases.json"
+rm -f "$astore/cache/tileWin/kernel/releases.json"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+a3=9.9.5-tilewin1
+check "the release after it is built and set" test "$(status next)" = "$a3"
+check "  the one that did not start is taken off" test ! -e "$sb/usr/lib/modules/$a2" -a ! -e "$akernels/$a2"
+echo boot-5 > "$sb/proc/sys/kernel/random/boot_id"
+TILEWIN_KERNEL_RUNNING=$a3 R auto-boot > /dev/null 2>&1
+TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "once it started well, the one before is taken off and deleted, with its tree" \
+	test ! -e "$sb/usr/lib/modules/$a1" -a ! -e "$akernels/$a1" -a ! -e "$astore/cache/tileWin/kernel/build/$a1"
+check "  the running kernel stays" test -f "$sb/usr/lib/modules/$a3/.tilewin-kernel"
+check "what was done is written down" grep -q "taken off" "$auto/log"
+
+# the series ends: the newest series is built
+mk_tree 9.10.2 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.10.2.tar.xz" linux-9.10.2)
+(cd "$mirror/v9.x" && sha256sum linux-9.10.2.tar.xz >> sha256sums.asc)
+cat > "$work/releases.json" <<'EOF'
+{"latest_stable": {"version": "9.10.2"}, "releases": [
+ {"moniker": "stable", "version": "9.10.2", "iseol": false, "source": null},
+ {"moniker": "stable", "version": "9.9.5", "iseol": true, "source": null}]}
+EOF
+rm -f "$astore/cache/tileWin/kernel/releases.json"
+TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "at the end of the series the newest series is built" test "$(status next)" = 9.10.2-tilewin1
+
+# on battery: no build
+mkdir -p "$sb/sys/class/power_supply/BAT0" "$sb/sys/class/power_supply/AC"
+echo Battery > "$sb/sys/class/power_supply/BAT0/type"
+echo Mains > "$sb/sys/class/power_supply/AC/type"
+echo 0 > "$sb/sys/class/power_supply/AC/online"
+before_build=$(ls "$akernels" | sort)
+sed -i 's/"9.10.2"/"9.10.3"/' "$work/releases.json"
+rm -f "$astore/cache/tileWin/kernel/releases.json"
+TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "on battery nothing is built" test "$(ls "$akernels" | sort)" = "$before_build"
+check "  and the status says why" test "$(status power)" = battery
+rm -rf "$sb/sys/class/power_supply"
+
+# checksums without kernel.org's signature are not taken by the updates
+mkdir -p "$work/gpg" && chmod 700 "$work/gpg"
+GNUPGHOME=$work/gpg TILEWIN_KERNEL_OFFLINE=1 TILEWIN_KERNEL_REQUIRE_SIGNATURE=1 K build 9.9.4 device zstd off > "$work/out" 2>&1
+check "a build of the updates needs kernel.org's signature" grep -q "signature" "$store/9.9.4-tilewin1/progress"
+K delete 9.9.4-tilewin1 2>/dev/null
+
+: > "$calls"
+R auto-disable > "$work/out" 2>&1
+check "auto-disable switches them off" grep -qx enabled=no "$sb/etc/tilewin/kernel-auto.conf"
+check "  the timer too" grep -q "^systemctl disable --now tilewin-kernel-auto.timer" "$calls"
+check "  and nothing is set for the next start" grep -qx 'bootctl set-oneshot ' "$calls"
+R auto-run > "$work/out" 2>&1
+check "  a run then does nothing" test "$(status state)" = off
+unset TILEWIN_KERNEL_AUTO_INLINE TILEWIN_KERNEL_NOTIFY TILEWIN_KERNEL_DMESG
+
+# ---------- the modules of the running kernel through an update ----------
+
+keep_tool=$(dirname "$root_tool")/tilewin-keep-modules
+if [ -f "$keep_tool" ]; then
+	km=$work/keep/usr/lib/modules
+	mkdir -p "$km/7.0.0-arch1/kernel/drivers" "$km/7.0.0-arch1/build" "$km/6.0.0-old"
+	echo usb > "$km/7.0.0-arch1/kernel/drivers/usb.ko"
+	echo kept > "$km/6.0.0-old/.tilewin-kept"
+	KM() { TILEWIN_KEEP_MODULES_DIR=$km TILEWIN_KEEP_MODULES_RUNNING=7.0.0-arch1 bash "$keep_tool" "$@"; }
+	KM pre
+	check "keep-modules: before an update the running kernel's modules are linked aside" \
+		test "$(stat -c %i "$km/7.0.0-arch1/kernel/drivers/usb.ko")" = "$(stat -c %i "$km/.tilewin-keep-7.0.0-arch1/kernel/drivers/usb.ko")"
+	check "  without its headers" test ! -e "$km/.tilewin-keep-7.0.0-arch1/build"
+	check "  and what was kept for a kernel that no longer runs goes" test ! -e "$km/6.0.0-old"
+	rm -rf "$km/7.0.0-arch1/kernel" "$km/7.0.0-arch1/build" # the update takes them
+	echo dep > "$km/7.0.0-arch1/modules.dep" # what depmod made stays behind
+	KM post > "$work/out"
+	check "  after it they are back" test -f "$km/7.0.0-arch1/kernel/drivers/usb.ko"
+	check "  marked as kept" test -f "$km/7.0.0-arch1/.tilewin-kept"
+	check "  and the aside copy is gone" test ! -e "$km/.tilewin-keep-7.0.0-arch1"
+	KM pre
+	KM post > "$work/out"
+	check "  an update that leaves them is left alone" test ! -e "$km/.tilewin-keep-7.0.0-arch1" -a -f "$km/7.0.0-arch1/kernel/drivers/usb.ko"
+	TILEWIN_KEEP_MODULES_DIR=$km TILEWIN_KEEP_MODULES_RUNNING=7.1.0-arch1 bash "$keep_tool" clean
+	check "  once another kernel runs, they go" test ! -e "$km/7.0.0-arch1"
+fi
+
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"
 	exit 1

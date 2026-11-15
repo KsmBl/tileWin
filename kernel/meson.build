@@ -62,3 +62,49 @@ install_data(
 	'org.tilewin.scx.rules',
 	install_dir: '/usr/share/polkit-1/rules.d',
 )
+
+# the automatic updates: the run as root and its timer, the check at every
+# start, the builds as the system user tilewin-kernel, and Check now without a
+# password (tilewin-kernel-root auto-enable switches them on)
+foreach unit : ['tilewin-kernel-auto.service', 'tilewin-kernel-auto-boot.service',
+		'tilewin-kernel-auto-build@.service']
+	configure_file(
+		input: unit + '.in',
+		output: unit,
+		configuration: kernel_conf,
+		install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),
+	)
+endforeach
+install_data(
+	'tilewin-kernel-auto.timer',
+	install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),
+)
+install_data(
+	'tilewin-kernel.sysusers',
+	rename: 'tilewin-kernel.conf',
+	install_dir: join_paths(prefix, 'lib', 'sysusers.d'),
+)
+install_data(
+	'org.tilewin.kernel-auto.rules',
+	install_dir: '/usr/share/polkit-1/rules.d',
+)
+
+# the modules of the running kernel kept through an update of the
+# distribution's kernel, from two hooks of pacman
+tilewin_keep_modules = configure_file(
+	input: 'tilewin-keep-modules.in',
+	output: 'tilewin-keep-modules',
+	configuration: kernel_conf,
+	install_dir: get_option('libexecdir'),
+	install_mode: 'rwxr-xr-x',
+)
+if find_program('pacman', required: false).found()
+	foreach hook : ['pre', 'post']
+		configure_file(
+			input: 'tilewin-keep-modules-' + hook + '.hook.in',
+			output: '10-tilewin-keep-modules-' + hook + '.hook',
+			configuration: kernel_conf,
+			install_dir: '/usr/share/libalpm/hooks',
+		)
+	endforeach
+endif

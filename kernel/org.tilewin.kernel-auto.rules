@@ -1,0 +1,12 @@
+// "Check now" of the Kernel page and the kernel widget: starting the run of
+// tileWin's automatic kernel updates early goes without a password for
+// administrators at the computer. It only does what the timer does anyway.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "tilewin-kernel-auto.service" &&
+        action.lookup("verb") == "start" &&
+        (subject.isInGroup("wheel") || subject.isInGroup("sudo")) &&
+        subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

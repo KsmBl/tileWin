@@ -26,6 +26,19 @@
 #                                          not), or no more
 #   tilewin-kernel-root livepatch-boot     applies those of the running kernel;
 #                                          tilewin-kernel-livepatch.service runs it
+#   tilewin-kernel-root auto-enable USER PROFILE NATIVE SERIES
+#                                          switches the automatic updates on
+#                                          (see "the automatic updates" below):
+#                                          what goes in, for this processor
+#                                          only on|off, and a new series at the
+#                                          end of the old one or as soon as it
+#                                          is out (end|new)
+#   tilewin-kernel-root auto-disable       switches them off again
+#   tilewin-kernel-root auto-set KEY VALUE battery yes|no, series end|new,
+#                                          native on|off, profile
+#   tilewin-kernel-root auto-run           what tilewin-kernel-auto.service does
+#   tilewin-kernel-root auto-boot          what tilewin-kernel-auto-boot.service
+#                                          does at every start
 #   tilewin-kernel-root scheduler-default SCHEDULER MODE
 #                                          the sched_ext scheduler scx_loader
 #                                          starts with the computer, or "none"
@@ -72,6 +85,20 @@ scx_conf=$root/etc/scx_loader/config.toml
 
 die() { echo "$*" >&2; exit 1; }
 note() { echo "$*"; }
+
+# What may be put on the computer: what root or the user who asked owns, and,
+# for the automatic updates (auto_uid set), what their system user built in
+# their own store, which only it and root can write to.
+auto_uid=
+owned() { # file
+	local owner
+	owner=$(stat -c %u "$1") || return 1
+	[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] && return 0
+	[[ -n $auto_uid && $owner == "$auto_uid" ]] || return 1
+	local real store
+	real=$(realpath -e "$1") && store=$(realpath -e "$(auto_get store)") || return 1
+	[[ $real == "$store"/* ]]
+}
 
 # VERSION-NAME, the name what tilewin-kernel takes; which kernels are ours
 # the marker says
@@ -289,8 +316,7 @@ install_kernel() { # kver store
 	[[ $(cat "$src/state" 2>/dev/null) == built ]] || die "$kver is not built"
 	# the store of the user who asked, or root's
 	local owner
-	owner=$(stat -c %u "$src")
-	[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+	owned "$src" || die "$src belongs to someone else"
 	if [[ -e $modules/$kver ]]; then
 		ours "$kver" || die "$modules/$kver is there already and not ours"
 		die "$kver is on the computer already"
@@ -524,8 +550,7 @@ livepatch_apply() { # kver name store
 	[[ -d $livepatch_sys ]] || die "The running kernel takes no livepatches"
 	local src=$store/$kver/livepatches/$name.ko owner
 	[[ -f $src ]] || die "The livepatch $name is not built"
-	owner=$(stat -c %u "$src")
-	[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+	owned "$src" || die "$src belongs to someone else"
 	local module=livepatch_$name
 	[[ -d $livepatch_sys/$module ]] && die "$name is applied already"
 	# a copy of root's own, so the file cannot change between check and load
@@ -561,8 +586,7 @@ livepatch_start() { # kver name store on|off
 	on)
 		local src=$store/$kver/livepatches/$name.ko owner
 		[[ -f $src ]] || die "The livepatch $name is not built"
-		owner=$(stat -c %u "$src")
-		[[ $owner == 0 || $owner == "${PKEXEC_UID:-0}" ]] || die "$src belongs to someone else"
+		owned "$src" || die "$src belongs to someone else"
 		mkdir -p "$dir"
 		cp "$src" "$dir/livepatch_$name.ko.new"
 		mv "$dir/livepatch_$name.ko.new" "$dir/livepatch_$name.ko"
@@ -655,6 +679,521 @@ scheduler_default() { # scheduler mode
 	note "$sched starts with the computer"
 }
 
+# ---------- the automatic updates ----------
+#
+# Kept up to date without restarts, as far as Linux can be:
+#  - the fixes kernel.org has for the running kernel are made into a livepatch
+#    and applied at once (and at every start of that kernel), checked: a
+#    kernel that complains in its log right after takes it out again;
+#  - each new release of the series is built in the background, put on the
+#    computer and set to start once at the next restart, which the user makes
+#    whenever they like; when the series ends, the newest series is built;
+#  - the start of a new kernel is checked: one that did not come up twice is
+#    not started again, and the one before it is;
+#  - old kernels of the automatic updates are taken off and deleted.
+# The boot loader's default stays the distribution's kernel: the kernel of the
+# updates is set to start once, again at every start that reached it, so a
+# kernel that does not start leaves the computer with the distribution's.
+#
+# The builds run as the system user tilewin-kernel (tilewin-kernel-auto-build@
+# fixes and @kernel.service), never as the user, so nothing a program of the
+# user could write to is ever loaded into the kernel without the password.
+# /etc/tilewin/kernel-auto.conf says what to build and for whom; the state for
+# the Kernel page and the kernel widget is /var/lib/tilewin/kernel-auto/status
+# (key=value), what was done is its log, and the builds write how far they are
+# to build/fixes and build/kernel there.
+
+auto_conf=$root/etc/tilewin/kernel-auto.conf
+auto_state=$root/var/lib/tilewin/kernel-auto
+auto_user=tilewin-kernel
+auto_dropin=$root/etc/systemd/system/tilewin-kernel-auto-build@.service.d
+tool=${TILEWIN_KERNEL_TOOL:-@bindir@/tilewin-kernel}
+
+auto_get() { sed -n "s/^$1=//p" "$auto_conf" 2>/dev/null | tail -n 1; }
+auto_on() { [[ $(auto_get enabled) == yes ]]; }
+auto_kernels() { echo "$(auto_get store)/data/tileWin/kernels"; }
+
+# One key of the status, the others kept.
+st() { # key value
+	mkdir -p "$auto_state"
+	local f=$auto_state/status
+	{
+		grep -v "^$1=" "$f" 2>/dev/null
+		printf '%s=%s\n' "$1" "$2"
+	} > "$f.new" && mv -f "$f.new" "$f"
+	chmod 644 "$f"
+}
+
+# A line of what was done, newest last, the last 50 kept.
+auto_log() { # text
+	mkdir -p "$auto_state"
+	printf '%s\t%s\n' "$(date +%s)" "$*" >> "$auto_state/log"
+	tail -n 50 "$auto_state/log" > "$auto_state/log.new" && mv -f "$auto_state/log.new" "$auto_state/log"
+	chmod 644 "$auto_state/log"
+}
+
+# A notification on the desktop of the user the updates are for.
+notify() { # title text [low|normal|critical]
+	if [[ -n ${TILEWIN_KERNEL_NOTIFY:-} ]]; then
+		printf '%s\t%s\t%s\n' "${3:-normal}" "$1" "$2" >> "$TILEWIN_KERNEL_NOTIFY"
+		return 0
+	fi
+	local user uid
+	user=$(auto_get user)
+	uid=$(id -u "$user" 2>/dev/null) || return 0
+	[[ -S /run/user/$uid/bus ]] || return 0
+	runuser -u "$user" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+		notify-send -a "Kernel updates" -i software-update-available -u "${3:-normal}" \
+		"$1" "$2" >/dev/null 2>&1 || true
+}
+
+boot_id() { cat "$root/proc/sys/kernel/random/boot_id" 2>/dev/null || echo none; }
+
+# On mains power, or a computer without a battery.
+on_mains() {
+	local d have_battery=no
+	for d in "$root"/sys/class/power_supply/*/; do
+		case $(cat "$d/type" 2>/dev/null) in
+		Mains) [[ $(cat "$d/online" 2>/dev/null) == 1 ]] && return 0 ;;
+		Battery) have_battery=yes ;;
+		esac
+	done
+	[[ $have_battery == no ]]
+}
+
+# Its release, 7.3 being 7.3.0.
+auto_release() { # kver
+	local v
+	v=$(sed -n 's/^version=//p' "$(auto_kernels)/$1/info" 2>/dev/null | tail -n 1)
+	[[ -z $v || $v == *.*.* ]] || v=$v.0
+	echo "$v"
+}
+
+# The kernels of the automatic updates: KVER<tab>RELEASE<tab>STATE, oldest first.
+auto_list() {
+	local d k store
+	store=$(auto_kernels)
+	for d in "$store"/*/; do
+		[[ -d $d ]] || continue
+		k=$(basename "$d")
+		valid_kver "$k" || continue
+		grep -qx 'auto=yes' "$d/info" 2>/dev/null || continue
+		printf '%s\t%s\t%s\n' "$k" "$(auto_release "$k")" "$(cat "$d/state" 2>/dev/null)"
+	done | sort -t$'\t' -k2,2V
+}
+
+listed() { [[ -f $auto_state/$1 ]] && grep -qxF -- "$2" "$auto_state/$1"; }
+
+# A build of the system user, waited for; for the tests, without systemd.
+auto_unit() { # fixes|kernel
+	if [[ -n ${TILEWIN_KERNEL_AUTO_INLINE:-} ]]; then
+		TILEWIN_KERNEL_STATUS=$auto_state/build/$1 TILEWIN_KERNEL_AUTO_CONF=$auto_conf \
+			XDG_DATA_HOME=$(auto_get store)/data XDG_CACHE_HOME=$(auto_get store)/cache \
+			TILEWIN_KERNEL_RUNNING=$running bash "$tool" auto-build "$1"
+	else
+		systemctl start "tilewin-kernel-auto-build@$1.service"
+	fi
+}
+
+# The kernel's log, for what went wrong right after a livepatch.
+kernel_log() {
+	if [[ -n ${TILEWIN_KERNEL_DMESG:-} ]]; then
+		cat -- "$TILEWIN_KERNEL_DMESG" 2>/dev/null
+	else
+		dmesg 2>/dev/null
+	fi
+}
+
+# The newest fixes made for the running kernel, applied, checked and set for
+# every start of it.
+auto_fixes() {
+	local store kver=$running lp name best="" n
+	store=$(auto_kernels)
+	lp=$store/$kver/livepatches
+	[[ -d $lp ]] || return 0
+	for n in "$lp"/security_*.state; do
+		[[ -f $n && $(cat "$n") == built && -f ${n%.state}.ko ]] || continue
+		name=$(basename "$n" .state)
+		listed bad "$name" && continue
+		best=$(printf '%s\n%s\n' "$best" "$name" | sort -V | tail -n 1)
+	done
+	[[ -n $best ]] || return 0
+	name=$best
+	local to=${name#security_} left
+	to=${to//_/.}
+	left=$(grep -c . "$lp/$name.left" 2>/dev/null)
+	if [[ -d $livepatch_sys/livepatch_$name ]]; then
+		st fixes "$to"
+		st fixes_left "${left:-0}"
+		return 0
+	fi
+	st state applying
+	st message "Applying the fixes of Linux $to"
+	local before out
+	before=$(kernel_log | wc -l)
+	if ! out=$( (livepatch_apply "$kver" "$name" "$store") 2>&1); then
+		echo "$name" >> "$auto_state/bad"
+		auto_log "The kernel did not take the fixes of Linux $to: $out"
+		notify "Kernel fixes not applied" "The kernel did not take the fixes of Linux $to. Restart into the newest kernel to get them." critical
+		return 1
+	fi
+	# the change goes through task by task; then a while to see that all is well
+	local i
+	for i in $(seq 120); do
+		[[ $(cat "$livepatch_sys/livepatch_$name/transition" 2>/dev/null) == 1 ]] || break
+		sleep 0.5
+	done
+	sleep "${TILEWIN_KERNEL_SETTLE:-20}"
+	local trouble
+	trouble=$(kernel_log | tail -n +"$((before + 1))" |
+		grep -E -m1 'Oops|BUG:|general protection|kernel panic|Call Trace|WARNING: CPU|livepatch: .*(fail|error)')
+	if [[ -n $trouble ]]; then
+		(livepatch_undo "$name") >/dev/null 2>&1
+		echo "$name" >> "$auto_state/bad"
+		auto_log "The fixes of Linux $to were taken out again: the kernel said \"${trouble:0:160}\""
+		notify "Kernel fixes taken out again" "Right after the fixes of Linux $to the kernel reported a problem, so they were undone. Restart into the newest kernel to get them." critical
+		return 1
+	fi
+	(livepatch_start "$kver" "$name" "$store" on) >/dev/null 2>&1
+	st fixes "$to"
+	st fixes_left "${left:-0}"
+	st fixes_applied "$(date +%s)"
+	local more="" also=""
+	if [[ ${left:-0} -gt 0 ]]; then
+		more=" $left changed files cannot be patched live: they come with the next kernel."
+		also="; $left files need a restart"
+	fi
+	auto_log "Applied the fixes of Linux $to live$also"
+	notify "Kernel fixed without a restart" "The security fixes of Linux $to are in the running kernel now.$more"
+}
+
+# The newest kernel built and not on the computer yet goes on.
+auto_install() {
+	local k rel state newest="" store out
+	store=$(auto_kernels)
+	while IFS=$'\t' read -r k rel state; do
+		[[ $state == built ]] || continue
+		listed failed "$k" && continue
+		newest=$k
+	done < <(auto_list)
+	[[ -n $newest ]] || return 0
+	ours "$newest" && return 0
+	st state installing
+	st message "Putting Linux $(auto_release "$newest") on the computer"
+	if out=$( (install_kernel "$newest" "$store") 2>&1); then
+		auto_log "Linux $(auto_release "$newest") is on the computer ($newest)"
+		return 0
+	fi
+	echo "$newest" >> "$auto_state/failed"
+	auto_log "Linux $(auto_release "$newest") could not be put on the computer: $(tail -n 1 <<<"$out")"
+	notify "New kernel not ready" "Linux $(auto_release "$newest") could not be put on the computer: $(tail -n 1 <<<"$out")" critical
+	return 1
+}
+
+# The kernel to start next: the newest of the updates on the computer that
+# did not fail to start.
+auto_target() {
+	local k rel state target=""
+	while IFS=$'\t' read -r k rel state; do
+		[[ $state == built ]] && ours "$k" && ! listed failed "$k" && target=$k
+	done < <(auto_list)
+	echo "$target"
+}
+
+# Sets a kernel to start once at the next restart; prints why not.
+arm_once() { # kver
+	local target=$1 how image
+	how=$(marker_get "$target" boot)
+	image=$(marker_get "$target" image)
+	case $how in
+	oneshot)
+		bootctl set-oneshot "tilewin-$target.efi" 2>&1 ;;
+	bootnext)
+		local num
+		local err
+		err=$(mktemp)
+		num=$(efi_entry_make "$target" "$image" 2>"$err")
+		[[ $num =~ ^[0-9A-Fa-f]{4}$ ]] || { tail -n 1 "$err"; rm -f "$err"; return 1; }
+		rm -f "$err"
+		efibootmgr 2>/dev/null | grep -qx "BootNext: $num" && return 0
+		efibootmgr -n "$num" 2>&1 >/dev/null ;;
+	grub-reboot)
+		local def entry
+		def=$(sed -n 's/^GRUB_DEFAULT=["'\'']\{0,1\}\([^"'\'']*\).*/\1/p' "$root/etc/default/grub" 2>/dev/null)
+		[[ $def == saved ]] || { echo "GRUB starts a kernel once only with GRUB_DEFAULT=saved in /etc/default/grub"; return 1; }
+		entry=$(grub_entry "$target")
+		[[ -n $entry ]] || { echo "GRUB has no entry for $target"; return 1; }
+		grub-reboot "$entry" 2>&1 ;;
+	*) echo "it is not known how to start $target"; return 1 ;;
+	esac
+}
+
+# The kernel to start next set for the next restart; for the same kernel the
+# count of starts it missed is kept.
+auto_arm() {
+	local target misses=0 k="" b="" m="" out
+	target=$(auto_target)
+	if [[ -z $target ]]; then
+		auto_disarm
+		st next ""
+		return 0
+	fi
+	{ read -r k b m < "$auto_state/armed"; } 2>/dev/null
+	[[ $k == "$target" && $m =~ ^[0-9]+$ ]] && misses=$m
+	if ! out=$(arm_once "$target"); then
+		st arm_error "${out:0:200}"
+		auto_log "Linux $(auto_release "$target") could not be set for the next start: ${out:0:160}"
+		return 1
+	fi
+	st arm_error ""
+	echo "$target $(boot_id) $misses" > "$auto_state/armed"
+	if [[ $target != "$running" ]]; then
+		if [[ $(sed -n 's/^next=//p' "$auto_state/status" 2>/dev/null) != "$target" ]]; then
+			auto_log "Linux $(auto_release "$target") starts at the next restart"
+			notify "New kernel ready" "Linux $(auto_release "$target") starts the next time you restart. Until then the running kernel gets its fixes live." low
+		fi
+		st next "$target"
+	else
+		st next ""
+	fi
+}
+
+auto_disarm() {
+	local k="" b="" m="" num
+	{ read -r k b m < "$auto_state/armed"; } 2>/dev/null || return 0
+	if [[ -n $k ]] && ours "$k"; then
+		case $(marker_get "$k" boot) in
+		oneshot) bootctl set-oneshot "" >/dev/null 2>&1 ;;
+		bootnext)
+			num=$(efi_entry "$k")
+			[[ -n $num ]] && efibootmgr 2>/dev/null | grep -qx "BootNext: $num" && efibootmgr -N >/dev/null 2>&1 ;;
+		grub-reboot) grub-editenv - unset next_entry >/dev/null 2>&1 ;;
+		esac
+	fi
+	rm -f "$auto_state/armed"
+}
+
+# How the start went that the last arming was for: the kernel came up, or the
+# computer started another one; twice another, and that kernel is not started
+# again. Once a start.
+auto_verdict() {
+	local k="" b="" m="" now
+	{ read -r k b m < "$auto_state/armed"; } 2>/dev/null || return 0
+	now=$(boot_id)
+	[[ -n $k && $b != "$now" ]] || return 0
+	[[ $m =~ ^[0-9]+$ ]] || m=0
+	if [[ $k == "$running" ]]; then
+		local before
+		before=$(cat "$auto_state/good" 2>/dev/null)
+		echo "$k" > "$auto_state/good"
+		echo "$k $now 0" > "$auto_state/armed"
+		[[ $before == "$k" ]] || auto_log "Linux $(auto_release "$k") started well ($k)"
+		return 0
+	fi
+	m=$((m + 1))
+	if [[ $m -ge 2 ]]; then
+		echo "$k" >> "$auto_state/failed"
+		rm -f "$auto_state/armed"
+		auto_log "Linux $(auto_release "$k") did not come up twice: it is not started again"
+		notify "New kernel did not start" "Linux $(auto_release "$k") did not come up twice, so the computer stays with $running. The next release is tried when it is out." critical
+	else
+		echo "$k $now $m" > "$auto_state/armed"
+		auto_log "The computer started $running instead of Linux $(auto_release "$k")"
+	fi
+}
+
+# The old kernels of the updates go: those older than the one to start next
+# (or than the running one, when none is set), and those that did not start;
+# never the running one, the one to start next or the last that started well.
+# Builds that failed stay until auto-build tries again.
+auto_cleanup() {
+	local keep target good k rel state ref tree
+	target=$(auto_target)
+	good=$(cat "$auto_state/good" 2>/dev/null)
+	keep=" $running $target $good "
+	ref=$(auto_release "${target:-$running}")
+	while IFS=$'\t' read -r k rel state; do
+		[[ $keep == *" $k "* || $state != built ]] && continue
+		if ! listed failed "$k"; then
+			[[ -n $ref ]] || continue
+			# only what is older than the reference, or as old
+			[[ $(printf '%s\n%s\n' "$ref" "$rel" | sort -V | tail -n 1) == "$ref" ]] || continue
+		fi
+		if ours "$k"; then
+			(remove_kernel "$k") >/dev/null 2>&1 || continue
+		fi
+		tree=$(sed -n 's/^tree=//p' "$(auto_kernels)/$k/info" 2>/dev/null)
+		[[ -n $tree && $tree == "$(auto_get store)"/* ]] && rm -rf -- "$tree"
+		rm -rf -- "${k:+$(auto_kernels)/$k}"
+		auto_log "Linux $rel ($k) was taken off: a newer one is there"
+	done < <(auto_list)
+}
+
+auto_run() {
+	auto_on || { st state off; return 0; }
+	mkdir -p "$root/run"
+	exec 8> "$root/run/tilewin-kernel-auto.lock"
+	flock -n 8 || { echo "The automatic updates are running already"; return 0; }
+	auto_uid=$(id -u "$auto_user" 2>/dev/null)
+	if [[ -z $auto_uid ]]; then
+		[[ -n ${TILEWIN_KERNEL_AUTO_INLINE:-} ]] || die "There is no user $auto_user: switch the automatic updates on again"
+		auto_uid=$(id -u)
+	fi
+	st running "$running"
+	st error ""
+	auto_verdict
+	if [[ -d $(auto_kernels)/$running ]]; then
+		st state fixes
+		st message "Looking for fixes of kernel.org"
+		auto_unit fixes ||
+			st error "The fixes could not be made: $(sed -n 's/^text=//p' "$auto_state/build/fixes" 2>/dev/null)"
+		auto_fixes
+	else
+		st fixes ""
+		st fixes_left ""
+	fi
+	if on_mains || [[ $(auto_get battery) == yes ]]; then
+		st power ""
+		st state building
+		st message "Looking for a new release"
+		auto_unit kernel ||
+			st error "The new kernel could not be built: $(sed -n 's/^text=//p' "$auto_state/build/kernel" 2>/dev/null)"
+	else
+		st power battery
+	fi
+	auto_install
+	auto_arm
+	auto_cleanup
+	st checked "$(date +%s)"
+	st state idle
+	st message ""
+}
+
+# At start: how the start went, and the next one armed again.
+auto_boot() {
+	auto_on || return 0
+	auto_uid=$(id -u "$auto_user" 2>/dev/null)
+	st running "$running"
+	auto_verdict
+	auto_arm
+}
+
+# Where the store goes: below /var/lib, or /home when that is another file
+# system with more room (a kernel tree with its objects takes 10 to 35 GB).
+auto_store_place() {
+	local best=$root/var/lib/tilewin-kernel best_free=0 c dir free
+	for c in "$root/var/lib/tilewin-kernel" "$root/home/.tilewin-kernel"; do
+		dir=$(dirname "$c")
+		[[ -d $dir ]] || continue
+		free=$(df -Pk "$dir" 2>/dev/null | awk 'NR == 2 { print $4 }')
+		[[ $free =~ ^[0-9]+$ ]] || continue
+		if [[ $free -gt $best_free ]]; then
+			best=$c
+			best_free=$free
+		fi
+	done
+	echo "$best"
+}
+
+auto_enable() { # user profile native series
+	local user=$1 profile=$2 native=$3 series=$4
+	[[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && id -u "$user" >/dev/null 2>&1 || die "There is no user $user"
+	[[ -n ${PKEXEC_UID:-} && $(id -u "$user") != "$PKEXEC_UID" ]] &&
+		die "The updates can only be switched on for yourself"
+	case $profile in running|device|portable|full) ;; *) die "unknown profile $profile" ;; esac
+	case $native in on|off) ;; *) die "for this processor is on or off" ;; esac
+	case $series in end|new) ;; *) die "a new series: end or new" ;; esac
+	if [[ -z $root ]] && ! id -u "$auto_user" >/dev/null 2>&1; then
+		systemd-sysusers tilewin-kernel.conf >&2 2>/dev/null
+		id -u "$auto_user" >/dev/null 2>&1 ||
+			useradd --system --no-create-home --home-dir /var/lib/tilewin-kernel \
+				--shell /usr/bin/nologin --comment "tileWin kernel builds" "$auto_user" >&2 ||
+			die "The user $auto_user could not be made"
+	fi
+	local store owner=$auto_user
+	[[ -n $root ]] && owner=$(id -un)
+	store=$(auto_get store)
+	[[ -n $store ]] || store=$(auto_store_place)
+	mkdir -p "$store"/{data,cache,gnupg,ccache} "$auto_state/build"
+	chown -R "$owner:$(id -gn "$owner")" "$store" "$auto_state/build"
+	chmod 755 "$store" "$store/data" "$auto_state" "$auto_state/build"
+	chmod 700 "$store/gnupg"
+	mkdir -p "$auto_dropin"
+	{
+		echo "# written by tilewin-kernel-root auto-enable: where the builds keep their files"
+		echo "[Service]"
+		echo "ReadWritePaths=$store"
+		echo "Environment=XDG_DATA_HOME=$store/data XDG_CACHE_HOME=$store/cache GNUPGHOME=$store/gnupg"
+		echo "Environment=CCACHE_DIR=$store/ccache CCACHE_MAXSIZE=25G HOME=$store"
+	} > "$auto_dropin/store.conf"
+	local battery
+	battery=$(auto_get battery)
+	mkdir -p "$(dirname "$auto_conf")"
+	{
+		echo "# tileWin's automatic kernel updates (the Kernel page of the settings)"
+		echo "enabled=yes"
+		echo "user=$user"
+		echo "store=$store"
+		echo "profile=$profile"
+		echo "native=$native"
+		echo "series=$series"
+		echo "battery=${battery:-no}"
+	} > "$auto_conf.new"
+	mv "$auto_conf.new" "$auto_conf"
+	chmod 644 "$auto_conf"
+	# what the builds need, with ccache for quick builds of the next release and
+	# patchutils for the live fixes
+	local missing=() line pkg
+	while read -r line; do
+		[[ -n $line ]] || continue
+		case $line in
+		*:ccache:optional|*:patchutils:optional) ;;
+		*:optional) continue ;;
+		esac
+		pkg=${line#*:}
+		missing+=("${pkg%%:*}")
+	done < <(bash "$tool" check zstd 2>/dev/null)
+	if [[ ${#missing[@]} -gt 0 ]]; then
+		note "Installing ${missing[*]}"
+		tools "${missing[@]}" >&2 || die "The programs a build needs could not be installed: ${missing[*]}"
+	fi
+	st state idle
+	st error ""
+	auto_log "The automatic updates were switched on"
+	systemctl daemon-reload >&2
+	systemctl enable tilewin-kernel-auto.timer tilewin-kernel-auto-boot.service >&2 ||
+		die "The units of the automatic updates are missing: install tileWin again"
+	systemctl start tilewin-kernel-auto.timer >&2
+	systemctl start --no-block tilewin-kernel-auto.service >&2
+	note "The automatic updates are on"
+}
+
+auto_disable() {
+	[[ -f $auto_conf ]] || { note "The automatic updates are off"; return 0; }
+	sed -i 's/^enabled=.*/enabled=no/' "$auto_conf"
+	systemctl disable --now tilewin-kernel-auto.timer tilewin-kernel-auto-boot.service >&2 2>/dev/null
+	systemctl stop tilewin-kernel-auto.service 'tilewin-kernel-auto-build@*.service' >&2 2>/dev/null
+	auto_disarm
+	st state off
+	st next ""
+	auto_log "The automatic updates were switched off"
+	note "The automatic updates are off; the kernels they made stay until you take them off"
+}
+
+# An option of the updates: battery yes|no, series end|new, native on|off,
+# profile; they count from the next build on.
+auto_set() { # key value
+	[[ -f $auto_conf ]] || die "The automatic updates were never switched on"
+	case $1=$2 in
+	battery=yes|battery=no|series=end|series=new|native=on|native=off) ;;
+	profile=running|profile=device|profile=portable|profile=full) ;;
+	*) die "not an option: $1=$2" ;;
+	esac
+	sed -i "/^$1=/d" "$auto_conf"
+	echo "$1=$2" >> "$auto_conf"
+	note "$1 is $2"
+}
+
 # The packages of Debian for the names of Arch, which tilewin-kernel check uses;
 # nothing for what Debian does not have.
 debian_packages() { # arch name
@@ -719,5 +1258,11 @@ livepatch-undo) [[ $# -eq 2 ]] || die "usage: tilewin-kernel-root livepatch-undo
 	livepatch_undo "$2" ;;
 scheduler-default) [[ $# -eq 3 ]] || die "usage: tilewin-kernel-root scheduler-default SCHEDULER MODE"
 	scheduler_default "$2" "$3" ;;
-*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|livepatch-start|livepatch-boot|scheduler-default" ;;
+auto-enable) [[ $# -eq 5 ]] || die "usage: tilewin-kernel-root auto-enable USER PROFILE NATIVE SERIES"
+	auto_enable "$2" "$3" "$4" "$5" ;;
+auto-disable) auto_disable ;;
+auto-set) [[ $# -eq 3 ]] || die "usage: tilewin-kernel-root auto-set KEY VALUE"; auto_set "$2" "$3" ;;
+auto-run) auto_run ;;
+auto-boot) auto_boot ;;
+*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|livepatch-start|livepatch-boot|scheduler-default|auto-enable|auto-disable|auto-set|auto-run|auto-boot" ;;
 esac

@@ -1,0 +1,12 @@
+[Unit]
+Description=tileWin's automatic kernel updates: live fixes and the next kernel
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/tilewin/kernel-auto.conf
+
+[Service]
+Type=oneshot
+ExecStart=@libexecdir@/tilewin-kernel-root auto-run
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=idle

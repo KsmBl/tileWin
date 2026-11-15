@@ -1,0 +1,76 @@
+#!/bin/bash
+# Keeps the modules of the running kernel when an update of the distribution's
+# kernel takes them away. pacman deletes /usr/lib/modules/OLD when "linux" is
+# updated, and until the next restart the running kernel could then load no
+# driver it had not loaded yet: a USB stick, a VPN, another file system. pacman
+# runs it from two hooks:
+#
+#   tilewin-keep-modules pre    before the transaction: a copy of the folder
+#                               made of hard links (it takes no room), without
+#                               the headers in build/ (DKMS would build for it);
+#                               and the folders kept before of kernels that no
+#                               longer run go
+#   tilewin-keep-modules post   after it: what the update took away put back,
+#                               marked with .tilewin-kept, and depmod run
+#   tilewin-keep-modules clean  only the cleaning of "pre"
+#
+# A folder kept this way belongs to no package. Installing the very release
+# that runs again (a downgrade back to it) would find its files there: the
+# next start, or "tilewin-keep-modules clean --all", takes it away.
+#
+# For the tests: TILEWIN_KEEP_MODULES_DIR (instead of /usr/lib/modules),
+# TILEWIN_KEEP_MODULES_RUNNING (instead of uname -r).
+set -uo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+modules=${TILEWIN_KEEP_MODULES_DIR:-/usr/lib/modules}
+running=${TILEWIN_KEEP_MODULES_RUNNING:-$(uname -r)}
+keep=$modules/.tilewin-keep-$running
+marker=.tilewin-kept
+
+# The kept folders of kernels that do not run (all of them with --all).
+clean() {
+	local d k
+	for d in "$modules"/*/; do
+		[[ -f $d$marker ]] || continue
+		k=$(basename "$d")
+		[[ ${1:-} != --all && $k == "$running" ]] && continue
+		rm -rf -- "${d%/}"
+	done
+	for d in "$modules"/.tilewin-keep-*; do
+		[[ -e $d && $d != "$keep" ]] && rm -rf -- "$d"
+	done
+	return 0
+}
+
+pre() {
+	clean
+	[[ -d $modules/$running/kernel ]] || return 0
+	rm -rf -- "$keep"
+	cp -al -- "$modules/$running" "$keep" 2>/dev/null || cp -a -- "$modules/$running" "$keep" ||
+		{ rm -rf -- "$keep"; return 0; }
+	rm -rf -- "$keep/build" "$keep/source"
+}
+
+post() {
+	[[ -d $keep ]] || return 0
+	# still there: the update was of another kernel, or of this release again
+	if [[ -d $modules/$running/kernel ]]; then
+		rm -rf -- "$keep"
+		return 0
+	fi
+	mkdir -p "$modules/$running"
+	cp -alf -- "$keep/." "$modules/$running/" 2>/dev/null || cp -af -- "$keep/." "$modules/$running/"
+	rm -rf -- "$keep"
+	echo "the modules of the running kernel, kept by tileWin until it no longer runs" \
+		> "$modules/$running/$marker"
+	depmod -b "${modules%/lib/modules}" "$running" 2>/dev/null || depmod "$running" 2>/dev/null
+	echo "The modules of the running kernel $running are kept: drivers still load until the next restart"
+}
+
+case ${1:-} in
+pre) pre ;;
+post) post ;;
+clean) clean "${2:-}" ;;
+*) echo "usage: tilewin-keep-modules pre|post|clean [--all]" >&2; exit 1 ;;
+esac

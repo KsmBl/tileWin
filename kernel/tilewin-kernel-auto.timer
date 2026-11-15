@@ -1,0 +1,13 @@
+# The Kernel page of the tileWin settings switches it on with the automatic
+# kernel updates: kernel.org is asked a while after the start and every three
+# hours, which finds a new stable release (they come about weekly) the same day.
+[Unit]
+Description=Look for new kernel fixes and releases every three hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=3h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

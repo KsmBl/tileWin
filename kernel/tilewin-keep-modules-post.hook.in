@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Upgrade
+Operation = Remove
+Type = Path
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Putting back the modules of the running kernel (tileWin)...
+When = PostTransaction
+Exec = @libexecdir@/tilewin-keep-modules post

@@ -1,0 +1,14 @@
+# At every start: whether the kernel of the automatic updates set for this start
+# came up, and that kernel set to start once again for the next one. A kernel
+# that does not start leaves the computer with the boot loader's default.
+[Unit]
+Description=Check the start of the kernel of tileWin's automatic updates and set the next one
+After=multi-user.target
+ConditionPathExists=/etc/tilewin/kernel-auto.conf
+
+[Service]
+Type=oneshot
+ExecStart=@libexecdir@/tilewin-kernel-root auto-boot
+
+[Install]
+WantedBy=multi-user.target

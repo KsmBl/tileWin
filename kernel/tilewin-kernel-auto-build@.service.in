@@ -1,0 +1,35 @@
+# The builds of tileWin's automatic kernel updates (%i: fixes or kernel), as the
+# system user tilewin-kernel in the store tilewin-kernel-root chose, which its
+# drop-in store.conf names. They run at the lowest priority, so the computer
+# stays as quick as it is while a kernel compiles.
+[Unit]
+Description=Build for tileWin's automatic kernel updates (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tilewin-kernel
+Group=tilewin-kernel
+ExecStart=@bindir@/tilewin-kernel auto-build %i
+Environment=TILEWIN_KERNEL_REQUIRE_SIGNATURE=1
+Environment=TILEWIN_KERNEL_STATUS=/var/lib/tilewin/kernel-auto/build/%i
+TimeoutStartSec=infinity
+Nice=19
+CPUSchedulingPolicy=batch
+CPUWeight=idle
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/tilewin/kernel-auto/build
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+CapabilityBoundingSet=
