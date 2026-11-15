@@ -1239,7 +1239,11 @@ auto_kernel() {
 			if [[ -s $cache/build.pid ]] && kill -0 "$(cat "$cache/build.pid")" 2>/dev/null; then
 				echo "Linux $target is being built"
 				return 0
-			fi ;;
+			fi
+			# stopped without a word: built again
+			rm -rf -- "${data:?}/$d" "${cache:?}/build/$d" ;;
+		cancelled)
+			rm -rf -- "${data:?}/$d" "${cache:?}/build/$d" ;;
 		*)
 			local started
 			started=$(info_get "$d" started)

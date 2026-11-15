@@ -96,96 +96,9 @@ static uint32_t kind_color(struct widget *w, enum tw_kernel_auto_kind kind, uint
 
 /* ---------- the shield ---------- */
 
-static void shield_path(cairo_t *cr, double x, double y, double s) {
-	double cx = x + s / 2;
-	cairo_new_path(cr);
-	cairo_move_to(cr, cx, y + s * 0.04);
-	cairo_curve_to(cr, cx + s * 0.18, y + s * 0.14, cx + s * 0.32, y + s * 0.16, x + s * 0.88, y + s * 0.16);
-	cairo_curve_to(cr, x + s * 0.88, y + s * 0.58, x + s * 0.74, y + s * 0.82, cx, y + s * 0.97);
-	cairo_curve_to(cr, x + s * 0.26, y + s * 0.82, x + s * 0.12, y + s * 0.58, x + s * 0.12, y + s * 0.16);
-	cairo_curve_to(cr, cx - s * 0.32, y + s * 0.16, cx - s * 0.18, y + s * 0.14, cx, y + s * 0.04);
-	cairo_close_path(cr);
-}
-
-/*
- * A shield in the color of the state with its sign in it: a tick, an arrow
- * down, dots while busy, the arrow of a restart, "!" or a bar for off. Flat
- * with a dark edge in Windows 95, with a light top elsewhere.
- */
 static void draw_shield(cairo_t *cr, double x, double y, double s, enum tw_kernel_auto_kind kind,
 		uint32_t color, bool flat) {
-	cairo_save(cr);
-	shield_path(cr, x, y, s);
-	if (flat) {
-		pd_color(cr, color);
-		cairo_fill_preserve(cr);
-	} else {
-		cairo_pattern_t *g = cairo_pattern_create_linear(0, y, 0, y + s);
-		double r = (color >> 24 & 0xff) / 255.0, gr = (color >> 16 & 0xff) / 255.0,
-			b = (color >> 8 & 0xff) / 255.0;
-		cairo_pattern_add_color_stop_rgb(g, 0, r + (1 - r) * 0.35, gr + (1 - gr) * 0.35, b + (1 - b) * 0.35);
-		cairo_pattern_add_color_stop_rgb(g, 1, r * 0.85, gr * 0.85, b * 0.85);
-		cairo_set_source(cr, g);
-		cairo_fill_preserve(cr);
-		cairo_pattern_destroy(g);
-	}
-	cairo_set_source_rgba(cr, 0, 0, 0, flat ? 0.75 : 0.35);
-	cairo_set_line_width(cr, fmax(1, s / 18));
-	cairo_stroke(cr);
-
-	double cx = x + s / 2, cy = y + s * 0.5, u = s / 10;
-	cairo_set_source_rgb(cr, 1, 1, 1);
-	cairo_set_line_width(cr, fmax(1.4, s / 9));
-	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-	cairo_new_path(cr);
-	switch (kind) {
-	case TW_KA_OK:
-	case TW_KA_FIXED:
-		cairo_move_to(cr, cx - 2.2 * u, cy);
-		cairo_line_to(cr, cx - 0.6 * u, cy + 1.7 * u);
-		cairo_line_to(cr, cx + 2.4 * u, cy - 1.7 * u);
-		cairo_stroke(cr);
-		break;
-	case TW_KA_DOWNLOADING:
-		cairo_move_to(cr, cx, cy - 2.4 * u);
-		cairo_line_to(cr, cx, cy + 1.8 * u);
-		cairo_move_to(cr, cx - 1.7 * u, cy + 0.3 * u);
-		cairo_line_to(cr, cx, cy + 2 * u);
-		cairo_line_to(cr, cx + 1.7 * u, cy + 0.3 * u);
-		cairo_stroke(cr);
-		break;
-	case TW_KA_RESTART:
-		cairo_arc(cr, cx, cy + 0.2 * u, 2.2 * u, -M_PI * 0.35, M_PI * 1.45);
-		cairo_stroke(cr);
-		cairo_move_to(cr, cx + 0.9 * u, cy - 2.6 * u);
-		cairo_line_to(cr, cx + 1.9 * u, cy - 1.6 * u);
-		cairo_line_to(cr, cx + 0.6 * u, cy - 1.0 * u);
-		cairo_stroke(cr);
-		break;
-	case TW_KA_ERROR:
-		cairo_move_to(cr, cx, cy - 2.4 * u);
-		cairo_line_to(cr, cx, cy + 0.6 * u);
-		cairo_stroke(cr);
-		cairo_arc(cr, cx, cy + 2.2 * u, s / 16, 0, 2 * M_PI);
-		cairo_fill(cr);
-		break;
-	case TW_KA_OFF:
-	case TW_KA_WAITING:
-	case TW_KA_PENDING:
-		cairo_move_to(cr, cx - 2 * u, cy);
-		cairo_line_to(cr, cx + 2 * u, cy);
-		cairo_stroke(cr);
-		break;
-	default: // busy: three dots
-		for (int i = -1; i <= 1; i++) {
-			cairo_new_path(cr);
-			cairo_arc(cr, cx + i * 1.9 * u, cy, s / 14, 0, 2 * M_PI);
-			cairo_fill(cr);
-		}
-		break;
-	}
-	cairo_restore(cr);
+	tw_kernel_auto_draw_shield(cr, x, y, s, kind, color, flat);
 }
 
 /* ---------- options of each place ---------- */

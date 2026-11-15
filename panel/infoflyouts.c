@@ -1218,6 +1218,8 @@ static void kernel_sample(struct info_flyout *f) {
 		tw_kernel_auto_ago(ka->checked, now, value, sizeof(value));
 	}
 	add_row(f, "Checked", ka->checked ? value : "not yet");
+	tw_kernel_auto_schedule_words(ka, value, sizeof(value));
+	add_row(f, "Runs", value);
 	if (ka->log_count > 0) {
 		add_heading(f, "Recent");
 		for (int i = 0; i < ka->log_count && i < 5; i++) {
@@ -1225,11 +1227,15 @@ static void kernel_sample(struct info_flyout *f) {
 			add_row(f, ka->log[i].text, value);
 		}
 	}
-	if (sum.kind == TW_KA_RESTART) {
+	if (ka->busy) {
+		add_action(f, "Stop", "exec systemctl stop tilewin-kernel-auto.service "
+			"tilewin-kernel-auto-now.service tilewin-kernel-auto-build@fixes.service "
+			"tilewin-kernel-auto-build@kernel.service", NULL);
+	} else if (sum.kind == TW_KA_RESTART) {
 		add_action(f, "Restart…", "exec tilewinmsg panel shutdown", NULL);
 	} else {
-		add_action(f, "Check now", "exec systemctl start --no-block tilewin-kernel-auto.service",
-			NULL);
+		add_action(f, "Update now", "exec systemctl start --no-block "
+			"tilewin-kernel-auto-now.service", NULL);
 	}
 	add_action(f, "Kernel page", "exec tilewin-settings --page kernel", NULL);
 	char *settings = widget_settings_command(f->widget);

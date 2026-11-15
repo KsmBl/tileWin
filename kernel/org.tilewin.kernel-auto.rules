@@ -1,12 +1,21 @@
-// "Check now" of the Kernel page and the kernel widget: starting the run of
-// tileWin's automatic kernel updates early goes without a password for
-// administrators at the computer. It only does what the timer does anyway.
+// "Update now" and "Stop" of the Kernel page and the kernel widget: starting the
+// run of tileWin's automatic kernel updates (it only does what its timer does
+// anyway) and stopping it and its builds go without a password for
+// administrators at the computer.
 polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit") == "tilewin-kernel-auto.service" &&
-        action.lookup("verb") == "start" &&
-        (subject.isInGroup("wheel") || subject.isInGroup("sudo")) &&
-        subject.local && subject.active) {
+    if (action.id != "org.freedesktop.systemd1.manage-units" ||
+        !(subject.isInGroup("wheel") || subject.isInGroup("sudo")) ||
+        !subject.local || !subject.active) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var unit = action.lookup("unit"), verb = action.lookup("verb");
+    if (verb == "start" &&
+        (unit == "tilewin-kernel-auto.service" || unit == "tilewin-kernel-auto-now.service")) {
         return polkit.Result.YES;
     }
+    if (verb == "stop" &&
+        /^tilewin-kernel-auto(-now|-build@(fixes|kernel))?\.service$/.test(unit)) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
 });

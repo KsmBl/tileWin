@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
+#include <cairo.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +54,12 @@ static void conf_pair(void *data, const char *key, const char *value) {
 		ka->native = strcmp(value, "on") == 0;
 	} else if (strcmp(key, "battery") == 0) {
 		ka->battery = strcmp(value, "yes") == 0;
+	} else if (strcmp(key, "when") == 0) {
+		COPY(ka->when, value);
+	} else if (strcmp(key, "time") == 0) {
+		COPY(ka->time, value);
+	} else if (strcmp(key, "catchup") == 0) {
+		ka->catchup = strcmp(value, "no") != 0;
 	}
 }
 
@@ -148,6 +156,7 @@ static void read_log(struct tw_kernel_auto *ka) {
 bool tw_kernel_auto_read(struct tw_kernel_auto *ka) {
 	memset(ka, 0, sizeof(*ka));
 	ka->kernel.percent = ka->fixes_build.percent = -1;
+	ka->catchup = true;
 	ka->configured = read_pairs("/etc/tilewin/kernel-auto.conf", conf_pair, ka);
 	if (!ka->configured) {
 		return false;
@@ -158,6 +167,20 @@ bool tw_kernel_auto_read(struct tw_kernel_auto *ka) {
 	read_log(ka);
 	ka->busy = run_going_on();
 	return true;
+}
+
+void tw_kernel_auto_schedule_words(const struct tw_kernel_auto *ka, char *out, size_t size) {
+	static const char *const days[][2] = { { "mon", "Monday" }, { "tue", "Tuesday" },
+		{ "wed", "Wednesday" }, { "thu", "Thursday" }, { "fri", "Friday" },
+		{ "sat", "Saturday" }, { "sun", "Sunday" } };
+	const char *at = ka->time[0] ? ka->time : "03:00";
+	for (size_t i = 0; i < sizeof(days) / sizeof(days[0]); i++) {
+		if (strcmp(ka->when, days[i][0]) == 0) {
+			snprintf(out, size, "every %s at %s", days[i][1], at);
+			return;
+		}
+	}
+	snprintf(out, size, "every day at %s", at);
 }
 
 void tw_kernel_auto_release(const char *kver, char *out, size_t size) {
@@ -333,10 +356,11 @@ void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 	}
 	if (!ka->running_auto) {
 		out->kind = TW_KA_PENDING;
-		SET(brief, "Kernel updates soon");
-		SET(title, "The first kernel of the updates comes soon");
-		SET(detail, "%s", ka->checked ? "It is built at the next check, on mains power." :
-			"The first check runs a few minutes after it was switched on.");
+		SET(brief, "No update yet");
+		SET(title, "Your first updated kernel is not built yet");
+		char when[64];
+		tw_kernel_auto_schedule_words(ka, when, sizeof(when));
+		SET(detail, "It is built %s, or now with Update now.", when);
 		return;
 	}
 	out->kind = TW_KA_OK;
@@ -350,3 +374,104 @@ void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 		SET(detail, "Nothing to do.");
 	}
 }
+
+/* ---------- the shield ---------- */
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+
+static void shield_path(cairo_t *cr, double x, double y, double s) {
+	double cx = x + s / 2;
+	cairo_new_path(cr);
+	cairo_move_to(cr, cx, y + s * 0.04);
+	cairo_curve_to(cr, cx + s * 0.18, y + s * 0.14, cx + s * 0.32, y + s * 0.16, x + s * 0.88, y + s * 0.16);
+	cairo_curve_to(cr, x + s * 0.88, y + s * 0.58, x + s * 0.74, y + s * 0.82, cx, y + s * 0.97);
+	cairo_curve_to(cr, x + s * 0.26, y + s * 0.82, x + s * 0.12, y + s * 0.58, x + s * 0.12, y + s * 0.16);
+	cairo_curve_to(cr, cx - s * 0.32, y + s * 0.16, cx - s * 0.18, y + s * 0.14, cx, y + s * 0.04);
+	cairo_close_path(cr);
+}
+
+/*
+ * A shield in the color of the state with its sign in it: a tick, an arrow
+ * down, dots while busy, the arrow of a restart, "!" or a bar for off. Flat
+ * with a dark edge in Windows 95, with a light top elsewhere.
+ */
+void tw_kernel_auto_draw_shield(cairo_t *cr, double x, double y, double s, enum tw_kernel_auto_kind kind,
+		uint32_t color, bool flat) {
+	cairo_save(cr);
+	shield_path(cr, x, y, s);
+	if (flat) {
+		cairo_set_source_rgba(cr, (color >> 24 & 0xff) / 255.0, (color >> 16 & 0xff) / 255.0,
+			(color >> 8 & 0xff) / 255.0, 1);
+		cairo_fill_preserve(cr);
+	} else {
+		cairo_pattern_t *g = cairo_pattern_create_linear(0, y, 0, y + s);
+		double r = (color >> 24 & 0xff) / 255.0, gr = (color >> 16 & 0xff) / 255.0,
+			b = (color >> 8 & 0xff) / 255.0;
+		cairo_pattern_add_color_stop_rgb(g, 0, r + (1 - r) * 0.35, gr + (1 - gr) * 0.35, b + (1 - b) * 0.35);
+		cairo_pattern_add_color_stop_rgb(g, 1, r * 0.85, gr * 0.85, b * 0.85);
+		cairo_set_source(cr, g);
+		cairo_fill_preserve(cr);
+		cairo_pattern_destroy(g);
+	}
+	cairo_set_source_rgba(cr, 0, 0, 0, flat ? 0.75 : 0.35);
+	cairo_set_line_width(cr, fmax(1, s / 18));
+	cairo_stroke(cr);
+
+	double cx = x + s / 2, cy = y + s * 0.5, u = s / 10;
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, fmax(1.4, s / 9));
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_new_path(cr);
+	switch (kind) {
+	case TW_KA_OK:
+	case TW_KA_FIXED:
+		cairo_move_to(cr, cx - 2.2 * u, cy);
+		cairo_line_to(cr, cx - 0.6 * u, cy + 1.7 * u);
+		cairo_line_to(cr, cx + 2.4 * u, cy - 1.7 * u);
+		cairo_stroke(cr);
+		break;
+	case TW_KA_DOWNLOADING:
+		cairo_move_to(cr, cx, cy - 2.4 * u);
+		cairo_line_to(cr, cx, cy + 1.8 * u);
+		cairo_move_to(cr, cx - 1.7 * u, cy + 0.3 * u);
+		cairo_line_to(cr, cx, cy + 2 * u);
+		cairo_line_to(cr, cx + 1.7 * u, cy + 0.3 * u);
+		cairo_stroke(cr);
+		break;
+	case TW_KA_RESTART:
+		cairo_arc(cr, cx, cy + 0.2 * u, 2.2 * u, -M_PI * 0.35, M_PI * 1.45);
+		cairo_stroke(cr);
+		cairo_move_to(cr, cx + 0.9 * u, cy - 2.6 * u);
+		cairo_line_to(cr, cx + 1.9 * u, cy - 1.6 * u);
+		cairo_line_to(cr, cx + 0.6 * u, cy - 1.0 * u);
+		cairo_stroke(cr);
+		break;
+	case TW_KA_ERROR:
+		cairo_move_to(cr, cx, cy - 2.4 * u);
+		cairo_line_to(cr, cx, cy + 0.6 * u);
+		cairo_stroke(cr);
+		cairo_arc(cr, cx, cy + 2.2 * u, s / 16, 0, 2 * M_PI);
+		cairo_fill(cr);
+		break;
+	case TW_KA_OFF:
+	case TW_KA_WAITING:
+	case TW_KA_PENDING:
+		cairo_move_to(cr, cx - 2 * u, cy);
+		cairo_line_to(cr, cx + 2 * u, cy);
+		cairo_stroke(cr);
+		break;
+	default: // busy: three dots
+		for (int i = -1; i <= 1; i++) {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx + i * 1.9 * u, cy, s / 14, 0, 2 * M_PI);
+			cairo_fill(cr);
+		}
+		break;
+	}
+	cairo_restore(cr);
+}
+

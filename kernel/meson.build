@@ -66,7 +66,8 @@ install_data(
 # the automatic updates: the run as root and its timer, the check at every
 # start, the builds as the system user tilewin-kernel, and Check now without a
 # password (tilewin-kernel-root auto-enable switches them on)
-foreach unit : ['tilewin-kernel-auto.service', 'tilewin-kernel-auto-boot.service',
+foreach unit : ['tilewin-kernel-auto.service', 'tilewin-kernel-auto-now.service',
+		'tilewin-kernel-auto-boot.service',
 		'tilewin-kernel-auto-build@.service']
 	configure_file(
 		input: unit + '.in',

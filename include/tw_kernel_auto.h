@@ -34,6 +34,8 @@ struct tw_kernel_auto {
 	bool configured;  // switched on once
 	bool enabled;
 	char profile[16], series[8];
+	char when[8], time[8]; // daily or mon..sun, HH:MM
+	bool catchup;          // a time the computer was off at is made up at the next start
 	bool native, battery;
 	bool busy;        // a run goes on now
 	char state[16];   // idle, fixes, building, applying, installing, off
@@ -84,8 +86,21 @@ struct tw_kernel_auto_summary {
 void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 	struct tw_kernel_auto_summary *out);
 
+/* When the updates run: "every day at 03:00", "every Monday at 21:30". */
+void tw_kernel_auto_schedule_words(const struct tw_kernel_auto *ka, char *out, size_t size);
+
 /* The release of a kernel name: "7.3.6" of "7.3.6-tilewin2". */
 void tw_kernel_auto_release(const char *kver, char *out, size_t size);
+
+/*
+ * A shield in the color of the state (0xRRGGBBAA) with its sign in it: a tick,
+ * an arrow down, dots while busy, the arrow of a restart, "!" or a bar for
+ * off; flat with a dark edge (Windows 95) or with a light top.
+ */
+typedef struct _cairo cairo_t;
+#include <stdint.h>
+void tw_kernel_auto_draw_shield(cairo_t *cr, double x, double y, double size,
+	enum tw_kernel_auto_kind kind, uint32_t color, bool flat);
 
 /* "3 min", "2 h", "5 days" ago. */
 void tw_kernel_auto_ago(time_t then, time_t now, char *out, size_t size);

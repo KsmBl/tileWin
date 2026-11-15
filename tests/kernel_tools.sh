@@ -789,7 +789,20 @@ check "  a store of its own, where there is the most room" test -d "$astore/data
 check "  the builds get it through a drop-in" grep -qx "ReadWritePaths=$astore" "$sb/etc/systemd/system/tilewin-kernel-auto-build@.service.d/store.conf"
 check "  the timer and the check at start are switched on" \
 	grep -qx "systemctl enable tilewin-kernel-auto.timer tilewin-kernel-auto-boot.service" "$calls"
-check "  and a first run started" grep -qx "systemctl start --no-block tilewin-kernel-auto.service" "$calls"
+check "  nothing is downloaded or built now" bash -c "! grep -q 'start --no-block tilewin-kernel-auto' '$calls'"
+sched=$sb/etc/systemd/system/tilewin-kernel-auto.timer.d/schedule.conf
+check "  it runs every day at 03:00 by default" grep -qx "OnCalendar=\*-\*-\* 03:00:00" "$sched"
+R auto-schedule wed 21:30 no > "$work/out" 2>&1
+check "auto-schedule sets the day and the time" grep -qx "OnCalendar=Wed \*-\*-\* 21:30:00" "$sched"
+check "  and whether a time missed is made up" grep -qx "Persistent=false" "$sched"
+check "  and says so" grep -q "every Wednesday at 21:30" "$work/out"
+R auto-schedule daily 25:00 yes > "$work/out" 2>&1
+check "  a time that is none is refused" grep -q "not a time" "$work/out"
+R auto-config when=fri time=06:15 catchup=yes battery=yes > "$work/out" 2>&1
+check "auto-config sets several at once" bash -c "grep -qx 'OnCalendar=Fri \*-\*-\* 06:15:00' '$sched' && grep -qx battery=yes '$sb/etc/tilewin/kernel-auto.conf'"
+R auto-config time=6pm > "$work/out" 2>&1
+check "  and refuses what is none, writing nothing" bash -c "grep -q 'not a time' '$work/out' && grep -qx time=06:15 '$sb/etc/tilewin/kernel-auto.conf'"
+R auto-config when=daily time=03:00 battery=no > /dev/null 2>&1
 R auto-enable root running off end > "$work/out" 2>&1
 check "  only for the user who asks" grep -q "only be switched on for yourself" "$work/out"
 
@@ -806,6 +819,14 @@ check "  the status names it for the next start" test "$(status next)" = "$a1"
 check "  and the user is told" bash -c "grep -q 'New kernel ready' '$work/notes'"
 check "  the distribution's kernel runs on without fixes" test -z "$(status fixes)"
 check "  done: idle, with the time it looked" bash -c "[ '$(status state)' = idle ] && [ -n '$(status checked)' ]"
+
+# a run stopped half way (Stop) leaves a build cancelled: the next run builds it again
+echo cancelled > "$akernels/$a1/state"
+TILEWIN_KERNEL_AUTO_MANUAL=1 R auto-run > "$work/out" 2>&1
+check "\"Update now\" builds what was stopped again" test "$(cat "$akernels/$a1/state" 2>/dev/null)" = built
+echo failed > "$akernels/$a1/state"
+TILEWIN_KERNEL_AUTO_MANUAL=1 R auto-run > "$work/out" 2>&1
+check "  and what failed, without waiting a day" test "$(cat "$akernels/$a1/state" 2>/dev/null)" = built
 
 # the restart: the kernel came up
 echo boot-2 > "$sb/proc/sys/kernel/random/boot_id"

@@ -1,0 +1,15 @@
+# "Update now" of the Kernel page and the kernel widget: the same run as the
+# timer's, which also tries again what failed or was stopped before.
+[Unit]
+Description=tileWin's automatic kernel updates, now
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/tilewin/kernel-auto.conf
+
+[Service]
+Type=oneshot
+Environment=TILEWIN_KERNEL_AUTO_MANUAL=1
+ExecStart=@libexecdir@/tilewin-kernel-root auto-run
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=idle
