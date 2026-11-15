@@ -425,117 +425,62 @@
 <circle cx="1640" cy="1320" r="784" fill="url(#glow)"/>
 <circle cx="1640" cy="1320" r="700" fill="url(#planet)"/>
 <circle cx="1640" cy="1320" r="700" fill="none" stroke="#ffcf99" stroke-opacity="0.35" stroke-width="2"/>
-<path d="M36 108 A72 72 0 0 1 108 36 H760 V70 H186 A30 30 0 0 0 156 100 V366 H36 V366 Z" fill="#ff9c3a"/>
-<text x="146.0" y="140.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="18" font-weight="bold" fill="#000000" text-anchor="end">24-6748</text>
-<path d="M768.0 36.0 H1028.0 V70.0 H768.0 V36.0 Z" fill="#c896d8"/>
-<text x="1020.0" y="63.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="16" font-weight="bold" fill="#000000" text-anchor="end">70-6825</text>
-<path d="M1036.0 36.0 H1126.0 V70.0 H1036.0 V36.0 Z" fill="#8f9bff"/>
-<text x="1118.0" y="63.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="16" font-weight="bold" fill="#000000" text-anchor="end">150</text>
-<path d="M1134.0 36.0 H1514.0 V70.0 H1134.0 V36.0 Z" fill="#8fc8ff"/>
-<text x="1506.0" y="63.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="16" font-weight="bold" fill="#000000" text-anchor="end">09-0547</text>
-<path d="M1522.0 36.0 H1642.0 V70.0 H1522.0 V36.0 Z" fill="#e8c070"/>
-<text x="1634.0" y="63.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="16" font-weight="bold" fill="#000000" text-anchor="end">723</text>
-<path d="M1650.0 36.0 H1867.0 A17.0 17.0 0 0 1 1867.0 70.0 H1650.0 V36.0 Z" fill="#e8c070"/>
-<path d="M36.0 374.0 H156.0 V444.0 H36.0 V374.0 Z" fill="#ffcf99"/>
-<text x="146.0" y="434.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="bold" fill="#000000" text-anchor="end">16-2928</text>
-<path d="M36.0 452.0 H156.0 V602.0 H36.0 V452.0 Z" fill="#c896d8"/>
-<text x="146.0" y="592.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="bold" fill="#000000" text-anchor="end">32-0336</text>
-<path d="M36.0 610.0 H156.0 V656.0 H36.0 V610.0 Z" fill="#8f9bff"/>
-<text x="146.0" y="646.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="bold" fill="#000000" text-anchor="end">20</text>
-<path d="M36.0 664.0 H156.0 V874.0 H36.0 V664.0 Z" fill="#8fc8ff"/>
-<text x="146.0" y="864.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="bold" fill="#000000" text-anchor="end">67-4711</text>
-<path d="M36.0 882.0 H156.0 V990.0 H36.0 V882.0 Z" fill="#8f9bff"/>
-<text x="1490.0" y="130.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">6669</text>
-<text x="1568.0" y="130.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">5609</text>
-<text x="1646.0" y="130.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">5425</text>
-<text x="1724.0" y="130.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">540</text>
-<text x="1802.0" y="130.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">1466</text>
-<text x="1490.0" y="154.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">4025</text>
-<text x="1568.0" y="154.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">6078</text>
-<text x="1646.0" y="154.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4333</text>
-<text x="1724.0" y="154.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">3632</text>
-<text x="1802.0" y="154.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">981</text>
-<text x="1490.0" y="178.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">3212</text>
-<text x="1568.0" y="178.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">4502</text>
-<text x="1646.0" y="178.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">3872</text>
-<text x="1724.0" y="178.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">2172</text>
-<text x="1802.0" y="178.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4896</text>
-<text x="1490.0" y="202.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">1214</text>
-<text x="1568.0" y="202.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">1951</text>
-<text x="1646.0" y="202.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">5436</text>
-<text x="1724.0" y="202.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">7419</text>
-<text x="1802.0" y="202.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">9024</text>
-<text x="1490.0" y="226.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">3366</text>
-<text x="1568.0" y="226.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">8648</text>
-<text x="1646.0" y="226.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">8341</text>
-<text x="1724.0" y="226.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">1124</text>
-<text x="1802.0" y="226.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">8798</text>
-<text x="1490.0" y="250.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">9518</text>
-<text x="1568.0" y="250.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">1674</text>
-<text x="1646.0" y="250.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">6991</text>
-<text x="1724.0" y="250.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">4662</text>
-<text x="1802.0" y="250.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">6262</text>
-<text x="1490.0" y="274.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">1692</text>
-<text x="1568.0" y="274.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">889</text>
-<text x="1646.0" y="274.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">8026</text>
-<text x="1724.0" y="274.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">5759</text>
-<text x="1802.0" y="274.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">2221</text>
-<text x="1490.0" y="298.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">8311</text>
-<text x="1568.0" y="298.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">5887</text>
-<text x="1646.0" y="298.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">2378</text>
-<text x="1724.0" y="298.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">7823</text>
-<text x="1802.0" y="298.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">3189</text>
-<text x="1490.0" y="322.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">551</text>
-<text x="1568.0" y="322.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">6192</text>
-<text x="1646.0" y="322.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">9971</text>
-<text x="1724.0" y="322.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">9616</text>
-<text x="1802.0" y="322.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">8874</text>
-<text x="1490.0" y="346.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">5592</text>
-<text x="1568.0" y="346.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">5540</text>
-<text x="1646.0" y="346.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">6649</text>
-<text x="1724.0" y="346.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">3598</text>
-<text x="1802.0" y="346.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4017</text>
-<text x="1490.0" y="370.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">1927</text>
-<text x="1568.0" y="370.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">6755</text>
-<text x="1646.0" y="370.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">2107</text>
-<text x="1724.0" y="370.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">7018</text>
-<text x="1802.0" y="370.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">6361</text>
-<text x="1490.0" y="394.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">1990</text>
-<text x="1568.0" y="394.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">6695</text>
-<text x="1646.0" y="394.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">1219</text>
-<text x="1724.0" y="394.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">5157</text>
-<text x="1802.0" y="394.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">0857</text>
-<text x="1490.0" y="418.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">1626</text>
-<text x="1568.0" y="418.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">2593</text>
-<text x="1646.0" y="418.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">2172</text>
-<text x="1724.0" y="418.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">4851</text>
-<text x="1802.0" y="418.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">1679</text>
-<text x="1490.0" y="442.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4811</text>
-<text x="1568.0" y="442.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">7913</text>
-<text x="1646.0" y="442.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">4674</text>
-<text x="1724.0" y="442.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">3753</text>
-<text x="1802.0" y="442.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">4934</text>
-<text x="1490.0" y="466.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">1402</text>
-<text x="1568.0" y="466.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">6004</text>
-<text x="1646.0" y="466.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">7991</text>
-<text x="1724.0" y="466.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">7428</text>
-<text x="1802.0" y="466.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">7875</text>
-<path d="M1498.0 96.0 H1576.0 V112.0 H1498.0 A8.0 8.0 0 0 1 1498.0 96.0 Z" fill="#8f9bff"/>
-<path d="M1582.0 96.0 H1668.0 V112.0 H1582.0 V96.0 Z" fill="#8fc8ff"/>
-<path d="M1674.0 96.0 H1760.0 V112.0 H1674.0 V96.0 Z" fill="#e8c070"/>
-<path d="M1766.0 96.0 H1844.0 A8.0 8.0 0 0 1 1844.0 112.0 H1766.0 V96.0 Z" fill="#d4707a"/>
+<text x="1490.0" y="90.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">6748</text>
+<text x="1568.0" y="90.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">2405</text>
+<text x="1646.0" y="90.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">2161</text>
+<text x="1724.0" y="90.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">336</text>
+<text x="1802.0" y="90.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">4711</text>
+<text x="1490.0" y="114.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">6669</text>
+<text x="1568.0" y="114.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">5609</text>
+<text x="1646.0" y="114.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">5425</text>
+<text x="1724.0" y="114.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">540</text>
+<text x="1802.0" y="114.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">1466</text>
+<text x="1490.0" y="138.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">4025</text>
+<text x="1568.0" y="138.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">6078</text>
+<text x="1646.0" y="138.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4333</text>
+<text x="1724.0" y="138.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">3632</text>
+<text x="1802.0" y="138.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">981</text>
+<text x="1490.0" y="162.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">3212</text>
+<text x="1568.0" y="162.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">4502</text>
+<text x="1646.0" y="162.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">3872</text>
+<text x="1724.0" y="162.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">2172</text>
+<text x="1802.0" y="162.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">4896</text>
+<text x="1490.0" y="186.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">1214</text>
+<text x="1568.0" y="186.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">1951</text>
+<text x="1646.0" y="186.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">5436</text>
+<text x="1724.0" y="186.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">7419</text>
+<text x="1802.0" y="186.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">9024</text>
+<text x="1490.0" y="210.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ff9c3a" text-anchor="start">3366</text>
+<text x="1568.0" y="210.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">8648</text>
+<text x="1646.0" y="210.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">8341</text>
+<text x="1724.0" y="210.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">1124</text>
+<text x="1802.0" y="210.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">8798</text>
+<text x="1490.0" y="234.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#e8c070" text-anchor="start">9518</text>
+<text x="1568.0" y="234.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">1674</text>
+<text x="1646.0" y="234.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">6991</text>
+<text x="1724.0" y="234.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">4662</text>
+<text x="1802.0" y="234.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#ffcf99" text-anchor="start">6262</text>
+<text x="1490.0" y="258.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#c896d8" text-anchor="start">1692</text>
+<text x="1568.0" y="258.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#d4707a" text-anchor="start">889</text>
+<text x="1646.0" y="258.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">8026</text>
+<text x="1724.0" y="258.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8f9bff" text-anchor="start">5759</text>
+<text x="1802.0" y="258.0" font-family="Antonio, Oswald, 'Nimbus Sans Narrow', 'Liberation Sans Narrow', sans-serif" font-size="17" font-weight="normal" fill="#8fc8ff" text-anchor="start">2221</text>
+<path d="M1498.0 56.0 H1576.0 V72.0 H1498.0 A8.0 8.0 0 0 1 1498.0 56.0 Z" fill="#8f9bff"/>
+<path d="M1582.0 56.0 H1668.0 V72.0 H1582.0 V56.0 Z" fill="#8fc8ff"/>
+<path d="M1674.0 56.0 H1760.0 V72.0 H1674.0 V56.0 Z" fill="#e8c070"/>
+<path d="M1766.0 56.0 H1844.0 A8.0 8.0 0 0 1 1844.0 72.0 H1766.0 V56.0 Z" fill="#d4707a"/>
 <circle cx="440" cy="690" r="60" fill="none" stroke="#c896d8" stroke-opacity="0.18" stroke-width="2"/>
 <circle cx="440" cy="690" r="120" fill="none" stroke="#c896d8" stroke-opacity="0.18" stroke-width="2"/>
 <circle cx="440" cy="690" r="180" fill="none" stroke="#c896d8" stroke-opacity="0.18" stroke-width="2"/>
 <circle cx="440" cy="690" r="240" fill="none" stroke="#c896d8" stroke-opacity="0.18" stroke-width="2"/>
 <path d="M440 690 L638.1 554.5" stroke="#ff9c3a" stroke-opacity="0.35" stroke-width="3"/>
-<circle cx="484.9" cy="674.4" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="637.1" cy="602.8" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="588.2" cy="573.8" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="380.1" cy="674.1" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="436.1" cy="801.9" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="546.4" cy="643.5" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="453.7" cy="757.3" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="503.9" cy="739.6" r="4" fill="#ffcf99" opacity="0.5"/>
-<circle cx="410.6" cy="656.4" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="504.4" cy="730.1" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="353.9" cy="795.0" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="391.3" cy="644.2" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="234.5" cy="719.2" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="450.5" cy="532.1" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="466.3" cy="731.1" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="532.1" cy="612.2" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="310.0" cy="815.3" r="4" fill="#ffcf99" opacity="0.5"/>
+<circle cx="350.1" cy="616.9" r="4" fill="#ffcf99" opacity="0.5"/>
 </svg>

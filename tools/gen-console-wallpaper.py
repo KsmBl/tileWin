@@ -3,9 +3,8 @@
 
     tools/gen-console-wallpaper.py      writes themes/console/wallpaper.svg
 
-Deep space with stars and the glowing limb of a planet, framed along the top
-and the left by the bars of the console: an elbow, blocks of colour with
-numbers on them, columns of readouts. An original design; the numbers are
+Deep space with stars and the glowing limb of a planet, a panel of readouts in
+a corner and the faint rings of a sensor; the windows bring the bars. An original design; the numbers are
 random. The file is committed, so building tileWin does not need Python.
 """
 import math
@@ -69,35 +68,9 @@ out.append('<circle cx="%d" cy="%d" r="%d" fill="url(#planet)"/>' % (cx, cy, pr)
 out.append('<circle cx="%d" cy="%d" r="%d" fill="none" stroke="#ffcf99" stroke-opacity="0.35" '
            'stroke-width="2"/>' % (cx, cy, pr))
 
-# the frame: the bar along the top turning down into the bar on the left
-m, top_h, side_w, outer, inner = 36, 34, 120, 72, 30
-left_end = 760
-out.append('<path d="M%d %d A%d %d 0 0 1 %d %d H%d V%d H%d A%d %d 0 0 0 %d %d V%d H%d V%d Z" '
-           'fill="%s"/>' % (m, m + outer, outer, outer, m + outer, m, left_end, m + top_h,
-                            m + side_w + inner, inner, inner, m + side_w, m + top_h + inner,
-                            m + 330, m, m + 330, COLORS[0]))
-text(m + side_w - 10, m + top_h + inner + 40, number(), 18)
-# the top bar goes on in blocks to the right end, which is round
-x = left_end + 8
-for i, w in enumerate([260, 90, 380, 120]):
-    block(x, m, w, top_h, COLORS[(i + 2) % 7])
-    text(x + w - 8, m + top_h - 7, number() if i % 2 == 0 else '%03d' % rng.randrange(1000), 16)
-    x += w + 8
-block(x, m, W - m - x, top_h, COLORS[5], right=True)
-# the bar on the left in blocks of different heights, numbered
-y = m + 338
-heights = [70, 150, 46, 210, 90, 120]
-for i, h in enumerate(heights):
-    if y + h > H - 120:
-        break
-    block(m, y, side_w, h, COLORS[(i + 1) % 7])
-    text(m + side_w - 10, y + h - 10, number() if h > 60 else '%02d' % rng.randrange(100), 17)
-    y += h + 8
-block(m, y, side_w, H - 90 - y, COLORS[3])
-
 # readouts on the right, under the top bar
-rx, ry = 1490, 130
-for row in range(15):
+rx, ry = 1490, 90
+for row in range(8):
     xx = rx
     for col in range(5):
         s = '%0*d' % (rng.choice([2, 3, 4]), rng.randrange(10000))
@@ -106,7 +79,7 @@ for row in range(15):
 # a small row of blocks above them, as a button bar
 bx = 1490
 for i in range(4):
-    block(bx, 100 - 4, 86, 16, COLORS[(i + 3) % 7], left=i == 0, right=i == 3)
+    block(bx, 56, 86, 16, COLORS[(i + 3) % 7], left=i == 0, right=i == 3)
     bx += 92
 
 # the rings of a sensor display, faint, on the left
