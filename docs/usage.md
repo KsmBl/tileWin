@@ -144,10 +144,10 @@ The **Open ports** widget (taskbar and desktop) shows the ports programs on this
 
 ### Asking before a program can be reached
 
-When one of your programs starts to listen on a port other computers could reach (any address but 127.0.0.1 and ::1), tileWin asks, as Windows' firewall does: **Allow** *program* **to be reached from other computers?** Until you allow it, other computers cannot connect to it; the program runs on and this computer still reaches it. The answer is kept for the program, not for the port: stopped and started again, also on another port, it is not asked about again. A program is its executable, and for an interpreter (python3, node, java, bash, ...) also the script or module it runs, so allowing `python3 -m http.server` does not allow every Python program. Closing the question without an answer blocks the program until it starts again. In the Open ports flyout such ports show **Blocked** (or **Asking**), and **Allowed programs** opens the answers, `~/.config/tileWin/ports.conf`:
+Switched on in Settings → Network (**Ask before a program opens a port**, off by default): when one of your programs starts to listen on a port other computers could reach (any address but 127.0.0.1 and ::1), tileWin asks, as Windows' firewall does: **Allow** *program* **to be reached from other computers?** Until you allow it, other computers cannot connect to it; the program runs on and this computer still reaches it. The answer is kept for the program, not for the port: stopped and started again, also on another port, it is not asked about again. A program is its executable, and for an interpreter (python3, node, java, bash, ...) also the script or module it runs, so allowing `python3 -m http.server` does not allow every Python program. Closing the question without an answer blocks the program until it starts again. In the Open ports flyout such ports show **Blocked** (or **Asking**), and **Allowed programs** opens the answers, `~/.config/tileWin/ports.conf`:
 
 ```
-guard yes                               # "guard no" switches the questions off
+guard yes                               # the switch of the Network page
 allow /usr/bin/python3.14 -m http.server
 block /home/me/bin/server
 ```

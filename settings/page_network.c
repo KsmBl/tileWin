@@ -1289,6 +1289,89 @@ static void add_portal(struct network_page *p, GtkWidget *content) {
 		"network wants you to log in", sw);
 }
 
+/* ---------- the guard of the ports ---------- */
+
+static char *ports_conf_path(void) {
+	char *dir = tw_config_dir();
+	char *path = dir ? g_build_filename(dir, "ports.conf", NULL) : NULL;
+	free(dir);
+	return path;
+}
+
+/* Whether "guard yes" is in ports.conf: off by default. */
+static bool port_guard_on(void) {
+	char *path = ports_conf_path(), *text = NULL;
+	bool on = false;
+	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			char *line = g_strstrip(*l);
+			if (g_str_has_prefix(line, "guard ")) {
+				char *v = g_strstrip(line + 6);
+				on = strcmp(v, "yes") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0;
+			}
+		}
+		g_strfreev(lines);
+	}
+	g_free(text);
+	g_free(path);
+	return on;
+}
+
+/* Writes the guard line of ports.conf, keeping the answers given; the taskbar follows. */
+static gboolean on_port_guard_switch(GtkSwitch *sw, gboolean state, gpointer data) {
+	struct network_page *p = data;
+	char *path = ports_conf_path(), *text = NULL;
+	if (!path) {
+		return TRUE;
+	}
+	GString *out = g_string_new(NULL);
+	bool written = false;
+	if (g_file_get_contents(path, &text, NULL, NULL)) {
+		char **lines = g_strsplit(text, "\n", -1);
+		for (char **l = lines; *l; l++) {
+			char *copy = g_strstrip(g_strdup(*l));
+			if (g_str_has_prefix(copy, "guard ")) {
+				if (!written) {
+					g_string_append_printf(out, "guard %s\n", state ? "yes" : "no");
+					written = true;
+				}
+			} else if (**l || l[1]) {
+				g_string_append_printf(out, "%s\n", *l);
+			}
+			g_free(copy);
+		}
+		g_strfreev(lines);
+	}
+	if (!written) {
+		g_string_prepend(out, state ? "guard yes\n" : "guard no\n");
+	}
+	char *dir = g_path_get_dirname(path);
+	g_mkdir_with_parents(dir, 0755);
+	g_free(dir);
+	if (!g_file_set_contents(path, out->str, out->len, NULL)) {
+		settings_problem(p->s, "Could not save the setting for open ports", NULL, NULL, NULL);
+	}
+	g_string_free(out, TRUE);
+	g_free(text);
+	g_free(path);
+	gtk_switch_set_state(sw, state);
+	return TRUE;
+}
+
+static void add_port_guard(struct network_page *p, GtkWidget *content) {
+	GtkWidget *group = ui_group(content, "Programs reachable from other computers",
+		"When one of your programs opens a port to the network, tileWin asks first, as "
+		"Windows' firewall does: until you allow it, other computers cannot connect to it, "
+		"while this computer still can. The answer is kept for the program, also when it is "
+		"started again. The services of the system are not touched.");
+	GtkWidget *sw = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(sw), port_guard_on());
+	g_signal_connect(sw, "state-set", G_CALLBACK(on_port_guard_switch), p);
+	ui_row(group, "Ask before a program opens a port", "Needs nftables; the answers are kept "
+		"in ~/.config/tileWin/ports.conf", sw);
+}
+
 GtkWidget *network_page_new(struct settings *s) {
 	struct network_page *p = section_new(s);
 	GtkWidget *content;
@@ -1335,6 +1418,7 @@ GtkWidget *network_page_new(struct settings *s) {
 
 	add_advanced(p);
 	add_portal(p, content);
+	add_port_guard(p, content);
 	sync_rows(p);
 	s->network_page = p;
 	load_conns(p);

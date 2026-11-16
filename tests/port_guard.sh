@@ -33,6 +33,8 @@ export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
 export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+# off by default: switched on as the Network page of the settings does
+echo "guard yes" > "$XDG_CONFIG_HOME/tileWin/ports.conf"
 
 # the helper: writes down its arguments
 cat > "$work/helper" <<EOT
@@ -135,7 +137,7 @@ sleep 3
 grep -q "$blocked" "$work/applied" && fail "the port of the program blocked went to the helper"
 
 # switched off: the table goes
-echo "guard no" >> "$XDG_CONFIG_HOME/tileWin/ports.conf"
+sed -i 's/^guard yes$/guard no/' "$XDG_CONFIG_HOME/tileWin/ports.conf"
 wait_until 10 grep -q '^stop$' "$work/applied" || fail "switching the guard off did not stop it"
 
 pgrep -f "^$panel" >/dev/null || fail "the panel is gone"

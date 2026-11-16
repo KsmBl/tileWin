@@ -12,7 +12,7 @@
  * script or module it runs, so allowing one Python server does not allow
  * every one. ~/.config/tileWin/ports.conf:
  *
- *   guard yes|no
+ *   guard yes|no   (no by default; switched on the Network page of the settings)
  *   allow /usr/bin/python3 -m http.server
  *   block /home/me/bin/server
  *
@@ -118,7 +118,7 @@ static bool read_conf(void) {
 		g_ptr_array_free(pg.rules, TRUE);
 	}
 	pg.rules = g_ptr_array_new_with_free_func(rule_free);
-	pg.guard = true; // on unless switched off
+	pg.guard = false; // off until switched on (the Network page of the settings)
 	char *text = NULL;
 	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
 		char **lines = g_strsplit(text, "\n", -1);
@@ -554,8 +554,8 @@ void portguard_init(struct panel *panel) {
 	pg.dismissed = g_ptr_array_new_with_free_func(g_free);
 	pg.queue = g_ptr_array_new_with_free_func(question_free);
 	read_conf();
-	// the table at once, with no port allowed yet; the next look opens those allowed
-	pg.applied = !pg.guard; // off: one stop, in case it was on before
+	// on: the table at once, with no port allowed yet; the next look opens those allowed.
+	// Off: nothing is asked of pkexec at all
 	tick(NULL);
 }
 
