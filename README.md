@@ -40,7 +40,7 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | Windows 1 | Atari ST, its menu bar along the top |
 |---|---|
 | ![Windows 1](docs/screenshots/theme-win1.png) | ![Atari ST](docs/screenshots/theme-atari.png) |
-| **Windows 3** | **Starship Console**, bars and elbows of colour on black |
+| **Windows 3** | **Starship Console**, bars and elbows of colour on black, with a moving wallpaper |
 | ![Windows 3](docs/screenshots/theme-win3.png) | ![Starship Console](docs/screenshots/theme-console.png) |
 | **Windows 95** | **Windows 2000** |
 | ![Windows 95](docs/screenshots/theme-win95.png) | ![Windows 2000](docs/screenshots/theme-win2000.png) |

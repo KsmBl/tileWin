@@ -714,6 +714,16 @@ void flyout_volume_changed(struct panel *panel);
 
 /* notify.c: the notification service, pop-ups and the Action Center */
 void notify_init(struct panel *panel);
+/*
+ * livewall.c: the moving wallpaper of a theme that has one, on the screens that
+ * show the theme's own wallpaper; the desktop hands it the pointer, and a click
+ * it took goes no further.
+ */
+void livewall_update(struct panel *panel);
+void livewall_output_gone(struct panel_output *output);
+void livewall_fini(void);
+bool livewall_pointer(struct panel_output *output, double x, double y);
+bool livewall_click(struct panel_output *output, double x, double y);
 /* whatsnew.c: once after an update, a notification of what the release brought */
 void whatsnew_check(struct panel *panel);
 void notify_fini(struct panel *panel);

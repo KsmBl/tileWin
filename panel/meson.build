@@ -50,6 +50,7 @@ executable(
 		'ipc.c',
 		'jumplist.c',
 		'launcher.c',
+		'livewall.c',
 		'main.c',
 		'emoji_data.c',
 		'emojipicker.c',

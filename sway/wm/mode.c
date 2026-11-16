@@ -16,6 +16,7 @@
 #include "sway/config.h"
 #include "sway/desktop/transaction.h"
 #include "sway/output.h"
+#include "sway/ipc-server.h"
 #include "sway/server.h"
 #include "sway/tilewin.h"
 #include "sway/tree/arrange.h"
@@ -1176,4 +1177,6 @@ void tw_wallpaper_invalidate(void) {
 	for (int i = 0; i < root->outputs->length; i++) {
 		tw_wallpaper_update(root->outputs->items[i]);
 	}
+	// the taskbar draws a moving wallpaper over the theme's, and only over it
+	ipc_event_tilewin("wallpaper", NULL);
 }

@@ -1072,6 +1072,8 @@ static void desktop_motion(struct psurface *s, double x, double y) {
 	}
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	int hover = hs && hs->kind == DESK_HS_ITEM ? (int)hs->id : -1;
+	// the moving wallpaper lies under the desktop: it learns where the pointer is
+	livewall_pointer(s->output, hover >= 0 ? -1 : x, hover >= 0 ? -1 : y);
 	if (hover != desktop.hover) {
 		desktop.hover = hover;
 		psurface_set_dirty(s);
@@ -1079,6 +1081,7 @@ static void desktop_motion(struct psurface *s, double x, double y) {
 }
 
 static void desktop_leave(struct psurface *s) {
+	livewall_pointer(s->output, -1, -1);
 	if (desktop.hover != -1) {
 		desktop.hover = -1;
 		desktop_refresh_surfaces(s->panel);
@@ -1108,6 +1111,10 @@ static void desktop_button(struct psurface *s, double x, double y, uint32_t butt
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	int index = hs && hs->kind == DESK_HS_ITEM ? (int)hs->id : -1;
 	uint32_t mods = panel_modifiers(panel);
+	// a click on the moving wallpaper's readouts or sensor opens what they are about
+	if (button == BTN_LEFT && index < 0 && livewall_click(s->output, x, y)) {
+		return;
+	}
 	if (button == BTN_LEFT) {
 		int64_t now = now_ms();
 		struct desktop_item *item = item_at(index);

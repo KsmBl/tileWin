@@ -9,7 +9,7 @@
 const struct tw_settings_page tw_settings_pages[] = {
 	{ "theme", "Theme", "appearance look style dark light colors mode night scheme accent",
 		"preferences-desktop-appearance-symbolic" },
-	{ "wallpaper", "Wallpaper", "background desktop picture",
+	{ "wallpaper", "Wallpaper", "background desktop picture moving live animated sensor readouts",
 		"preferences-desktop-wallpaper-symbolic" },
 	{ "desktop", "Desktop", "icons grid cells widgets gadgets clock analog binary digital chart "
 		"gauge ring bar cpu memory power",

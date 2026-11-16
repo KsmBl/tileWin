@@ -462,6 +462,7 @@ int main(int argc, char **argv) {
 	}
 
 	portguard_fini();
+	livewall_fini();
 	clipboard_fini(&panel);
 	thumbnails_fini(&panel);
 	notes_fini(); // what was typed last is written before the taskbar goes

@@ -507,6 +507,8 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 		set_main_output(panel, jstr(event, "main_output"));
 	} else if (strcmp(change, "theme") == 0) {
 		panel_request_reload(panel);
+	} else if (strcmp(change, "wallpaper") == 0) {
+		livewall_update(panel); // over the theme's wallpaper only
 	} else if (strcmp(change, "panel") == 0) {
 		const char *args = jstr(event, "args");
 		if (args) {

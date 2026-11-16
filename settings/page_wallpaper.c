@@ -38,6 +38,7 @@ struct wallpaper_page {
 	GtkWidget *type_dd, *color1, *color2, *dir_dd, *image_button, *fit_dd, *bg;
 	GtkWidget *row_color1, *row_color2, *row_dir, *row_image, *row_fit, *row_bg;
 	char *image_path;
+	GPtrArray *keys; // the switch of the moving wallpaper, in taskbar.conf
 };
 
 static int index_of(const char *const *names, const char *value, int fallback) {
@@ -445,6 +446,7 @@ void wallpaper_page_refresh(struct settings *s) {
 		return;
 	}
 	p->updating = true;
+	ui_taskbar_keys_refresh(p->keys);
 	load_screens(p);
 	int first;
 	struct cstmt *st = wallpaper_stmt(p, &first);
@@ -545,6 +547,11 @@ GtkWidget *wallpaper_page_new(struct settings *s) {
 	p->scope_dd = dropdown(p, (const char *const[]){
 		"Each theme has its own wallpaper", "One wallpaper for all themes", NULL });
 	ui_row(group, "Wallpaper", NULL, p->scope_dd);
+	p->keys = g_ptr_array_new();
+	ui_taskbar_key(s, p->keys, group, "live_wallpaper", "Moving wallpaper",
+		"Over the theme's own wallpaper, in themes that have one (the Starship Console's "
+		"sensor and readouts)", true, 0, 0, 1);
+	ui_taskbar_keys_refresh(p->keys);
 
 	GtkWidget *all = ui_group(content, "Wallpaper for all themes", NULL);
 	p->all_group = gtk_widget_get_parent(all);
