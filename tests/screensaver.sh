@@ -3,8 +3,9 @@
 # test checks that
 #  - nothing covers the desktop before the three seconds are up;
 #  - then tilewin-screensaver covers it (the screen turns dark, from teal);
-#  - moving the mouse ends it, brings the desktop back and, with
-#    "screensaver_lock yes", runs the lock command;
+#  - with "screensaver_lock yes" the lock command runs as it starts, so the
+#    lock screen is under it when it ends, and not again after it;
+#  - moving the mouse ends it and brings the desktop back;
 #  - "screensaver start" starts it at once and is not ended by input in the
 #    first moment (the keys that ran the command), but by input after that.
 #  - with "stats yes" the frames a second and CPU use show in the top left
@@ -126,6 +127,8 @@ dark=$(brightness)
 echo "after five seconds: brightness $dark"
 running || fail "tilewin-screensaver is not running after the idle time"
 [ "$dark" -lt 30 ] || fail "the screen saver does not cover the desktop"
+grep -q locked "$work/locked" 2>/dev/null ||
+	fail "the lock command did not run under the screen saver (screensaver_lock yes)"
 
 nudge 300
 sleep 1
@@ -133,8 +136,8 @@ back=$(brightness)
 echo "after moving the mouse: brightness $back"
 running && fail "moving the mouse did not end the screen saver"
 [ "$back" -gt 60 ] || fail "the desktop did not come back"
-grep -q locked "$work/locked" 2>/dev/null ||
-	fail "coming back did not run the lock command (screensaver_lock yes)"
+[ "$(grep -c locked "$work/locked" 2>/dev/null)" -eq 1 ] ||
+	fail "the lock command ran again after the screen saver ($(grep -c locked "$work/locked"))"
 
 # by hand: the input right after the command does not count
 ipc idle_timeout screensaver never >/dev/null

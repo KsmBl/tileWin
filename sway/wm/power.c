@@ -7,6 +7,7 @@
  *       (lock_command), the computer goes to sleep or the screen saver
  *       starts (screensaver_command, tilewin-screensaver by default, which
  *       runs until input comes and is then ended; with "screensaver_lock
+ *       yes" the lock screen starts under it, so it is there when the saver ends;
  *       yes" the screen is locked then); 0 is never.
  *       The screen saver also comes on while the screen is locked: it is
  *       shown over the lock screen, gets no input, and input ends it.
@@ -95,6 +96,7 @@ static struct {
 	pid_t saver_pid;   // and its process group
 	struct timespec saver_started;
 	bool saver_by_hand; // "screensaver start": the keys of that do not end it
+	bool saver_locked;  // the lock screen was started under it (screensaver_lock yes)
 	int key_inhibit_fd;
 	bool sleeping; // logind announced a sleep and has not announced the end of it
 	struct timespec key_rest; // the power key rests for POWER_KEY_REST_MS from here
@@ -225,6 +227,14 @@ static void saver_launch(void) {
 	power.saver_pid = pid;
 	clock_gettime(CLOCK_MONOTONIC, &power.saver_started);
 	sway_log(SWAY_DEBUG, "Screen saver started: %s", command);
+	// "on resume, display the logon screen": the lock screen goes up now, under the
+	// saver, which is drawn over it; started only when the saver ends, the desktop
+	// would show until the lock screen had drawn
+	power.saver_locked = false;
+	if (power.saver_fd >= 0 && config && config->tw_screensaver_lock) {
+		lock_session();
+		power.saver_locked = true;
+	}
 }
 
 static bool saver_alive(void) {
@@ -341,7 +351,10 @@ static int handle_timer(void *data) {
 
 /* Undoes dimming, the screen saver and turning the screen off after input. */
 static void wake(void) {
-	if (saver_end() && config && config->tw_screensaver_lock && !server.session_lock.lock) {
+	bool locked_under = power.saver_locked;
+	power.saver_locked = false;
+	if (saver_end() && !locked_under && config && config->tw_screensaver_lock &&
+			!server.session_lock.lock) {
 		spawn(config->tw_lock_command); // "on resume, display the logon screen"
 	}
 	undim();
