@@ -89,11 +89,11 @@ wait_still 30 screen
 
 # maximize the window, click the page so the wheel reaches it, and scroll down
 # to the Left section: its rows are then
-# start at y 434, search at 491 and taskbar at 548, with the handles at x 283
+# start at y 269, search at 326 and taskbar at 383, with the handles at x 283
 WAYLAND_DISPLAY=$display "$tool" 1280 720 click 1008 15 click 690 100 scroll 690 400 7 >/dev/null 2>&1
 wait_still 30 screen
 # the start button, dropped onto the lower half of the window buttons
-WAYLAND_DISPLAY=$display "$tool" 1280 720 drag 283 434 400 560 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 720 drag 283 269 400 395 >/dev/null 2>&1
 saved() { grep -q "^[[:space:]]*left search taskbar start$" "$XDG_CONFIG_HOME/tileWin/taskbar.conf"; }
 wait_until 10 saved
 kill "$starter" 2>/dev/null

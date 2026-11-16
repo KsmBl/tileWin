@@ -4,13 +4,14 @@
 #include "settings.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
+#include "tw_widgets.h"
 
 /*
  * The first window a new user sees: a theme, light or dark, how windows work,
- * the keys worth knowing, and a way to bring settings over from another
- * computer. Everything is applied at once and all of it can be skipped.
+ * the keys worth knowing, widgets worth having on the taskbar, and a way to
+ * bring settings over from another computer. Everything is applied at once and all of it can be skipped.
  */
-#define STEPS 4
+#define STEPS 5
 
 struct welcome {
 	struct settings *s;
@@ -209,8 +210,70 @@ static void build_keys(struct welcome *w) {
 	gtk_box_append(GTK_BOX(box), grid);
 }
 
+static gboolean on_widget(GtkSwitch *sw, gboolean state, gpointer data) {
+	struct welcome *w = data;
+	taskbar_set_widget(w->s, g_object_get_data(G_OBJECT(sw), "widget"), state);
+	gtk_switch_set_state(sw, state);
+	return TRUE;
+}
+
+static void on_more_widgets(GtkButton *button, gpointer data) {
+	open_settings(data, "taskbar");
+}
+
+/* Whether the theme in use lays out a taskbar of its own, which the sections give way to. */
+static bool theme_lays_out(struct welcome *w) {
+	const char *value = cstmt_arg(confdoc_child(w->s->taskbar->root, "theme_layout", NULL), 0);
+	if (value && (strcmp(value, "no") == 0 || strcmp(value, "false") == 0)) {
+		return false;
+	}
+	char *name = tw_ipc_state("theme_window");
+	char *error = NULL;
+	struct tw_theme *theme = name ? tw_theme_load(name, &error) : NULL;
+	free(error);
+	g_free(name);
+	bool own = theme && tw_theme_str(theme, "layout.window.right", NULL);
+	if (theme) {
+		tw_theme_free(theme);
+	}
+	return own;
+}
+
+static void build_widgets(struct welcome *w) {
+	GtkWidget *box = step_new(w, 3, "Widgets for the taskbar",
+		"A few that are worth having beside the clock. Each comes on at once; the Taskbar and "
+		"Desktop pages have them all, and each one opens a flyout when clicked.");
+	static const char *const suggested[] = { "cpu", "memory", "net", "storage", "power",
+		"ports", "kernel", "git", NULL };
+	GtkWidget *list = gtk_list_box_new();
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_NONE);
+	gtk_list_box_set_show_separators(GTK_LIST_BOX(list), TRUE);
+	gtk_widget_add_css_class(list, "tw-group");
+	for (int i = 0; suggested[i]; i++) {
+		const struct tw_widget_info *info = tw_widget_find(suggested[i]);
+		if (!info) {
+			continue;
+		}
+		GtkWidget *sw = gtk_switch_new();
+		gtk_switch_set_active(GTK_SWITCH(sw), taskbar_has_widget(w->s, info->type));
+		g_object_set_data(G_OBJECT(sw), "widget", (gpointer)info->type);
+		g_signal_connect(sw, "state-set", G_CALLBACK(on_widget), w);
+		ui_row(list, info->title, info->description, sw);
+	}
+	gtk_box_append(GTK_BOX(box), list);
+	if (theme_lays_out(w)) {
+		gtk_box_append(GTK_BOX(box), label_new("The theme in use lays out its taskbar itself: "
+			"these show in other themes, or with Let the theme bring its own layout off on the "
+			"Taskbar page.", "dim-label"));
+	}
+	GtkWidget *more = gtk_button_new_with_label("More widgets…");
+	gtk_widget_set_halign(more, GTK_ALIGN_START);
+	g_signal_connect(more, "clicked", G_CALLBACK(on_more_widgets), w);
+	gtk_box_append(GTK_BOX(box), more);
+}
+
 static void build_done(struct welcome *w) {
-	GtkWidget *box = step_new(w, 3, "That's it",
+	GtkWidget *box = step_new(w, 4, "That's it",
 		"Coming from another computer? The Backup page brings all your tileWin settings over "
 		"from a file. Everything else is in the settings, and all of it has a search.");
 	GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -235,6 +298,7 @@ void welcome_show(struct settings *s) {
 	build_look(w);
 	build_mode(w);
 	build_keys(w);
+	build_widgets(w);
 	build_done(w);
 
 	GtkWidget *foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);

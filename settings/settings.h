@@ -291,6 +291,10 @@ void theme_page_refresh(struct settings *s);
 GtkWidget *wallpaper_page_new(struct settings *s);
 void wallpaper_page_refresh(struct settings *s);
 GtkWidget *taskbar_page_new(struct settings *s);
+/* Whether a widget is on the taskbar of the mode in use (the welcome window). */
+bool taskbar_has_widget(struct settings *s, const char *name);
+/* Puts a widget at the start of the notification area, or takes it off the taskbar. */
+void taskbar_set_widget(struct settings *s, const char *name, bool on);
 void taskbar_page_refresh(struct settings *s);
 /* Deletes a script widget, from the layouts and the desktop too. */
 void taskbar_delete_script(struct settings *s, const char *name);

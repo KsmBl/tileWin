@@ -1024,3 +1024,78 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 	rebuild_all(p);
 	return page;
 }
+
+/* ---------- for the welcome window ---------- */
+
+/* The layout block of the mode in use, or of the other one, which the taskbar mirrors. */
+static struct cstmt *mode_layout(struct settings *s) {
+	char *mode = settings_current_mode();
+	const char *other = strcmp(mode, "tile") == 0 ? "window" : "tile";
+	struct cstmt *block = confdoc_block(s->taskbar, "layout", mode, false);
+	if (!block) {
+		block = confdoc_block(s->taskbar, "layout", other, false);
+	}
+	g_free(mode);
+	return block;
+}
+
+bool taskbar_has_widget(struct settings *s, const char *name) {
+	struct cstmt *layout = mode_layout(s);
+	for (int sec = 0; layout && sec < SECTION_COUNT; sec++) {
+		GPtrArray *names = read_names(confdoc_child(layout, section_keys[sec], NULL));
+		bool found = array_has(names, name);
+		g_ptr_array_unref(names);
+		if (found) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void taskbar_set_widget(struct settings *s, const char *name, bool on) {
+	if (taskbar_has_widget(s, name) == on) {
+		return;
+	}
+	struct cstmt *layout = mode_layout(s);
+	if (!layout) {
+		return;
+	}
+	char *block_name = g_strdup(cstmt_arg(layout, 0));
+	for (int sec = 0; sec < SECTION_COUNT; sec++) {
+		// every write builds the statements anew: look the block up each time
+		layout = block_name ? confdoc_block(s->taskbar, "layout", block_name, false) : NULL;
+		if (!layout) {
+			break;
+		}
+		GPtrArray *names = read_names(confdoc_child(layout, section_keys[sec], NULL));
+		bool changed = false;
+		if (on && sec == SECTION_RIGHT) {
+			// at the left end of the notification area, before the tray
+			guint at = 0;
+			for (guint i = 0; i < names->len; i++) {
+				if (strcmp(names->pdata[i], "tray") == 0) {
+					at = i;
+					break;
+				}
+			}
+			g_ptr_array_insert(names, at, g_strdup(name));
+			changed = true;
+		} else if (!on) {
+			for (guint i = 0; i < names->len;) {
+				if (strcmp(names->pdata[i], name) == 0) {
+					g_ptr_array_remove_index(names, i);
+					changed = true;
+				} else {
+					i++;
+				}
+			}
+		}
+		if (changed) {
+			write_names(s->taskbar, layout, section_keys[sec], names);
+		}
+		g_ptr_array_unref(names);
+	}
+	g_free(block_name);
+	settings_taskbar_changed(s);
+	taskbar_page_refresh(s);
+}

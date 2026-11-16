@@ -107,6 +107,9 @@ theme=$(cat "$XDG_CONFIG_HOME/tileWin/current-theme" 2>/dev/null)
 [ "$theme" != win10 ] || fail "a click on a card left the theme at $theme"
 echo "the card chose $theme"
 
+# the look, the mode, the keys, the widgets, and the last step
+"$keys" key none return
+sleep 0.5
 "$keys" key none return
 sleep 0.5
 "$keys" key none return
