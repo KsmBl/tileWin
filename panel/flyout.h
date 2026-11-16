@@ -50,6 +50,21 @@ void draw_slider_max(cairo_t *cr, const struct fly_style *st, struct pbox b, int
 void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on);
 void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 	const char *label, bool primary, bool hover);
+/*
+ * The scrollbar of a list in a flyout, drawn in the track box (FLY_SCROLLBAR
+ * wide) when it holds more than it shows: first of total rows at the top,
+ * visible of them shown. In the look of the theme: a raised thumb on Windows
+ * 95, outlined on the Atari ST, a block of colour on the Starship Console, a
+ * thin round one elsewhere, wider while hover.
+ */
+#define FLY_SCROLLBAR 10
+void fly_draw_scrollbar(cairo_t *cr, const struct fly_style *st, struct panel *panel,
+	struct pbox track, int first, int visible, int total, bool hover);
+/* The first row a pointer at y on the track shows: the thumb centred there. */
+int fly_scrollbar_first(struct pbox track, double y, int visible, int total);
+/* The thumb of the scrollbar, in the track box. */
+struct pbox fly_scrollbar_thumb(struct pbox track, int first, int visible, int total);
+
 /* The Bluetooth rune in a size x size square. */
 void draw_bluetooth_glyph(cairo_t *cr, double x, double y, double size, uint32_t color);
 

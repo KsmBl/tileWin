@@ -250,6 +250,72 @@ void fly_draw_chart_bg(cairo_t *cr, const struct fly_style *st, struct pbox g) {
 	}
 }
 
+struct pbox fly_scrollbar_thumb(struct pbox track, int first, int visible, int total) {
+	struct pbox thumb = track;
+	if (total <= 0 || visible >= total) {
+		return thumb;
+	}
+	int h = track.height * visible / total;
+	h = h < 24 ? 24 : h;
+	int max_first = total - visible;
+	thumb.height = h;
+	thumb.y = track.y + (track.height - h) * (first < 0 ? 0 : first > max_first ? max_first :
+		first) / max_first;
+	return thumb;
+}
+
+int fly_scrollbar_first(struct pbox track, double y, int visible, int total) {
+	int max_first = total - visible;
+	if (max_first <= 0) {
+		return 0;
+	}
+	struct pbox thumb = fly_scrollbar_thumb(track, 0, visible, total);
+	double room = track.height - thumb.height;
+	double at = (y - track.y - thumb.height / 2.0) / (room > 0 ? room : 1);
+	int first = (int)(at * max_first + 0.5);
+	return first < 0 ? 0 : first > max_first ? max_first : first;
+}
+
+void fly_draw_scrollbar(cairo_t *cr, const struct fly_style *st, struct panel *panel,
+		struct pbox track, int first, int visible, int total, bool hover) {
+	if (visible >= total) {
+		return;
+	}
+	struct pbox thumb = fly_scrollbar_thumb(track, first, visible, total);
+	if (panel_atari(panel)) {
+		// GEM: a white track outlined, the thumb in the dots of its title bars
+		pd_atari_outline(cr, track.x, track.y, track.width, track.height, st->fg,
+			tw_theme_color(panel->theme, "menu.bg", 0xffffffff), false);
+		pd_rect(cr, thumb.x + 2, thumb.y + 2, thumb.width - 4, thumb.height - 4, st->fg);
+		return;
+	}
+	if (panel_console(panel)) {
+		pd_console_block(cr, thumb.x, thumb.y, thumb.width, thumb.height, false, false,
+			hover ? panel_console_color(panel, 1) : panel_console_color(panel, 0));
+		return;
+	}
+	if (st->style == PS_CLASSIC) {
+		// Windows 95: a light track and a raised grey thumb
+		pd_rect(cr, track.x, track.y, track.width, track.height, 0xdfdfdfff);
+		pd_rect(cr, thumb.x, thumb.y, thumb.width, thumb.height, 0xc0c0c0ff);
+		pd_bevel(cr, thumb.x, thumb.y, thumb.width, thumb.height, false);
+		return;
+	}
+	// a thin round thumb, the track showing while the pointer is over it
+	double w = hover ? track.width - 2 : 4;
+	double x = track.x + (track.width - w) / 2;
+	if (hover) {
+		cairo_new_path(cr);
+		pd_rounded(cr, x, track.y, w, track.height, w / 2);
+		pd_color(cr, (st->track & 0xffffff00) | ((st->track & 0xff) / 2));
+		cairo_fill(cr);
+	}
+	cairo_new_path(cr);
+	pd_rounded(cr, x, thumb.y, w, thumb.height, w / 2);
+	pd_color(cr, (st->dim & 0xffffff00) | (hover ? 0xd0 : 0x90));
+	cairo_fill(cr);
+}
+
 void fly_draw_bar(cairo_t *cr, const struct fly_style *st, double x, double y, double w,
 		double h, double share, uint32_t color) {
 	share = share < 0 ? 0 : share > 1 ? 1 : share;
@@ -483,7 +549,8 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 
 #define NET_HEADER 64
 #define NET_ROW 48
-#define NET_ROWS 6
+#define NET_ROWS_MIN 3 // rows of networks shown, as many as there is room for
+#define NET_ROWS_MAX 8 // and the scrollbar beside them for the rest
 #define NET_EXPAND 42
 #define NET_SECRET 26 // the line showing the password of a saved network
 #define NET_MESSAGE 56
@@ -502,6 +569,7 @@ enum {
 	NET_HS_COPY,
 	NET_HS_SECRET,      // show the password of a saved network
 	NET_HS_COPY_SECRET,
+	NET_HS_SCROLLBAR,
 };
 
 struct wifi_net {
@@ -595,6 +663,8 @@ struct net_flyout {
 	char status[256];
 	bool status_error;
 	int scroll;
+	bool dragging;        // the thumb of the scrollbar is held
+	struct pbox scroll_track; // where the scrollbar was drawn last
 	struct loop_timer *timer;
 	// the interface of the default route: addresses and current usage
 	char iface[IFNAMSIZ];
@@ -661,15 +731,30 @@ static bool net_list_shown(struct net_flyout *f) {
 	return f->have_nmcli && f->wifi_device && f->wifi_enabled && f->nets->length > 0;
 }
 
+static int net_height_with(struct net_flyout *f, int rows);
+
+/* As many rows as there is room for between the taskbar and the edge of the screen. */
 static int net_visible_rows(struct net_flyout *f) {
-	return f->nets->length < NET_ROWS ? f->nets->length : NET_ROWS;
+	int most = NET_ROWS_MAX;
+	const struct popup_anchor *a = &f->base.anchor;
+	if (a->output) {
+		int room = a->above ? a->y : a->output->height - a->y;
+		room -= net_height_with(f, 0) + 2 * popup_shadow_margin(f->base.panel) + 16;
+		most = room / NET_ROW;
+		most = most < NET_ROWS_MIN ? NET_ROWS_MIN : most > NET_ROWS_MAX ? NET_ROWS_MAX : most;
+	}
+	return f->nets->length < most ? f->nets->length : most;
 }
 
 static int net_height(struct net_flyout *f) {
+	return net_height_with(f, net_visible_rows(f));
+}
+
+static int net_height_with(struct net_flyout *f, int rows) {
 	int h = NET_HEADER + 1 + (f->wired ? NET_WIRED + 1 : 0) + (f->iface[0] ? NET_DETAILS + 1 : 0) +
 		(f->iface[0] && f->have_link ? NET_LINK : 0);
 	if (net_list_shown(f)) {
-		h += net_visible_rows(f) * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
+		h += rows * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
 			(net_secret_shown(f) ? NET_SECRET : 0);
 	} else {
 		h += NET_MESSAGE;
@@ -1511,6 +1596,7 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	if (net_list_shown(f)) {
 		y += 4;
 		int rows = net_visible_rows(f);
+		int list_top = y;
 		for (int i = f->scroll; i < f->nets->length && i < f->scroll + rows; i++) {
 			struct wifi_net *n = f->nets->items[i];
 			bool expanded = f->expanded && strcmp(f->expanded, n->ssid) == 0;
@@ -1632,6 +1718,15 @@ static void net_render(struct popup *p, cairo_t *cr) {
 			}
 			y += row.height;
 		}
+		// the scrollbar, in the padding at the right of the rows
+		f->scroll_track = (struct pbox){ W - M - 3 - FLY_SCROLLBAR, list_top, FLY_SCROLLBAR,
+			y - list_top };
+		if (rows < f->nets->length) {
+			fly_draw_scrollbar(cr, &st, p->panel, f->scroll_track, f->scroll, rows,
+				f->nets->length, f->dragging || hovered(&f->base, f->scroll_track));
+			psurface_add_hotspot(p->surface, f->scroll_track.x, f->scroll_track.y,
+				f->scroll_track.width, f->scroll_track.height, NULL, NET_HS_SCROLLBAR, 0, NULL);
+		}
 		y += 4;
 	} else {
 		const char *message = !f->loaded ? "Searching for networks..." :
@@ -1661,9 +1756,37 @@ static void net_render(struct popup *p, cairo_t *cr) {
 	}
 }
 
+static void net_scroll_to(struct popup *p, double y) {
+	struct net_flyout *f = p->data;
+	f->scroll = fly_scrollbar_first(f->scroll_track, y, net_visible_rows(f), f->nets->length);
+	popup_set_dirty(p);
+}
+
+static void net_motion(struct popup *p, double x, double y) {
+	struct net_flyout *f = p->data;
+	if (f->dragging) {
+		net_scroll_to(p, y);
+	}
+	flyout_motion(p, x, y);
+}
+
 static void net_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
 	struct net_flyout *f = p->data;
-	if (pressed || button != BTN_LEFT) {
+	if (button == BTN_LEFT && !pressed && f->dragging) {
+		f->dragging = false;
+		popup_set_dirty(p);
+		return;
+	}
+	if (button == BTN_LEFT && pressed) {
+		// the scrollbar is dragged from where it is pressed
+		struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+		if (hs && hs->kind == NET_HS_SCROLLBAR) {
+			f->dragging = true;
+			net_scroll_to(p, y);
+		}
+		return;
+	}
+	if (button != BTN_LEFT) {
 		return;
 	}
 	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
@@ -1704,8 +1827,9 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 			net_forget_secret(f);
 			memset(f->password, 0, sizeof(f->password));
 			// keep the expanded row visible
-			if (hs->id >= f->scroll + NET_ROWS - 1 && f->nets->length > NET_ROWS) {
-				f->scroll = hs->id - NET_ROWS + 2;
+			int rows = net_visible_rows(f);
+			if (hs->id >= f->scroll + rows - 1 && f->nets->length > rows) {
+				f->scroll = hs->id - rows + 2;
 			}
 		}
 		net_update(f);
@@ -1816,7 +1940,7 @@ static const struct popup_vtable net_vtable = {
 	.walk_scrolls = true,
 	.typing = net_typing,
 	.render = net_render,
-	.motion = flyout_motion,
+	.motion = net_motion,
 	.leave = flyout_leave,
 	.button = net_button,
 	.axis = net_axis,

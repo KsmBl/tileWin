@@ -54,12 +54,13 @@
 #define BAR_ROW 36
 #define FOOTER 44
 #define HISTORY 60
-#define MAX_ROWS 24
+#define MAX_ROWS 256 // more than there is room for scroll
 #define MAX_ACTIONS 3
 
 enum info_hotspot {
 	HS_ROW = 1,
 	HS_ACTION,
+	HS_SCROLLBAR,
 };
 
 struct info_flyout;
@@ -113,6 +114,9 @@ struct info_flyout {
 	int row_count;
 	struct info_action actions[MAX_ACTIONS];
 	int action_count;
+	int scroll;            // the first row shown, when there are more than there is room for
+	bool dragging;         // the thumb of the scrollbar is held
+	struct pbox scroll_track;
 
 	struct loop_timer *tick;
 	void *state;
@@ -1270,9 +1274,6 @@ static void ports_sample(struct info_flyout *f) {
 	if (p->count == 0) {
 		snprintf(f->subtitle, sizeof(f->subtitle), "No program listens on a port");
 	}
-	// the rows there are room for: a heading for each group, a line for the rest
-	int room = MAX_ROWS - (open ? 1 : 0) - (p->local ? 1 : 0) - (p->temporary ? 1 : 0);
-	int shown = 0;
 	for (int group = 0; group < 2; group++) {
 		bool network = group == 0;
 		bool heading = false;
@@ -1285,16 +1286,6 @@ static void ports_sample(struct info_flyout *f) {
 				add_heading(f, network ? "Reachable from other computers" :
 					"Only from this computer");
 				heading = true;
-			}
-			if (shown == room - 1 && p->count - shown > 1) {
-				char more[64];
-				snprintf(more, sizeof(more), "and %d more", p->count - shown);
-				add_row(f, more, NULL);
-				shown = p->count;
-				break;
-			}
-			if (shown >= room) {
-				break;
 			}
 			char name[64], label[128], value[96];
 			tw_port_name(e, name, sizeof(name));
@@ -1319,7 +1310,6 @@ static void ports_sample(struct info_flyout *f) {
 					row->badge_kind = BADGE_GOOD;
 				}
 			}
-			shown++;
 		}
 	}
 	if (p->temporary) {
@@ -1363,6 +1353,48 @@ static int row_height(const struct info_row *row) {
 	return row->heading ? ROWS_TITLE : row->bar >= 0 ? BAR_ROW : ROW;
 }
 
+static int rows_height(struct info_flyout *f, int from) {
+	int h = 0;
+	for (int i = from; i < f->row_count; i++) {
+		h += row_height(&f->rows[i]);
+	}
+	return h;
+}
+
+/* The height of the list of rows: all of them, or what there is room for on the screen. */
+static int rows_area(struct info_flyout *f) {
+	int all = rows_height(f, 0);
+	const struct popup_anchor *a = &f->anchor;
+	if (!a->output) {
+		return all;
+	}
+	int room = a->above ? a->y : a->output->height - a->y;
+	room -= HEADER + (f->graph ? GRAPH : 0) + 12 + (f->rows_title[0] ? ROWS_TITLE : 0) +
+		(f->action_count > 0 ? FOOTER : 0) + 2 * popup_shadow_margin(f->panel) + 16;
+	room = room < 4 * ROW ? 4 * ROW : room;
+	return all < room ? all : room;
+}
+
+/* The first row the list can start at and still be full to its bottom. */
+static int max_scroll(struct info_flyout *f, int area) {
+	int s = f->row_count;
+	int h = 0;
+	while (s > 0 && h + row_height(&f->rows[s - 1]) <= area) {
+		h += row_height(&f->rows[--s]);
+	}
+	return s;
+}
+
+/* How many rows show from the first one on. */
+static int rows_shown(struct info_flyout *f, int area) {
+	int n = 0, h = 0;
+	for (int i = f->scroll; i < f->row_count && h + row_height(&f->rows[i]) <= area; i++) {
+		h += row_height(&f->rows[i]);
+		n++;
+	}
+	return n;
+}
+
 static int content_height(struct info_flyout *f) {
 	int h = HEADER;
 	if (f->graph) {
@@ -1370,9 +1402,7 @@ static int content_height(struct info_flyout *f) {
 	}
 	if (f->row_count > 0) {
 		h += 6 + (f->rows_title[0] ? ROWS_TITLE : 0);
-		for (int i = 0; i < f->row_count; i++) {
-			h += row_height(&f->rows[i]);
-		}
+		h += rows_area(f);
 		h += 6;
 	}
 	if (f->action_count > 0) {
@@ -1541,11 +1571,17 @@ static void info_render(struct popup *p, cairo_t *cr) {
 			pd_text(cr, st.font, f->rows_title, x0, y, cw, ROWS_TITLE - 6, st.dim, PD_LEFT);
 			y += ROWS_TITLE;
 		}
-		for (int i = 0; i < f->row_count; i++) {
+		// as many rows as there is room for, from the first one scrolled to
+		int area = rows_area(f);
+		int top = max_scroll(f, area);
+		f->scroll = f->scroll < 0 ? 0 : f->scroll > top ? top : f->scroll;
+		int list_top = y;
+		int shown = rows_shown(f, area);
+		for (int i = f->scroll; i < f->scroll + shown; i++) {
 			struct info_row *row = &f->rows[i];
 			int h = row_height(row);
 			if (row->heading) {
-				if (i > 0) {
+				if (i > f->scroll) {
 					draw_line(cr, &st, p, y + 2);
 				}
 				pd_text(cr, st.font, row->label, x0, y + 6, cw, h - 6, st.dim, PD_LEFT);
@@ -1590,6 +1626,16 @@ static void info_render(struct popup *p, cairo_t *cr) {
 					row->full_is_bad && share > 0.9 ? st.error : st.bar);
 			}
 			y += h;
+		}
+		y = list_top + area;
+		if (shown < f->row_count) {
+			// the scrollbar, in the padding at the right of the rows
+			f->scroll_track = (struct pbox){ W - M - 3 - FLY_SCROLLBAR, list_top, FLY_SCROLLBAR,
+				area };
+			fly_draw_scrollbar(cr, &st, p->panel, f->scroll_track, f->scroll, shown,
+				f->row_count, f->dragging || hovered(f, f->scroll_track));
+			psurface_add_hotspot(p->surface, f->scroll_track.x, f->scroll_track.y,
+				f->scroll_track.width, f->scroll_track.height, NULL, HS_SCROLLBAR, 0, NULL);
 		}
 		y += 6;
 	}
@@ -1649,8 +1695,26 @@ static void tick(void *data) {
 	f->tick = loop_add_timer_lazy(f->panel->loop, f->source->interval_ms, tick, f);
 }
 
+static void scroll_to(struct info_flyout *f, double y) {
+	int area = rows_area(f);
+	f->scroll = fly_scrollbar_first(f->scroll_track, y, rows_shown(f, area), f->row_count);
+	int top = max_scroll(f, area);
+	f->scroll = f->scroll > top ? top : f->scroll;
+}
+
+static void info_axis(struct popup *p, double x, double y, int direction) {
+	struct info_flyout *f = p->data;
+	int top = max_scroll(f, rows_area(f));
+	f->scroll += direction;
+	f->scroll = f->scroll < 0 ? 0 : f->scroll > top ? top : f->scroll;
+	popup_set_dirty(p);
+}
+
 static void info_motion(struct popup *p, double x, double y) {
 	struct info_flyout *f = p->data;
+	if (f->dragging) {
+		scroll_to(f, y);
+	}
 	f->px = x;
 	f->py = y;
 	f->inside = true;
@@ -1665,7 +1729,17 @@ static void info_leave(struct popup *p) {
 
 static void info_button(struct popup *p, double x, double y, uint32_t button, bool pressed) {
 	struct info_flyout *f = p->data;
-	if (button != BTN_LEFT || pressed) {
+	if (button != BTN_LEFT) {
+		return;
+	}
+	if (pressed || f->dragging) {
+		// the scrollbar is dragged from where it is pressed
+		struct hotspot *hs = pressed ? psurface_hotspot_at(p->surface, x, y) : NULL;
+		f->dragging = hs && hs->kind == HS_SCROLLBAR;
+		if (f->dragging) {
+			scroll_to(f, y);
+		}
+		popup_set_dirty(p);
 		return;
 	}
 	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
@@ -1728,6 +1802,7 @@ static const struct popup_vtable info_vtable = {
 	.motion = info_motion,
 	.leave = info_leave,
 	.button = info_button,
+	.axis = info_axis,
 	.key = info_key,
 	.destroy = info_destroy,
 };
