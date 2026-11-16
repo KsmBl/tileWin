@@ -72,6 +72,7 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Message dialogs** of GTK 3 apps ("Save changes?") in the look of the theme.
 - **Brightness and volume up to 130%**, a battery chart of the last 24 hours, and a limit on the clock of each processor core.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
+- **Open ports** on the taskbar and the desktop: every port a program listens on, and whether it is only for this computer, a local network or public.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
 - **Kernels** built for this computer from kernel.org, with or without live patching, added to the boot menu, loaded with kexec or booted into once, without touching the boot loader's own setup; with automatic updates, security fixes applied live without a restart and each new release built in the background for the next one, shown by the Kernel updates widget.

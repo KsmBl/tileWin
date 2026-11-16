@@ -48,8 +48,8 @@ extern const struct tw_widget_option tw_claude_taskbar_look[];
 extern const struct tw_widget_option tw_claude_desktop_look[];
 
 /*
- * The look of a widget that has one of its own for each place (the Claude and
- * kernel widgets): the options of the taskbar or of the desktop; NULL for none.
+ * The look of a widget that has one of its own for each place (the Claude,
+ * kernel and ports widgets): the options of the taskbar or of the desktop; NULL for none.
  */
 const struct tw_widget_option *tw_widget_look(const char *type, bool desktop);
 

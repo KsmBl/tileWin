@@ -79,6 +79,7 @@ executable(
 		'widgets/git.c',
 		'widgets/claude.c',
 		'widgets/kernel.c',
+		'widgets/ports.c',
 		'widgets/system.c',
 		'widgets/taskbar.c',
 		'widgets/tray.c',

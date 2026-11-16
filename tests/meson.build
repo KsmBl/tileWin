@@ -49,6 +49,17 @@ test(
 )
 
 test(
+	'ports',
+	executable(
+		'test-ports',
+		'test_ports.c',
+		include_directories: [sway_inc],
+		link_with: [lib_sway_common],
+	),
+	suite: 'unit',
+)
+
+test(
 	'textedit',
 	executable(
 		'test-textedit',
@@ -1326,6 +1337,15 @@ test(
 	depends: [pointer_tool],
 	suite: 'gui',
 	timeout: 180,
+)
+
+test(
+	'ports-widget',
+	find_program('ports_widget.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
 )
 
 test(

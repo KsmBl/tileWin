@@ -50,7 +50,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, Claude Code usage.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, Claude Code usage, open ports.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -79,6 +79,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
 - **Battery chart** of the last 24 hours in the battery flyout, the times it charged in green.
 - **Login pages of public Wi-Fi** accepted in the background: the terms ticked, the right button pressed, a page that wants your email opened for you.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, when they reset and how long they last at this pace, from what Claude Code shows its status line, never from its login.
+- **Open ports** on the taskbar and the desktop: every TCP port that listens and UDP port that waits, with its program, and whether it can only be reached from this computer (local), from a private network (LAN) or from every network (public).
 - **Processor page** (Advanced): a limit on the clock of each core, P-cores and E-cores apart, kept after a restart.
 - **Battery saver**, like the one of Windows: on battery at or below 20% (`battery_saver`, "Battery saver" on the Screen page) the animations, the trail of the pointer and the charts the taskbar widgets keep in the background stop until the computer is plugged in, and the taskbar says so in a notification.
 - **Keep awake:** a switch in the flyout of the battery widget (`keep_awake on|off|toggle`) for downloads and other things that have to run on. While it is on there is no battery saver, no screen saver, no dimming, and the screen neither turns off nor locks and the computer does not go to sleep by itself. A second click turns it off again, and so does logging out or restarting the computer.

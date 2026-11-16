@@ -93,12 +93,43 @@ static const struct tw_widget_option kernel_desktop_look[] = {
 	{ 0 },
 };
 
+static const struct tw_widget_option opts_ports[] = {
+	{ "interval", "Update interval", "Seconds between looks, 5 by default", NULL },
+	{ "public_fg", "Color of a public port", "Open to every network, e.g. #d83b3b (red) by "
+		"default", NULL },
+	{ "lan_fg", "Color of a LAN port", "Open to a private network, e.g. #d9822b by default",
+		NULL },
+	{ "local_fg", "Color of a local port", "Only for this computer, e.g. #2e9e4f (green) by "
+		"default", NULL },
+	{ 0 },
+};
+
+static const char *const choice_ports_text[] = { "full", "short", "none", NULL };
+
+/* How the ports widget looks on the taskbar. */
+static const struct tw_widget_option ports_taskbar_look[] = {
+	{ "text", "Text", "full: \"2 public · 9 local\"; short: how many are open to the network; "
+		"none: the socket alone", choice_ports_text },
+	{ "hide_local", "Hide while all are local", "Only there while a port is open to the network",
+		choice_yes_no },
+	{ 0 },
+};
+
+/* How it looks on the desktop. */
+static const struct tw_widget_option ports_desktop_look[] = {
+	{ "text_size", "Text size", "Pixels at a cell of 100, 13 by default", choice_text_size },
+	{ 0 },
+};
+
 const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
 	if (type && strcmp(type, "claude") == 0) {
 		return desktop ? tw_claude_desktop_look : tw_claude_taskbar_look;
 	}
 	if (type && strcmp(type, "kernel") == 0) {
 		return desktop ? kernel_desktop_look : kernel_taskbar_look;
+	}
+	if (type && strcmp(type, "ports") == 0) {
+		return desktop ? ports_desktop_look : ports_taskbar_look;
 	}
 	return NULL;
 }
@@ -360,6 +391,12 @@ static const struct tw_widget_style styles_kernel[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_ports[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "list", "A line for each port", 3, 3 },
+	{ "tile", "Tile with its name", 2, 2 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_meter[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "chart", "Chart of the last measurements", 3, 2 },
@@ -432,6 +469,8 @@ const struct tw_widget_info tw_widgets[] = {
 	{ "kernel", "Kernel updates", "The automatic kernel updates: fixes applied live, a new "
 		"kernel downloaded and built, ready for the next restart", STATUS, opts_kernel,
 		styles_kernel },
+	{ "ports", "Open ports", "The ports this computer listens on and whether each is only "
+		"for this computer, a local network or public", STATUS, opts_ports, styles_ports },
 	{ "clock", "Clock", "Time and date with a calendar", STATUS, opts_clock, styles_clock },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history",
 		STATUS, opts_notifications, styles_plain },
@@ -454,6 +493,7 @@ const char *tw_widget_desktop_style(const char *type) {
 	} own[] = {
 		{ "claude", "list" },
 		{ "kernel", "card" },
+		{ "ports", "list" },
 	};
 	for (size_t i = 0; type && i < sizeof(own) / sizeof(own[0]); i++) {
 		if (strcmp(own[i].type, type) == 0) {

@@ -390,6 +390,7 @@ extern const struct widget_impl widget_notifications;
 extern const struct widget_impl widget_git;
 extern const struct widget_impl widget_claude;
 extern const struct widget_impl widget_kernel;
+extern const struct widget_impl widget_ports;
 
 /* ---------- panel ---------- */
 
@@ -703,6 +704,9 @@ struct tw_kernel_auto_summary;
 /* widgets/kernel.c: the state of the kernel updates, read again now; NULL for another widget. */
 const struct tw_kernel_auto *kernel_widget_state(struct widget *w,
 	struct tw_kernel_auto_summary *sum);
+struct tw_ports;
+/* widgets/ports.c: the ports, read again now with their programs; NULL for another widget. */
+const struct tw_ports *ports_widget_state(struct widget *w);
 
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);

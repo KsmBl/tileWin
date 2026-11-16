@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "tw_claude_usage.h"
 #include "tw_kernel_auto.h"
+#include "tw_ports.h"
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -69,6 +70,9 @@ struct info_row {
 	char *command; // run when the row is clicked, NULL when it cannot be
 	bool marked;   // the one in use, e.g. the active keyboard layout
 	bool heading;  // names the rows below it
+	// a word in a pill at the right end, in a color of its kind (the ports' scopes)
+	char badge[16];
+	enum { BADGE_NONE, BADGE_GOOD, BADGE_WARN, BADGE_BAD } badge_kind;
 };
 
 struct info_action {
@@ -82,6 +86,7 @@ struct info_source {
 	int interval_ms; // how often the figures are read again, 0 for never
 	void (*sample)(struct info_flyout *f);
 	void (*free_state)(void *state);
+	int width; // of the flyout, 0 for WIDTH
 };
 
 struct info_flyout {
@@ -1246,18 +1251,92 @@ static void kernel_sample(struct info_flyout *f) {
 	free(settings);
 }
 
+/* ---------- the ports ---------- */
+
+static void ports_sample(struct info_flyout *f) {
+	const struct tw_ports *p = ports_widget_state(f->widget);
+	if (!p) {
+		return;
+	}
+	int open = p->public_ + p->lan;
+	snprintf(f->big, sizeof(f->big), "%d", open);
+	if (open) {
+		snprintf(f->title, sizeof(f->title), "Port%s open to the network", open == 1 ? "" : "s");
+	} else {
+		snprintf(f->title, sizeof(f->title), "Nothing open to the network");
+	}
+	snprintf(f->subtitle, sizeof(f->subtitle), "%d more only for this computer", p->local);
+	if (p->count == 0) {
+		snprintf(f->subtitle, sizeof(f->subtitle), "No program listens on a port");
+	}
+	// the rows there are room for: a heading for each group, a line for the rest
+	int room = MAX_ROWS - (open ? 1 : 0) - (p->local ? 1 : 0) - (p->temporary ? 1 : 0);
+	int shown = 0;
+	for (int group = 0; group < 2; group++) {
+		bool network = group == 0;
+		bool heading = false;
+		for (int i = 0; i < p->count; i++) {
+			const struct tw_port *e = &p->items[i];
+			if ((e->scope != TW_PORT_LOCAL) != network) {
+				continue;
+			}
+			if (!heading) {
+				add_heading(f, network ? "Reachable from other computers" :
+					"Only from this computer");
+				heading = true;
+			}
+			if (shown == room - 1 && p->count - shown > 1) {
+				char more[64];
+				snprintf(more, sizeof(more), "and %d more", p->count - shown);
+				add_row(f, more, NULL);
+				shown = p->count;
+				break;
+			}
+			if (shown >= room) {
+				break;
+			}
+			char name[64], label[128], value[96];
+			tw_port_name(e, name, sizeof(name));
+			snprintf(label, sizeof(label), "%u  %s", e->port, name);
+			if (!e->program[0] && e->user[0] && e->uid != getuid() && p->programs) {
+				// another user's program: whose it is is all there is to see
+				snprintf(label, sizeof(label), "%u  %s (%s)", e->port, name, e->user);
+			}
+			snprintf(value, sizeof(value), "%s %s", tw_port_protocols(e),
+				e->any ? "all addresses" : e->address);
+			struct info_row *row = add_row(f, label, value);
+			if (row) {
+				snprintf(row->badge, sizeof(row->badge), "%s", tw_port_scope_name(e->scope));
+				row->badge_kind = e->scope == TW_PORT_PUBLIC ? BADGE_BAD :
+					e->scope == TW_PORT_LAN ? BADGE_WARN : BADGE_GOOD;
+			}
+			shown++;
+		}
+	}
+	if (p->temporary) {
+		char text[96];
+		snprintf(text, sizeof(text), "%d UDP port%s of programs' own requests", p->temporary,
+			p->temporary == 1 ? "" : "s");
+		add_heading(f, text);
+	}
+	char *settings = widget_settings_command(f->widget);
+	add_action(f, "Settings", settings, NULL);
+	free(settings);
+}
+
 static const struct info_source sources[] = {
-	{ "disk", 1000, disk_sample, free },
-	{ "gpu", 1000, gpu_sample, gpu_free },
-	{ "net", 1000, net_sample, net_free },
-	{ "storage", 5000, storage_sample, free },
-	{ "power", 1000, power_sample, free },
-	{ "keyboard", 0, keyboard_sample, free },
-	{ "title", 1000, title_sample, free },
-	{ "custom", 1000, custom_sample, free },
-	{ "git", 2000, git_sample, git_free },
-	{ "claude", 5000, claude_sample, free },
-	{ "kernel", 2000, kernel_sample, free },
+	{ "disk", 1000, disk_sample, free, 0 },
+	{ "gpu", 1000, gpu_sample, gpu_free, 0 },
+	{ "net", 1000, net_sample, net_free, 0 },
+	{ "storage", 5000, storage_sample, free, 0 },
+	{ "power", 1000, power_sample, free, 0 },
+	{ "keyboard", 0, keyboard_sample, free, 0 },
+	{ "title", 1000, title_sample, free, 0 },
+	{ "custom", 1000, custom_sample, free, 0 },
+	{ "git", 2000, git_sample, git_free, 0 },
+	{ "claude", 5000, claude_sample, free, 0 },
+	{ "kernel", 2000, kernel_sample, free, 0 },
+	{ "ports", 3000, ports_sample, free, 400 }, // the addresses want the room
 };
 
 /* ---------- drawing ---------- */
@@ -1364,6 +1443,55 @@ static void draw_graph(struct info_flyout *f, cairo_t *cr, const struct fly_styl
 	}
 }
 
+/* The colors of a badge: its word, and the pill behind it. */
+static void badge_colors(const struct fly_style *st, int kind, uint32_t *text, uint32_t *fill) {
+	uint32_t c;
+	switch (kind) {
+	case BADGE_BAD: c = st->dark ? 0xff7b72ff : 0xc42b1cff; break;
+	case BADGE_WARN: c = st->dark ? 0xf2b25cff : 0xb3600aff; break;
+	default: c = st->dark ? 0x6ccf8aff : 0x1f7a3aff; break;
+	}
+	*text = c;
+	*fill = (c & 0xffffff00) | (st->dark ? 0x2e : 0x24);
+}
+
+/* A word in a pill, right-aligned at x + w; returns the width it took. */
+static int draw_badge(struct panel *panel, cairo_t *cr, const struct fly_style *st,
+		const char *text, int kind, int right, int y, int h) {
+	int tw = 0, th = 0;
+	pd_text_size(cr, st->font, text, &tw, &th);
+	int bh = th + 4 < h - 6 ? th + 4 : h - 6;
+	int bw = tw + 14;
+	int bx = right - bw, by = y + (h - bh) / 2;
+	uint32_t fg, fill;
+	badge_colors(st, kind, &fg, &fill);
+	if (panel_atari(panel)) {
+		// GEM: black and white, the public ones inverted
+		bool inverted = kind == BADGE_BAD;
+		uint32_t paper = tw_theme_color(panel->theme, "menu.bg", 0xffffffff);
+		pd_atari_outline(cr, bx, by, bw, bh, st->fg, inverted ? st->fg : paper, false);
+		pd_text(cr, st->font, text, bx, by, bw, bh, inverted ? paper : st->fg, PD_CENTER);
+		return bw;
+	}
+	if (panel_console(panel)) {
+		// a block of colour with round ends, the word in black
+		pd_console_block(cr, bx, by, bw, bh, true, true, fg);
+		pd_text(cr, st->bold, text, bx, by, bw, bh, 0x000000ff, PD_CENTER);
+		return bw;
+	}
+	if (st->style == PS_CLASSIC) {
+		// Windows 95: a flat field with a thin sunken edge
+		pd_rect(cr, bx, by, bw, bh, fill);
+		pd_border_sunken_thin(cr, bx, by, bw, bh);
+	} else {
+		pd_rounded(cr, bx, by, bw, bh, st->style == PS_LUNA ? 3 : bh / 2.0);
+		pd_color(cr, fill);
+		cairo_fill(cr);
+	}
+	pd_text(cr, st->font, text, bx, by, bw, bh, fg, PD_CENTER);
+	return bw;
+}
+
 static void info_render(struct popup *p, cairo_t *cr) {
 	struct info_flyout *f = p->data;
 	struct fly_style st;
@@ -1422,18 +1550,25 @@ static void info_render(struct popup *p, cairo_t *cr) {
 				pd_rect(cr, x0 - 6, y + 6, 3, h - 12, st.accent);
 			}
 			int vw = 0, lw = 0;
+			int row_w = cw; // the badge takes the right end
+			if (row->badge[0]) {
+				int text_h = row->bar >= 0 ? 22 : h;
+				int bw = draw_badge(p->panel, cr, &st, row->badge, row->badge_kind, x0 + cw, y,
+					text_h);
+				row_w = cw - bw - 8;
+			}
 			if (row->value[0]) {
 				// the label keeps what it needs up to half the width, the value gets the rest
 				pd_text_size(cr, st.font, row->value, &vw, NULL);
 				pd_text_size(cr, row->marked ? st.bold : st.font, row->label, &lw, NULL);
-				int room = cw - (lw < cw / 2 ? lw : cw / 2) - 12;
+				int room = row_w - (lw < row_w / 2 ? lw : row_w / 2) - 12;
 				vw = vw > room ? room : vw;
 			}
 			int text_h = row->bar >= 0 ? 22 : h;
 			pd_text(cr, row->marked ? st.bold : st.font, row->label, x0, y,
-				cw - vw - (vw ? 12 : 0), text_h, st.fg, PD_LEFT);
+				row_w - vw - (vw ? 12 : 0), text_h, st.fg, PD_LEFT);
 			if (row->value[0]) {
-				pd_text(cr, st.font, row->value, x0 + cw - vw, y, vw, text_h, st.dim, PD_RIGHT);
+				pd_text(cr, st.font, row->value, x0 + row_w - vw, y, vw, text_h, st.dim, PD_RIGHT);
 			}
 			if (row->bar >= 0) {
 				double share = fmin(fmax(row->bar, 0), 1);
@@ -1469,7 +1604,7 @@ static void info_render(struct popup *p, cairo_t *cr) {
 
 static void geometry(struct info_flyout *f, int *x, int *y, int *width, int *height) {
 	int M = popup_shadow_margin(f->panel);
-	*width = WIDTH + 2 * M;
+	*width = (f->source->width ? f->source->width : WIDTH) + 2 * M;
 	*height = content_height(f) + 2 * M;
 	*x = f->anchor.right_align ? f->anchor.x - *width + M : f->anchor.x - M;
 	*y = f->anchor.above ? f->anchor.y - *height : f->anchor.y;
