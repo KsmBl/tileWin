@@ -142,6 +142,18 @@ The **Kernel updates** widget (taskbar and desktop) shows the state of the autom
 
 The **Open ports** widget (taskbar and desktop) shows the ports programs on this computer listen on, and how far each can be reached: **Local** (only from this computer: 127.0.0.1, ::1), **LAN** (an address of a private network: 192.168.x.x, 10.x.x.x, 172.16–31.x.x, 100.64/10, link-local, fc00::/7) or **Public** (all addresses, 0.0.0.0 or ::, or a public address: every network the computer is on, the internet too when no router or firewall stands in between). On the taskbar a network socket in the color of the widest of them (green: all local, amber: one on a LAN, red: one public) and "2 public · 9 local"; its text can be full, short (how many are open to the network) or none, and it can hide while all ports are local. On the desktop it is a **List** with a line for each port, like on the taskbar, or a tile. A click opens a flyout in the look of the theme: the ports reachable from other computers, then those only for this computer, each with its port, program, protocol, address and a badge of how far it reaches. The program of another user's socket (root's sshd, cupsd) cannot be seen without root: the flyout then names the service of the port and the user. UDP sockets on a port the kernel hands out for outgoing traffic (the answers to a program's own DNS lookups, for one) are no service and are only counted. It looks every 5 seconds (Update interval), and the colors can be set in its settings.
 
+### Asking before a program can be reached
+
+When one of your programs starts to listen on a port other computers could reach (any address but 127.0.0.1 and ::1), tileWin asks, as Windows' firewall does: **Allow** *program* **to be reached from other computers?** Until you allow it, other computers cannot connect to it; the program runs on and this computer still reaches it. The answer is kept for the program, not for the port: stopped and started again, also on another port, it is not asked about again. A program is its executable, and for an interpreter (python3, node, java, bash, ...) also the script or module it runs, so allowing `python3 -m http.server` does not allow every Python program. Closing the question without an answer blocks the program until it starts again. In the Open ports flyout such ports show **Blocked** (or **Asking**), and **Allowed programs** opens the answers, `~/.config/tileWin/ports.conf`:
+
+```
+guard yes                               # "guard no" switches the questions off
+allow /usr/bin/python3.14 -m http.server
+block /home/me/bin/server
+```
+
+Only programs of users are guarded (those in `user.slice`); the services of the system (sshd, cupsd, Docker) are not, nor is another firewall changed. It works with a table of nftables of its own, `inet tilewin_ports`, set by `tilewin-ports-guard` through pkexec; administrators at the computer are not asked for a password for it. It needs `nftables`, which install.sh installs.
+
 ## Claude Code usage
 
 The **Claude Code usage** widget (taskbar and desktop) shows the 5-hour and weekly usage limits of a Claude Code account: how much of each is used, when it resets, and how long it lasts at the pace it was used at since it started (or that it lasts until it resets). Its settings tick what it shows and put it in order, with presets, apart for the taskbar (both limits by default) and the desktop (everything, a line for each, in the style "A line for each item"); the bars turn orange above 80% and red above 95% (Warning above, Critical above). A click opens a flyout in the look of the theme with both limits in full (used, when they reset, how long they last at this pace), how old the values are, and Usage on claude.ai, Connect or Disconnect and Settings.

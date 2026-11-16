@@ -23,6 +23,7 @@
 #include <string.h>
 #include "draw.h"
 #include "panel.h"
+#include "portguard.h"
 #include "tw_ports.h"
 #include "tw_theme.h"
 
@@ -90,9 +91,17 @@ static void tick(void *data) {
 	s->timer = loop_add_timer_lazy(w->panel->loop, interval_ms(w), tick, w);
 }
 
-/* The widest scope there is. */
+/* The widest scope there is, of the ports other computers can connect to. */
 static enum tw_port_scope widest(const struct tw_ports *p) {
-	return p->public_ ? TW_PORT_PUBLIC : p->lan ? TW_PORT_LAN : TW_PORT_LOCAL;
+	enum tw_port_scope scope = TW_PORT_LOCAL;
+	for (int i = 0; i < p->count; i++) {
+		const struct tw_port *e = &p->items[i];
+		enum portguard_verdict v = portguard_verdict(e->port, e->tcp);
+		if (e->scope > scope && v != PG_BLOCKED && v != PG_ASKING) {
+			scope = e->scope;
+		}
+	}
+	return scope;
 }
 
 static uint32_t scope_color(struct widget *w, enum tw_port_scope scope, bool dark) {

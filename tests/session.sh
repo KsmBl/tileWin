@@ -26,6 +26,12 @@ rm -f "$address"
 TILEWIN_WAYLAND_SOCKET=wayland-tw-test-$$
 export TILEWIN_WAYLAND_SOCKET
 
+# the guard of the ports would change the firewall of the computer (pkexec):
+# off, unless a test hands it a helper of its own (TILEWIN_PORTS_GUARD)
+if [ -z "${TILEWIN_PORTS_GUARD:-}" ]; then
+	export TILEWIN_NO_PORT_GUARD=1
+fi
+
 "$@" &
 child=$!
 trap 'kill "$child" 2>/dev/null' TERM INT HUP

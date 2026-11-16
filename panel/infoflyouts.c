@@ -2,6 +2,7 @@
 #include "tw_claude_usage.h"
 #include "tw_kernel_auto.h"
 #include "tw_ports.h"
+#include "portguard.h"
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -1309,6 +1310,14 @@ static void ports_sample(struct info_flyout *f) {
 				snprintf(row->badge, sizeof(row->badge), "%s", tw_port_scope_name(e->scope));
 				row->badge_kind = e->scope == TW_PORT_PUBLIC ? BADGE_BAD :
 					e->scope == TW_PORT_LAN ? BADGE_WARN : BADGE_GOOD;
+				// the guard keeps other computers out until the program is allowed
+				enum portguard_verdict v = network ? portguard_verdict(e->port, e->tcp) :
+					PG_NONE;
+				if (v == PG_BLOCKED || v == PG_ASKING) {
+					snprintf(row->badge, sizeof(row->badge), "%s",
+						v == PG_ASKING ? "Asking" : "Blocked");
+					row->badge_kind = BADGE_GOOD;
+				}
 			}
 			shown++;
 		}
@@ -1318,6 +1327,11 @@ static void ports_sample(struct info_flyout *f) {
 		snprintf(text, sizeof(text), "%d UDP port%s of programs' own requests", p->temporary,
 			p->temporary == 1 ? "" : "s");
 		add_heading(f, text);
+	}
+	if (portguard_active()) {
+		// the answers given, to change or forget one
+		add_action(f, "Allowed programs", "exec sh -c 'f=${XDG_CONFIG_HOME:-$HOME/.config}/tileWin/"
+			"ports.conf; [ -e \"$f\" ] || printf \"guard yes\\n\" > \"$f\"; xdg-open \"$f\"'", NULL);
 	}
 	char *settings = widget_settings_command(f->widget);
 	add_action(f, "Settings", settings, NULL);

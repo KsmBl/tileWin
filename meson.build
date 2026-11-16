@@ -211,6 +211,7 @@ subdir('devices')
 subdir('cpu')
 subdir('claude')
 subdir('network')
+subdir('ports')
 
 gtk4 = dependency('gtk4', version: '>=4.12', required: get_option('settings'))
 if gtk4.found()

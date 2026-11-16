@@ -11,6 +11,7 @@
 #include "log.h"
 #include "draw.h"
 #include "panel.h"
+#include "portguard.h"
 #include "tw_accent.h"
 #include "tw_desktop.h"
 #include "stringop.h"
@@ -431,6 +432,7 @@ int main(int argc, char **argv) {
 	scheduler_init(&panel);
 	battery_history_init(&panel);
 	clipboard_init(&panel);
+	portguard_init(&panel);
 	welcome_new_user(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
@@ -458,6 +460,7 @@ int main(int argc, char **argv) {
 		loop_poll(panel.loop);
 	}
 
+	portguard_fini();
 	clipboard_fini(&panel);
 	thumbnails_fini(&panel);
 	notes_fini(); // what was typed last is written before the taskbar goes

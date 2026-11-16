@@ -1,0 +1,9 @@
+// The taskbar of tileWin opens the ports of the programs a user allowed without
+// asking for a password, for administrators at the computer itself: the user
+// has just answered tileWin's own question.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.tilewin.ports.guard" &&
+        subject.isInGroup("wheel") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

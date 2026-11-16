@@ -1349,6 +1349,14 @@ test(
 )
 
 test(
+	'port-guard',
+	find_program('port_guard.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'claude-usage',
 	find_program('claude_usage.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

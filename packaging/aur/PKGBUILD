@@ -9,7 +9,7 @@ license=('MIT')
 depends=(
 	'cairo' 'curl' 'gdk-pixbuf2' 'glib2' 'glibc' 'gtk4' 'json-c' 'libcap' 'libdrm' 'libevdev'
 	'libinput' 'librsvg' 'libxcb' 'libxkbcommon' 'pam' 'pango' 'pcre2' 'pixman' 'polkit'
-	'systemd-libs' 'wayland' 'wlroots0.20' 'xcb-util-wm' 'xdg-utils' 'xorg-xwayland'
+	'systemd-libs' 'wayland' 'wlroots0.20' 'xcb-util-wm' 'xdg-utils' 'xorg-xwayland' 'nftables'
 )
 makedepends=('git' 'meson' 'ninja' 'pkgconf' 'wayland-protocols')
 optdepends=(

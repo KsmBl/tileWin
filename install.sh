@@ -139,7 +139,7 @@ install_deps() {
 			wlroots0.20 wayland wayland-protocols libxkbcommon libinput libevdev \
 			pixman libdrm cairo pango gdk-pixbuf2 librsvg gtk4 json-c pcre2 \
 			xcb-util-wm xorg-xwayland systemd-libs polkit curl \
-			grim slurp wl-clipboard xdg-utils
+			grim slurp wl-clipboard xdg-utils nftables
 		# terminus-font: the pixel font of the Atari ST theme; noto-fonts-emoji: the emoji picker
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal xdg-desktop-portal-gtk \
 			tesseract tesseract-data-eng libpulse terminus-font noto-fonts-emoji || \
@@ -163,7 +163,7 @@ install_deps() {
 			libjson-c-dev libpcre2-dev libxcb1-dev libxcb-icccm4-dev xwayland libsystemd-dev \
 			libpam0g-dev libpolkit-agent-1-dev polkitd pkexec libcurl4-openssl-dev curl \
 			libcap2-bin python3 \
-			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
+			grim slurp wl-clipboard xdg-utils pulseaudio-utils nftables || \
 			warn "some packages could not be installed"
 		# Debian 13 has wlroots 0.18 only: 0.20 is built along with tileWin then
 		if apt-cache show libwlroots-0.20-dev >/dev/null 2>&1; then
@@ -196,7 +196,7 @@ install_deps() {
 			libevdev-devel pixman-devel libdrm-devel cairo-devel pango-devel \
 			gdk-pixbuf2-devel librsvg2-devel gtk4-devel json-c-devel pcre2-devel \
 			xcb-util-wm-devel xorg-x11-server-Xwayland systemd-devel polkit-devel libcurl-devel \
-			grim slurp wl-clipboard xdg-utils pulseaudio-utils || \
+			grim slurp wl-clipboard xdg-utils pulseaudio-utils nftables || \
 			warn "some packages are missing; tileWin needs wlroots 0.20"
 		# the emoji picker draws in Noto Color Emoji
 		sudo dnf install -y google-noto-color-emoji-fonts || \

@@ -1,0 +1,89 @@
+#!/bin/bash
+# The guard of the ports, for the taskbar of tileWin, which runs it with pkexec.
+# It is the only part that runs as root. A program of a user (one in
+# user.slice) that listens on a port cannot be reached from other computers
+# until the user has allowed it: tileWin asks, as Windows' firewall does, and
+# hands the ports of the programs allowed to this.
+#
+#   tilewin-ports-guard apply TCP UDP  the table there, with these ports allowed:
+#                                      lists of port numbers split by commas,
+#                                      "-" for none
+#   tilewin-ports-guard stop           the table gone: nothing guarded
+#   tilewin-ports-guard status         "on" or "off"
+#
+# The table only drops: new connections from other computers to a socket of a
+# program in user.slice on a port not allowed. The services of the system
+# (system.slice), the loopback and the answers to the user's own connections
+# are not touched, and another firewall goes on doing what it does.
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+table=tilewin_ports
+
+die() { echo "$*" >&2; exit 1; }
+
+# A list of ports as nft takes it: "22, 8080" or nothing for "-".
+ports() {
+	local list=$1 out="" p count=0
+	[ "$list" = "-" ] && return 0
+	[[ $list =~ ^[0-9]+(,[0-9]+)*$ ]] || die "not a list of ports: $list"
+	IFS=, read -ra all <<< "$list"
+	for p in "${all[@]}"; do
+		p=$((10#$p))
+		[ "$p" -ge 1 ] && [ "$p" -le 65535 ] || die "not a port: $p"
+		count=$((count + 1))
+		[ "$count" -le 4096 ] || die "too many ports"
+		out+="${out:+, }$p"
+	done
+	printf '%s' "$out"
+}
+
+apply() {
+	local tcp udp
+	tcp=$(ports "$1")
+	udp=$(ports "$2")
+	# the whole table again in one transaction: no moment without it
+	{
+		if nft list table inet "$table" >/dev/null 2>&1; then
+			echo "delete table inet $table"
+		fi
+		cat <<EOT
+table inet $table {
+	set tcp_allowed {
+		type inet_service
+		${tcp:+elements = { $tcp \}}
+	}
+	set udp_allowed {
+		type inet_service
+		${udp:+elements = { $udp \}}
+	}
+	chain input {
+		type filter hook input priority filter - 5; policy accept;
+		iif "lo" accept
+		ct state established,related accept
+		meta l4proto tcp socket cgroupv2 level 1 "user.slice" tcp dport != @tcp_allowed counter drop
+		meta l4proto udp socket cgroupv2 level 1 "user.slice" udp dport != @udp_allowed counter drop
+	}
+}
+EOT
+	} | nft -f -
+}
+
+case "${1:-}" in
+apply)
+	[ $# -eq 3 ] || die "usage: $0 apply TCP UDP"
+	command -v nft >/dev/null || die "nft is not installed (nftables)"
+	apply "$2" "$3"
+	;;
+stop)
+	if nft list table inet "$table" >/dev/null 2>&1; then
+		nft delete table inet "$table"
+	fi
+	;;
+status)
+	if nft list table inet "$table" >/dev/null 2>&1; then echo on; else echo off; fi
+	;;
+*)
+	die "usage: $0 apply TCP UDP | stop | status"
+	;;
+esac
