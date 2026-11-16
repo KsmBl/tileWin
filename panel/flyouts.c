@@ -551,6 +551,7 @@ struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *outp
 #define NET_ROW 48
 #define NET_ROWS_MIN 3 // rows of networks shown, as many as there is room for
 #define NET_ROWS_MAX 8 // and the scrollbar beside them for the rest
+#define NET_FILTER 40   // the search field above a list longer than that
 #define NET_EXPAND 42
 #define NET_SECRET 26 // the line showing the password of a saved network
 #define NET_MESSAGE 56
@@ -570,6 +571,7 @@ enum {
 	NET_HS_SECRET,      // show the password of a saved network
 	NET_HS_COPY_SECRET,
 	NET_HS_SCROLLBAR,
+	NET_HS_FILTER,
 };
 
 struct wifi_net {
@@ -662,7 +664,12 @@ struct net_flyout {
 	struct text_cursor password_cursor;
 	char status[256];
 	bool status_error;
-	int scroll;
+	int scroll;           // the first of the rows shown
+	list_t *shown;        // struct wifi_net *: those of nets the search lets through, in order
+	char filter[64];      // what was typed to find a network by its name
+	struct text_cursor filter_cursor;
+	char **order;         // the names in the order shown, kept while the pointer is in it
+	int order_count;
 	bool dragging;        // the thumb of the scrollbar is held
 	struct pbox scroll_track; // where the scrollbar was drawn last
 	struct loop_timer *timer;
@@ -731,6 +738,25 @@ static bool net_list_shown(struct net_flyout *f) {
 	return f->have_nmcli && f->wifi_device && f->wifi_enabled && f->nets->length > 0;
 }
 
+/* The search field: above a list longer than there are rows for, or while it holds text. */
+static bool net_filter_shown(struct net_flyout *f) {
+	return net_list_shown(f) && (f->filter[0] || f->nets->length > NET_ROWS_MAX);
+}
+
+/* The networks the search lets through, in the order of nets. */
+static void net_filter_apply(struct net_flyout *f) {
+	if (!f->shown) {
+		f->shown = create_list();
+	}
+	f->shown->length = 0;
+	for (int i = 0; i < f->nets->length; i++) {
+		struct wifi_net *n = f->nets->items[i];
+		if (!f->filter[0] || strcasestr(n->ssid, f->filter)) {
+			list_add(f->shown, n);
+		}
+	}
+}
+
 static int net_height_with(struct net_flyout *f, int rows);
 
 /* As many rows as there is room for between the taskbar and the edge of the screen. */
@@ -743,7 +769,8 @@ static int net_visible_rows(struct net_flyout *f) {
 		most = room / NET_ROW;
 		most = most < NET_ROWS_MIN ? NET_ROWS_MIN : most > NET_ROWS_MAX ? NET_ROWS_MAX : most;
 	}
-	return f->nets->length < most ? f->nets->length : most;
+	int count = f->shown ? f->shown->length : f->nets->length;
+	return count < most ? count : most;
 }
 
 static int net_height(struct net_flyout *f) {
@@ -754,7 +781,9 @@ static int net_height_with(struct net_flyout *f, int rows) {
 	int h = NET_HEADER + 1 + (f->wired ? NET_WIRED + 1 : 0) + (f->iface[0] ? NET_DETAILS + 1 : 0) +
 		(f->iface[0] && f->have_link ? NET_LINK : 0);
 	if (net_list_shown(f)) {
-		h += rows * NET_ROW + 8 + (f->expanded ? NET_EXPAND : 0) +
+		// a search that finds nothing still has the room of one row, to say so
+		h += (rows > 0 ? rows : 1) * NET_ROW + 8 + (net_filter_shown(f) ? NET_FILTER : 0) +
+			(f->expanded ? NET_EXPAND : 0) +
 			(net_secret_shown(f) ? NET_SECRET : 0);
 	} else {
 		h += NET_MESSAGE;
@@ -892,10 +921,58 @@ static void net_rate_text(double mbit, char *out, size_t size) {
 	}
 }
 
+/* The order the networks were shown in, kept while the pointer is in the flyout. */
+static char **steady_order;
+static int steady_count;
+
+static int steady_index(const char *ssid) {
+	for (int i = 0; i < steady_count; i++) {
+		if (strcmp(steady_order[i], ssid) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int wifi_net_steady_cmp(const void *a, const void *b) {
+	const struct wifi_net *na = *(struct wifi_net **)a;
+	const struct wifi_net *nb = *(struct wifi_net **)b;
+	int ia = steady_index(na->ssid), ib = steady_index(nb->ssid);
+	if (ia >= 0 && ib >= 0) {
+		return ia - ib;
+	}
+	if (ia >= 0 || ib >= 0) {
+		return ia >= 0 ? -1 : 1; // new ones come after those that were there
+	}
+	return wifi_net_cmp(a, b);
+}
+
+static void net_order_free(struct net_flyout *f) {
+	for (int i = 0; i < f->order_count; i++) {
+		free(f->order[i]);
+	}
+	free(f->order);
+	f->order = NULL;
+	f->order_count = 0;
+}
+
 static void net_query_done(void *data, const char *output) {
 	struct net_flyout *f = net_current;
 	if (!f) {
 		return;
+	}
+	// the network at the top of the list stays at the top after the refresh, and while
+	// the pointer is over the list the networks keep their places
+	char *anchor = NULL;
+	if (f->shown && f->scroll > 0 && f->scroll < f->shown->length) {
+		anchor = strdup(((struct wifi_net *)f->shown->items[f->scroll])->ssid);
+	}
+	net_order_free(f);
+	if (f->base.inside && f->nets->length > 0) {
+		f->order = calloc(f->nets->length, sizeof(char *));
+		for (int i = 0; f->order && i < f->nets->length; i++) {
+			f->order[f->order_count++] = strdup(((struct wifi_net *)f->nets->items[i])->ssid);
+		}
 	}
 	net_clear(f);
 	f->have_nmcli = !strstr(output, "--missing");
@@ -1014,10 +1091,21 @@ static void net_query_done(void *data, const char *output) {
 		saved_net_free(known->items[i]);
 	}
 	list_free(known);
-	list_qsort(f->nets, wifi_net_cmp);
-	if (f->scroll > f->nets->length - net_visible_rows(f)) {
-		f->scroll = 0;
+	steady_order = f->order;
+	steady_count = f->order_count;
+	list_qsort(f->nets, f->order_count ? wifi_net_steady_cmp : wifi_net_cmp);
+	steady_order = NULL;
+	steady_count = 0;
+	net_filter_apply(f);
+	f->scroll = 0;
+	for (int i = 0; anchor && i < f->shown->length; i++) {
+		if (strcmp(((struct wifi_net *)f->shown->items[i])->ssid, anchor) == 0) {
+			f->scroll = i;
+		}
 	}
+	free(anchor);
+	int max = f->shown->length - net_visible_rows(f);
+	f->scroll = f->scroll > max ? (max > 0 ? max : 0) : f->scroll;
 	f->loaded = true;
 	if (!f->rescanned && f->have_nmcli && f->wifi_device && f->wifi_enabled) {
 		f->rescanned = true;
@@ -1595,10 +1683,27 @@ static void net_render(struct popup *p, cairo_t *cr) {
 
 	if (net_list_shown(f)) {
 		y += 4;
+		if (!f->shown) {
+			net_filter_apply(f);
+		}
+		if (net_filter_shown(f)) {
+			// typing anywhere in the flyout searches; the field shows what was typed
+			struct pbox field = { x0, y + 4, cw, NET_FILTER - 10 };
+			draw_field(cr, &st, field, f->filter, &f->filter_cursor, false,
+				"Type to search networks");
+			psurface_add_hotspot(p->surface, field.x, field.y, field.width, field.height, NULL,
+				NET_HS_FILTER, 0, NULL);
+			y += NET_FILTER;
+		}
 		int rows = net_visible_rows(f);
 		int list_top = y;
-		for (int i = f->scroll; i < f->nets->length && i < f->scroll + rows; i++) {
-			struct wifi_net *n = f->nets->items[i];
+		if (f->shown->length == 0) {
+			pd_text(cr, st.font, "No network by that name", x0, y, cw, NET_ROW, st.dim, PD_LEFT);
+			y += NET_ROW;
+		}
+		for (int k = f->scroll; k < f->shown->length && k < f->scroll + rows; k++) {
+			struct wifi_net *n = f->shown->items[k];
+			int i = list_find(f->nets, n); // the hotspots name it by its place in nets
 			bool expanded = f->expanded && strcmp(f->expanded, n->ssid) == 0;
 			bool shown = expanded && net_secret_shown(f);
 			struct pbox row = { M + 6, y, W - 2 * M - 12, NET_ROW + (expanded ? NET_EXPAND : 0) +
@@ -1721,9 +1826,10 @@ static void net_render(struct popup *p, cairo_t *cr) {
 		// the scrollbar, in the padding at the right of the rows
 		f->scroll_track = (struct pbox){ W - M - 3 - FLY_SCROLLBAR, list_top, FLY_SCROLLBAR,
 			y - list_top };
-		if (rows < f->nets->length) {
+		p->surface->touch_drag = rows < f->shown->length ? f->scroll_track : (struct pbox){ 0 };
+		if (rows < f->shown->length) {
 			fly_draw_scrollbar(cr, &st, p->panel, f->scroll_track, f->scroll, rows,
-				f->nets->length, f->dragging || hovered(&f->base, f->scroll_track));
+				f->shown->length, f->dragging || hovered(&f->base, f->scroll_track));
 			psurface_add_hotspot(p->surface, f->scroll_track.x, f->scroll_track.y,
 				f->scroll_track.width, f->scroll_track.height, NULL, NET_HS_SCROLLBAR, 0, NULL);
 		}
@@ -1758,7 +1864,7 @@ static void net_render(struct popup *p, cairo_t *cr) {
 
 static void net_scroll_to(struct popup *p, double y) {
 	struct net_flyout *f = p->data;
-	f->scroll = fly_scrollbar_first(f->scroll_track, y, net_visible_rows(f), f->nets->length);
+	f->scroll = fly_scrollbar_first(f->scroll_track, y, net_visible_rows(f), f->shown->length);
 	popup_set_dirty(p);
 }
 
@@ -1828,8 +1934,9 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 			memset(f->password, 0, sizeof(f->password));
 			// keep the expanded row visible
 			int rows = net_visible_rows(f);
-			if (hs->id >= f->scroll + rows - 1 && f->nets->length > rows) {
-				f->scroll = hs->id - rows + 2;
+			int at = list_find(f->shown, n);
+			if (at >= f->scroll + rows - 1 && f->shown->length > rows) {
+				f->scroll = at - rows + 2;
 			}
 		}
 		net_update(f);
@@ -1881,7 +1988,7 @@ static void net_button(struct popup *p, double x, double y, uint32_t button, boo
 
 static void net_axis(struct popup *p, double x, double y, int direction) {
 	struct net_flyout *f = p->data;
-	int max = f->nets->length - net_visible_rows(f);
+	int max = (f->shown ? f->shown->length : f->nets->length) - net_visible_rows(f);
 	f->scroll += direction;
 	f->scroll = f->scroll < 0 ? 0 : f->scroll > max ? max : f->scroll;
 	popup_set_dirty(p);
@@ -1891,8 +1998,21 @@ static void net_key(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_
 	struct net_flyout *f = p->data;
 	if (!f->asking_password) {
 		if (sym == XKB_KEY_Escape) {
-			popup_close_later(p->panel);
+			if (f->filter[0]) {
+				// Escape empties the search first, as in the start menu
+				f->filter[0] = '\0';
+				f->filter_cursor = (struct text_cursor){ 0 };
+			} else {
+				popup_close_later(p->panel);
+				return;
+			}
+		} else if (!net_list_shown(f) || text_key(f->filter, sizeof(f->filter),
+				&f->filter_cursor, sym, utf8, mods) == TEXT_KEY_IGNORED) {
+			return;
 		}
+		net_filter_apply(f);
+		f->scroll = 0;
+		net_update(f);
 		return;
 	}
 	if (sym == XKB_KEY_Escape) {
@@ -1923,6 +2043,8 @@ static void net_destroy(struct popup *p) {
 	net_forget_secret(f);
 	net_clear(f);
 	list_free(f->nets);
+	list_free(f->shown);
+	net_order_free(f);
 	free(f->expanded);
 	free(f->connecting);
 	free(f->failed);
@@ -1932,7 +2054,7 @@ static void net_destroy(struct popup *p) {
 
 static bool net_typing(struct popup *p) {
 	struct net_flyout *f = p->data;
-	return f->asking_password;
+	return f->asking_password || f->filter[0];
 }
 
 static const struct popup_vtable net_vtable = {

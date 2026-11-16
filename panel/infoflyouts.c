@@ -1695,6 +1695,8 @@ static void info_render(struct popup *p, cairo_t *cr) {
 			y += h;
 		}
 		y = list_top + area;
+		p->surface->touch_drag = shown < f->row_count ? (struct pbox){ W - M - 3 - FLY_SCROLLBAR,
+			list_top, FLY_SCROLLBAR, area } : (struct pbox){ 0 };
 		if (shown < f->row_count) {
 			// the scrollbar, in the padding at the right of the rows
 			f->scroll_track = (struct pbox){ W - M - 3 - FLY_SCROLLBAR, list_top, FLY_SCROLLBAR,

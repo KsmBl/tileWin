@@ -243,7 +243,9 @@ static void touch_handle_motion(void *data, struct wl_touch *touch, uint32_t tim
 			return;
 		}
 		touch_stop_hold(seat);
-		if (s && s->touch_scroll && s->impl && s->impl->pointer_axis &&
+		// a scrollbar is dragged by the finger as by the mouse, not scrolled against it
+		bool on_drag = s && pbox_contains(&s->touch_drag, seat->touch_x0, seat->touch_y0);
+		if (s && s->touch_scroll && s->impl && s->impl->pointer_axis && !on_drag &&
 				fabs(dy) > fabs(dx)) {
 			seat->touch_state = TOUCH_SCROLL;
 			last_y = seat->touch_y0;

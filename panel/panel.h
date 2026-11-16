@@ -80,6 +80,7 @@ struct psurface {
 	struct pool_buffer *shown; // the one last committed, to compare the next with
 	bool configured, dirty, frame_pending, catcher;
 	bool touch_scroll; // a finger dragged up or down scrolls it (popups)
+	struct pbox touch_drag; // where a finger drags instead, e.g. a scrollbar; empty for none
 	list_t *hotspots; // struct hotspot *
 	struct hotspot *hover;
 	struct wl_list link; // panel::surfaces
