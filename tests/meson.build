@@ -1357,6 +1357,15 @@ test(
 )
 
 test(
+	'polkit-screen-back',
+	find_program('polkit_screen_back.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool, count_content],
+	suite: 'gui',
+	timeout: 60,
+)
+
+test(
 	'claude-usage',
 	find_program('claude_usage.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

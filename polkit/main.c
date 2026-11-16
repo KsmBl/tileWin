@@ -1541,7 +1541,13 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
 		wl_output_add_listener(o->wl_output, &output_listener, o);
 		wl_list_insert(agent.outputs.prev, &o->link);
 		if (agent.current) {
-			create_surface(o); // a screen plugged in meanwhile darkens too
+			// a screen plugged in meanwhile darkens too; when the dialog has no screen
+			// (the only one went, as on a switch to another console and back), this one
+			// takes it, with the keyboard
+			if (!agent.main) {
+				agent.main = o;
+			}
+			create_surface(o);
 		}
 	}
 }
