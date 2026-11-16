@@ -94,9 +94,9 @@ wait_still 20 shot
 # The page is tall enough to show the taskbar menu, the last one of the
 # right-click menus: open its Theme submenu, then add a separator to it, which
 # saves the menu.
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2634 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 1094 2469 >/dev/null 2>&1
 wait_still 10 shot
-WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2242 >/dev/null 2>&1
+WAYLAND_DISPLAY=$display "$tool" 1280 3000 click 904 2077 >/dev/null 2>&1
 written=$XDG_CONFIG_HOME/tileWin/taskbar.conf
 wait_until 5 sh -c "sed -n '/submenu \"Theme\"/,/^\t}/p' '$written' | grep -q separator"
 kill "$starter" 2>/dev/null
@@ -110,6 +110,6 @@ if echo "$theme" | grep -q '^[[:space:]]*themes$' && echo "$theme" | grep -q sep
 fi
 echo "the Theme submenu was not saved as the list of every installed theme."
 echo "Either the editor keeps the old items, or the Taskbar page has been"
-echo "rearranged and the submenu is no longer at 1094,2634."
+echo "rearranged and the submenu is no longer at 1094,2469."
 echo "$theme"
 exit 1

@@ -79,7 +79,7 @@ wait_still 15 screen
 click() { "$pointer" 1280 3000 click "$1" "$2" >/dev/null 2>&1; }
 shows() { sed -n '/^widget claude {/,/^}/p' "$conf" | sed -n 's/^[[:space:]]*show //p' | tr -d '"'; }
 
-click 1166 1284 # the gear of "Claude Code usage" in the right section
+click 1166 1119 # the gear of "Claude Code usage" in the right section
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'Claude Code usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
