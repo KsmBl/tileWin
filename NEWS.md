@@ -5,6 +5,18 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.7
+
+- **Starship Console, renewed.** The cooler palette of the later consoles: lavender frames, lilac bars, steel blue buttons, peach for the menu and the clock. Its menus are framed as its windows, the start menu with the elbow and a bar to MENU, and its title bars are taller and easier to grab.
+- **A moving wallpaper** for the Starship Console: a sensor whose sweep goes round with the Wi-Fi networks in reach as contacts, and a STATUS panel of live readouts (time, processor and its last minute, memory, disk, network, battery, temperature). A row lights up under the pointer and opens its flyout when clicked. It rests while windows cover it and is switched off with **Moving wallpaper** on the Wallpaper page.
+- **Moving windows by their title bar** works over the whole bar again in themes with a thick frame on one side, and the right edge of a Starship Console window no longer takes the window's scrollbar.
+- **Answers of the port guard in the settings:** every program allowed or blocked, everywhere or on one network, to change or forget on the Network page. The question also offers **Only on** the network you are on and **This time only**, and a click on a port in the Open ports flyout opens a menu: open in the browser, copy the address, allow, block, end the program. When the guard cannot work, a notification and the Network page say why.
+- **Wi-Fi flyout:** type to find a network by its name; the list keeps its place when it refreshes and while the pointer is over it.
+- **Clipboard** has a page of its own under System, with **Clear** for everything but the pinned entries.
+- **What's new** after an update: a notification names what the release brought, and the About page shows all of it.
+- **Welcome window:** a step of widgets worth having on the taskbar, each switched on with a click.
+- **Fixes:** the password dialog comes back with the screen after a switch to another console and back, instead of leaving it dark; with **Lock on resume**, the lock screen is there the moment the screen saver ends, without a glimpse of the desktop.
+
 ## 1.6
 
 - **Open ports widget** for the taskbar and the desktop: every port a program on this computer listens on, and whether it can only be reached from here (**Local**), from a private network (**LAN**) or from every network the computer is on (**Public**). On the taskbar a network socket in the colour of the widest of them and "2 public · 9 local"; a click opens a flyout with each port, its program, protocol and address and a badge of how far it reaches, in the look of every theme.
