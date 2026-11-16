@@ -75,6 +75,8 @@ struct info_row {
 	// a word in a pill at the right end, in a color of its kind (the ports' scopes)
 	char badge[16];
 	enum { BADGE_NONE, BADGE_GOOD, BADGE_WARN, BADGE_BAD } badge_kind;
+	// a click opens a menu the source makes from this (source->row_menu), "" for none
+	char menu_key[96];
 };
 
 struct info_action {
@@ -89,6 +91,8 @@ struct info_source {
 	void (*sample)(struct info_flyout *f);
 	void (*free_state)(void *state);
 	int width; // of the flyout, 0 for WIDTH
+	// the menu of a row with a menu_key, made when it is clicked (menu_items_free)
+	list_t *(*row_menu)(struct info_flyout *f, const struct info_row *row);
 };
 
 struct info_flyout {
@@ -1298,6 +1302,10 @@ static void ports_sample(struct info_flyout *f) {
 				e->any ? "all addresses" : e->address);
 			struct info_row *row = add_row(f, label, value);
 			if (row) {
+				// port, protocol, process (0: not ours), address, how far, program
+				snprintf(row->menu_key, sizeof(row->menu_key), "%u %s %d %s %d %s", e->port,
+					e->tcp ? "tcp" : "udp", e->uid == getuid() ? e->pid : 0,
+					e->any || !e->address[0] ? "-" : e->address, (int)e->scope, name);
 				snprintf(row->badge, sizeof(row->badge), "%s", tw_port_scope_name(e->scope));
 				row->badge_kind = e->scope == TW_PORT_PUBLIC ? BADGE_BAD :
 					e->scope == TW_PORT_LAN ? BADGE_WARN : BADGE_GOOD;
@@ -1328,19 +1336,78 @@ static void ports_sample(struct info_flyout *f) {
 	free(settings);
 }
 
+static void menu_add(list_t *items, const char *label, const char *command) {
+	list_add(items, menu_item_new(label, command));
+}
+
+static void menu_separator(list_t *items) {
+	struct menu_item *sep = menu_item_new(NULL, NULL);
+	sep->separator = true;
+	list_add(items, sep);
+}
+
+/* What can be done with a port: open, copy, allow or block, end its program. */
+static list_t *ports_row_menu(struct info_flyout *f, const struct info_row *row) {
+	unsigned port = 0;
+	char proto[8] = "", address[64] = "", name[64] = "";
+	int pid = 0, scope = 0;
+	if (sscanf(row->menu_key, "%u %7s %d %63s %d %63[^\n]", &port, proto, &pid, address,
+			&scope, name) < 5) {
+		return NULL;
+	}
+	bool tcp = strcmp(proto, "tcp") == 0;
+	bool v6 = strchr(address, ':') != NULL;
+	char host[80];
+	snprintf(host, sizeof(host), strcmp(address, "-") == 0 ? "localhost" : v6 ? "[%s]" : "%s",
+		address);
+	list_t *items = create_list();
+	char cmd[256], label[128];
+	if (tcp) {
+		snprintf(cmd, sizeof(cmd), "exec xdg-open http://%s:%u/", host, port);
+		menu_add(items, "Open in browser", cmd);
+	}
+	snprintf(cmd, sizeof(cmd), "panel ports copy %s:%u", host, port);
+	menu_add(items, "Copy address", cmd);
+	enum portguard_verdict v = scope != TW_PORT_LOCAL ? portguard_verdict(port, tcp) : PG_NONE;
+	if (v != PG_NONE) {
+		menu_separator(items);
+		snprintf(cmd, sizeof(cmd), "panel ports allow %u %s", port, proto);
+		menu_add(items, "Allow everywhere", cmd);
+		const char *network = portguard_network_name();
+		if (network && *network) {
+			snprintf(label, sizeof(label), "Allow only on “%s”", network);
+			snprintf(cmd, sizeof(cmd), "panel ports network %u %s", port, proto);
+			menu_add(items, label, cmd);
+		}
+		snprintf(cmd, sizeof(cmd), "panel ports once %u %s", port, proto);
+		menu_add(items, "Allow this time only", cmd);
+		snprintf(cmd, sizeof(cmd), "panel ports block %u %s", port, proto);
+		menu_add(items, "Block", cmd);
+		snprintf(cmd, sizeof(cmd), "panel ports forget %u %s", port, proto);
+		menu_add(items, "Ask again", cmd);
+	}
+	if (pid > 0) {
+		menu_separator(items);
+		snprintf(label, sizeof(label), "End %s", name);
+		snprintf(cmd, sizeof(cmd), "exec kill %d", pid);
+		menu_add(items, label, cmd);
+	}
+	return items;
+}
+
 static const struct info_source sources[] = {
-	{ "disk", 1000, disk_sample, free, 0 },
-	{ "gpu", 1000, gpu_sample, gpu_free, 0 },
-	{ "net", 1000, net_sample, net_free, 0 },
-	{ "storage", 5000, storage_sample, free, 0 },
-	{ "power", 1000, power_sample, free, 0 },
-	{ "keyboard", 0, keyboard_sample, free, 0 },
-	{ "title", 1000, title_sample, free, 0 },
-	{ "custom", 1000, custom_sample, free, 0 },
-	{ "git", 2000, git_sample, git_free, 0 },
-	{ "claude", 5000, claude_sample, free, 0 },
-	{ "kernel", 2000, kernel_sample, free, 0 },
-	{ "ports", 3000, ports_sample, free, 400 }, // the addresses want the room
+	{ "disk", 1000, disk_sample, free, 0, NULL },
+	{ "gpu", 1000, gpu_sample, gpu_free, 0, NULL },
+	{ "net", 1000, net_sample, net_free, 0, NULL },
+	{ "storage", 5000, storage_sample, free, 0, NULL },
+	{ "power", 1000, power_sample, free, 0, NULL },
+	{ "keyboard", 0, keyboard_sample, free, 0, NULL },
+	{ "title", 1000, title_sample, free, 0, NULL },
+	{ "custom", 1000, custom_sample, free, 0, NULL },
+	{ "git", 2000, git_sample, git_free, 0, NULL },
+	{ "claude", 5000, claude_sample, free, 0, NULL },
+	{ "kernel", 2000, kernel_sample, free, 0, NULL },
+	{ "ports", 3000, ports_sample, free, 400, ports_row_menu }, // the addresses want the room
 };
 
 /* ---------- drawing ---------- */
@@ -1589,7 +1656,7 @@ static void info_render(struct popup *p, cairo_t *cr) {
 				continue;
 			}
 			struct pbox box = { x0 - 6, y, cw + 12, h };
-			if (row->command) {
+			if (row->command || row->menu_key[0]) {
 				if (hovered(f, box)) {
 					fill_hover(cr, &st, box);
 				}
@@ -1746,7 +1813,18 @@ static void info_button(struct popup *p, double x, double y, uint32_t button, bo
 	if (!hs) {
 		return;
 	}
-	if (hs->kind == HS_ROW && hs->id < f->row_count && f->rows[hs->id].command) {
+	if (hs->kind == HS_ROW && hs->id < f->row_count && f->rows[hs->id].menu_key[0] &&
+			f->source->row_menu) {
+		list_t *items = f->source->row_menu(f, &f->rows[hs->id]);
+		if (items) {
+			struct popup_anchor anchor = {
+				.output = f->anchor.output,
+				.x = p->x + (int)x,
+				.y = p->y + (int)y,
+			};
+			menu_open(f->panel, items, true, anchor, NULL);
+		}
+	} else if (hs->kind == HS_ROW && hs->id < f->row_count && f->rows[hs->id].command) {
 		bar_run_command(f->panel, f->rows[hs->id].command, NULL);
 		popup_close_later(f->panel);
 	} else if (hs->kind == HS_ACTION && hs->id < f->action_count) {

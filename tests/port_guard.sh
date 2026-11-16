@@ -49,6 +49,8 @@ cat $work/answer
 EOT
 chmod +x "$work/helper" "$work/dialog"
 export TILEWIN_PORTS_GUARD=$work/helper TILEWIN_DIALOG=$work/dialog
+# the network the computer is on, instead of NetworkManager's
+export TILEWIN_PORTS_NETWORK="0b6f-test Home net"
 
 failures=0
 fail() {
@@ -76,6 +78,8 @@ print(s.getsockname()[1], flush=True)
 time.sleep(600)
 EOT
 cp "$work/server.py" "$work/other.py"
+cp "$work/server.py" "$work/once.py"
+cp "$work/server.py" "$work/home.py"
 serve() { # script: starts it, sets port
 	python3 "$1" > "$work/port.out" &
 	servers+=($!)
@@ -83,7 +87,8 @@ serve() { # script: starts it, sets port
 	port=$(cat "$work/port.out")
 	rm -f "$work/port.out"
 }
-questions() { ls "$work"/question.* 2>/dev/null | wc -l; }
+# the questions about the test's own servers (other programs of the user may listen too)
+questions() { grep -l "$work/server.py" "$work"/question.* 2>/dev/null | wc -l; }
 
 cat > "$work/tilewin.conf" <<EOT
 wallpaper solid #204070
@@ -112,6 +117,18 @@ wait_until 10 grep -q "^apply $first -\$" "$work/applied" ||
 	fail "the port of the program allowed did not go to the helper"
 [ "$(questions)" -eq 1 ] || fail "not asked once about the new program ($(questions))"
 grep -q "Allow python3" "$work"/question.* || fail "the question does not name the program"
+# the question reads as tilewin-dialog reads it: the explanation too
+if python3 -c 'import gi' 2>/dev/null; then
+	python3 -I -c '
+import sys
+from gi.repository import GLib
+for f in sys.argv[1:]:
+    k = GLib.KeyFile()
+    k.load_from_file(f, 0)
+    assert "listens on port" in k.get_string("dialog", "secondary")
+    assert len(k.get_string_list("dialog", "labels")) == len(k.get_string_list("dialog", "responses"))
+' "$work"/question.* || fail "tilewin-dialog cannot read the question"
+fi
 grep -q "^allow .*python3.* $work/server.py\$" "$XDG_CONFIG_HOME/tileWin/ports.conf" ||
 	fail "the answer was not kept for the script"
 
@@ -129,16 +146,53 @@ wait_until 10 grep -q "^apply $second -\$" "$work/applied" ||
 echo 2 > "$work/answer"
 serve "$work/other.py"
 blocked=$port
-wait_until 10 sh -c "[ \$(ls $work/question.* | wc -l) -eq 2 ]" ||
+wait_until 10 sh -c "grep -q '$work/other.py' $work/question.*" ||
 	fail "not asked about the other script"
 wait_until 10 grep -q "^block .* $work/other.py\$" "$XDG_CONFIG_HOME/tileWin/ports.conf" ||
 	fail "the block was not kept"
 sleep 3
 grep -q "$blocked" "$work/applied" && fail "the port of the program blocked went to the helper"
 
+# "This time only": let in now, asked again when it starts again
+echo 4 > "$work/answer"
+serve "$work/once.py"
+once=$port
+wait_until 10 sh -c "grep -q '^apply .*$once' '$work/applied'" || fail "this time only did not let it in"
+grep -q "once.py" "$XDG_CONFIG_HOME/tileWin/ports.conf" && fail "this time only was kept"
+kill "${servers[-1]}"
+serve "$work/once.py"
+wait_until 10 sh -c "[ \$(grep -l '$work/once.py' $work/question.* | wc -l) -eq 2 ]" ||
+	fail "a program let in this time only was not asked about again"
+
+# only on this network
+echo 3 > "$work/answer"
+serve "$work/home.py"
+home=$port
+wait_until 10 grep -q "^allow@0b6f-test .*$work/home.py\$" "$XDG_CONFIG_HOME/tileWin/ports.conf" ||
+	fail "the answer for this network was not kept"
+grep -q "^network 0b6f-test Home net\$" "$XDG_CONFIG_HOME/tileWin/ports.conf" ||
+	fail "the name of the network was not kept"
+grep -q 'Only on “Home net”' "$work"/question.* || fail "the question did not offer this network"
+wait_until 10 sh -c "tail -n 1 '$work/applied' | grep -q '$home'" ||
+	fail "the program allowed on this network was not let in"
+
+# the menu of the flyout: Block it everywhere
+ipc panel ports block "$home" tcp >/dev/null 2>&1
+wait_until 10 sh -c "tail -n 1 '$work/applied' | grep -qv '$home'" ||
+	fail "Block from the menu did not shut it out"
+grep -q "^block .*$work/home.py\$" "$XDG_CONFIG_HOME/tileWin/ports.conf" &&
+	! grep -q "^allow@0b6f-test .*home.py" "$XDG_CONFIG_HOME/tileWin/ports.conf" ||
+	fail "Block from the menu did not replace the answer for this network"
+
+# what the settings see
+status=$XDG_RUNTIME_DIR/tilewin-ports-guard-$(cat "$work/display").status
+[ "$(head -n 1 "$status" 2>/dev/null)" = on ] || fail "the status for the settings is not on"
+
 # switched off: the table goes
 sed -i 's/^guard yes$/guard no/' "$XDG_CONFIG_HOME/tileWin/ports.conf"
 wait_until 10 grep -q '^stop$' "$work/applied" || fail "switching the guard off did not stop it"
+wait_until 5 sh -c "[ \"\$(head -n 1 '$status')\" = off ]" || fail "the status did not say off"
+rm -f "$status"
 
 pgrep -f "^$panel" >/dev/null || fail "the panel is gone"
 if [ "$failures" -gt 0 ]; then

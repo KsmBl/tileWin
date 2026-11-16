@@ -5,6 +5,7 @@
 #include "draw.h"
 #include "log.h"
 #include "panel.h"
+#include "portguard.h"
 #include "stringop.h"
 #include "tw_paths.h"
 #include "tw_widgets.h"
@@ -679,6 +680,12 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		struct popup_anchor anchor = popup_anchor_for_bar(output->bar, output->width, 0);
 		anchor.right_align = true;
 		calendar_toggle(panel, anchor, NULL);
+	} else if (strcmp(cmd, "ports") == 0 && argc > 1) {
+		if (strcmp(argv[1], "copy") == 0 && argc > 2) {
+			clipboard_copy_text(panel, argv[2]); // from the menu of the Open ports flyout
+		} else {
+			portguard_command(argc - 1, argv + 1);
+		}
 	} else if (strcmp(cmd, "clipboard") == 0) {
 		clipboard_toggle(panel, output);
 	} else if (strcmp(cmd, "emoji") == 0) {

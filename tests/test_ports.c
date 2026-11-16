@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "tw_portrules.h"
 #include "tw_ports.h"
 
 static int failures;
@@ -160,6 +161,45 @@ int main(void) {
 	tw_ports_read_from(&none, "/nonexistent", true);
 	CHECK(none.count == 0 && none.temporary == 0, "no ports without /proc/net");
 	tw_ports_free(&none);
+
+	// ports.conf: the answers for each program, everywhere or on one network
+	put("/ports.conf", "# a comment\nguard yes\nnetwork 0b6f-1 Home net\n"
+		"allow /usr/bin/python3 -m http.server\nblock /opt/x/server\n"
+		"allow@0b6f-1 /opt/x/server\nallowed /not/a/rule\nblock@ /no/network\n");
+	char conf[512];
+	snprintf(conf, sizeof(conf), "%s/ports.conf", root);
+	struct tw_port_rules r = { 0 };
+	CHECK(tw_port_rules_read(&r, conf), "ports.conf is read");
+	CHECK(r.guard, "the guard is on");
+	CHECK(r.count == 3, "three answers, not %d", r.count);
+	const struct tw_port_rule *rule = tw_port_rules_find(&r, "/opt/x/server", NULL);
+	CHECK(rule && !rule->allow, "blocked everywhere");
+	rule = tw_port_rules_find(&r, "/opt/x/server", "0b6f-1");
+	CHECK(rule && rule->allow && rule->network, "allowed on the home network");
+	rule = tw_port_rules_find(&r, "/opt/x/server", "other");
+	CHECK(rule && !rule->allow, "blocked on another network");
+	CHECK(tw_port_rules_find(&r, "/usr/bin/python3 -m http.server", "0b6f-1")->allow,
+		"a program with arguments is found");
+	CHECK(!tw_port_rules_find(&r, "/usr/bin/python3", NULL), "not by its interpreter alone");
+	CHECK(strcmp(tw_port_rules_network_name(&r, "0b6f-1"), "Home net") == 0,
+		"the network keeps its name");
+	tw_port_rules_set(&r, "/opt/x/server", NULL, true);
+	tw_port_rules_forget(&r, "/opt/x/server", "0b6f-1");
+	tw_port_rules_set(&r, "/new prog", "0b6f-1", false);
+	r.guard = false;
+	CHECK(tw_port_rules_write(&r, conf), "ports.conf is written");
+	struct tw_port_rules again = { 0 };
+	tw_port_rules_read(&again, conf);
+	CHECK(!again.guard && again.count == 3, "written and read again (%d)", again.count);
+	rule = tw_port_rules_find(&again, "/opt/x/server", "0b6f-1");
+	CHECK(rule && rule->allow && !rule->network, "the answer for everywhere now holds there too");
+	rule = tw_port_rules_find(&again, "/new prog", "0b6f-1");
+	CHECK(rule && !rule->allow, "a program with a space in its name");
+	CHECK(tw_port_rules_network_name(&again, "0b6f-1") != NULL, "the network's name was kept");
+	tw_port_rules_free(&again);
+	tw_port_rules_free(&r);
+	CHECK(!tw_port_rules_read(&r, "/nonexistent/ports.conf") && !r.guard && r.count == 0,
+		"no file: off, no answers");
 
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
 	if (system(cmd) != 0) {

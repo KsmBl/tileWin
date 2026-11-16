@@ -20,5 +20,9 @@ void portguard_fini(void);
 bool portguard_active(void);
 /* What the guard does to a port the user's program listens on. */
 enum portguard_verdict portguard_verdict(unsigned port, bool tcp);
+/* The name of the network the computer is on, NULL for none. */
+const char *portguard_network_name(void);
+/* "panel ports allow|block|once|network|forget PORT tcp|udp" for the program on that port. */
+void portguard_command(int argc, char **argv);
 
 #endif

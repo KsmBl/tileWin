@@ -4,21 +4,22 @@
  * first, as Windows' firewall asks "Allow access?". Until then
  * tilewin-ports-guard (pkexec, the only part that runs as root) keeps other
  * computers from connecting to it; the program itself runs on and this
- * computer reaches it as before.
+ * computer reaches it as before. Off until switched on in the settings.
  *
  * The answer is kept for the program, not for the port or the process, so a
  * program stopped and started again (on another port too) is not asked about
  * twice: its executable, and for an interpreter (python3, node, java, ...) the
  * script or module it runs, so allowing one Python server does not allow
- * every one. ~/.config/tileWin/ports.conf:
+ * every one. It is kept everywhere or for the network the computer is on (the
+ * NetworkManager connection with the default route), in ports.conf
+ * (tw_portrules.h). "This time only" lets the program in until it ends.
+ * Closing the question without an answer blocks it until it starts again.
  *
- *   guard yes|no   (no by default; switched on the Network page of the settings)
- *   allow /usr/bin/python3 -m http.server
- *   block /home/me/bin/server
- *
- * Closing the question without an answer blocks the program until it starts
- * again, when it is asked once more. It looks every two seconds, at /proc/net
- * alone while nothing changes there.
+ * It looks every two seconds, at /proc/net alone while nothing changes there,
+ * and at the network every ten. What it does is written to
+ * $XDG_RUNTIME_DIR/tilewin-ports-guard-$WAYLAND_DISPLAY.status for the settings ("off", "on",
+ * or "broken" and why on the next line), and a notification says so once
+ * when it cannot work.
  */
 #define _GNU_SOURCE
 #include <ctype.h>
@@ -34,6 +35,7 @@
 #include "panel.h"
 #include "portguard.h"
 #include "tw_paths.h"
+#include "tw_portrules.h"
 #include "tw_ports.h"
 
 #ifndef TILEWIN_LIBEXECDIR
@@ -41,11 +43,7 @@
 #endif
 
 #define TICK_MS 2000
-
-struct rule {
-	char *program;
-	bool allow;
-};
+#define NETWORK_EVERY 5 // ticks between looks at the network
 
 struct question {
 	char *program, *name;
@@ -68,33 +66,28 @@ struct exposed {
 static struct {
 	struct panel *panel;
 	struct loop_timer *timer;
+	struct tw_port_rules rules;
 	bool guard;          // on in ports.conf
 	bool applied;        // the table is there as far as we know
 	bool broken;         // the helper failed: tried again only when ports.conf changes
-	time_t conf_mtime;
-	GPtrArray *rules;    // struct rule *
+	char *why;           // what failed
+	bool told;           // the notification about it was shown
+	struct timespec conf_mtime; // and its size: a change in the same second shows too
+	off_t conf_size;
+	bool conf_read;
 	GPtrArray *dismissed; // "pid program": closed without an answer, while it runs
+	GPtrArray *once;     // "pid program": allowed this time only, while it runs
 	GPtrArray *queue;    // struct question *, the first one on the screen
-	struct proc *asking, *applying;
+	struct proc *asking, *applying, *networking;
 	bool apply_again;
 	char *sent;          // the lists last handed to the helper: "TCP UDP"
 	unsigned long last_print;
 	struct exposed *exposed;
 	int exposed_count;
+	char *net_uuid, *net_name; // the network the computer is on, NULL for none
+	int ticks;
+	char *status_written;
 } pg;
-
-static char *conf_path(void) {
-	char *dir = tw_config_dir();
-	char *path = dir ? g_strdup_printf("%s/ports.conf", dir) : NULL;
-	free(dir);
-	return path;
-}
-
-static void rule_free(void *data) {
-	struct rule *r = data;
-	g_free(r->program);
-	g_free(r);
-}
 
 static void question_free(void *data) {
 	struct question *q = data;
@@ -103,91 +96,79 @@ static void question_free(void *data) {
 	g_free(q);
 }
 
+/* ---------- what the settings see ---------- */
+
+static void write_status(void) {
+	const char *runtime = getenv("XDG_RUNTIME_DIR");
+	if (!runtime || !*runtime) {
+		return;
+	}
+	char *text = !pg.guard ? g_strdup("off\n") : pg.broken ?
+		g_strdup_printf("broken\n%s\n", pg.why ? pg.why : "") : g_strdup("on\n");
+	if (pg.status_written && strcmp(pg.status_written, text) == 0) {
+		g_free(text);
+		return;
+	}
+	// one for each session, as the clipboard's socket
+	const char *display = getenv("WAYLAND_DISPLAY");
+	char *path = g_strdup_printf("%s/tilewin-ports-guard-%s.status", runtime,
+		display && *display && !strchr(display, '/') ? display : "wayland");
+	g_file_set_contents(path, text, -1, NULL);
+	g_free(path);
+	g_free(pg.status_written);
+	pg.status_written = text;
+}
+
 /* ---------- ports.conf ---------- */
 
 static bool read_conf(void) {
-	char *path = conf_path();
+	char *path = tw_port_rules_path();
 	struct stat st;
-	time_t mtime = path && stat(path, &st) == 0 ? st.st_mtime : 0;
-	if (pg.rules && mtime == pg.conf_mtime) {
-		g_free(path);
+	bool there = path && stat(path, &st) == 0;
+	struct timespec mtime = there ? st.st_mtim : (struct timespec){ 0 };
+	off_t size = there ? st.st_size : -1;
+	if (pg.conf_read && mtime.tv_sec == pg.conf_mtime.tv_sec &&
+			mtime.tv_nsec == pg.conf_mtime.tv_nsec && size == pg.conf_size) {
+		free(path);
 		return false;
 	}
+	pg.conf_read = true;
 	pg.conf_mtime = mtime;
-	if (pg.rules) {
-		g_ptr_array_free(pg.rules, TRUE);
-	}
-	pg.rules = g_ptr_array_new_with_free_func(rule_free);
-	pg.guard = false; // off until switched on (the Network page of the settings)
-	char *text = NULL;
-	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
-		char **lines = g_strsplit(text, "\n", -1);
-		for (char **l = lines; *l; l++) {
-			char *line = g_strstrip(*l);
-			if (g_str_has_prefix(line, "guard ")) {
-				char *v = g_strstrip(line + 6);
-				pg.guard = strcmp(v, "no") != 0 && strcmp(v, "off") != 0 &&
-					strcmp(v, "false") != 0;
-			} else if (g_str_has_prefix(line, "allow ") || g_str_has_prefix(line, "block ")) {
-				struct rule *r = g_new0(struct rule, 1);
-				r->allow = line[0] == 'a';
-				r->program = g_strdup(g_strstrip(line + 6));
-				g_ptr_array_add(pg.rules, r);
-			}
-		}
-		g_strfreev(lines);
-	}
-	g_free(text);
-	g_free(path);
+	pg.conf_size = size;
+	tw_port_rules_read(&pg.rules, path); // none: off, no answers
+	pg.guard = pg.rules.guard;
+	free(path);
 	return true;
 }
 
-/* Keeps the answer for a program in ports.conf, in place of an older one. */
-static void remember(const char *program, bool allow) {
-	char *path = conf_path();
-	if (!path) {
-		return;
+/* Keeps the answer for a program, everywhere or on the network it is on now. */
+static void remember(const char *program, bool allow, bool this_network) {
+	char *path = tw_port_rules_path();
+	struct tw_port_rules r = { 0 };
+	tw_port_rules_read(&r, path);
+	r.guard = true; // it asks, so it is on
+	const char *network = this_network ? pg.net_uuid : NULL;
+	if (network) {
+		tw_port_rules_name_network(&r, network, pg.net_name ? pg.net_name : network);
 	}
-	char *text = NULL;
-	GString *out = g_string_new(NULL);
-	if (g_file_get_contents(path, &text, NULL, NULL)) {
-		char **lines = g_strsplit(text, "\n", -1);
-		for (char **l = lines; *l; l++) {
-			char *copy = g_strdup(*l);
-			char *line = g_strstrip(copy);
-			bool same = (g_str_has_prefix(line, "allow ") || g_str_has_prefix(line, "block ")) &&
-				strcmp(g_strstrip(line + 6), program) == 0;
-			if (!same && (**l || l[1])) {
-				g_string_append_printf(out, "%s\n", *l);
-			}
-			g_free(copy);
-		}
-		g_strfreev(lines);
-	} else {
-		g_string_append(out, "# Which programs other computers may reach: the answers to tileWin's\n"
-			"# question, for each program (\"guard no\" switches the questions off)\n");
+	tw_port_rules_set(&r, program, network, allow);
+	if (!tw_port_rules_write(&r, path)) {
+		sway_log(SWAY_ERROR, "portguard: cannot write %s", path ? path : "ports.conf");
 	}
-	g_string_append_printf(out, "%s %s\n", allow ? "allow" : "block", program);
-	char *dir = g_path_get_dirname(path);
-	tw_mkdir_p(dir);
-	g_free(dir);
-	if (!g_file_set_contents(path, out->str, out->len, NULL)) {
-		sway_log(SWAY_ERROR, "portguard: cannot write %s", path);
-	}
-	g_string_free(out, TRUE);
-	g_free(text);
-	g_free(path);
-	pg.conf_mtime = -1; // read again
+	tw_port_rules_free(&r);
+	free(path);
+	pg.conf_read = false; // read again
+	read_conf();
 }
 
-static const struct rule *rule_for(const char *program) {
-	for (guint i = 0; pg.rules && i < pg.rules->len; i++) {
-		const struct rule *r = pg.rules->pdata[i];
-		if (strcmp(r->program, program) == 0) {
-			return r;
-		}
+static bool in_list(GPtrArray *list, int pid, const char *program) {
+	char *key = g_strdup_printf("%d %s", pid, program);
+	bool found = false;
+	for (guint i = 0; list && i < list->len && !found; i++) {
+		found = strcmp(list->pdata[i], key) == 0;
 	}
-	return NULL;
+	g_free(key);
+	return found;
 }
 
 /* ---------- which program ---------- */
@@ -272,19 +253,58 @@ static char *program_of(int pid) {
 
 static void apply_ports(void);
 
+/* Why the helper failed, in words, from what it and pkexec said. */
+static char *failure(const char *output) {
+	if (strstr(output, "nft is not installed")) {
+		return g_strdup("nftables is not installed");
+	}
+	if (strstr(output, "tilewin-ports-guard: not found") || strstr(output, "No such file")) {
+		return g_strdup("tilewin-ports-guard is not installed; install tileWin again");
+	}
+	if (strstr(output, "Not authorized") || strstr(output, "dismissed") ||
+			strstr(output, "Request dismissed")) {
+		return g_strdup("the administrator's password was not given");
+	}
+	if (strstr(output, "No authentication agent")) {
+		return g_strdup("no password dialog to ask for the administrator's password");
+	}
+	char *line = g_strdup(output);
+	g_strstrip(line);
+	char *nl = strchr(line, '\n');
+	if (nl) {
+		*nl = '\0';
+	}
+	if (!*line) {
+		g_free(line);
+		return g_strdup("tilewin-ports-guard failed");
+	}
+	return line;
+}
+
 static void applied(void *data, const char *output) {
 	pg.applying = NULL;
 	if (!strstr(output, "tilewin-ports-guard: done")) {
 		if (!pg.broken) {
-			sway_log(SWAY_ERROR, "portguard: tilewin-ports-guard failed; programs on public "
-				"ports are not asked about until ports.conf changes");
+			g_free(pg.why);
+			pg.why = failure(output);
+			sway_log(SWAY_ERROR, "portguard: tilewin-ports-guard failed: %s", pg.why);
+			if (!pg.told) {
+				pg.told = true;
+				char *body = g_strdup_printf("Programs can be reached from other computers "
+					"without being asked about: %s.", pg.why);
+				notify_local(pg.panel, "Open ports", "dialog-warning",
+					"Asking before a program opens a port does not work", body);
+				g_free(body);
+			}
 		}
 		pg.broken = true;
 		g_free(pg.sent);
 		pg.sent = NULL;
+		write_status();
 		return;
 	}
 	pg.applied = pg.guard;
+	write_status();
 	if (pg.apply_again) {
 		pg.apply_again = false;
 		apply_ports();
@@ -301,7 +321,7 @@ static char *helper(void) {
 
 static void run_helper(const char *args) {
 	char *h = helper();
-	char *cmd = g_strdup_printf("%s %s && echo 'tilewin-ports-guard: done'", h, args);
+	char *cmd = g_strdup_printf("%s %s 2>&1 && echo 'tilewin-ports-guard: done'", h, args);
 	pg.applying = proc_run(pg.panel, cmd, false, NULL, applied, NULL);
 	g_free(cmd);
 	g_free(h);
@@ -352,9 +372,68 @@ static void apply_ports(void) {
 	g_free(args);
 }
 
+/* ---------- the network the computer is on ---------- */
+
+/* nmcli: "NAME:UUID:DEFAULT:DEFAULT6" a line for each connection that is up. */
+static void networked(void *data, const char *output) {
+	pg.networking = NULL;
+	char *uuid = NULL, *name = NULL;
+	char **lines = g_strsplit(output, "\n", -1);
+	for (char **l = lines; *l && !uuid; l++) {
+		// the name may hold an escaped colon (\:); the UUID and the rest have none
+		char **f = g_strsplit(*l, ":", -1);
+		int n = g_strv_length(f);
+		if (n >= 4 && (strcmp(f[n - 2], "yes") == 0 || strcmp(f[n - 1], "yes") == 0)) {
+			char *keep = f[n - 3];
+			uuid = g_strdup(keep);
+			f[n - 3] = NULL; // the name: what comes before the UUID
+			char *joined = g_strjoinv(":", f);
+			f[n - 3] = keep;
+			GString *plain = g_string_new(NULL);
+			for (const char *c = joined; *c; c++) {
+				if (*c == '\\' && c[1]) {
+					c++;
+				}
+				g_string_append_c(plain, *c);
+			}
+			name = g_string_free(plain, FALSE);
+			g_free(joined);
+		}
+		g_strfreev(f);
+	}
+	g_strfreev(lines);
+	bool changed = g_strcmp0(uuid, pg.net_uuid) != 0;
+	g_free(pg.net_uuid);
+	g_free(pg.net_name);
+	pg.net_uuid = uuid;
+	pg.net_name = name;
+	if (changed) {
+		pg.last_print = 0; // the answers of another network may hold now
+	}
+}
+
+static void look_at_network(void) {
+	if (pg.networking) {
+		return;
+	}
+	const char *fake = getenv("TILEWIN_PORTS_NETWORK"); // the tests: "UUID NAME"
+	if (fake) {
+		const char *space = strchr(fake, ' ');
+		char *line = space ? g_strdup_printf("%s:%.*s:yes:no\n", space + 1, (int)(space - fake),
+			fake) : g_strdup("");
+		networked(NULL, line);
+		g_free(line);
+		return;
+	}
+	pg.networking = proc_run(pg.panel, "nmcli -t -f NAME,UUID,DEFAULT,DEFAULT6 connection "
+		"show --active 2>/dev/null", false, NULL, networked, NULL);
+}
+
 /* ---------- the question ---------- */
 
 static void ask_next(void);
+
+enum { ANSWER_ALLOW = 1, ANSWER_BLOCK = 2, ANSWER_NETWORK = 3, ANSWER_ONCE = 4 };
 
 static void answered(void *data, const char *output) {
 	pg.asking = NULL;
@@ -362,26 +441,39 @@ static void answered(void *data, const char *output) {
 		return;
 	}
 	struct question *q = pg.queue->pdata[0];
-	int response = atoi(output);
-	if (response == 1 || response == 2) {
-		remember(q->program, response == 1);
-		read_conf();
-	} else {
+	switch (atoi(output)) {
+	case ANSWER_ALLOW:
+		remember(q->program, true, false);
+		break;
+	case ANSWER_NETWORK:
+		remember(q->program, true, true);
+		break;
+	case ANSWER_BLOCK:
+		remember(q->program, false, false);
+		break;
+	case ANSWER_ONCE:
+		g_ptr_array_add(pg.once, g_strdup_printf("%d %s", q->pid, q->program));
+		break;
+	default:
 		// closed: blocked until it starts again
 		g_ptr_array_add(pg.dismissed, g_strdup_printf("%d %s", q->pid, q->program));
+		break;
 	}
 	g_ptr_array_remove_index(pg.queue, 0);
 	pg.last_print = 0; // look again now, with the answer
 	ask_next();
 }
 
-static char *keyfile_escape(const char *text) {
+/* A value of the key file; in a list (the buttons) a ; is escaped too. */
+static char *keyfile_escape(const char *text, bool list) {
 	GString *s = g_string_new(NULL);
 	for (const char *c = text; *c; c++) {
 		if (*c == '\n') {
 			g_string_append(s, "\\n");
 		} else if (*c == '\\') {
 			g_string_append(s, "\\\\");
+		} else if (*c == ';' && list) {
+			g_string_append(s, "\\;");
 		} else {
 			g_string_append_c(s, *c);
 		}
@@ -404,10 +496,27 @@ static void ask_next(void) {
 		"Until you allow it, other computers cannot connect to it; this computer still can. "
 		"The answer is kept for this program, also when it is started again.",
 		q->program, q->port, q->tcp && q->udp ? "TCP and UDP" : q->udp ? "UDP" : "TCP", where);
-	char *t = keyfile_escape(text), *s = keyfile_escape(secondary);
+	char *t = keyfile_escape(text, false), *s = keyfile_escape(secondary, false);
+	// on this network only, when the computer is on one
+	char *net_label = NULL;
+	if (pg.net_name && *pg.net_name) {
+		char *label = g_strdup_printf("Only on “%s”", pg.net_name);
+		// a _ in the name would be taken for the key of the button
+		GString *plain = g_string_new(NULL);
+		for (const char *c = label; *c; c++) {
+			if (*c == '_') {
+				g_string_append_c(plain, '_');
+			}
+			g_string_append_c(plain, *c);
+		}
+		g_free(label);
+		net_label = keyfile_escape(plain->str, true);
+		g_string_free(plain, TRUE);
+	}
 	char *keyfile = g_strdup_printf("[dialog]\ntitle=Open port\ntext=%s\nsecondary=%s\n"
-		"markup=false\nsecondary_markup=false\ntype=warning\nlabels=_Allow;_Block;\n"
-		"responses=1;2;\ndefault=1\n", t, s);
+		"markup=false\nsecondary_markup=false\ntype=warning\n"
+		"labels=_Allow;%s%s_This time only;_Block;\nresponses=1;%s4;2;\ndefault=1\n", t, s,
+		net_label ? net_label : "", net_label ? ";" : "", net_label ? "3;" : "");
 	bool ok = g_file_set_contents(file, keyfile, -1, NULL);
 	if (ok) {
 		chmod(file, 0600);
@@ -419,6 +528,7 @@ static void ask_next(void) {
 		g_free(cmd);
 		g_free(quoted);
 	}
+	g_free(net_label);
 	g_free(keyfile);
 	g_free(t);
 	g_free(s);
@@ -439,16 +549,6 @@ static bool queued(const char *program) {
 		}
 	}
 	return false;
-}
-
-static bool dismissed(int pid, const char *program) {
-	char *key = g_strdup_printf("%d %s", pid, program);
-	bool found = false;
-	for (guint i = 0; pg.dismissed && i < pg.dismissed->len && !found; i++) {
-		found = strcmp(pg.dismissed->pdata[i], key) == 0;
-	}
-	g_free(key);
-	return found;
 }
 
 /* ---------- looking ---------- */
@@ -475,15 +575,31 @@ static unsigned long print_of(const struct tw_ports *p) {
 	return h | 1; // never 0, which means "not looked yet"
 }
 
-static void look(bool conf_changed) {
+/* Forgets what was said for processes that have ended. */
+static void prune(GPtrArray *list) {
+	for (guint i = 0; list && i < list->len;) {
+		int pid = atoi(list->pdata[i]);
+		char path[32];
+		snprintf(path, sizeof(path), "/proc/%d", pid);
+		if (access(path, F_OK) != 0) {
+			g_ptr_array_remove_index(list, i);
+		} else {
+			i++;
+		}
+	}
+}
+
+static void look(bool force) {
 	struct tw_ports p = { 0 };
 	tw_ports_read(&p, false);
 	unsigned long print = print_of(&p);
-	if (print == pg.last_print && !conf_changed) {
+	if (print == pg.last_print && !force) {
 		tw_ports_free(&p);
 		return;
 	}
 	pg.last_print = print;
+	prune(pg.once);
+	prune(pg.dismissed);
 	tw_ports_read(&p, true); // now with the programs
 	clear_exposed();
 	uid_t me = getuid();
@@ -503,26 +619,28 @@ static void look(bool conf_changed) {
 			x->verdict = PG_BLOCKED;
 			continue;
 		}
-		const struct rule *r = rule_for(x->program);
-		if (r) {
+		const struct tw_port_rule *r = tw_port_rules_find(&pg.rules, x->program, pg.net_uuid);
+		if (in_list(pg.once, e->pid, x->program)) {
+			x->verdict = PG_ALLOWED;
+		} else if (r) {
 			x->verdict = r->allow ? PG_ALLOWED : PG_BLOCKED;
-			continue;
-		}
-		x->verdict = PG_ASKING;
-		if (dismissed(e->pid, x->program)) {
+		} else if (in_list(pg.dismissed, e->pid, x->program)) {
 			x->verdict = PG_BLOCKED;
-		} else if (pg.guard && !pg.broken && !queued(x->program)) {
-			struct question *q = g_new0(struct question, 1);
-			q->program = g_strdup(x->program);
-			char name[64];
-			q->name = g_strdup(tw_port_name(e, name, sizeof(name)));
-			q->pid = e->pid;
-			q->port = e->port;
-			q->tcp = e->tcp;
-			q->udp = e->udp;
-			q->any = e->any;
-			snprintf(q->address, sizeof(q->address), "%s", e->address);
-			g_ptr_array_add(pg.queue, q);
+		} else {
+			x->verdict = PG_ASKING;
+			if (pg.guard && !pg.broken && !queued(x->program)) {
+				struct question *q = g_new0(struct question, 1);
+				q->program = g_strdup(x->program);
+				char name[64];
+				q->name = g_strdup(tw_port_name(e, name, sizeof(name)));
+				q->pid = e->pid;
+				q->port = e->port;
+				q->tcp = e->tcp;
+				q->udp = e->udp;
+				q->any = e->any;
+				snprintf(q->address, sizeof(q->address), "%s", e->address);
+				g_ptr_array_add(pg.queue, q);
+			}
 		}
 	}
 	tw_ports_free(&p);
@@ -536,12 +654,17 @@ static void tick(void *data) {
 	bool changed = read_conf();
 	if (changed) {
 		pg.broken = false; // ports.conf changed: try the helper again
+		pg.told = false;
 		if (was_guarded != pg.guard) {
 			g_free(pg.sent);
 			pg.sent = NULL;
 		}
 	}
+	if (pg.guard && pg.ticks++ % NETWORK_EVERY == 0) {
+		look_at_network();
+	}
 	look(changed);
+	write_status();
 	pg.timer = loop_add_timer_lazy(pg.panel->loop, TICK_MS, tick, NULL);
 }
 
@@ -552,8 +675,8 @@ void portguard_init(struct panel *panel) {
 	}
 	pg.panel = panel;
 	pg.dismissed = g_ptr_array_new_with_free_func(g_free);
+	pg.once = g_ptr_array_new_with_free_func(g_free);
 	pg.queue = g_ptr_array_new_with_free_func(question_free);
-	read_conf();
 	// on: the table at once, with no port allowed yet; the next look opens those allowed.
 	// Off: nothing is asked of pkexec at all
 	tick(NULL);
@@ -568,13 +691,17 @@ void portguard_fini(void) {
 	}
 	proc_cancel(pg.asking);
 	proc_cancel(pg.applying);
+	proc_cancel(pg.networking);
 	clear_exposed();
-	if (pg.rules) {
-		g_ptr_array_free(pg.rules, TRUE);
-	}
+	tw_port_rules_free(&pg.rules);
 	g_ptr_array_free(pg.dismissed, TRUE);
+	g_ptr_array_free(pg.once, TRUE);
 	g_ptr_array_free(pg.queue, TRUE);
 	g_free(pg.sent);
+	g_free(pg.why);
+	g_free(pg.net_uuid);
+	g_free(pg.net_name);
+	g_free(pg.status_written);
 	memset(&pg, 0, sizeof(pg));
 }
 
@@ -582,15 +709,68 @@ bool portguard_active(void) {
 	return pg.panel && pg.guard && !pg.broken;
 }
 
+static const struct exposed *exposed_at(unsigned port, bool tcp) {
+	for (int i = 0; i < pg.exposed_count; i++) {
+		const struct exposed *e = &pg.exposed[i];
+		if (e->port == port && (tcp ? e->tcp : e->udp)) {
+			return e;
+		}
+	}
+	return NULL;
+}
+
 enum portguard_verdict portguard_verdict(unsigned port, bool tcp) {
 	if (!portguard_active()) {
 		return PG_NONE;
 	}
-	for (int i = 0; i < pg.exposed_count; i++) {
-		const struct exposed *e = &pg.exposed[i];
-		if (e->port == port && (tcp ? e->tcp : e->udp)) {
-			return e->verdict;
-		}
+	const struct exposed *e = exposed_at(port, tcp);
+	return e ? e->verdict : PG_NONE;
+}
+
+const char *portguard_network_name(void) {
+	return pg.net_name;
+}
+
+/* "ports allow|block|once|network|forget PORT tcp|udp", from the menu of the flyout. */
+void portguard_command(int argc, char **argv) {
+	if (!pg.panel || argc < 3) {
+		return;
 	}
-	return PG_NONE;
+	const char *what = argv[0];
+	const struct exposed *e = exposed_at((unsigned)atoi(argv[1]), strcmp(argv[2], "udp") != 0);
+	if (!e || !e->program) {
+		return;
+	}
+	char *program = g_strdup(e->program);
+	int pid = e->pid;
+	if (strcmp(what, "allow") == 0 || strcmp(what, "block") == 0) {
+		// everywhere, this network too: its own answer would win
+		if (pg.net_uuid) {
+			char *path = tw_port_rules_path();
+			struct tw_port_rules r = { 0 };
+			tw_port_rules_read(&r, path);
+			tw_port_rules_forget(&r, program, pg.net_uuid);
+			tw_port_rules_write(&r, path);
+			tw_port_rules_free(&r);
+			free(path);
+		}
+		remember(program, what[0] == 'a', false);
+	} else if (strcmp(what, "network") == 0 && pg.net_uuid) {
+		remember(program, true, true);
+	} else if (strcmp(what, "once") == 0) {
+		g_ptr_array_add(pg.once, g_strdup_printf("%d %s", pid, program));
+	} else if (strcmp(what, "forget") == 0) {
+		char *path = tw_port_rules_path();
+		struct tw_port_rules r = { 0 };
+		tw_port_rules_read(&r, path);
+		tw_port_rules_forget(&r, program, NULL);
+		tw_port_rules_forget(&r, program, pg.net_uuid);
+		tw_port_rules_write(&r, path);
+		tw_port_rules_free(&r);
+		free(path);
+		pg.conf_read = false;
+		read_conf();
+	}
+	g_free(program);
+	look(true);
 }
