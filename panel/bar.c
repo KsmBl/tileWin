@@ -626,6 +626,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		} else if (output && (!open || strcmp(action, "search") == 0)) {
 			startmenu_toggle(panel, output, strcmp(action, "search") == 0);
 		}
+	} else if (strcmp(cmd, "command") == 0) {
+		command_center_toggle(panel, panel_main_output(panel));
 	} else if (strcmp(cmd, "launcher") == 0) {
 		if (output) {
 			launcher_toggle(panel, output);

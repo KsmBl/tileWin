@@ -37,6 +37,7 @@ executable(
 		'shortcuts.c',
 		'shortcuts_text.c',
 		'clipboard.c',
+		'commandcenter.c',
 		'config.c',
 		'desktop.c',
 		'deskprops.c',

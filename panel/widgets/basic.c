@@ -410,8 +410,14 @@ const struct widget_impl widget_showdesktop = {
 
 /* ================= search box ================= */
 
+/* A field with its words (Windows 10, and themes that ask: "search.style box"), or a button. */
+static bool search_box(struct render_ctx *ctx) {
+	const char *style = tw_theme_str(ctx->panel->theme, "search.style", NULL);
+	return style ? strcmp(style, "box") == 0 : ctx->style == PSV_FLAT;
+}
+
 static int search_measure(struct widget *w, struct render_ctx *ctx) {
-	if (ctx->style == PSV_FLAT) {
+	if (search_box(ctx)) {
 		return widget_conf_int(w, "width", tw_theme_int(ctx->panel->theme, "search.width", 300));
 	}
 	return widget_conf_int(w, "width", ctx->style == PSV_FLUENT ? 44 :
@@ -421,11 +427,21 @@ static int search_measure(struct widget *w, struct render_ctx *ctx) {
 static void search_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
 	cairo_t *cr = ctx->cairo;
 	const struct tw_theme *t = ctx->panel->theme;
-	if (ctx->style == PSV_FLAT && b.width > 80) {
+	if (search_box(ctx) && b.width > 80) {
 		bool hover = render_hover(ctx, b);
-		pd_rect(cr, b.x, b.y, b.width, b.height, hover ?
-			tw_theme_color(t, "search.hover_bg", 0xffffffff) :
-			tw_theme_color(t, "search.bg", 0xf2f2f2ff));
+		uint32_t bg = hover ? tw_theme_color(t, "search.hover_bg", 0xffffffff) :
+			tw_theme_color(t, "search.bg", 0xf2f2f2ff);
+		int radius = tw_theme_int(t, "search.radius", 0);
+		if (radius > 0) {
+			// a pill inside the bar
+			int inset = tw_theme_int(t, "search.inset", 6);
+			double h = b.height - 2 * inset;
+			pd_rounded(cr, b.x, b.y + inset, b.width, h, radius > h / 2 ? h / 2 : radius);
+			pd_color(cr, bg);
+			cairo_fill(cr);
+		} else {
+			pd_rect(cr, b.x, b.y, b.width, b.height, bg);
+		}
 		uint32_t fg = tw_theme_color(t, "search.fg", 0x6b6b6bff);
 		pd_glyph_search(cr, b.x + 12, b.y + (b.height - 16) / 2.0, 16,
 			tw_theme_color(t, "search.glyph", 0x000000ff));

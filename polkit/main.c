@@ -1658,7 +1658,7 @@ static enum era era_of(const struct tw_theme *t) {
 		{ "win1", ERA_WIN1 }, { "win3", ERA_WIN3 }, { "win31", ERA_WIN3 },
 		{ "win95", ERA_WIN95 }, { "classic", ERA_WIN95 }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
-		{ "win8", ERA_WIN8 }, { "metro", ERA_WIN8 }, { "win11", ERA_WIN11 },
+		{ "win8", ERA_WIN8 }, { "metro", ERA_WIN8 }, { "win11", ERA_WIN11 }, { "cc", ERA_WIN11 },
 		{ "fluent", ERA_WIN11 },
 	};
 	for (size_t i = 0; i < sizeof(eras) / sizeof(eras[0]); i++) {
