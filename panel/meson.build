@@ -74,6 +74,7 @@ executable(
 		'tooltip.c',
 		'trayicons.c',
 		'wayland.c',
+		'whatsnew.c',
 		'widgets/basic.c',
 		'widgets/workspaces.c',
 		'widgets/custom.c',

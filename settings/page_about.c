@@ -10,6 +10,7 @@
 #include "tw_paths.h"
 #include "tw_theme.h"
 #include "tilewin-version.h"
+#include "tw_news.h"
 
 /*
  * About page: what a fetch tool prints in a terminal, laid out as a page
@@ -478,6 +479,67 @@ static void on_copy(GtkButton *button, gpointer data) {
 	settings_status(p->s, "The whole page was copied");
 }
 
+/* A change of NEWS.md as Pango markup: **bold** and `code`, the rest as it is. */
+static char *news_markup(const char *item) {
+	GString *out = g_string_new(NULL);
+	bool bold = false, code = false;
+	for (const char *c = item; *c;) {
+		if (c[0] == '*' && c[1] == '*') {
+			g_string_append(out, bold ? "</b>" : "<b>");
+			bold = !bold;
+			c += 2;
+		} else if (*c == '`') {
+			g_string_append(out, code ? "</tt>" : "<tt>");
+			code = !code;
+			c++;
+		} else {
+			const char *end = c + 1;
+			while (*end && *end != '`' && !(end[0] == '*' && end[1] == '*')) {
+				end++;
+			}
+			char *escaped = g_markup_escape_text(c, end - c);
+			g_string_append(out, escaped);
+			g_free(escaped);
+			c = end;
+		}
+	}
+	if (code) {
+		g_string_append(out, "</tt>");
+	}
+	if (bold) {
+		g_string_append(out, "</b>");
+	}
+	return g_string_free(out, FALSE);
+}
+
+/* What this release brought, from NEWS.md: the taskbar points here after an update. */
+static void news_group_new(GtkWidget *content) {
+	char release[32];
+	tw_news_release(SWAY_VERSION, release, sizeof(release));
+	char **items = tw_news_items(NULL, release);
+	if (!items || !items[0]) {
+		tw_news_free(items);
+		return;
+	}
+	char *title = g_strdup_printf("What's new in %s", release);
+	GtkWidget *group = ui_group(content, title, NULL);
+	g_free(title);
+	for (char **i = items; *i; i++) {
+		char *markup = news_markup(*i);
+		GtkWidget *label = gtk_label_new(NULL);
+		gtk_label_set_markup(GTK_LABEL(label), markup);
+		gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		gtk_widget_set_margin_start(label, 14);
+		gtk_widget_set_margin_end(label, 14);
+		gtk_widget_set_margin_top(label, 10);
+		gtk_widget_set_margin_bottom(label, 10);
+		gtk_list_box_append(GTK_LIST_BOX(group), label);
+		g_free(markup);
+	}
+	tw_news_free(items);
+}
+
 GtkWidget *about_page_new(struct settings *s) {
 	struct about_page *p = g_new0(struct about_page, 1);
 	p->s = s;
@@ -525,6 +587,7 @@ GtkWidget *about_page_new(struct settings *s) {
 		pretty ? pretty : "Linux", SWAY_VERSION);
 
 	updates_group_new(s, content);
+	news_group_new(content);
 
 	struct utsname un;
 	bool have_uname = uname(&un) == 0;

@@ -67,6 +67,7 @@ enum close_reason {
 
 struct n_action {
 	char *key, *label;
+	char *command; // a notification of the taskbar's own runs this instead of telling an app
 };
 
 struct notification {
@@ -288,6 +289,7 @@ static void free_actions(list_t *actions) {
 		struct n_action *a = actions->items[i];
 		free(a->key);
 		free(a->label);
+		free(a->command);
 		free(a);
 	}
 	list_free(actions);
@@ -559,9 +561,19 @@ static void focus_app(struct notification *n) {
 }
 
 /* Clicked: the app shows it, and it leaves the list like on Windows. */
+static void run_local_action(struct notification *n, const char *key) {
+	for (int i = 0; n->actions && i < n->actions->length; i++) {
+		struct n_action *a = n->actions->items[i];
+		if (a->command && strcmp(a->key, key) == 0) {
+			bar_run_command(nt.panel, a->command, NULL);
+		}
+	}
+}
+
 static void activate(struct notification *n) {
 	if (has_default_action(n)) {
 		emit_action(n, "default");
+		run_local_action(n, "default");
 	}
 	focus_app(n);
 	remove_item(n, CLOSED_DISMISSED);
@@ -573,6 +585,9 @@ static void invoke_action(struct notification *n, int index) {
 		return;
 	}
 	emit_action(n, a->key);
+	if (a->command) {
+		bar_run_command(nt.panel, a->command, NULL);
+	}
 	remove_item(n, CLOSED_DISMISSED);
 }
 
@@ -1074,8 +1089,18 @@ static uint32_t add_notification(uint32_t replaces, struct notification *fields)
 	return id;
 }
 
+static void local_notification_with(const char *app_name, const char *icon,
+		const char *summary, const char *body, int urgency, const char *const *labels,
+		const char *const *commands);
+
 static void local_notification(const char *app_name, const char *icon, const char *summary,
 		const char *body, int urgency) {
+	local_notification_with(app_name, icon, summary, body, urgency, NULL, NULL);
+}
+
+static void local_notification_with(const char *app_name, const char *icon,
+		const char *summary, const char *body, int urgency, const char *const *labels,
+		const char *const *commands) {
 	if (!nt.items) {
 		return;
 	}
@@ -1090,7 +1115,23 @@ static void local_notification(const char *app_name, const char *icon, const cha
 	n->summary = strdup(summary ? summary : "");
 	n->body = strdup(body ? body : "");
 	n->actions = create_list();
+	// labels[0] is what a click on the notification does ("default"), the rest buttons
+	for (int i = 0; labels && commands && labels[i] && commands[i]; i++) {
+		struct n_action *a = calloc(1, sizeof(*a));
+		char key[16];
+		snprintf(key, sizeof(key), "local%d", i);
+		a->key = strdup(i == 0 ? "default" : key);
+		a->label = strdup(labels[i]);
+		a->command = strdup(commands[i]);
+		list_add(n->actions, a);
+	}
 	add_notification(0, n);
+}
+
+void notify_local_with_actions(struct panel *panel, const char *app_name, const char *icon,
+		const char *summary, const char *body, const char *const *labels,
+		const char *const *commands) {
+	local_notification_with(app_name, icon, summary, body, 1, labels, commands);
 }
 
 void notify_local(struct panel *panel, const char *app_name, const char *icon,

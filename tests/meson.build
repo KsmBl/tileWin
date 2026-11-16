@@ -60,6 +60,18 @@ test(
 )
 
 test(
+	'news',
+	executable(
+		'test-news',
+		'test_news.c',
+		include_directories: [sway_inc],
+		link_with: [lib_sway_common],
+	),
+	args: [meson.project_source_root() / 'NEWS.md', meson.project_version()],
+	suite: 'unit',
+)
+
+test(
 	'textedit',
 	executable(
 		'test-textedit',

@@ -714,12 +714,21 @@ void flyout_volume_changed(struct panel *panel);
 
 /* notify.c: the notification service, pop-ups and the Action Center */
 void notify_init(struct panel *panel);
+/* whatsnew.c: once after an update, a notification of what the release brought */
+void whatsnew_check(struct panel *panel);
 void notify_fini(struct panel *panel);
 void notify_theme_changed(struct panel *panel);
 /* "notifications [toggle|open|close|clear]" and "dnd [toggle|on|off]" */
 /* A notification of the taskbar itself (not over D-Bus). */
 void notify_local(struct panel *panel, const char *app_name, const char *icon,
 	const char *summary, const char *body);
+/*
+ * One with what a click does and buttons: labels and commands (bar_run_command)
+ * NULL-terminated, the first for the click on the notification, the rest buttons.
+ */
+void notify_local_with_actions(struct panel *panel, const char *app_name, const char *icon,
+	const char *summary, const char *body, const char *const *labels,
+	const char *const *commands);
 /* The same that also comes through do not disturb. */
 void notify_local_urgent(struct panel *panel, const char *app_name, const char *icon,
 	const char *summary, const char *body);

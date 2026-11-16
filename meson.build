@@ -223,6 +223,7 @@ endif
 subdir('tests')
 
 # tileWin data files
+install_data('NEWS.md', install_dir: tilewin_datadir)
 install_subdir('themes', install_dir: tilewin_datadir)
 install_subdir('config', install_dir: tilewin_datadir)
 

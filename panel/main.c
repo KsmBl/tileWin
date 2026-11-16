@@ -425,6 +425,7 @@ int main(int argc, char **argv) {
 	}
 	panel_outputs_update_bars(&panel);
 	notify_init(&panel);
+	whatsnew_check(&panel);
 	badges_init(&panel);
 	media_init(&panel);
 	appsound_init(&panel);
