@@ -113,7 +113,7 @@ int main(void) {
 		}
 		check_str(sc, "scheme", "dark");
 		check_color(sc, "wallpaper.color", 0x000000ff);
-		check_color(sc, "decoration.active.title_bg", 0xff9c3aff);
+		check_color(sc, "decoration.active.title_bg", 0xa5a6ffff);
 		check_color(sc, "menu.bg", 0x000000ff);
 		check_str(sc, "startmenu.layout", "blocks");
 		check_str(sc, "icons.set", "console");

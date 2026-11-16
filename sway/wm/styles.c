@@ -77,7 +77,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		[STYLE_WIN8] = { 30, 22, 8, 0, 0 },
 		[STYLE_WIN10] = { 31, 30, 1, 6, 0 },
 		[STYLE_WIN11] = { 33, 32, 1, 8, 8 },
-		[STYLE_CONSOLE] = { 32, 30, 3, 6, 0 },
+		[STYLE_CONSOLE] = { 36, 32, 3, 6, 0 },
 	};
 	enum style s = get_style(t);
 	int border = tw_theme_int(t, "decoration.border_width", defaults[s].border);
@@ -576,8 +576,8 @@ static void draw_win95(cairo_t *cr, const struct tw_theme *t,
 
 /* The colour of a block: the theme's palette, in turn. */
 static uint32_t console_color(const struct tw_theme *t, int index) {
-	static const uint32_t fallback[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
-		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+	static const uint32_t fallback[] = { 0xa5a6ffff, 0xffaa90ff, 0xcc99ccff, 0x6688ccff,
+		0x99ccffff, 0xffcc99ff, 0xcc6699ff };
 	const char *spec = tw_theme_str(t, "palette.colors", NULL);
 	if (spec) {
 		char *copy = strdup(spec), *save = NULL;
@@ -625,8 +625,8 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 	bool on = f->focused;
 	// one colour for the frame, a second for the bar before the title; a window
 	// without the focus all in one quiet colour
-	uint32_t frame = state_color(t, f, "frame", 0xff9c3aff, 0x4d4560ff);
-	uint32_t fill = state_color(t, f, "accent", 0xc896d8ff, 0x4d4560ff);
+	uint32_t frame = state_color(t, f, "frame", 0xa5a6ffff, 0x3d4266ff);
+	uint32_t fill = state_color(t, f, "accent", 0xcc99ccff, 0x3d4266ff);
 	double bar = m->top - 8, L = m->left, B = m->bottom;
 	// the elbow of the consoles: a wide sweep outside, a softer curve inside
 	double elbow = 120, outer = 44, inner = 18;
@@ -681,7 +681,7 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 			g_object_unref(layout);
 			title_w = tw < room ? tw : room;
 			draw_text(cr, font, upper, title_end - title_w, 0, title_w + 1, bar,
-				state_color(t, f, "title_fg", 0xff9c3aff, 0x8f84aaff), false, TEXT_PLAIN, 0);
+				state_color(t, f, "title_fg", 0xa5a6ffff, 0x8088c0ff), false, TEXT_PLAIN, 0);
 		}
 		g_free(upper);
 	}
@@ -706,7 +706,7 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 		if (box->width <= 0) {
 			continue;
 		}
-		uint32_t c = on ? console_color(t, blocks[i].color) : 0x4d4560ff;
+		uint32_t c = on ? console_color(t, blocks[i].color) : 0x3d4266ff;
 		bool hover = f->hover == blocks[i].hit, pressed = hover && f->pressed == blocks[i].hit;
 		bool last = true; // pills, round at both ends
 		console_block(cr, box->x, 0, box->width, bar, last, last, c);
@@ -716,7 +716,7 @@ static void draw_console(cairo_t *cr, const struct tw_theme *t,
 				"decoration.button.hover", pressed ? 0x00000040 : 0xffffff50));
 		}
 		draw_text(cr, "Antonio, Nimbus Sans Narrow, Sans Condensed Bold 9", blocks[i].label,
-			box->x, 0, box->width, bar, on ? 0x000000ff : 0x8f84aaff, true, TEXT_PLAIN, 0);
+			box->x, 0, box->width, bar, on ? 0x000000ff : 0x8088c0ff, true, TEXT_PLAIN, 0);
 	}
 }
 

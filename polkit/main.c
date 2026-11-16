@@ -357,7 +357,7 @@ static void button(cairo_t *cr, double x, double y, double w, double h, const ch
 		cairo_arc(cr, x + r, y + r, r, M_PI / 2, 3 * M_PI / 2);
 		cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2, M_PI / 2);
 		cairo_close_path(cr);
-		uint32_t c = pressed ? 0xffcf99ff : primary ? agent.accent : hover ? 0x8fc8ffff : 0x8f9bffff;
+		uint32_t c = pressed ? 0xd3d6ffff : primary ? agent.accent : hover ? 0x99ccffff : 0x6688ccff;
 		cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
 			(c >> 8 & 0xff) / 255.0, 1);
 		cairo_fill(cr);
@@ -1695,14 +1695,14 @@ static void load_theme(void) {
 	switch (era) {
 	case ERA_CONSOLE:
 		agent.body = 0x000000ff;
-		agent.fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
-		agent.instruction = tw_theme_color(t, "dialog.heading_fg", 0xff9c3aff);
-		agent.dim = 0xc896d8ff;
-		agent.field_bg = tw_theme_color(t, "dialog.field_bg", 0x1a1208ff);
+		agent.fg = tw_theme_color(t, "dialog.fg", 0xd3d6ffff);
+		agent.instruction = tw_theme_color(t, "dialog.heading_fg", 0xa5a6ffff);
+		agent.dim = 0xcc99ccff;
+		agent.field_bg = tw_theme_color(t, "dialog.field_bg", 0x0e1124ff);
 		agent.field_fg = agent.fg;
-		agent.field_line = 0xc896d8ff;
-		agent.field_focus = 0xff9c3aff;
-		agent.error = 0xd4707aff;
+		agent.field_line = 0xcc99ccff;
+		agent.field_focus = 0xa5a6ffff;
+		agent.error = 0xe0606aff;
 		agent.dark = true;
 		agent.question = "A program needs the password of an administrator.";
 		agent.yes_label = "Allow";

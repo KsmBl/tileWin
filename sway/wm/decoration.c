@@ -390,8 +390,15 @@ enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 
 	if (!maximized) {
 		const int corner = 16;
+		// each side resizes as wide as its own frame, at least a few pixels: the
+		// Starship Console has a thick bar down the left and no line on the right,
+		// and the right edge must not take the window's own scrollbar
 		int side = in.left > 0 ? in.left : 1;
-		int top_zone = side > 4 ? side : 4;
+		int right_side = in.right > 4 ? in.right : 4;
+		// the band along the top as thin as the thinner side: a thick bar down the
+		// left would otherwise leave only a sliver of the title bar to move it by
+		int thin = in.right < side ? in.right : side;
+		int top_zone = thin < 4 ? 4 : thin > 8 ? 8 : thin;
 		if (top_zone > in.top) {
 			top_zone = in.top;
 		}
@@ -400,7 +407,7 @@ enum tw_hit tw_deco_hit_test(struct sway_container *con, double lx, double ly,
 		// dragging them resizes the windows on both sides
 		enum wlr_edges inner = tw_snap_inner_edges(con->tw.snap);
 		int left_zone = inner & WLR_EDGE_LEFT ? SHARED_EDGE_ZONE : side;
-		int right_zone = inner & WLR_EDGE_RIGHT ? SHARED_EDGE_ZONE : side;
+		int right_zone = inner & WLR_EDGE_RIGHT ? SHARED_EDGE_ZONE : right_side;
 		if (inner & WLR_EDGE_TOP) {
 			top_zone = SHARED_EDGE_ZONE;
 		}

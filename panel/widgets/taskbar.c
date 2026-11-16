@@ -295,7 +295,7 @@ static void draw_labeled_button(struct widget *w, struct render_ctx *ctx,
 		for (const char *c = e->window->app_id ? e->window->app_id : ""; *c; c++) {
 			hash = hash * 33 + (unsigned char)*c;
 		}
-		uint32_t color = active || pressed ? tw_theme_color(t, "taskbar.active_bg", 0xff9c3aff) :
+		uint32_t color = active || pressed ? tw_theme_color(t, "taskbar.active_bg", 0xa5a6ffff) :
 			panel_console_color(panel, 1 + hash % 6);
 		if (hover && !active) {
 			color = (color & 0xffffff00) | 0xd0;
@@ -796,7 +796,7 @@ static void start_render(struct widget *w, struct render_ctx *ctx, struct pbox b
 	if (panel_console(panel)) {
 		// the round end of the bar, the word at its right end
 		uint32_t bg = pressed ? panel_console_color(panel, 1) : hover ?
-			panel_console_color(panel, 5) : tw_theme_color(t, "start.bg", 0xff9c3aff);
+			panel_console_color(panel, 5) : tw_theme_color(t, "start.bg", 0xa5a6ffff);
 		pd_console_block(cr, b.x + 4, b.y + 5, b.width - 6, b.height - 10, true, false, bg);
 		pd_text(cr, bar_bold_font(panel), label, b.x + 8, b.y + 5, b.width - 18, b.height - 10,
 			fg, PD_RIGHT);

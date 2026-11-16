@@ -371,10 +371,10 @@ static void read_theme(void) {
 	}
 	if (g.look == LOOK_CONSOLE) {
 		g.card_bg = 0x000000ff;
-		g.fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
-		g.field_bg = tw_theme_color(t, "dialog.field_bg", 0x1a1208ff);
+		g.fg = tw_theme_color(t, "dialog.fg", 0xd3d6ffff);
+		g.field_bg = tw_theme_color(t, "dialog.field_bg", 0x0e1124ff);
 		g.field_fg = g.fg;
-		g.accent = tw_theme_color(t, "accent.color", 0xff9c3aff);
+		g.accent = tw_theme_color(t, "accent.color", 0xa5a6ffff);
 	}
 	if (g.look == LOOK_SWAY) {
 		g.field_bg = 0x313244ff;

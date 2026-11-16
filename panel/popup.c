@@ -519,6 +519,7 @@ struct menu {
 	bool classic_start;
 	enum menu_look look; // GEM's or the console's, in any theme
 	int banner_w;
+	int rail, head; // the console's frame: the bar down the left, the bar along the top
 	bool above;
 	struct loop_timer *submenu_timer;
 	int pending_submenu;
@@ -562,6 +563,59 @@ static void draw_check(cairo_t *cr, double x, double y, double s, uint32_t color
 	cairo_restore(cr);
 }
 
+/*
+ * The frame of a menu of the console: black, a bar down the left with round
+ * ends, and for the start menu the elbow of its windows, the bar along the top
+ * ending round before the menu's name. In another theme too (the Blocks start menu).
+ */
+static void console_menu_frame(struct popup *p, cairo_t *cr, struct menu *m, int M, int w,
+		int h) {
+	struct panel *panel = p->panel;
+	double x = M, y = M, W = w - 2 * M, H = h - 2 * M;
+	pd_rounded(cr, x, y, W, H, 18);
+	pd_color(cr, 0x000000ff);
+	cairo_fill(cr);
+	uint32_t frame = panel_console_color(panel, 0);
+	double rail = m->rail;
+	if (m->head > 0) {
+		double bar = m->head - 10, outer = 22, inner = 10, elbow = 70;
+		// one shape: the top bar as far as the elbow, round outside, hollow inside,
+		// down the left and round at its foot
+		cairo_new_path(cr);
+		cairo_move_to(cr, x, y + outer);
+		cairo_arc(cr, x + outer, y + outer, outer, M_PI, 3 * M_PI / 2);
+		cairo_line_to(cr, x + elbow, y);
+		cairo_line_to(cr, x + elbow, y + bar);
+		cairo_line_to(cr, x + rail + inner, y + bar);
+		cairo_arc_negative(cr, x + rail + inner, y + bar + inner, inner, -M_PI / 2, M_PI);
+		cairo_line_to(cr, x + rail, y + H - rail / 2);
+		cairo_arc(cr, x + rail / 2, y + H - rail / 2, rail / 2, 0, M_PI);
+		cairo_close_path(cr);
+		pd_color(cr, frame);
+		cairo_fill(cr);
+		// the name in capitals at the right end, the bar up to it in a second colour
+		const char *font = tw_theme_str(panel->theme, "menu.bold_font", bar_bold_font(panel));
+		const char *name = "MENU";
+		int tw = 0;
+		pd_text_size(cr, font, name, &tw, NULL);
+		double title_x = x + W - 12 - tw;
+		pd_text(cr, font, name, title_x, y, tw + 2, bar, frame, PD_LEFT);
+		double from = x + elbow + 5, to = title_x - 8;
+		if (to - from > bar) {
+			pd_console_block(cr, from, y, to - from, bar, false, true,
+				panel_console_color(panel, 2));
+		}
+	} else {
+		// a submenu: the bar down the left alone, round at both ends
+		cairo_new_path(cr);
+		cairo_arc(cr, x + rail / 2, y + rail / 2 + 4, rail / 2, M_PI, 2 * M_PI);
+		cairo_arc(cr, x + rail / 2, y + H - rail / 2 - 4, rail / 2, 0, M_PI);
+		cairo_close_path(cr);
+		pd_color(cr, frame);
+		cairo_fill(cr);
+	}
+}
+
 static void menu_render(struct popup *p, cairo_t *cr) {
 	struct menu *m = p->data;
 	struct panel *panel = p->panel;
@@ -573,20 +627,15 @@ static void menu_render(struct popup *p, cairo_t *cr) {
 	popup_draw_frame(panel, cr, w, h, M, "menu");
 	// a look of another theme brings its own box: black with an orange frame for
 	// the console's blocks, white with one black line for GEM's words
-	if (m->look == MENU_LOOK_CONSOLE && !panel_console(panel)) {
-		pd_rounded(cr, M + 1, M + 1, w - 2 * M - 2, h - 2 * M - 2, 12);
-		pd_color(cr, 0x000000ff);
-		cairo_fill_preserve(cr);
-		pd_color(cr, panel_console_color(panel, 0));
-		cairo_set_line_width(cr, 2);
-		cairo_stroke(cr);
+	if (m->look == MENU_LOOK_CONSOLE) {
+		console_menu_frame(p, cr, m, M, w, h);
 	} else if (m->look == MENU_LOOK_GEM && !panel_atari(panel)) {
 		pd_rect(cr, M, M, w - 2 * M, h - 2 * M, 0x000000ff);
 		pd_rect(cr, M + 1, M + 1, w - 2 * M - 2, h - 2 * M - 2, 0xffffffff);
 	}
 
-	int content_x = M + m->pad + m->banner_w;
-	int content_w = w - 2 * M - 2 * m->pad - m->banner_w;
+	int content_x = M + m->pad + m->banner_w + m->rail;
+	int content_w = w - 2 * M - 2 * m->pad - m->banner_w - m->rail;
 	if (m->banner_w > 0) {
 		double bx = M + 3, by = M + 3, bh = h - 2 * M - 6;
 		cairo_rectangle(cr, bx, by, m->banner_w - 2, bh);
@@ -1046,10 +1095,13 @@ static struct popup *menu_create(struct panel *panel, struct popup *parent,
 	m->icon_col = classic_start ? 36 : style == PS_AERO ? 30 : 26;
 	m->arrow_col = 20;
 	if (m->look == MENU_LOOK_CONSOLE) {
-		// a column of blocks of colour, a little apart
+		// a column of blocks of colour, a little apart, beside the bar down the left;
+		// the start menu has the elbow of the windows, with a bar along the top too
 		m->icon_col = 22;
 		m->pad = 6;
 		m->sep_h = 8;
+		m->rail = 16;
+		m->head = classic_start && !parent ? 30 : 0;
 	}
 	if (m->look == MENU_LOOK_GEM) {
 		// the menus of GEM: words alone, two characters in, a check mark in front
@@ -1064,7 +1116,7 @@ static struct popup *menu_create(struct panel *panel, struct popup *parent,
 	int max_text = 60;
 	m->ys = calloc(items->length, sizeof(int));
 	m->hs = calloc(items->length, sizeof(int));
-	int cy = m->margin + m->pad;
+	int cy = m->margin + m->pad + m->head;
 	for (int i = 0; i < items->length; i++) {
 		struct menu_item *item = items->items[i];
 		m->ys[i] = cy;
@@ -1079,15 +1131,18 @@ static struct popup *menu_create(struct panel *panel, struct popup *parent,
 			}
 		}
 	}
-	int width = m->margin * 2 + m->pad * 2 + m->banner_w + m->icon_col + max_text +
+	int width = m->margin * 2 + m->pad * 2 + m->banner_w + m->rail + m->icon_col + max_text +
 		m->arrow_col + 12;
 	if (width < (classic_start ? 190 : 150)) {
 		width = classic_start ? 190 : 150;
 	}
+	if (m->head > 0 && width < 280 + 2 * m->margin) {
+		width = 280 + 2 * m->margin; // room for the elbow, the bar and the name
+	}
 	if (width > 480) {
 		width = 480;
 	}
-	int height = cy + m->pad + m->margin;
+	int height = cy + m->pad + m->margin + (m->rail ? 4 : 0);
 	if (above) {
 		y -= height;
 	}

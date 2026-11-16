@@ -27,8 +27,8 @@ INVERTED = {'atari-dark'}
 # themes drawn as another one, then every colour turned to the nearest of a
 # palette: the Starship Console's soft colours, on black
 PALETTE = {'console': ('win10', {
-    'orange': '#ff9c3a', 'peach': '#ffcf99', 'lilac': '#c896d8', 'periwinkle': '#8f9bff',
-    'sky': '#8fc8ff', 'sand': '#e8c070', 'rose': '#d4707a'})}
+    'orange': '#ffaa90', 'peach': '#d3d6ff', 'lilac': '#cc99cc', 'periwinkle': '#a5a6ff',
+    'sky': '#99ccff', 'sand': '#ffcc99', 'rose': '#cc6699'})}
 # where a set goes: themes/<theme>/<folder>
 OUT = {'atari-dark': ('atari', 'icons-dark')}
 

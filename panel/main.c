@@ -90,8 +90,8 @@ bool panel_console(struct panel *p) {
 }
 
 uint32_t panel_console_color(struct panel *p, int index) {
-	static const uint32_t fallback[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
-		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
+	static const uint32_t fallback[] = { 0xa5a6ffff, 0xffaa90ff, 0xcc99ccff, 0x6688ccff,
+		0x99ccffff, 0xffcc99ff, 0xcc6699ff };
 	const char *spec = p && p->theme ? tw_theme_str(p->theme, "palette.colors", NULL) : NULL;
 	uint32_t colors[16];
 	int count = 0;

@@ -481,9 +481,9 @@ static void console_block(cairo_t *cr, double x, double y, double w, double h, b
 static void render_console(cairo_t *cr, double W, double H, bool sign_in,
 		const char *clock_text, const char *date_text) {
 	const struct tw_theme *t = lock.theme;
-	static const uint32_t colors[] = { 0xff9c3aff, 0xffcf99ff, 0xc896d8ff, 0x8f9bffff,
-		0x8fc8ffff, 0xe8c070ff, 0xd4707aff };
-	uint32_t fg = tw_theme_color(t, "dialog.fg", 0xffcf99ff);
+	static const uint32_t colors[] = { 0xa5a6ffff, 0xffaa90ff, 0xcc99ccff, 0x6688ccff,
+		0x99ccffff, 0xffcc99ff, 0xcc6699ff };
+	uint32_t fg = tw_theme_color(t, "dialog.fg", 0xd3d6ffff);
 	const char *bold = tw_theme_str(t, "menu.bold_font", "Nimbus Sans Narrow, Sans Condensed Bold 11");
 	set_u32(cr, 0x000000ff);
 	cairo_paint(cr);
@@ -534,7 +534,7 @@ static void render_console(cairo_t *cr, double W, double H, bool sign_in,
 	cairo_arc(cr, x + fh / 2, y + fh / 2, fh / 2, M_PI / 2, 3 * M_PI / 2);
 	cairo_arc(cr, x + fw - fh / 2, y + fh / 2, fh / 2, -M_PI / 2, M_PI / 2);
 	cairo_close_path(cr);
-	set_u32(cr, tw_theme_color(t, "dialog.field_bg", 0x1a1208ff));
+	set_u32(cr, tw_theme_color(t, "dialog.field_bg", 0x0e1124ff));
 	cairo_fill_preserve(cr);
 	set_u32(cr, colors[0]);
 	cairo_set_line_width(cr, 2);

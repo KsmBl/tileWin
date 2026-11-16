@@ -303,11 +303,11 @@ static void add_atari(GString *css, const struct tw_theme *t) {
 
 static void add_console(GString *css, const struct tw_theme *t) {
 	uint32_t bg = 0x000000ff;
-	uint32_t fg = tw_theme_color(t, "menu.fg", 0xffcf99ff) | 0xff;
-	uint32_t orange = tw_theme_color(t, "accent.color", 0xff9c3aff) | 0xff;
-	uint32_t field = tw_theme_color(t, "menu.field_bg", 0x1a1208ff) | 0xff;
-	struct palette p = { .bg = bg, .fg = fg, .dim = 0xc896d8ff, .base = bg, .base_fg = fg,
-		.border = 0x3a2a50ff, .accent = orange, .accent_fg = 0x000000ff, .hl = orange,
+	uint32_t fg = tw_theme_color(t, "menu.fg", 0xd3d6ffff) | 0xff;
+	uint32_t orange = tw_theme_color(t, "accent.color", 0xa5a6ffff) | 0xff;
+	uint32_t field = tw_theme_color(t, "menu.field_bg", 0x0e1124ff) | 0xff;
+	struct palette p = { .bg = bg, .fg = fg, .dim = 0xcc99ccff, .base = bg, .base_fg = fg,
+		.border = 0x2a2f55ff, .accent = orange, .accent_fg = 0x000000ff, .hl = orange,
 		.hl_fg = 0x000000ff, .side = bg, .dark = true };
 	add_common(css, &p);
 	g_string_append_printf(css,
@@ -316,50 +316,50 @@ static void add_console(GString *css, const struct tw_theme *t) {
 		".tw-heading { color: %s; font-weight: bold; }\n"
 		".tw-side { border-right: 10px solid %s; border-top-right-radius: 0; }\n"
 		".navigation-sidebar > row { border-radius: 9999px; margin: 2px 8px; }\n"
-		".navigation-sidebar > row:hover { background-color: #2a1e10; }\n"
+		".navigation-sidebar > row:hover { background-color: #1a1f3a; }\n"
 		".navigation-sidebar > row:selected, .navigation-sidebar > row:selected:hover, "
 		"flowboxchild:selected, flowboxchild.tw-card:selected { background-color: %s; "
 		"color: #000000; }\n"
-		"list.tw-group { background-color: %s; border: 2px solid #c896d8; border-radius: 18px; }\n"
-		"list.tw-group > row { border-color: #3a2a50; }\n"
-		"button, dropdown > button.toggle { background: #8f9bff; color: #000000; border: none; "
+		"list.tw-group { background-color: %s; border: 2px solid #cc99cc; border-radius: 18px; }\n"
+		"list.tw-group > row { border-color: #2a2f55; }\n"
+		"button, dropdown > button.toggle { background: #6688cc; color: #000000; border: none; "
 		"border-radius: 9999px; box-shadow: none; padding: 3px 16px; min-height: 22px; "
 		"font-weight: bold; }\n"
 		"button label, dropdown > button.toggle label { color: #000000; }\n"
-		"button:hover, dropdown > button.toggle:hover { background: #8fc8ff; }\n"
-		"button:active, button:checked { background: #ffcf99; }\n"
+		"button:hover, dropdown > button.toggle:hover { background: #99ccff; }\n"
+		"button:active, button:checked { background: #d3d6ff; }\n"
 		"button.suggested-action { background: %s; }\n"
-		"button.destructive-action { background: #d4707a; }\n"
+		"button.destructive-action { background: #e0606a; }\n"
 		"button.flat { background: transparent; color: %s; }\n"
 		"button.flat label { color: %s; }\n"
-		"button.flat:hover { background: #2a1e10; }\n"
-		"button:disabled { background: #3a2a50; }\n"
-		"button:disabled label { color: #806850; }\n"
+		"button.flat:hover { background: #1a1f3a; }\n"
+		"button:disabled { background: #2a2f55; }\n"
+		"button:disabled label { color: #6a6f9a; }\n"
 		"dropdown > button.toggle arrow { color: #000000; }\n"
 		"entry, spinbutton, searchbar entry { background: %s; color: %s; border: 2px solid %s; "
 		"border-radius: 9999px; box-shadow: none; }\n"
 		"spinbutton > button { background: transparent; color: %s; }\n"
 		"spinbutton > text, entry > text { background: transparent; color: %s; }\n"
-		"switch { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"switch { background: #2a2f55; border: none; border-radius: 9999px; }\n"
 		"switch:checked { background: %s; }\n"
-		"switch > slider { background: #ffcf99; border: none; border-radius: 9999px; "
+		"switch > slider { background: #d3d6ff; border: none; border-radius: 9999px; "
 		"box-shadow: none; }\n"
-		"check, radio { background: %s; border: 2px solid #c896d8; color: #000000; "
+		"check, radio { background: %s; border: 2px solid #cc99cc; color: #000000; "
 		"box-shadow: none; }\n"
 		"check:checked, radio:checked { background: %s; border-color: %s; }\n"
-		"scale > trough { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"scale > trough { background: #2a2f55; border: none; border-radius: 9999px; }\n"
 		"scale > trough > highlight { background: %s; border-radius: 9999px; }\n"
-		"scale > trough > slider { background: #ffcf99; border: none; border-radius: 9999px; "
+		"scale > trough > slider { background: #d3d6ff; border: none; border-radius: 9999px; "
 		"box-shadow: none; }\n"
-		"progressbar > trough { background: #3a2a50; border: none; border-radius: 9999px; }\n"
+		"progressbar > trough { background: #2a2f55; border: none; border-radius: 9999px; }\n"
 		"progressbar > trough > progress { background: %s; border-radius: 9999px; }\n"
-		"scrollbar > range > trough > slider { background: #c896d8; border-radius: 9999px; }\n"
+		"scrollbar > range > trough > slider { background: #cc99cc; border-radius: 9999px; }\n"
 		"popover > contents { background: %s; color: %s; border: 2px solid %s; "
 		"border-radius: 16px; }\n"
-		"tooltip, tooltip.background { background: %s; color: %s; border: 2px solid #c896d8; "
+		"tooltip, tooltip.background { background: %s; color: %s; border: 2px solid #cc99cc; "
 		"border-radius: 10px; }\n"
 		"tooltip > * { color: %s; }\n"
-		"separator { background-color: #3a2a50; }\n",
+		"separator { background-color: #2a2f55; }\n",
 		C(orange), C(orange), C(orange), C(orange), C(bg),
 		C(orange), C(fg), C(fg),
 		C(field), C(fg), C(orange), C(fg), C(fg),
