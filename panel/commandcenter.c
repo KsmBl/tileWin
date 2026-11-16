@@ -25,6 +25,7 @@
 #include <strings.h>
 #include <time.h>
 #include "draw.h"
+#include "flyout.h"
 #include "popup.h"
 #include "stringop.h"
 #include "textfield.h"
@@ -41,6 +42,10 @@
 #define MAX_ALTS 3
 
 enum cc_kind { CC_WINDOW, CC_APP, CC_ACTION, CC_SETTING, CC_FILE, CC_SUM, CC_RUN };
+
+/* A sign drawn on a tile of the accent, for the actions: the same in light and dark. */
+enum cc_glyph { GL_NONE, GL_WIFI, GL_WIFI_OFF, GL_BT, GL_BELL, GL_BELL_OFF, GL_MOON, GL_TILE,
+	GL_OVERLAP, GL_POWER, GL_SEARCH };
 
 static const char *const kind_names[] = { "Window", "App", "Action", "Setting", "File", "Sum",
 	"Command" };
@@ -60,6 +65,7 @@ struct cc_item {
 	int alt_count;
 	double score;
 	bool heading; // a line that names the rows below it
+	enum cc_glyph glyph;
 };
 
 struct cc {
@@ -204,40 +210,59 @@ static const struct {
 	{ "shutdown", "Shut down or restart…", NULL, "system-shutdown", "power off reboot restart",
 		"panel shutdown" },
 	{ "logoff", "Sign out…", NULL, "system-log-out", "log out logout leave", "panel shutdown logoff" },
-	{ "dark", "Dark or light mode", "Switch the colour scheme", "weather-clear-night",
+	{ "dark", "Dark or light mode", "Switch the colour scheme", "preferences-desktop-theme",
 		"theme night colour color scheme", "color_scheme toggle" },
-	{ "wifi-on", "Turn Wi-Fi on", NULL, "network-wireless", "wlan wireless radio",
+	{ "wifi-on", "Turn Wi-Fi on", NULL, "tray-network-wireless-4", "wlan wireless radio",
 		"exec nmcli radio wifi on" },
-	{ "wifi-off", "Turn Wi-Fi off", NULL, "network-wireless-offline", "wlan wireless radio airplane",
+	{ "wifi-off", "Turn Wi-Fi off", NULL, "tray-network-wireless-offline", "wlan wireless radio airplane",
 		"exec nmcli radio wifi off" },
-	{ "network", "Networks", "Join a Wi-Fi network", "network-wireless", "wifi wlan connect",
+	{ "network", "Networks", "Join a Wi-Fi network", "tray-network-wireless-3", "wifi wlan connect",
 		"panel network" },
-	{ "bluetooth", "Bluetooth", "Devices nearby", "bluetooth", "headphones pair", "panel bluetooth" },
-	{ "dnd", "Do not disturb", "Keep notifications quiet", "notifications-disabled",
+	{ "bluetooth", "Bluetooth", "Devices nearby", "tray-bluetooth", "headphones pair", "panel bluetooth" },
+	{ "dnd", "Do not disturb", "Keep notifications quiet", "tray-volume-off",
 		"focus quiet silence notifications", "panel dnd toggle" },
-	{ "notifications", "Notifications", "What came in lately", "preferences-system-notifications",
+	{ "notifications", "Notifications", "What came in lately", "internet-mail",
 		"action center messages", "panel notifications" },
 	{ "quick", "Quick settings", "Volume, brightness, toggles", "preferences-system",
 		"control center volume brightness", "panel quicksettings" },
-	{ "taskview", "Task view", "Every window and desktop", "view-grid", "overview expose windows",
+	{ "taskview", "Task view", "Every window and desktop", "window-arrange", "overview expose windows",
 		"taskview" },
 	{ "desktop", "Show the desktop", "Every window out of the way", "user-desktop",
 		"minimize all", "showdesktop" },
-	{ "mode", "Switch tile and window mode", NULL, "view-app-grid", "tiling floating layout",
+	{ "mode", "Switch tile and window mode", NULL, "tilewin-mode", "tiling floating layout",
 		"wm_mode toggle" },
 	{ "snip", "Take a screenshot", "A part of the screen, a window or all of it",
-		"applets-screenshooter", "screen capture snip print", "panel snip" },
-	{ "clipboard", "Clipboard history", "What was copied lately", "edit-paste",
+		"image-x-generic", "screen capture snip print", "panel snip" },
+	{ "clipboard", "Clipboard history", "What was copied lately", "x-office-document",
 		"paste copied", "panel clipboard" },
-	{ "emoji", "Emoji and symbols", NULL, "face-smile", "smiley symbol character",
+	{ "emoji", "Emoji and symbols", NULL, "font-x-generic", "smiley symbol character",
 		"panel emoji" },
-	{ "shortcuts", "Keyboard shortcuts", "Every key worth knowing", "input-keyboard",
+	{ "shortcuts", "Keyboard shortcuts", "Every key worth knowing", "help-browser",
 		"keys bindings help", "panel shortcuts" },
 	{ "settings", "Settings", NULL, "preferences-system", "preferences options control panel",
 		"exec tilewin-settings" },
 	{ "terminal", "Terminal", NULL, "utilities-terminal", "shell console command line",
 		"exec $term" },
 };
+
+static enum cc_glyph glyph_of(const char *key) {
+	static const struct {
+		const char *key;
+		enum cc_glyph glyph;
+	} glyphs[] = {
+		{ "sleep", GL_MOON }, { "shutdown", GL_POWER }, { "dark", GL_MOON },
+		{ "wifi-on", GL_WIFI }, { "wifi-off", GL_WIFI_OFF }, { "network", GL_WIFI },
+		{ "bluetooth", GL_BT }, { "dnd", GL_BELL_OFF }, { "notifications", GL_BELL },
+		{ "taskview", GL_OVERLAP }, { "desktop", GL_TILE }, { "mode", GL_TILE },
+		{ "snip", GL_SEARCH },
+	};
+	for (size_t i = 0; i < sizeof(glyphs) / sizeof(glyphs[0]); i++) {
+		if (strcmp(glyphs[i].key, key) == 0) {
+			return glyphs[i].glyph;
+		}
+	}
+	return GL_NONE;
+}
 
 static void add_actions(struct cc *c) {
 	for (size_t i = 0; i < sizeof(actions) / sizeof(actions[0]); i++) {
@@ -254,6 +279,7 @@ static void add_actions(struct cc *c) {
 		struct cc_item *it = item_new(CC_ACTION, key, actions[i].name, actions[i].detail,
 			actions[i].icon, command);
 		it->keywords = strdup(actions[i].keywords);
+		it->glyph = glyph_of(actions[i].key);
 		list_add(c->items, it);
 		free(own);
 	}
@@ -491,6 +517,57 @@ static int row_h(const struct cc_item *it) {
 	return it->heading ? HEAD_H : ROW_H;
 }
 
+/* A tile in a tint of the accent with the sign of an action on it. */
+static void draw_glyph_tile(cairo_t *cr, enum cc_glyph g, double x, double y, uint32_t accent) {
+	pd_rounded(cr, x, y, 28, 28, 8);
+	pd_color(cr, (accent & 0xffffff00) | 0x30);
+	cairo_fill(cr);
+	double s = 18, gx = x + 5, gy = y + 5;
+	uint32_t c = accent;
+	switch (g) {
+	case GL_WIFI:
+	case GL_WIFI_OFF:
+		pd_glyph_network(cr, gx, gy, s, 4, true, g == GL_WIFI, c);
+		break;
+	case GL_BT:
+		draw_bluetooth_glyph(cr, gx, gy, s, c);
+		break;
+	case GL_BELL:
+	case GL_BELL_OFF:
+		notify_draw_bell(cr, gx, gy, s, c, g == GL_BELL_OFF);
+		break;
+	case GL_MOON:
+		// a crescent: a disc, a second one taken out of it
+		cairo_save(cr);
+		cairo_new_path(cr);
+		cairo_arc(cr, x + 14, y + 14, 8, 0, 2 * M_PI);
+		cairo_new_sub_path(cr);
+		cairo_arc(cr, x + 18, y + 11, 7, 0, 2 * M_PI);
+		cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+		cairo_clip(cr);
+		cairo_new_path(cr);
+		cairo_arc(cr, x + 14, y + 14, 8, 0, 2 * M_PI);
+		pd_color(cr, c);
+		cairo_fill(cr);
+		cairo_restore(cr);
+		break;
+	case GL_TILE:
+		pd_glyph_tile(cr, gx, gy, s, c);
+		break;
+	case GL_OVERLAP:
+		pd_glyph_overlap(cr, gx, gy, s, c);
+		break;
+	case GL_POWER:
+		pd_glyph_power(cr, gx, gy, s, c);
+		break;
+	case GL_SEARCH:
+		pd_glyph_search(cr, gx, gy, s, c);
+		break;
+	case GL_NONE:
+		break;
+	}
+}
+
 static void cc_render(struct popup *p, cairo_t *cr) {
 	struct cc *c = p->data;
 	struct panel *panel = p->panel;
@@ -561,9 +638,11 @@ static void cc_render(struct popup *p, cairo_t *cr) {
 			pd_color(cr, sel ? hl : (hl & 0xffffff00) | ((hl & 0xff) / 2));
 			cairo_fill(cr);
 		}
-		cairo_surface_t *icon = it->icon ? apps_icon(panel, it->icon, 28 * p->surface->scale) :
-			NULL;
-		if (icon) {
+		cairo_surface_t *icon = it->icon && it->glyph == GL_NONE ?
+			apps_icon(panel, it->icon, 28 * p->surface->scale) : NULL;
+		if (it->glyph != GL_NONE) {
+			draw_glyph_tile(cr, it->glyph, rx + 12, y + (h - 28) / 2, accent);
+		} else if (icon) {
 			pd_icon(cr, icon, rx + 12, y + (h - 28) / 2, 28);
 		} else {
 			pd_rounded(cr, rx + 12, y + (h - 28) / 2, 28, 28, 8);
