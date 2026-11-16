@@ -962,11 +962,6 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 		align_values, align_labels);
 
 
-	GtkWidget *clipboard = ui_group(content, "Clipboard", NULL);
-	ui_taskbar_key(s, p->root_settings, clipboard, "clipboard_history", "Remember what was copied",
-		"Win+V shows the history; passwords marked as secret are never kept", true, 0, 0, 1);
-	ui_taskbar_key(s, p->root_settings, clipboard, "clipboard_paste", "Paste the entry that is picked",
-		"Off only copies it back to the clipboard", true, 0, 0, 1);
 
 	for (int i = 0; i < SECTION_COUNT; i++) {
 		char *title = g_strdup_printf("%s section", section_titles[i]);

@@ -276,6 +276,7 @@ void settings_refresh(struct settings *s) {
 	wallpaper_page_refresh(s);
 	taskbar_page_refresh(s);
 	desktop_page_refresh(s);
+	clipboard_page_refresh(s);
 	screensaver_page_refresh(s);
 	menus_page_refresh(s);
 	launcher_page_refresh(s);
@@ -726,6 +727,7 @@ static void build_window(struct settings *s) {
 		{ "fingerprint", fingerprint_page_new, 3 },
 		{ "apps", apps_page_new, 5 },
 		{ "account", account_page_new, 5 },
+		{ "clipboard", clipboard_page_new, 5 },
 		{ "backup", backup_page_new, 5 },
 		{ "kernel", kernel_page_new, 6 },
 		{ "cpu", cpu_page_new, 6 },

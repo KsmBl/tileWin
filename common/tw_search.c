@@ -49,7 +49,7 @@ const struct tw_settings_page tw_settings_pages[] = {
 	{ "dns", "DNS", "dns servers name resolver cache prefetch fastest block lists pihole "
 		"pi-hole ads adblock trackers hosts allow",
 		"network-server-symbolic" },
-	{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications clipboard history right "
+	{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications right "
 		"click context menu",
 		"view-continuous-symbolic" },
 	{ "startmenu", "Start menu", "start pinned apps places power tiles layout",
@@ -66,6 +66,8 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"input-mouse-symbolic" },
 	{ "apps", "Apps", "default browser email startup autostart programs",
 		"applications-system-symbolic" },
+	{ "clipboard", "Clipboard", "clipboard history copy paste win+v pinned clear cut",
+		"edit-paste-symbolic" },
 	{ "account", "Account", "user picture photo avatar profile name",
 		"avatar-default-symbolic" },
 	{ "backup", "Backup", "restore save export import copy settings file another computer",
