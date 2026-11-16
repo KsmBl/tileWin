@@ -44,13 +44,14 @@ const struct tw_settings_page tw_settings_pages[] = {
 	{ "bluetooth", "Bluetooth", "headphones mouse keyboard pair devices wireless",
 		"bluetooth-symbolic" },
 	{ "network", "Network", "wifi wi-fi wlan ethernet cable ip address dhcp fixed static gateway "
-		"subnet mask router password key dns servers",
+		"subnet mask router password key dns servers firewall port ports open public "
+		"reachable allow block program server listen login page captive portal hotspot",
 		"network-wireless-symbolic" },
 	{ "dns", "DNS", "dns servers name resolver cache prefetch fastest block lists pihole "
 		"pi-hole ads adblock trackers hosts allow",
 		"network-server-symbolic" },
 	{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications right "
-		"click context menu",
+		"click context menu open ports kernel claude git cpu memory",
 		"view-continuous-symbolic" },
 	{ "startmenu", "Start menu", "start pinned apps places power tiles layout",
 		"start-here-symbolic" },

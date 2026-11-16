@@ -144,15 +144,24 @@ The **Open ports** widget (taskbar and desktop) shows the ports programs on this
 
 ### Asking before a program can be reached
 
-Switched on in Settings → Network (**Ask before a program opens a port**, off by default): when one of your programs starts to listen on a port other computers could reach (any address but 127.0.0.1 and ::1), tileWin asks, as Windows' firewall does: **Allow** *program* **to be reached from other computers?** Until you allow it, other computers cannot connect to it; the program runs on and this computer still reaches it. The answer is kept for the program, not for the port: stopped and started again, also on another port, it is not asked about again. A program is its executable, and for an interpreter (python3, node, java, bash, ...) also the script or module it runs, so allowing `python3 -m http.server` does not allow every Python program. Closing the question without an answer blocks the program until it starts again. In the Open ports flyout such ports show **Blocked** (or **Asking**), and **Allowed programs** opens the answers, `~/.config/tileWin/ports.conf`:
+Switched on in Settings → Network (**Ask before a program opens a port**, off by default): when one of your programs starts to listen on a port other computers could reach (any address but 127.0.0.1 and ::1), tileWin asks, as Windows' firewall does: **Allow** *program* **to be reached from other computers?** Until you allow it, other computers cannot connect to it; the program runs on and this computer still reaches it. The answers:
+
+- **Allow** and **Block** are kept for the program, not for the port: stopped and started again, also on another port, it is not asked about again.
+- **Only on “*network*”** allows it on the network the computer is on now (the NetworkManager connection with the default route) and nowhere else: on another network it is asked about again.
+- **This time only** lets it in until it ends; started again, it is asked about again.
+- Closing the question blocks it until it starts again.
+
+A program is its executable, and for an interpreter (python3, node, java, bash, ...) also the script or module it runs, so allowing `python3 -m http.server` does not allow every Python program. In the Open ports flyout such ports show **Blocked** (or **Asking**), and a click on any port opens a menu: **Open in browser**, **Copy address**, **Allow everywhere**, **Allow only on** the network, **Allow this time only**, **Block**, **Ask again** and **End** the program. The **Answers** list on the Network page shows every answer, everywhere or on which network, to switch between Allowed and Blocked or to forget so the program is asked again. They are kept in `~/.config/tileWin/ports.conf`:
 
 ```
 guard yes                               # the switch of the Network page
+network 0b6f2c1e-...  Home              # the name of a network, for the settings
 allow /usr/bin/python3.14 -m http.server
 block /home/me/bin/server
+allow@0b6f2c1e-... /usr/bin/syncthing   # only on that network
 ```
 
-Only programs of users are guarded (those in `user.slice`); the services of the system (sshd, cupsd, Docker) are not, nor is another firewall changed. It works with a table of nftables of its own, `inet tilewin_ports`, set by `tilewin-ports-guard` through pkexec; administrators at the computer are not asked for a password for it. It needs `nftables`, which install.sh installs.
+Only programs of users are guarded (those in `user.slice`); the services of the system (sshd, cupsd, Docker) are not, nor is another firewall changed. It works with a table of nftables of its own, `inet tilewin_ports`, set by `tilewin-ports-guard` through pkexec; administrators at the computer are not asked for a password for it. It needs `nftables`, which install.sh installs. When it cannot work (nftables missing, the password not given), a notification says why once, and the Network page says it beside the switch.
 
 ## Claude Code usage
 

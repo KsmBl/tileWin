@@ -3,6 +3,8 @@
 #include <string.h>
 #include "settings.h"
 #include "tw_paths.h"
+#include "tw_portrules.h"
+#include <sys/stat.h>
 
 /*
  * Network page: each saved network of NetworkManager (Wi-Fi, cable, ...) with
@@ -1291,85 +1293,260 @@ static void add_portal(struct network_page *p, GtkWidget *content) {
 
 /* ---------- the guard of the ports ---------- */
 
-static char *ports_conf_path(void) {
-	char *dir = tw_config_dir();
-	char *path = dir ? g_build_filename(dir, "ports.conf", NULL) : NULL;
-	free(dir);
-	return path;
+/*
+ * "Programs reachable from other computers": the switch of the port guard
+ * (tw_portrules.h), whether it works (the status the taskbar writes, else
+ * what is missing), and the answers given, each to be allowed or blocked
+ * again, or forgotten so the program is asked about once more.
+ */
+struct guard_ui {
+	struct network_page *p;
+	GtkWidget *sw, *status, *list;
+	GPtrArray *rows; // the rows of the answers, to take out again
+	struct timespec mtime;
+	off_t size;
+	char *status_text;
+	guint timer;
+	bool syncing;
+};
+
+static struct guard_ui guard;
+
+/* What a row of the list changes: one answer. */
+struct guard_answer {
+	char *program, *network;
+};
+
+static void guard_answer_free(gpointer data, GClosure *closure) {
+	struct guard_answer *a = data;
+	g_free(a->program);
+	g_free(a->network);
+	g_free(a);
 }
 
-/* Whether "guard yes" is in ports.conf: off by default. */
-static bool port_guard_on(void) {
-	char *path = ports_conf_path(), *text = NULL;
-	bool on = false;
-	if (path && g_file_get_contents(path, &text, NULL, NULL)) {
-		char **lines = g_strsplit(text, "\n", -1);
-		for (char **l = lines; *l; l++) {
-			char *line = g_strstrip(*l);
-			if (g_str_has_prefix(line, "guard ")) {
-				char *v = g_strstrip(line + 6);
-				on = strcmp(v, "yes") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0;
-			}
-		}
-		g_strfreev(lines);
+static void guard_list_fill(void);
+
+/* Reads ports.conf, lets change do its work on it, writes it back. */
+static void guard_change(void (*change)(struct tw_port_rules *r, const struct guard_answer *a,
+		gpointer data), const struct guard_answer *a, gpointer data) {
+	char *path = tw_port_rules_path();
+	struct tw_port_rules r = { 0 };
+	tw_port_rules_read(&r, path);
+	change(&r, a, data);
+	if (!tw_port_rules_write(&r, path)) {
+		settings_problem(guard.p->s, "Could not save the setting for open ports", NULL, NULL,
+			NULL);
 	}
-	g_free(text);
-	g_free(path);
-	return on;
+	tw_port_rules_free(&r);
+	free(path);
+	guard_list_fill();
 }
 
-/* Writes the guard line of ports.conf, keeping the answers given; the taskbar follows. */
+static void change_guard(struct tw_port_rules *r, const struct guard_answer *a, gpointer data) {
+	r->guard = GPOINTER_TO_INT(data);
+}
+
+static void change_verdict(struct tw_port_rules *r, const struct guard_answer *a,
+		gpointer data) {
+	tw_port_rules_set(r, a->program, a->network, GPOINTER_TO_INT(data));
+}
+
+static void change_forget(struct tw_port_rules *r, const struct guard_answer *a,
+		gpointer data) {
+	tw_port_rules_forget(r, a->program, a->network);
+}
+
 static gboolean on_port_guard_switch(GtkSwitch *sw, gboolean state, gpointer data) {
-	struct network_page *p = data;
-	char *path = ports_conf_path(), *text = NULL;
-	if (!path) {
-		return TRUE;
+	if (!guard.syncing) {
+		guard_change(change_guard, NULL, GINT_TO_POINTER(state));
 	}
-	GString *out = g_string_new(NULL);
-	bool written = false;
-	if (g_file_get_contents(path, &text, NULL, NULL)) {
-		char **lines = g_strsplit(text, "\n", -1);
-		for (char **l = lines; *l; l++) {
-			char *copy = g_strstrip(g_strdup(*l));
-			if (g_str_has_prefix(copy, "guard ")) {
-				if (!written) {
-					g_string_append_printf(out, "guard %s\n", state ? "yes" : "no");
-					written = true;
-				}
-			} else if (**l || l[1]) {
-				g_string_append_printf(out, "%s\n", *l);
-			}
-			g_free(copy);
-		}
-		g_strfreev(lines);
-	}
-	if (!written) {
-		g_string_prepend(out, state ? "guard yes\n" : "guard no\n");
-	}
-	char *dir = g_path_get_dirname(path);
-	g_mkdir_with_parents(dir, 0755);
-	g_free(dir);
-	if (!g_file_set_contents(path, out->str, out->len, NULL)) {
-		settings_problem(p->s, "Could not save the setting for open ports", NULL, NULL, NULL);
-	}
-	g_string_free(out, TRUE);
-	g_free(text);
-	g_free(path);
 	gtk_switch_set_state(sw, state);
 	return TRUE;
 }
 
+static void on_verdict(GObject *dd, GParamSpec *pspec, gpointer data) {
+	if (guard.syncing) {
+		return;
+	}
+	bool allow = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd)) == 0;
+	guard_change(change_verdict, data, GINT_TO_POINTER(allow));
+}
+
+static void on_forget(GtkButton *button, gpointer data) {
+	guard_change(change_forget, data, NULL);
+}
+
+/* "python3 -m http.server" for "/usr/bin/python3.14 -m http.server". */
+static char *program_title(const char *program) {
+	const char *space = strchr(program, ' ');
+	char *exe = space ? g_strndup(program, space - program) : g_strdup(program);
+	char *base = g_path_get_basename(exe);
+	char *title;
+	if (space) {
+		// an interpreter: the script by its name, a module as it was asked for
+		const char *what = space + 1;
+		if (what[0] == '/') {
+			char *script = g_path_get_basename(what);
+			title = g_strdup_printf("%s (%s)", script, base);
+			g_free(script);
+		} else {
+			title = g_strdup_printf("%s %s", base, what);
+		}
+	} else {
+		title = g_strdup(base);
+	}
+	g_free(base);
+	g_free(exe);
+	return title;
+}
+
+static void guard_list_fill(void) {
+	if (!guard.list) {
+		return;
+	}
+	char *path = tw_port_rules_path();
+	struct tw_port_rules r = { 0 };
+	tw_port_rules_read(&r, path);
+	struct stat st;
+	if (path && stat(path, &st) == 0) {
+		guard.mtime = st.st_mtim;
+		guard.size = st.st_size;
+	} else {
+		guard.mtime = (struct timespec){ 0 };
+		guard.size = -1;
+	}
+	free(path);
+	guard.syncing = true;
+	gtk_switch_set_active(GTK_SWITCH(guard.sw), r.guard);
+	for (guint i = 0; i < guard.rows->len; i++) {
+		gtk_list_box_remove(GTK_LIST_BOX(guard.list), guard.rows->pdata[i]);
+	}
+	g_ptr_array_set_size(guard.rows, 0);
+	if (r.count == 0) {
+		g_ptr_array_add(guard.rows, ui_row(guard.list, "No answers yet",
+			"tileWin asks the first time a program opens a port to the network", NULL));
+	}
+	for (int i = 0; i < r.count; i++) {
+		const struct tw_port_rule *rule = &r.items[i];
+		char *title = program_title(rule->program);
+		const char *net = rule->network ? tw_port_rules_network_name(&r, rule->network) : NULL;
+		char *where = rule->network ? g_strdup_printf("only on “%s”", net ? net :
+			rule->network) : g_strdup("everywhere");
+		char *subtitle = g_strdup_printf("%s · %s", rule->program, where);
+		GtkWidget *dd = gtk_drop_down_new_from_strings((const char *const[]){ "Allowed",
+			"Blocked", NULL });
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(dd), rule->allow ? 0 : 1);
+		struct guard_answer *a = g_new0(struct guard_answer, 1);
+		a->program = g_strdup(rule->program);
+		a->network = g_strdup(rule->network);
+		g_signal_connect_data(dd, "notify::selected", G_CALLBACK(on_verdict), a,
+			guard_answer_free, 0);
+		GtkWidget *row = ui_row(guard.list, title, subtitle, dd);
+		struct guard_answer *b = g_new0(struct guard_answer, 1);
+		b->program = g_strdup(rule->program);
+		b->network = g_strdup(rule->network);
+		GtkWidget *forget = ui_icon_button("user-trash-symbolic",
+			"Forget: the program is asked about again", true, G_CALLBACK(on_forget), NULL);
+		g_signal_handlers_disconnect_by_func(forget, G_CALLBACK(on_forget), NULL);
+		g_signal_connect_data(forget, "clicked", G_CALLBACK(on_forget), b, guard_answer_free, 0);
+		gtk_box_append(GTK_BOX(ui_row_box(row)), forget);
+		g_ptr_array_add(guard.rows, row);
+		g_free(subtitle);
+		g_free(where);
+		g_free(title);
+	}
+	guard.syncing = false;
+	tw_port_rules_free(&r);
+}
+
+/* What keeps the guard from working, or NULL when it does (or is off). */
+static char *guard_trouble(bool on) {
+	if (!on) {
+		return NULL;
+	}
+	const char *runtime = g_getenv("XDG_RUNTIME_DIR");
+	const char *display = g_getenv("WAYLAND_DISPLAY");
+	char *path = g_strdup_printf("%s/tilewin-ports-guard-%s.status", runtime ? runtime : "/tmp",
+		display && *display && !strchr(display, '/') ? display : "wayland");
+	char *text = NULL;
+	char *trouble = NULL;
+	if (g_file_get_contents(path, &text, NULL, NULL) && g_str_has_prefix(text, "broken")) {
+		char *why = strchr(text, '\n');
+		why = why ? g_strstrip(why + 1) : NULL;
+		trouble = g_strdup(why && *why ? why : "tilewin-ports-guard failed");
+	} else if (!g_find_program_in_path("nft") && !g_file_test("/usr/sbin/nft",
+			G_FILE_TEST_EXISTS) && !g_file_test("/sbin/nft", G_FILE_TEST_EXISTS)) {
+		trouble = g_strdup("nftables is not installed");
+	} else if (!g_file_test(TILEWIN_LIBEXECDIR "/tilewin-ports-guard", G_FILE_TEST_EXISTS)) {
+		trouble = g_strdup("tilewin-ports-guard is not installed; install tileWin again");
+	}
+	g_free(text);
+	g_free(path);
+	return trouble;
+}
+
+static gboolean guard_tick(gpointer data) {
+	if (!guard.list) {
+		guard.timer = 0;
+		return G_SOURCE_REMOVE;
+	}
+	// the answers the taskbar keeps meanwhile show at once
+	char *path = tw_port_rules_path();
+	struct stat st;
+	bool there = path && stat(path, &st) == 0;
+	free(path);
+	if (there ? (st.st_mtim.tv_sec != guard.mtime.tv_sec ||
+			st.st_mtim.tv_nsec != guard.mtime.tv_nsec || st.st_size != guard.size) :
+			guard.size != -1) {
+		guard_list_fill();
+	}
+	char *trouble = guard_trouble(gtk_switch_get_active(GTK_SWITCH(guard.sw)));
+	char *text = trouble ? g_strdup_printf("Not working: %s.", trouble) : NULL;
+	if (g_strcmp0(text, guard.status_text) != 0) {
+		gtk_label_set_text(GTK_LABEL(guard.status), text ? text : "");
+		gtk_widget_set_visible(guard.status, text != NULL);
+		g_free(guard.status_text);
+		guard.status_text = g_strdup(text);
+	}
+	g_free(text);
+	g_free(trouble);
+	return G_SOURCE_CONTINUE;
+}
+
+static void guard_destroyed(GtkWidget *widget, gpointer data) {
+	guard.list = NULL;
+	if (guard.timer) {
+		g_source_remove(guard.timer);
+		guard.timer = 0;
+	}
+}
+
 static void add_port_guard(struct network_page *p, GtkWidget *content) {
+	guard.p = p;
+	guard.rows = g_ptr_array_new();
 	GtkWidget *group = ui_group(content, "Programs reachable from other computers",
 		"When one of your programs opens a port to the network, tileWin asks first, as "
 		"Windows' firewall does: until you allow it, other computers cannot connect to it, "
 		"while this computer still can. The answer is kept for the program, also when it is "
-		"started again. The services of the system are not touched.");
-	GtkWidget *sw = gtk_switch_new();
-	gtk_switch_set_active(GTK_SWITCH(sw), port_guard_on());
-	g_signal_connect(sw, "state-set", G_CALLBACK(on_port_guard_switch), p);
-	ui_row(group, "Ask before a program opens a port", "Needs nftables; the answers are kept "
-		"in ~/.config/tileWin/ports.conf", sw);
+		"started again, everywhere or on one network. The services of the system are not "
+		"touched.");
+	guard.sw = gtk_switch_new();
+	g_signal_connect(guard.sw, "state-set", G_CALLBACK(on_port_guard_switch), NULL);
+	GtkWidget *row = ui_row(group, "Ask before a program opens a port", "Off by default; needs "
+		"nftables", guard.sw);
+	guard.status = gtk_label_new("");
+	gtk_widget_add_css_class(guard.status, "error");
+	gtk_label_set_wrap(GTK_LABEL(guard.status), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(guard.status), 1);
+	gtk_widget_set_visible(guard.status, FALSE);
+	gtk_box_insert_child_after(GTK_BOX(ui_row_box(row)), guard.status,
+		gtk_widget_get_first_child(ui_row_box(row)));
+	guard.list = ui_group(content, "Answers", "Allowed or blocked for each program; forget one "
+		"to be asked again. The Open ports widget lets you answer for a port too.");
+	g_signal_connect(guard.list, "destroy", G_CALLBACK(guard_destroyed), NULL);
+	guard_list_fill();
+	guard_tick(NULL);
+	guard.timer = g_timeout_add(2000, guard_tick, NULL);
 }
 
 GtkWidget *network_page_new(struct settings *s) {
