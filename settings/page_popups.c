@@ -28,6 +28,7 @@ struct popup_entry {
 	char *name, *app, *position;
 	int width, height, dim; // percent
 	bool slide;             // slides in and out (animation slide|none)
+	bool everywhere;        // opening the app anywhere opens it as the popup
 	char *keys;             // its shortcut, NULL for none
 };
 
@@ -209,6 +210,7 @@ static void load(struct popups_page *p) {
 		e->dim = !v ? 50 : g_ascii_strcasecmp(v, "no") == 0 ? 0 : atoi(v);
 		v = twconf_value(n, "animation");
 		e->slide = !v || g_ascii_strcasecmp(v, "none") != 0;
+		e->everywhere = twconf_parse_bool(twconf_value(n, "everywhere"), false);
 		find_binding(p->s, e->name, &e->keys);
 		g_ptr_array_add(p->entries, e);
 	}
@@ -224,6 +226,9 @@ static bool save(struct popups_page *p) {
 		g_string_append_printf(out, "\npopup %s {\n\tapp %s\n\tposition %s\n\twidth %d%%\n"
 			"\theight %d%%\n\tdim %d\n\tanimation %s\n", e->name, app, e->position, e->width,
 			e->height, e->dim, e->slide ? "slide" : "none");
+		if (e->everywhere) {
+			g_string_append(out, "\teverywhere yes\n");
+		}
 		g_string_append(out, "}\n");
 		g_free(app);
 	}
@@ -288,7 +293,8 @@ struct popup_dialog {
 	struct popups_page *p;
 	struct popup_entry *editing; // NULL for a new one
 	char *app, *keys;
-	GtkWidget *window, *app_button, *position, *width, *height, *dim, *motion, *keys_button,
+	GtkWidget *window, *app_button, *position, *width, *height, *dim, *motion, *everywhere,
+		*keys_button,
 		*warning, *preview, *save;
 };
 
@@ -455,6 +461,7 @@ static void on_save(GtkButton *button, gpointer data) {
 	e->height = (int)gtk_range_get_value(GTK_RANGE(d->height));
 	e->dim = dims[gtk_drop_down_get_selected(GTK_DROP_DOWN(d->dim))];
 	e->slide = gtk_drop_down_get_selected(GTK_DROP_DOWN(d->motion)) == 0;
+	e->everywhere = gtk_switch_get_active(GTK_SWITCH(d->everywhere));
 	g_free(e->keys);
 	e->keys = d->keys && *d->keys ? g_strdup(d->keys) : NULL;
 	if (save(p)) {
@@ -554,6 +561,12 @@ static void open_dialog(struct popups_page *p, struct popup_entry *editing) {
 	d->motion = labelled(grid, 5, "Comes in", gtk_drop_down_new_from_strings(motions));
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(d->motion), editing && !editing->slide ? 1 : 0);
 	labelled(grid, 6, "Shortcut", keys_box);
+	d->everywhere = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(d->everywhere), editing && editing->everywhere);
+	gtk_widget_set_halign(d->everywhere, GTK_ALIGN_START);
+	gtk_widget_set_tooltip_text(d->everywhere, "Opening the app from the taskbar, the start "
+		"menu, search, the desktop or the Command Center opens it as this popup too");
+	labelled(grid, 7, "Open as popup everywhere", d->everywhere);
 	gtk_box_append(GTK_BOX(box), grid);
 
 	d->warning = gtk_label_new(NULL);

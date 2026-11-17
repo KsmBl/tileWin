@@ -847,6 +847,8 @@ void proc_spawn(const char *command);
 /* apps.c */
 list_t *apps_get(void);         // struct tw_desktop_entry *, cached
 void apps_launch(struct panel *panel, const struct tw_desktop_entry *entry);
+/* The app popup that opens this app wherever it is started (popups.conf, everywhere yes). */
+const char *apps_popup_for(const struct tw_desktop_entry *entry);
 struct tw_desktop_entry *apps_find(const char *id_or_app_id);
 cairo_surface_t *apps_icon_for_window(struct panel *panel, struct pwindow *win, int size);
 cairo_surface_t *apps_icon(struct panel *panel, const char *name, int size);

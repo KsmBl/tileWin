@@ -252,6 +252,10 @@ static struct tw_desktop_entry *entry_at(struct startmenu *sm, int id) {
 }
 
 static char *app_command(struct panel *panel, const struct tw_desktop_entry *e) {
+	const char *popup = apps_popup_for(e);
+	if (popup) {
+		return format_str("popup toggle %s", popup);
+	}
 	char *cmd = tw_desktop_exec_command(e);
 	if (!cmd) {
 		return NULL;

@@ -7,6 +7,8 @@
 #include <time.h>
 #include "log.h"
 #include "panel.h"
+#include "tw_paths.h"
+#include "twconf.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 
@@ -89,7 +91,64 @@ const char *apps_display_name(const char *app_id) {
 	return e ? e->name : app_id;
 }
 
+/*
+ * The app popup that opens this app wherever it is started from (its block in
+ * popups.conf says "everywhere yes"); NULL when it opens as a window. The file
+ * is read again when it changed.
+ */
+const char *apps_popup_for(const struct tw_desktop_entry *entry) {
+	static char *names[64], *apps[64];
+	static int count;
+	static struct timespec seen;
+	static off_t seen_size = -1;
+	if (!entry || !entry->id) {
+		return NULL;
+	}
+	char *dir = tw_config_dir();
+	char *path = dir ? format_str("%s/popups.conf", dir) : NULL;
+	free(dir);
+	struct stat st;
+	bool there = path && stat(path, &st) == 0;
+	if (!there) {
+		st.st_size = -2;
+		st.st_mtim = (struct timespec){ 0 };
+	}
+	if (st.st_size != seen_size || st.st_mtim.tv_sec != seen.tv_sec ||
+			st.st_mtim.tv_nsec != seen.tv_nsec) {
+		for (int i = 0; i < count; i++) {
+			free(names[i]);
+			free(apps[i]);
+		}
+		count = 0;
+		seen = st.st_mtim;
+		seen_size = st.st_size;
+		struct twconf_node *root = there ? twconf_parse_file(path, NULL) : NULL;
+		for (int i = 0; root && i < twconf_count(root) && count < 64; i++) {
+			struct twconf_node *n = twconf_at(root, i);
+			const char *app = twconf_value(n, "app");
+			if (strcmp(n->name, "popup") == 0 && n->argc > 0 && app &&
+					twconf_parse_bool(twconf_value(n, "everywhere"), false)) {
+				names[count] = strdup(n->argv[0]);
+				apps[count++] = strdup(app);
+			}
+		}
+		twconf_free(root);
+	}
+	free(path);
+	for (int i = 0; i < count; i++) {
+		if (strcmp(apps[i], entry->id) == 0) {
+			return names[i];
+		}
+	}
+	return NULL;
+}
+
 void apps_launch(struct panel *panel, const struct tw_desktop_entry *entry) {
+	const char *popup = apps_popup_for(entry);
+	if (popup) {
+		ipc_panel_commandf(panel, "popup toggle %s", popup);
+		return;
+	}
 	char *cmd = tw_desktop_exec_command(entry);
 	if (!cmd) {
 		return;

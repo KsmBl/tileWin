@@ -76,6 +76,7 @@ popup mail {
 	width 70%
 	height 100%
 	dim 50
+	everywhere yes
 }
 popup notes {
 	app tw-test-notes.desktop
@@ -183,6 +184,17 @@ read -r x y w h _ <<< "$(window twtestnotes)"
 	fail "notes is not 50% wide at the top: $x $y $w $h"
 [ "$(wc -l < "$work/notes-starts")" -eq 1 ] || fail "notes was started although it ran"
 darkened && fail "dim 0 darkened the screen"
+
+# with "everywhere yes", opening the app from the start menu's search opens the popup
+ipc popup toggle notes >/dev/null 2>&1 # (away with notes)
+wait_until 5 hidden || true
+ipc panel startmenu search >/dev/null 2>&1
+sleep 1
+"$keyboard" text testmail >/dev/null 2>&1
+sleep 1
+"$keyboard" key none return >/dev/null 2>&1
+wait_until 5 shown || fail "opening the app from the search did not open it as the popup"
+[ "$(wc -l < "$work/starts")" -eq 1 ] || fail "the search started the app again"
 
 ipc popup toggle nothing 2>&1 | grep -q '"success": false' ||
 	fail "an unknown popup did not fail"
