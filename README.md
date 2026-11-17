@@ -7,7 +7,7 @@ tileWin is a Wayland compositor with two modes you can switch between at any tim
   - floating windows with themed title bars and minimize/maximize/close buttons
   - drag-to-edge snapping, Alt+Tab and Windows keyboard shortcuts
 
-It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are fourteen built-in themes, from **Windows 1** to **Windows 11**, the **Atari ST**, the science-fiction **Starship Console** and **sway**. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live.
+It comes with **tilewin-panel**, a lightweight taskbar with widgets, custom script widgets, right-click menus and a start menu. There are fifteen built-in themes, from **Windows 1** to **Windows 11**, the **Atari ST**, the science-fiction **Starship Console**, **sway** and the experimental **modernCC**, built around a Command Center. They style window decorations, taskbar, start menu, menus and wallpaper, and switch live.
 
 tileWin is built on sway 1.12 and wlroots 0.20. The compositor and taskbar are written in C without GTK/Qt and use no CPU when idle; only the optional settings app uses GTK4 and runs only while it is open.
 
@@ -50,6 +50,8 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 | ![Windows Vista](docs/screenshots/theme-vista.png) | ![Windows 7](docs/screenshots/theme-win7.png) |
 | **Windows 8**, its start screen of colored tiles over the whole screen | **Windows 11** |
 | ![Windows 8 start screen](docs/screenshots/theme-win8.png) | ![Windows 11](docs/screenshots/theme-win11.png) |
+| **modernCC** (experimental), the Command Center open | **modernCC** (dark) |
+| ![modernCC](docs/screenshots/theme-moderncc.png) | ![modernCC dark](docs/screenshots/theme-moderncc-dark.png) |
 
 Windows 10 is the window mode screenshot at the top.
 
@@ -64,8 +66,9 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **A taskbar** with a start menu, window previews, tray, clock and calendar, quick settings, notifications, and widgets from CPU and network charts to the weather of your own script. Its flyouts work from the keyboard, and it stays sharp on screens at 125% or 150%.
 - **Search** in the start menu and the launcher: apps, settings pages (`dark mode`, `wifi`), files and folders in your home, and sums (`6*7`).
 - **Help when you need it:** a welcome at the first start, `Super+/` for the keys of the current mode, and a word on how to get back after switching the mode.
+- **The Command Center** (modernCC, experimental): one place to start anything, opened by Super. It finds apps, open windows, actions, settings pages, files and sums as you type, ranks them by how well they match and how often you use them, and offers what else can be done with the chosen row (Tab, Alt+1 to Alt+3). `>`, `@` and `#` keep to actions, windows or settings: [docs/moderncc.md](docs/moderncc.md).
 - **A desktop** with icons, and widgets as clocks, charts and gauges.
-- **14 themes**, Windows 1 to Windows 11, the Atari ST, Starship Console and sway, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
+- **15 themes**, Windows 1 to Windows 11, the Atari ST, Starship Console, sway and modernCC, each with its own title bars, taskbar, start menu and wallpaper, light or dark, on a schedule if you like, the accent color taken from the wallpaper if you like.
 - **Little helpers:** clipboard history, a snipping tool that also reads text, an emoji picker, sticky notes, screen savers, night light and a lock screen.
 - **Login pages of public Wi-Fi** accepted by themselves: the terms ticked, not the newsletter, and the right button pressed, also on pages made by scripts (with Chromium); a page that wants your email or room number opens for you instead.
 - **Fingerprint** on the lock screen, as Windows Hello does it, the fingers added and removed in the settings.
@@ -197,6 +200,7 @@ Window mode and tile mode each remember their own theme.
 
 - [docs/features.md](docs/features.md): everything tileWin does
 - [docs/usage.md](docs/usage.md): keys, flyouts, the settings app, the themes and the screen savers in detail
+- [docs/moderncc.md](docs/moderncc.md): the experimental modernCC theme and its Command Center
 - [docs/display-manager.md](docs/display-manager.md): the login screen, its settings and how to try it
 - [docs/configuration.md](docs/configuration.md): every config file and setting, and how to make a theme of your own
 - [docs/development.md](docs/development.md): the tests
