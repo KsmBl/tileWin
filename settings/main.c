@@ -114,6 +114,12 @@ static GtkWidget *problem_banner(struct settings *s) {
 	return box;
 }
 
+static void restart_new_tilewin(gpointer data) {
+	char *error = NULL;
+	tw_ipc_command("restart relaunch-apps", &error);
+	g_free(error);
+}
+
 bool settings_command(struct settings *s, const char *fmt, ...) {
 	va_list args;
 	va_start(args, fmt);
@@ -121,7 +127,17 @@ bool settings_command(struct settings *s, const char *fmt, ...) {
 	va_end(args);
 	char *error = NULL;
 	bool ok = tw_ipc_command(command, &error);
-	if (!ok && tw_ipc_available()) {
+	if (!ok && tw_ipc_available() && error && strstr(error, "Unknown/invalid command")) {
+		// installed, but the tileWin that runs is the one from before: a restart in
+		// place keeps it, the new one starts with the next login
+		char *word = g_strndup(command, strcspn(command, " "));
+		char *text = g_strdup_printf("The tileWin that runs is older than these settings and "
+			"does not know \"%s\" yet. The new one starts with your next login, or now with "
+			"Restart (your apps open again).", word);
+		settings_problem(s, text, "Restart", restart_new_tilewin, NULL);
+		g_free(text);
+		g_free(word);
+	} else if (!ok && tw_ipc_available()) {
 		char *text = g_strdup_printf("tileWin rejected \"%s\": %s", command,
 			error ? error : "unknown error");
 		settings_problem(s, text, NULL, NULL, NULL);
