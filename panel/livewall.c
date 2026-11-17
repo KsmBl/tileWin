@@ -337,6 +337,7 @@ static void sensor_look(struct radar_look *look, double S) {
 	look->card_border = pal(0);
 	look->upper = true;
 	look->bearings = true;
+	look->bluetooth = true;
 	look->scale = 1;
 	look->turn = 6;
 	look->cards_x = 0;

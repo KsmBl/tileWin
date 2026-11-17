@@ -9,6 +9,7 @@
  *       text count|name|none # on the taskbar: how many, the one connected to, the radar alone
  *       turn 6               # seconds for a round of the sweep
  *       color #3b82f6        # of the sweep; the accent of the theme by default
+ *       bluetooth yes|no     # Bluetooth devices too, as diamonds (yes)
  *   }
  *
  * On the desktop the pointer on a contact shows its card (signal, security,
@@ -93,6 +94,8 @@ static void look_of(struct widget *w, const struct gadget_ctx *ctx,
 	snprintf(look->family, sizeof(look->family), "%s", pal->family);
 	look->scale = ctx->scale;
 	look->turn = turn_of(w);
+	const char *bt = place_conf(w, "bluetooth", NULL);
+	look->bluetooth = !bt || twconf_parse_bool(bt, true);
 	look->shadow = pal->shadow && !ctx->card;
 	look->bad = pal->critical;
 	if (panel_console(panel)) {

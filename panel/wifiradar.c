@@ -527,7 +527,7 @@ static void add_item(list_t *items, const char *label, const char *action, const
 bool wifiradar_menu(const struct radar_geom *g, const struct radar_look *look, double x,
 		double y, struct popup_anchor anchor) {
 	int i = wifiradar_hit(g, look, x, y);
-	if (i < 0) {
+	if (i < 0 || i >= RADAR_MAX) {
 		return false;
 	}
 	const struct radar_net *n = &rd.nets[i];
@@ -618,35 +618,91 @@ bool wifiradar_in_disc(const struct radar_geom *g, double x, double y) {
  * Where the contacts are drawn: at their bearing and distance, those too close
  * to one drawn before turned a little further round so each can be pointed at.
  */
-static void positions(const struct radar_geom *g, const struct radar_look *look, double now,
-		double *xs, double *ys) {
+/* ---------- Bluetooth devices ---------- */
+
+#define BT_MAX 32
+
+/* The devices shown: those paired, and those in reach while Bluetooth looks around. */
+static int bt_shown(const struct radar_look *look, struct bt_device **out) {
+	if (!look->bluetooth || !bt_available() || !bt_powered()) {
+		return 0;
+	}
+	list_t *all = bt_devices();
+	int n = 0;
+	for (int i = 0; all && i < all->length && n < BT_MAX; i++) {
+		struct bt_device *d = all->items[i];
+		if ((d->paired || d->has_rssi) && d->address) {
+			out[n++] = d;
+		}
+	}
+	return n;
+}
+
+/* Where a device is: connected near the middle, else by its signal, else out at the rim. */
+static double bt_distance(const struct bt_device *d) {
+	if (d->connected) {
+		return 0.22;
+	}
+	if (d->has_rssi) {
+		double strength = (d->rssi + 100) / 70.0; // -100 dBm far, -30 near
+		strength = strength < 0 ? 0 : strength > 1 ? 1 : strength;
+		return 0.14 + 0.82 * (1 - strength);
+	}
+	return 0.92;
+}
+
+/*
+ * Where the contacts are drawn: at their bearing and distance, those too close
+ * to one drawn before turned a little further round so each can be pointed at;
+ * the networks first (0 to rd.count), then the devices (from RADAR_MAX).
+ */
+static void positions_with(const struct radar_geom *g, const struct radar_look *look, double now,
+		double *xs, double *ys, struct bt_device **devices, int nd) {
 	double apart = 11 * look->scale;
-	for (int i = 0; i < rd.count; i++) {
-		const struct radar_net *n = &rd.nets[i];
-		double r = g->R * distance_now(n, now), a = n->angle - M_PI / 2;
-		double step = r > 1 ? fmin(apart / r, 0.6) : 0.6;
+	double px[RADAR_MAX + BT_MAX], py[RADAR_MAX + BT_MAX];
+	int placed = 0;
+	for (int k = 0; k < rd.count + nd; k++) {
+		bool net = k < rd.count;
+		double r, a;
+		if (net) {
+			r = g->R * distance_now(&rd.nets[k], now);
+			a = rd.nets[k].angle - M_PI / 2;
+		} else {
+			const struct bt_device *d = devices[k - rd.count];
+			r = g->R * bt_distance(d);
+			a = angle_of(d->address) - M_PI / 2;
+		}
+		double step = r > 1 ? fmin(apart / r, 0.6) : 0.6, x = 0, y = 0;
 		for (int tries = 0; tries < 12; tries++) {
-			xs[i] = g->cx + cos(a) * r;
-			ys[i] = g->cy + sin(a) * r;
+			x = g->cx + cos(a) * r;
+			y = g->cy + sin(a) * r;
 			bool crowded = false;
-			for (int j = 0; j < i && !crowded; j++) {
-				crowded = hypot(xs[i] - xs[j], ys[i] - ys[j]) < apart;
+			for (int j = 0; j < placed && !crowded; j++) {
+				crowded = hypot(x - px[j], y - py[j]) < apart;
 			}
 			if (!crowded) {
 				break;
 			}
 			a += step;
 		}
+		px[placed] = x;
+		py[placed++] = y;
+		int slot = net ? k : RADAR_MAX + (k - rd.count);
+		xs[slot] = x;
+		ys[slot] = y;
 	}
 }
+
 
 int wifiradar_hit(const struct radar_geom *g, const struct radar_look *look, double x,
 		double y) {
 	if (rd.status != RADAR_READY) {
 		return -1;
 	}
-	double xs[RADAR_MAX], ys[RADAR_MAX];
-	positions(g, look, now_s(), xs, ys);
+	double xs[RADAR_MAX + BT_MAX], ys[RADAR_MAX + BT_MAX];
+	struct bt_device *devices[BT_MAX];
+	int nd = bt_shown(look, devices);
+	positions_with(g, look, now_s(), xs, ys, devices, nd);
 	int best = -1;
 	double best_d = 12 * look->scale;
 	best_d = fmax(best_d, 10);
@@ -660,12 +716,34 @@ int wifiradar_hit(const struct radar_geom *g, const struct radar_look *look, dou
 			best = i;
 		}
 	}
+	for (int i = 0; i < nd; i++) {
+		double d = hypot(x - xs[RADAR_MAX + i], y - ys[RADAR_MAX + i]);
+		if (d < best_d) {
+			best_d = d;
+			best = RADAR_MAX + i;
+		}
+	}
 	return best;
 }
 
 void wifiradar_click(const struct radar_geom *g, const struct radar_look *look, double x,
 		double y, struct popup_anchor anchor) {
 	int i = wifiradar_hit(g, look, x, y);
+	if (i >= RADAR_MAX) {
+		// a device: connect or disconnect it, pair a new one
+		struct bt_device *devices[BT_MAX];
+		int nd = bt_shown(look, devices);
+		if (i - RADAR_MAX < nd) {
+			struct bt_device *d = devices[i - RADAR_MAX];
+			if (d->paired) {
+				bt_connect(d->path, !d->connected);
+			} else {
+				bt_pair(d->path);
+			}
+			changed();
+		}
+		return;
+	}
 	if (i >= 0) {
 		connect_to(&rd.nets[i], anchor);
 		return;
@@ -728,34 +806,14 @@ static const char *band_of(int freq) {
 }
 
 /* The card of the contact under the pointer: its name, how it is, what a click does. */
-static void draw_card(cairo_t *cr, const struct radar_look *look, const struct radar_net *n,
-		double bx, double by) {
+/* A card beside a contact: its name, a line of facts and what a click does. */
+static void draw_card_lines(cairo_t *cr, const struct radar_look *look, double bx, double by,
+		const char *title, const char *facts, const char *hint, uint32_t hint_color) {
 	double sc = look->scale;
 	char bold[200], small[200];
 	font(bold, sizeof(bold), look, true, 12 * sc);
 	font(small, sizeof(small), look, false, 10.5 * sc);
-	char facts[160];
-	const char *band = band_of(n->freq);
-	snprintf(facts, sizeof(facts), "Signal %d%%%s%s%s%s", n->signal,
-		n->secured ? " · " : " · Open", n->secured ? n->security : "", band ? " · " : "",
-		band ? band : "");
-	const char *connecting = wifiradar_connecting();
-	char hint[200];
-	if (connecting && strcmp(connecting, n->ssid) == 0) {
-		snprintf(hint, sizeof(hint), "Connecting...");
-	} else if (rd.failed[0] && strcmp(rd.failed, n->ssid) == 0 &&
-			now_s() - rd.failed_at < FAILED_SHOWN) {
-		snprintf(hint, sizeof(hint), "Could not connect%s%s", rd.why[0] ? ": " : "", rd.why);
-	} else if (n->active) {
-		snprintf(hint, sizeof(hint), "Connected · click for details");
-	} else if (n->known) {
-		snprintf(hint, sizeof(hint), "Saved · click to connect");
-	} else if (n->secured) {
-		snprintf(hint, sizeof(hint), "Click to connect with its password");
-	} else {
-		snprintf(hint, sizeof(hint), "Click to connect");
-	}
-	char *name = look->upper ? g_utf8_strup(n->ssid, -1) : g_strdup(n->ssid);
+	char *name = look->upper ? g_utf8_strup(title, -1) : g_strdup(title);
 	int w1 = 0, w2 = 0, w3 = 0, h1 = 0, h2 = 0;
 	pd_text_size(cr, bold, name, &w1, &h1);
 	pd_text_size(cr, small, facts, &w2, &h2);
@@ -786,10 +844,51 @@ static void draw_card(cairo_t *cr, const struct radar_look *look, const struct r
 	ty += fmax(h1, 12 * sc);
 	pd_text(cr, small, facts, x + pad, ty, w - 2 * pad, line, alpha(look->card_fg, 0.75), PD_LEFT);
 	ty += line;
+	pd_text(cr, small, hint, x + pad, ty, w - 2 * pad, line, hint_color, PD_LEFT);
+}
+
+/* The card of the contact under the pointer: its name, how it is, what a click does. */
+static void draw_card(cairo_t *cr, const struct radar_look *look, const struct radar_net *n,
+		double bx, double by) {
+	char facts[160];
+	const char *band = band_of(n->freq);
+	snprintf(facts, sizeof(facts), "Signal %d%%%s%s%s%s", n->signal,
+		n->secured ? " · " : " · Open", n->secured ? n->security : "", band ? " · " : "",
+		band ? band : "");
+	const char *connecting = wifiradar_connecting();
 	bool failed = rd.failed[0] && strcmp(rd.failed, n->ssid) == 0 &&
 		now_s() - rd.failed_at < FAILED_SHOWN;
-	pd_text(cr, small, hint, x + pad, ty, w - 2 * pad, line,
-		failed ? look->bad : n->active ? look->linked : look->sweep, PD_LEFT);
+	char hint[200];
+	if (connecting && strcmp(connecting, n->ssid) == 0) {
+		snprintf(hint, sizeof(hint), "Connecting...");
+	} else if (failed) {
+		snprintf(hint, sizeof(hint), "Could not connect%s%s", rd.why[0] ? ": " : "", rd.why);
+	} else if (n->active) {
+		snprintf(hint, sizeof(hint), "Connected · click for details");
+	} else if (n->known) {
+		snprintf(hint, sizeof(hint), "Saved · click to connect");
+	} else if (n->secured) {
+		snprintf(hint, sizeof(hint), "Click to connect with its password");
+	} else {
+		snprintf(hint, sizeof(hint), "Click to connect");
+	}
+	draw_card_lines(cr, look, bx, by, n->ssid, facts, hint,
+		failed ? look->bad : n->active ? look->linked : look->sweep);
+}
+
+/* The card of a Bluetooth device: its name, how it is, what a click does. */
+static void draw_bt_card(cairo_t *cr, const struct radar_look *look, const struct bt_device *d,
+		double bx, double by) {
+	char facts[96];
+	snprintf(facts, sizeof(facts), "Bluetooth · %s%s", d->connected ? "connected" :
+		d->paired ? "paired" : "in reach", d->has_rssi ? "" : "");
+	if (d->has_rssi) {
+		snprintf(facts + strlen(facts), sizeof(facts) - strlen(facts), " · %d dBm", d->rssi);
+	}
+	const char *hint = d->busy ? "Working on it..." : d->connected ? "Click to disconnect" :
+		d->paired ? "Click to connect" : "Click to pair";
+	draw_card_lines(cr, look, bx, by, d->name ? d->name : d->address, facts, hint,
+		d->connected ? look->linked : look->sweep);
 }
 
 /* The corners of a target around a contact: hovered, or turned down. */
@@ -954,8 +1053,10 @@ void wifiradar_draw(cairo_t *cr, const struct radar_geom *g, const struct radar_
 		cairo_stroke(cr);
 	}
 
-	double xs[RADAR_MAX], ys[RADAR_MAX];
-	positions(g, look, now, xs, ys);
+	double xs[RADAR_MAX + BT_MAX], ys[RADAR_MAX + BT_MAX];
+	struct bt_device *devices[BT_MAX];
+	int nd = bt_shown(look, devices);
+	positions_with(g, look, now, xs, ys, devices, nd);
 	const char *connecting = wifiradar_connecting();
 	char small[200], bold_small[200];
 	font(small, sizeof(small), look, false, 10.5 * sc);
@@ -1096,12 +1197,66 @@ void wifiradar_draw(cairo_t *cr, const struct radar_geom *g, const struct radar_
 					named * fade * (n->active || trying ? 1 : 0.85)), PD_LEFT);
 		}
 	}
-	if (rd.count == 0) {
+	// the Bluetooth devices: diamonds, lit by the sweep as the networks are
+	for (int i = 0; i < nd; i++) {
+		const struct bt_device *d = devices[i];
+		double x = xs[RADAR_MAX + i], y = ys[RADAR_MAX + i];
+		double a = atan2(y - cy, x - cx);
+		double since = fmod(sweep - a + 4 * M_PI, 2 * M_PI) / (2 * M_PI);
+		bool hovered = hover == RADAR_MAX + i;
+		double glow = hovered || d->connected ? 1 : 0.28 + 0.72 * pow(1 - since, 2);
+		uint32_t color = d->connected ? look->linked : look->blip;
+		double size = (hovered || d->connected ? 4.6 : 3.6) * sc;
+		cairo_new_path(cr);
+		cairo_move_to(cr, x, y - size);
+		cairo_line_to(cr, x + size, y);
+		cairo_line_to(cr, x, y + size);
+		cairo_line_to(cr, x - size, y);
+		cairo_close_path(cr);
+		if (d->paired) {
+			pd_color(cr, alpha(color, glow));
+			cairo_fill(cr);
+		} else {
+			pd_color(cr, alpha(color, glow));
+			cairo_set_line_width(cr, lw);
+			cairo_stroke(cr);
+		}
+		if (d->busy) {
+			double t = fmod(now / 1.2, 1.0);
+			cairo_new_path(cr);
+			cairo_arc(cr, x, y, (4 + 14 * t) * sc, 0, 2 * M_PI);
+			pd_color(cr, alpha(look->sweep, 1 - t));
+			cairo_set_line_width(cr, lw);
+			cairo_stroke(cr);
+		}
+		if (hovered) {
+			brackets(cr, x, y, size + 6 * sc, 4 * sc, look->fg, 1.5 * lw);
+		}
+		double named = hovered || d->connected ? 1 : glow > 0.72 ? (glow - 0.72) / 0.28 : 0;
+		const char *name = d->name ? d->name : d->address;
+		if (named > 0 && !hovered && name) {
+			int tw = 0;
+			const char *f = d->connected ? bold_small : small;
+			char *up = look->upper ? g_utf8_strup(name, -1) : NULL;
+			pd_text_size(cr, f, up ? up : name, &tw, NULL);
+			g_free(up);
+			tw = (int)fmin(tw, R);
+			double lx = x + size + 5 * sc;
+			if (lx + tw > look->cards_x + look->cards_w) {
+				lx = x - size - 5 * sc - tw;
+			}
+			label(cr, look, f, name, lx, y - 8 * sc, tw, 16 * sc,
+				alpha(d->connected ? look->linked : look->fg, named * 0.85), PD_LEFT);
+		}
+	}
+	if (rd.count == 0 && nd == 0) {
 		draw_message(cr, g, look, rd.status == RADAR_LOOKING ? "Looking for networks..." :
 			"No networks in reach", NULL);
 	}
 	if (hover >= 0 && hover < rd.count && !rd.nets[hover].gone) {
 		draw_card(cr, look, &rd.nets[hover], xs[hover], ys[hover]);
+	} else if (hover >= RADAR_MAX && hover - RADAR_MAX < nd) {
+		draw_bt_card(cr, look, devices[hover - RADAR_MAX], xs[hover], ys[hover]);
 	}
 	cairo_restore(cr);
 }

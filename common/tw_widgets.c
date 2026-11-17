@@ -112,6 +112,8 @@ static const struct tw_widget_option opts_wifiradar[] = {
 	{ "turn", "Seconds for a round", "How fast the sweep goes round, 6 by default",
 		choice_radar_turn },
 	{ "color", "Color of the sweep", "e.g. #3b82f6; the accent of the theme by default", NULL },
+	{ "bluetooth", "Bluetooth devices", "The paired ones and those in reach, as diamonds: "
+		"a click connects, disconnects or pairs", choice_yes_no },
 	{ 0 },
 };
 

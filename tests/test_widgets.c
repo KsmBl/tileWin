@@ -23,7 +23,7 @@ static void check(bool ok, const char *what, const char *widget) {
 static const char *const drawn[] = {
 	"compact", "tile", "chart", "gauge", "ring", "bar", "digital", "analog", "binary",
 	// drawn by the widgets that have them (draw_gadget): Claude's and the kernel's
-	"list", "card", NULL,
+	"list", "card", "week", "windows", "radar", NULL,
 };
 
 static bool is_drawn(const char *name) {

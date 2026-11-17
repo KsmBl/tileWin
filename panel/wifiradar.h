@@ -44,6 +44,7 @@ struct radar_look {
 	bool bearings;          // 000 090 180 270 around the outside
 	bool shadow;            // text gets a shadow (straight on the wallpaper)
 	bool mono;              // ink on paper (the Atari ST): hatching, no shades
+	bool bluetooth;         // Bluetooth devices too, as diamonds
 	double scale;           // 1 for text at 100 pixel cells
 	double turn;            // seconds for a round of the sweep
 	double cards_x, cards_y, cards_w, cards_h; // where the card of a contact may go
@@ -80,7 +81,10 @@ void wifiradar_geom(double x, double y, double w, double h, const struct radar_l
 	struct radar_geom *g);
 void wifiradar_draw(cairo_t *cr, const struct radar_geom *g, const struct radar_look *look,
 	int hover);
-/* The contact at a point, -1 for none. */
+/*
+ * The contact at a point, -1 for none: a Wi-Fi network below RADAR_MAX, a
+ * Bluetooth device RADAR_MAX and up.
+ */
 int wifiradar_hit(const struct radar_geom *g, const struct radar_look *look, double x,
 	double y);
 bool wifiradar_in_disc(const struct radar_geom *g, double x, double y);
