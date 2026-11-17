@@ -1195,6 +1195,34 @@ static int window_series(struct claude_charts *c, bool week, time_t reset, time_
 	return n;
 }
 
+/* The usage at a time between the points of a series; below 0 outside it. */
+static double value_at(const time_t *ts, const double *vs, int n, time_t t) {
+	if (n < 1 || t < ts[0] || t > ts[n - 1]) {
+		return -1;
+	}
+	for (int i = 1; i < n; i++) {
+		if (t <= ts[i]) {
+			double span = (double)(ts[i] - ts[i - 1]);
+			double share = span > 0 ? (double)(t - ts[i - 1]) / span : 1;
+			return vs[i - 1] + (vs[i] - vs[i - 1]) * share;
+		}
+	}
+	return vs[n - 1];
+}
+
+/* The time under the pointer, for a chart from start to end. */
+static time_t time_at(struct pbox g, time_t start, time_t end, double px) {
+	double share = g.width > 0 ? (px - g.x) / g.width : 0;
+	share = share < 0 ? 0 : share > 1 ? 1 : share;
+	return start + (time_t)((double)(end - start) * share);
+}
+
+static void when_words(time_t t, bool weekday, char *out, size_t size) {
+	struct tm tm;
+	localtime_r(&t, &tm);
+	strftime(out, size, weekday ? "%a %H:%M" : "%H:%M", &tm);
+}
+
 static uint32_t usage_color(const struct fly_style *st, double used) {
 	if (used >= 90) {
 		return st->dark ? 0xff7b72ff : 0xc42b1cff;
@@ -1276,8 +1304,8 @@ static void draw_now(cairo_t *cr, const struct fly_style *st, struct pbox g, dou
  * window a band with its usage rising in it and what it came to at its top,
  * the time between them empty, and the line of now.
  */
-static void draw_five_hours(struct claude_charts *c, cairo_t *cr, const struct fly_style *st,
-		struct pbox box) {
+static void draw_five_hours(struct info_flyout *f, struct claude_charts *c, cairo_t *cr,
+		const struct fly_style *st, struct pbox box) {
 	// the windows there were: the resets in the history and the one now, newest last
 	time_t resets[64];
 	int nr = 0;
@@ -1368,10 +1396,38 @@ static void draw_five_hours(struct claude_charts *c, cairo_t *cr, const struct f
 		}
 	}
 	draw_now(cr, st, g, now_x, now_used, now_color);
+	// what was used at the time under the pointer
+	if (f->inside && pbox_contains(&g, f->px, f->py)) {
+		time_t t = time_at(g, start, end, f->px);
+		char when[32], text[96];
+		when_words(t, false, when, sizeof(when));
+		double ys[1] = { -1 };
+		uint32_t colors[1] = { st->chart_line };
+		snprintf(text, sizeof(text), "%s\nnot in a 5-hour window", when);
+		for (int i = first; i < nr; i++) {
+			time_t reset = resets[i];
+			if (t < reset - TW_CLAUDE_FIVE_HOURS || t > reset) {
+				continue;
+			}
+			time_t ts[256];
+			double vs[256];
+			int n = window_series(c, false, reset, TW_CLAUDE_FIVE_HOURS, ts, vs, 256);
+			double v = value_at(ts, vs, n, t);
+			if (v >= 0) {
+				ys[0] = chart_y(g, v);
+				colors[0] = usage_color(st, v);
+				snprintf(text, sizeof(text), "%s\n%.0f%% used", when, v);
+			} else {
+				snprintf(text, sizeof(text), "%s\nstill to come", when);
+			}
+		}
+		pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, f->px, ys, colors, 1, text,
+			st->fg, (st->dark ? 0x2b2b2bff : 0xffffffff), st->dim);
+	}
 }
 
-static void draw_week(struct claude_charts *c, cairo_t *cr, const struct fly_style *st,
-		struct pbox box) {
+static void draw_week(struct info_flyout *f, struct claude_charts *c, cairo_t *cr,
+		const struct fly_style *st, struct pbox box) {
 	struct pbox g = { box.x, box.y, box.width, box.height - 20 };
 	fly_draw_chart_bg(cr, st, g);
 	time_t end = c->seven_day.resets_at, start = end - TW_CLAUDE_SEVEN_DAYS;
@@ -1435,6 +1491,29 @@ static void draw_week(struct claude_charts *c, cairo_t *cr, const struct fly_sty
 	pd_text_size(cr, st->font, label, &tw, NULL);
 	double lx = now_x + 6 + tw > g.x + g.width - 4 ? now_x - 6 - tw : now_x + 6;
 	pd_text(cr, st->font, label, lx, g.y + 2, tw + 2, 16, st->fg, PD_LEFT);
+	// at the time under the pointer: what was used, or where this pace leads
+	if (f->inside && pbox_contains(&g, f->px, f->py)) {
+		time_t t = time_at(g, start, end, f->px);
+		char when[32], text[96];
+		when_words(t, true, when, sizeof(when));
+		double ys[1] = { -1 };
+		uint32_t colors[1] = { color };
+		double v = value_at(ts, vs, n, t);
+		if (t <= c->now && v >= 0) {
+			ys[0] = chart_y(g, v);
+			colors[0] = usage_color(st, v);
+			snprintf(text, sizeof(text), "%s\n%.0f%% used", when, v);
+		} else if (t > c->now && c->now > start && used > 0) {
+			double ahead = fmin(used + used / (double)(c->now - start) * (double)(t - c->now), 100);
+			ys[0] = chart_y(g, ahead);
+			colors[0] = usage_color(st, ahead);
+			snprintf(text, sizeof(text), "%s\nat this pace %.0f%%", when, ahead);
+		} else {
+			snprintf(text, sizeof(text), "%s", when);
+		}
+		pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, f->px, ys, colors, 1, text,
+			st->fg, (st->dark ? 0x2b2b2bff : 0xffffffff), st->dim);
+	}
 }
 
 static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
@@ -1447,7 +1526,7 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 	pd_text(cr, st->bold, "The last three 5-hour windows", box.x, y, box.width, 18, st->fg,
 		PD_LEFT);
 	y += 22;
-	draw_five_hours(c, cr, st, (struct pbox){ box.x, y, box.width, CHART_FIVE });
+	draw_five_hours(f, c, cr, st, (struct pbox){ box.x, y, box.width, CHART_FIVE });
 	y += CHART_FIVE + 8;
 	char title[96] = "This week";
 	if (c->seven_day.resets_at > 0) {
@@ -1460,7 +1539,7 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 	}
 	pd_text(cr, st->bold, title, box.x, y, box.width, 18, st->fg, PD_LEFT);
 	y += 22;
-	draw_week(c, cr, st, (struct pbox){ box.x, y, box.width, CHART_WEEK });
+	draw_week(f, c, cr, st, (struct pbox){ box.x, y, box.width, CHART_WEEK });
 }
 
 static void claude_sample(struct info_flyout *f) {
@@ -1901,6 +1980,37 @@ static void draw_graph(struct info_flyout *f, cairo_t *cr, const struct fly_styl
 		pd_color(cr, colors[s]);
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
+	}
+	// the reading under the pointer, and how long ago it was
+	if (f->inside && f->history_len > 0 && pbox_contains(&g, f->px, f->py)) {
+		int i = (int)lround((f->px - first_x) / step);
+		i = i < 0 ? 0 : i >= f->history_len ? f->history_len - 1 : i;
+		double hx = first_x + i * step;
+		double ys[2] = { -1, -1 };
+		char a[32], b[32], text[160];
+		for (int k = 0; k < (f->two_series ? 2 : 1); k++) {
+			ys[k] = g.y + g.height - g.height * fmin(f->history[k][i] / max, 1);
+		}
+		format(a, sizeof(a), f->history[0][i]);
+		int ago = (int)lround((f->history_len - 1 - i) *
+			(f->source && f->source->interval_ms > 0 ? f->source->interval_ms / 1000.0 : 1));
+		char when[32];
+		if (ago <= 0) {
+			snprintf(when, sizeof(when), "now");
+		} else {
+			snprintf(when, sizeof(when), "%d s ago", ago);
+		}
+		if (f->two_series) {
+			format(b, sizeof(b), f->history[1][i]);
+			snprintf(text, sizeof(text), "%s %s · %s %s\n%s", f->series_names[0], a,
+				f->series_names[1], b, when);
+		} else {
+			snprintf(text, sizeof(text), "%s\n%s", a, when);
+		}
+		if (hx >= g.x) {
+			pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, hx, ys, colors,
+				f->two_series ? 2 : 1, text, st->fg, (st->dark ? 0x2b2b2bff : 0xffffffff), st->dim);
+		}
 	}
 	int y = g.y + g.height + 2;
 	pd_text(cr, st->font, f->graph_note, g.x, y, g.width, 22, st->dim, PD_LEFT);

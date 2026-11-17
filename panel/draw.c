@@ -609,6 +609,61 @@ void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, 
 	cairo_restore(cr);
 }
 
+void pd_chart_hover(cairo_t *cr, const char *font, double x, double y, double w, double h,
+		double px, const double *ys, const uint32_t *colors, int n, const char *text,
+		uint32_t fg, uint32_t bg, uint32_t line) {
+	if (px < x || px > x + w) {
+		return;
+	}
+	cairo_save(cr);
+	pd_rect(cr, floor(px), y, 1, h, line);
+	for (int i = 0; i < n; i++) {
+		if (ys[i] < 0) {
+			continue;
+		}
+		cairo_new_path(cr);
+		cairo_arc(cr, px + 0.5, ys[i], 3.5, 0, 2 * M_PI);
+		pd_color(cr, colors[i]);
+		cairo_fill_preserve(cr);
+		pd_color(cr, bg);
+		cairo_set_line_width(cr, 1.5);
+		cairo_stroke(cr);
+	}
+	if (text && *text) {
+		// one or two lines, in a box beside the line: right of it, or left near the end
+		const char *nl = strchr(text, '\n');
+		char first[160], second[160] = "";
+		snprintf(first, sizeof(first), "%.*s", nl ? (int)(nl - text) : (int)strlen(text), text);
+		if (nl) {
+			snprintf(second, sizeof(second), "%s", nl + 1);
+		}
+		int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
+		pd_text_size(cr, font, first, &w1, &h1);
+		if (second[0]) {
+			pd_text_size(cr, font, second, &w2, &h2);
+		}
+		double bw = (w1 > w2 ? w1 : w2) + 12, bh = h1 + (second[0] ? h2 : 0) + 8;
+		double bx = px + 8, by = y + 4;
+		if (bx + bw > x + w) {
+			bx = px - 8 - bw;
+		}
+		if (bx < x) {
+			bx = x;
+		}
+		pd_rounded(cr, bx, by, bw, bh, 4);
+		pd_color(cr, (bg & 0xffffff00) | 0xe8);
+		cairo_fill_preserve(cr);
+		pd_color(cr, (fg & 0xffffff00) | 0x40);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+		pd_text(cr, font, first, bx + 6, by + 4, bw - 12, h1, fg, PD_LEFT);
+		if (second[0]) {
+			pd_text(cr, font, second, bx + 6, by + 4 + h1, bw - 12, h2, fg, PD_LEFT);
+		}
+	}
+	cairo_restore(cr);
+}
+
 static void pd_rgba(cairo_t *cr, uint32_t c, double alpha) {
 	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
 		(c >> 8 & 0xff) / 255.0, alpha);

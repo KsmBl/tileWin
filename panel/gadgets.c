@@ -444,6 +444,61 @@ static void draw_series(struct gadget_ctx *ctx, const struct gadget_palette *pal
 	}
 }
 
+/*
+ * The reading under the pointer on a chart of the desktop: the nearest of the
+ * measurements, the newest at the right.
+ */
+static void chart_hover(struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct widget_sample *s, double cx, double cy, double cw, double ch,
+		uint32_t line) {
+	if (!ctx->pointer || ctx->px < cx || ctx->px > cx + cw || ctx->py < cy ||
+			ctx->py > cy + ch) {
+		return;
+	}
+	double step = cw / (WIDGET_HISTORY - 1);
+	int i = (int)lround((ctx->px - cx) / step);
+	i = i < 0 ? 0 : i >= WIDGET_HISTORY ? WIDGET_HISTORY - 1 : i;
+	double x = cx + i * step;
+	char font[224], text[128];
+	snprintf(font, sizeof(font), "%s %dpx", pal->family, (int)lround(11 * ctx->scale));
+	double ys[2] = { -1, -1 };
+	uint32_t colors[2] = { line, line };
+	int n = 1;
+	const char *when = i == WIDGET_HISTORY - 1 ? "now" : "earlier";
+	if (s->series_count > 0) {
+		double highest = 0;
+		for (int k = 0; k < s->series_count; k++) {
+			for (int j = 0; j < WIDGET_HISTORY; j++) {
+				highest = fmax(highest, s->series[k][j]);
+			}
+		}
+		double top = pd_nice_ceiling(fmax(highest, s->series_rate ? 1000 : 1));
+		series_colors(pal, line, colors);
+		char a[32] = "", b[32] = "";
+		void (*format)(char *, size_t, double) = s->series_rate ? pd_format_axis_rate :
+			axis_plain;
+		for (int k = 0; k < s->series_count && k < 2; k++) {
+			ys[k] = cy + ch - ch * clamp01(s->series[k][i] / top);
+			format(k == 0 ? a : b, 32, s->series[k][i]);
+		}
+		n = s->series_count > 1 ? 2 : 1;
+		if (n == 2) {
+			snprintf(text, sizeof(text), "%s %s · %s %s\n%s", s->series_name[0], a,
+				s->series_name[1], b, when);
+		} else {
+			snprintf(text, sizeof(text), "%s\n%s", a, when);
+		}
+	} else {
+		int v = s->has_history ? s->history[i] : (i == WIDGET_HISTORY - 1 ? s->percent : 0);
+		ys[0] = cy + ch - ch * clamp01(v / 100.0);
+		snprintf(text, sizeof(text), "%d%%\n%s", v, when);
+	}
+	uint32_t bg = pal->dark || pal->look == GADGET_METRO ? 0x202020ff : 0xffffffff;
+	uint32_t fg = bg == 0xffffffff ? 0x1b1b1bff : 0xf2f2f2ff;
+	pd_chart_hover(ctx->cairo, font, cx, cy, cw, ch, x, ys, colors, n, text, fg, bg,
+		alpha(pal->fg, 0x90));
+}
+
 static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		const struct widget_sample *s, const char *title) {
 	cairo_t *cr = ctx->cairo;
@@ -526,6 +581,7 @@ static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 	if (s->series_count > 0) {
 		draw_series(ctx, pal, s, cx, cy, cw, ch, line);
 		cairo_restore(cr);
+		chart_hover(ctx, pal, s, cx, cy, cw, ch, line);
 		return;
 	}
 	// the measurements, oldest at the left
@@ -561,6 +617,7 @@ static void draw_chart(struct gadget_ctx *ctx, const struct gadget_palette *pal,
 	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
 	cairo_stroke(cr);
 	cairo_restore(cr);
+	chart_hover(ctx, pal, s, cx, cy, cw, ch, line);
 }
 
 /* ---------- gauge ---------- */

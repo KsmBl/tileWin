@@ -2997,6 +2997,36 @@ static void power_apply_drag(struct power_flyout *f, bool now) {
 	}
 }
 
+/*
+ * The reading of a chart of the last minute (a percentage a second, the newest
+ * at the right) under the pointer: what it was and how long ago.
+ */
+static void hover_minute(cairo_t *cr, const struct fly_style *st, struct flyout *f,
+		struct pbox g, const int *history, int len, int max_len) {
+	if (len < 1 || !hovered(f, g)) {
+		return;
+	}
+	double step = (double)g.width / (max_len - 1);
+	double first_x = g.x + g.width - (len - 1) * step;
+	int i = (int)lround((f->px - first_x) / step);
+	i = i < 0 ? 0 : i >= len ? len - 1 : i;
+	double x = first_x + i * step;
+	if (x < g.x) {
+		return;
+	}
+	char text[64];
+	int ago = len - 1 - i;
+	if (ago == 0) {
+		snprintf(text, sizeof(text), "%d%%\nnow", history[i]);
+	} else {
+		snprintf(text, sizeof(text), "%d%%\n%d s ago", history[i], ago);
+	}
+	double ys[1] = { g.y + g.height - g.height * history[i] / 100.0 };
+	uint32_t colors[1] = { st->chart_line };
+	pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, x, ys, colors, 1, text, st->fg,
+		(st->dark ? 0x2b2b2bff : 0xffffffff), st->dim);
+}
+
 static void chart_axis_percent(char *out, size_t size, double v) {
 	snprintf(out, size, "%.0f%%", v);
 }
@@ -3078,6 +3108,26 @@ static void power_render_chart(struct power_flyout *f, cairo_t *cr, const struct
 			cairo_stroke(cr);
 			run = i;
 		}
+	}
+	// the charge at the time under the pointer
+	if (count > 0 && hovered(&f->base, g)) {
+		int best = 0;
+		for (int i = 1; i < count; i++) {
+			if (fabs(PX(i) - f->base.px) < fabs(PX(best) - f->base.px)) {
+				best = i;
+			}
+		}
+		time_t at = (time_t)(now - (1 - points[best].x) * TW_BATTERY_SPAN);
+		struct tm tm;
+		localtime_r(&at, &tm);
+		char when[32], text[96];
+		strftime(when, sizeof(when), now - at > 20 * 3600 ? "%a %H:%M" : "%H:%M", &tm);
+		snprintf(text, sizeof(text), "%s\n%.0f%%%s", when, points[best].y * 100,
+			points[best].charging ? ", charging" : "");
+		double ys[1] = { PY(best) };
+		uint32_t colors[1] = { points[best].charging ? green : st->chart_line };
+		pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, PX(best), ys, colors, 1, text,
+			st->fg, (st->dark ? 0x2b2b2bff : 0xffffffff), st->dim);
 	}
 #undef PX
 #undef PY
@@ -3891,6 +3941,7 @@ static void cpu_render(struct popup *p, cairo_t *cr) {
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
 	}
+	hover_minute(cr, &st, &f->base, g, f->history, f->history_len, CPU_HISTORY_LEN);
 	pd_text(cr, st.font, "60 seconds", x0, g.y + g.height + 2, cw, 22, st.dim, PD_LEFT);
 	pd_text(cr, st.font, "100%", x0, g.y + g.height + 2, cw, 22, st.dim, PD_RIGHT);
 	y += CPU_GRAPH;
@@ -4368,6 +4419,7 @@ static void mem_render(struct popup *p, cairo_t *cr) {
 		cairo_set_line_width(cr, 1.5);
 		cairo_stroke(cr);
 	}
+	hover_minute(cr, &st, &f->base, g, f->history, f->history_len, MEM_HISTORY_LEN);
 	pd_text(cr, st.font, "60 seconds", x0, g.y + g.height + 2, cw, 22, st.dim, PD_LEFT);
 	pd_text(cr, st.font, "100%", x0, g.y + g.height + 2, cw, 22, st.dim, PD_RIGHT);
 	y += MEM_GRAPH;

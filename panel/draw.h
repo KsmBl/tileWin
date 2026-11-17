@@ -54,6 +54,15 @@ void pd_format_axis_rate(char *out, size_t size, double bytes_per_second);
 void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, double h,
 	double top, void (*format)(char *out, size_t size, double value), uint32_t line,
 	uint32_t label);
+/*
+ * Where the pointer is over a chart (x, y, w, h): a line across at px, a dot on
+ * each curve (ys[i] in pixels, below 0 for none, in colors[i]) and a label of
+ * one or two lines beside them, kept inside the chart. fg and bg are those of
+ * the label, line the color of the line across.
+ */
+void pd_chart_hover(cairo_t *cr, const char *font, double x, double y, double w, double h,
+	double px, const double *ys, const uint32_t *colors, int n, const char *text,
+	uint32_t fg, uint32_t bg, uint32_t line);
 
 /* glyphs, drawn inside a size x size square */
 /* The flag of Windows XP: four glossy panels waving, with a shadow. */

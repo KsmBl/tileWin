@@ -529,6 +529,9 @@ static void desk_motion(struct psurface *s, double x, double y) {
 	ds->py = y;
 	ds->inside = true;
 	struct hotspot *after = hotspot_at(ds, x, y);
+	if (!compact(ds->dw) && !tile(ds->dw)) {
+		psurface_set_dirty(s); // a chart shows the reading under the pointer
+	}
 	if (before != after || !after || entered) {
 		// drawing again frees the hotspots, so the tooltip gets a copy
 		struct hotspot hovered = after ? *after : (struct hotspot){ 0 };
