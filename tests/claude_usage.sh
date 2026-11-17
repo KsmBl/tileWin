@@ -108,6 +108,12 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":30,"resets_at":%d}}}' $((
 	sh -c "$command" >/dev/null
 [ "$(wc -l < "$history" 2>/dev/null)" -eq 2 ] || fail "the same values were written down again"
 
+# ---- another session's older, lower value in the same window does not lower it
+printf '{"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":%d}}}' $((now + 3600)) |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '5h 30%' || fail "an older, lower value lowered the 5-hour usage: $("$tool" list)"
+[ "$(wc -l < "$history" 2>/dev/null)" -eq 2 ] || fail "an older, lower value went into the history"
+
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
 echo '{ this is not json' > "$work/broken/settings.json"

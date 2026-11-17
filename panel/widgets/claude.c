@@ -29,6 +29,7 @@
 #include <time.h>
 #include "draw.h"
 #include "panel.h"
+#include "claudecharts.h"
 #include "tw_claude_usage.h"
 #include "tw_theme.h"
 
@@ -568,12 +569,54 @@ static void desk_rings(struct widget *w, struct gadget_ctx *ctx, const struct ga
 	}
 }
 
+/*
+ * The charts of the flyout on the desktop (claudecharts.c): the week ("week")
+ * or the last three 5-hour windows ("windows"), with the reading under the
+ * pointer, in the colors of the desktop's widgets.
+ */
+static void desk_chart(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		const struct desk_look *l, double y, double bottom, bool week) {
+	struct claude_state *c = w->data;
+	struct claude_charts charts = { 0 };
+	claude_charts_load(&charts, c->have ? &c->usage : NULL, time(NULL));
+	if (!charts.have) {
+		pd_text(ctx->cairo, l->font, "Nothing written down yet", l->pad, y,
+			ctx->width - 2 * l->pad, 30 * l->sc, pal->dim, PD_LEFT);
+		free(charts.points);
+		return;
+	}
+	bool light_text = (pal->fg >> 24 & 0xff) + (pal->fg >> 16 & 0xff) + (pal->fg >> 8 & 0xff) > 384;
+	struct claude_look look = {
+		.fg = pal->fg, .dim = pal->dim,
+		.chart_bg = pal->mono ? pal->bg : (pal->track & 0xffffff00) | 0x50,
+		.chart_grid = pal->grid,
+		.chart_line = pal->mono ? pal->fg : pal->accent,
+		.label_bg = light_text ? 0x202020ff : 0xffffffff,
+		.chart_radius = pal->radius > 0 ? 4 : 0,
+		.dark = light_text,
+		.sunken = pal->look == GADGET_CLASSIC,
+		.font = l->small, .bold = l->bold,
+	};
+	struct claude_hover hover = { ctx->pointer, ctx->px, ctx->py };
+	struct pbox box = { (int)l->pad, (int)y, (int)(ctx->width - 2 * l->pad),
+		(int)(bottom - y) };
+	if (box.height > 40) {
+		if (week) {
+			claude_chart_week(&hover, &charts, ctx->cairo, &look, box);
+		} else {
+			claude_chart_five_hours(&hover, &charts, ctx->cairo, &look, box);
+		}
+	}
+	free(charts.points);
+}
+
 static bool claude_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal) {
 	const char *style = ctx->style ? ctx->style : "";
 	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0,
-		rings = strcmp(style, "ring") == 0;
-	if (!list && !bars && !rings) {
+		rings = strcmp(style, "ring") == 0, week = strcmp(style, "week") == 0,
+		windows = strcmp(style, "windows") == 0;
+	if (!list && !bars && !rings && !week && !windows) {
 		return false; // compact and tile: the taskbar look
 	}
 	struct claude_state *c = w->data;
@@ -586,7 +629,9 @@ static bool claude_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
 		return true;
 	}
 	double bottom = ctx->height - l.pad - desk_foot(c, ctx, pal, &l);
-	if (list) {
+	if (week || windows) {
+		desk_chart(w, ctx, pal, &l, y, bottom, week);
+	} else if (list) {
 		desk_list(w, ctx, pal, &l, y, bottom);
 	} else if (bars) {
 		desk_bars(w, ctx, pal, &l, y, bottom);
@@ -628,6 +673,14 @@ static void append_window(GString *t, struct claude_state *c, bool seven_day) {
 }
 
 static char *claude_tooltip(struct widget *w, struct hotspot *hs) {
+	const char *style = w->desk ? widget_conf(w, "style", NULL) : NULL;
+	struct twconf_node *st = w->desk ? twconf_child(w->desk, "style") : NULL;
+	if (st && st->argc > 0) {
+		style = st->argv[0];
+	}
+	if (style && (strcmp(style, "week") == 0 || strcmp(style, "windows") == 0)) {
+		return NULL; // the chart shows the reading under the pointer instead
+	}
 	struct claude_state *c = w->data;
 	GString *t = g_string_new("Claude Code");
 	if (c->usage.account) {

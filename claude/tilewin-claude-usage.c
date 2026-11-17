@@ -126,9 +126,22 @@ static void copy_window(json_object *limits, const char *key, json_object *out) 
 			!json_object_object_get_ex(window, "used_percentage", &used)) {
 		return; // not shown this time: what was written before stays
 	}
+	// several sessions of Claude Code each show the limits as of their own last
+	// answer, so an older, lower value can come after a newer one: within the same
+	// window what was used only grows, and the highest seen stays
+	double value = json_object_get_double(used);
+	json_object *before, *before_used, *before_resets;
+	if (json_object_object_get_ex(out, key, &before) &&
+			json_object_object_get_ex(before, "used_percentage", &before_used) &&
+			json_object_object_get_ex(before, "resets_at", &before_resets) &&
+			json_object_object_get_ex(window, "resets_at", &resets) &&
+			tw_claude_same_window((time_t)json_object_get_int64(before_resets),
+				(time_t)json_object_get_int64(resets)) &&
+			json_object_get_double(before_used) > value) {
+		value = json_object_get_double(before_used);
+	}
 	json_object *copy = json_object_new_object();
-	json_object_object_add(copy, "used_percentage",
-		json_object_new_double(json_object_get_double(used)));
+	json_object_object_add(copy, "used_percentage", json_object_new_double(value));
 	if (json_object_object_get_ex(window, "resets_at", &resets)) {
 		json_object_object_add(copy, "resets_at",
 			json_object_new_int64(json_object_get_int64(resets)));

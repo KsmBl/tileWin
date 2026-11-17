@@ -1,0 +1,44 @@
+#ifndef _TW_CLAUDECHARTS_H
+#define _TW_CLAUDECHARTS_H
+#include <cairo.h>
+#include <stdbool.h>
+#include <time.h>
+#include "panel.h"
+#include "tw_claude_usage.h"
+
+/*
+ * The charts of the Claude Code usage: the last three 5-hour windows along the
+ * hours, and the week from its start to its reset with the line of now and the
+ * pace ahead. The widget's flyout and its desktop styles draw them, each in
+ * its colors.
+ */
+struct claude_charts {
+	struct tw_claude_point *points;
+	int count;
+	struct tw_claude_window five_hour, seven_day; // as of now
+	time_t now;
+	bool have;
+};
+
+struct claude_look {
+	uint32_t fg, dim, chart_bg, chart_grid, chart_line, label_bg;
+	double chart_radius;
+	bool dark;    // a dark background: the warning colors lighter
+	bool sunken;  // the chart in a sunken edge (Windows 95)
+	const char *font, *bold;
+};
+
+/* Where the pointer is, for the reading under it. */
+struct claude_hover {
+	bool inside;
+	double px, py;
+};
+
+void claude_chart_five_hours(const struct claude_hover *f, const struct claude_charts *c,
+	cairo_t *cr, const struct claude_look *st, struct pbox box);
+void claude_chart_week(const struct claude_hover *f, const struct claude_charts *c,
+	cairo_t *cr, const struct claude_look *st, struct pbox box);
+/* Reads the history and the values of now into c (its points freed first). */
+void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u, time_t now);
+
+#endif

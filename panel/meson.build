@@ -53,6 +53,7 @@ executable(
 		'launcher.c',
 		'livewall.c',
 		'wifiradar.c',
+		'claudecharts.c',
 		'main.c',
 		'emoji_data.c',
 		'emojipicker.c',

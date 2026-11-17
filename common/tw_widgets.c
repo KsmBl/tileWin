@@ -391,6 +391,8 @@ static const struct tw_widget_style styles_claude[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ "ring", "Ring of the 5-hour limit", 2, 2 },
 	{ "bar", "Bar of the 5-hour limit", 3, 1 },
+	{ "week", "Chart of the week", 4, 2 },
+	{ "windows", "Chart of the last three 5-hour windows", 4, 2 },
 	{ 0 },
 };
 static const struct tw_widget_style styles_kernel[] = {
