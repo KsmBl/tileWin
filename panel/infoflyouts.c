@@ -1270,12 +1270,12 @@ static void draw_now(cairo_t *cr, const struct fly_style *st, struct pbox g, dou
 	}
 }
 
-static void hour_label(time_t t, char *out, size_t size) {
-	struct tm tm;
-	localtime_r(&t, &tm);
-	strftime(out, size, "%H:%M", &tm);
-}
-
+/*
+ * The last three 5-hour windows in one chart, along the hours from the start
+ * of the oldest to the reset of the newest (or now, when none runs): each
+ * window a band with its usage rising in it and what it came to at its top,
+ * the time between them empty, and the line of now.
+ */
 static void draw_five_hours(struct claude_charts *c, cairo_t *cr, const struct fly_style *st,
 		struct pbox box) {
 	// the windows there were: the resets in the history and the one now, newest last
@@ -1300,44 +1300,74 @@ static void draw_five_hours(struct claude_charts *c, cairo_t *cr, const struct f
 		}
 	}
 	int first = nr > 3 ? nr - 3 : 0;
-	const int gap = 8;
-	int pw = (box.width - 2 * gap) / 3;
-	for (int slot = 0; slot < 3; slot++) {
-		struct pbox g = { box.x + slot * (pw + gap), box.y, pw, box.height - 20 };
-		fly_draw_chart_bg(cr, st, g);
-		// the half and the top
-		pd_rect(cr, g.x, g.y + g.height / 2, g.width, 1, st->chart_grid);
-		int index = nr - 3 + slot; // the newest at the right
-		if (index < first || index < 0) {
-			pd_text(cr, st->font, "–", g.x, g.y, g.width, g.height, st->dim, PD_CENTER);
+	struct pbox g = { box.x, box.y, box.width, box.height - 20 };
+	fly_draw_chart_bg(cr, st, g);
+	if (nr == 0) {
+		pd_text(cr, st->font, "Nothing written down yet", g.x, g.y, g.width, g.height, st->dim,
+			PD_CENTER);
+		return;
+	}
+	time_t start = resets[first] - TW_CLAUDE_FIVE_HOURS;
+	time_t end = resets[nr - 1] > c->now ? resets[nr - 1] : c->now;
+	// the hours: a faint line at each, a time under every few
+	long span_h = (long)((end - start) / 3600) + 1;
+	int every = span_h <= 16 ? 3 : span_h <= 30 ? 6 : 12;
+	struct tm tm;
+	localtime_r(&start, &tm);
+	tm.tm_min = tm.tm_sec = 0;
+	tm.tm_isdst = -1;
+	for (long h = 1; h <= span_h + 1; h++) {
+		struct tm at = tm;
+		at.tm_hour += (int)h;
+		time_t t = mktime(&at);
+		if (t <= start || t >= end) {
 			continue;
 		}
-		time_t reset = resets[index], start = reset - TW_CLAUDE_FIVE_HOURS;
+		double x = chart_x(g, start, end, t);
+		bool labelled = at.tm_hour % every == 0;
+		pd_rect(cr, round(x), g.y, 1, g.height, labelled ? st->chart_grid :
+			(st->chart_grid & 0xffffff00) | ((st->chart_grid & 0xff) / 2));
+		if (labelled) {
+			char label[16];
+			strftime(label, sizeof(label), "%H:%M", &at);
+			pd_text(cr, st->font, label, x - 30, g.y + g.height + 2, 60, 18, st->dim, PD_CENTER);
+		}
+	}
+	pd_rect(cr, g.x, g.y + g.height / 2, g.width, 1, st->chart_grid);
+	double now_x = chart_x(g, start, end, c->now);
+	draw_behind(cr, st, g, now_x);
+	double now_used = -1;
+	uint32_t now_color = st->chart_line;
+	for (int i = first; i < nr; i++) {
+		time_t reset = resets[i], wstart = reset - TW_CLAUDE_FIVE_HOURS;
+		double x0 = chart_x(g, start, end, wstart), x1 = chart_x(g, start, end, reset);
+		// the window: a band, its edges marked
+		pd_rect(cr, x0, g.y, x1 - x0, g.height, (st->chart_line & 0xffffff00) | 0x10);
+		pd_rect(cr, round(x0), g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
+		pd_rect(cr, round(x1) - 1, g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
 		time_t ts[256];
 		double vs[256];
 		int n = window_series(c, false, reset, TW_CLAUDE_FIVE_HOURS, ts, vs, 256);
 		double peak = 0;
-		for (int i = 0; i < n; i++) {
-			peak = fmax(peak, vs[i]);
+		for (int k = 0; k < n; k++) {
+			peak = fmax(peak, vs[k]);
 		}
-		bool running = c->now < reset && c->now >= start;
 		uint32_t color = usage_color(st, peak);
-		if (running) {
-			draw_behind(cr, st, g, chart_x(g, start, reset, c->now));
-		}
-		draw_series(cr, g, start, reset, ts, vs, n, color);
+		draw_series(cr, g, start, end, ts, vs, n, color);
+		bool running = c->now >= wstart && c->now < reset;
 		if (running && n > 0) {
-			draw_now(cr, st, g, chart_x(g, start, reset, c->now), vs[n - 1], color);
+			now_used = vs[n - 1];
+			now_color = color;
 		}
-		char a[16], b[16], label[48];
-		hour_label(start, a, sizeof(a));
-		hour_label(reset, b, sizeof(b));
-		snprintf(label, sizeof(label), "%s–%s", a, b);
-		pd_text(cr, st->font, label, g.x, g.y + g.height + 2, g.width, 18, st->dim, PD_LEFT);
+		// what it came to, at its top
+		char label[16];
 		snprintf(label, sizeof(label), "%.0f%%", running && n > 0 ? vs[n - 1] : peak);
-		pd_text(cr, st->bold, label, g.x, g.y + g.height + 2, g.width, 18,
-			running ? st->fg : st->dim, PD_RIGHT);
+		if (x1 - x0 > 30) {
+			pd_text(cr, running ? st->bold : st->font, label, x0, g.y + 2, x1 - x0 - 4, 16,
+				running ? st->fg : st->dim, PD_RIGHT);
+		}
 	}
+	draw_now(cr, st, g, now_x, now_used, now_color);
 }
 
 static void draw_week(struct claude_charts *c, cairo_t *cr, const struct fly_style *st,
