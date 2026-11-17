@@ -587,6 +587,8 @@ test(
 	env: saver_gui_env,
 	suite: 'gui',
 	timeout: 300,
+	# heavy on the screen and its timing: alone, not beside the others
+	is_parallel: false,
 )
 
 test(
@@ -733,6 +735,8 @@ test(
 	env: saver_gui_env,
 	suite: 'gui',
 	timeout: 180,
+	# heavy on the screen and its timing: alone, not beside the others
+	is_parallel: false,
 )
 
 test(
@@ -743,6 +747,8 @@ test(
 	env: saver_gui_env,
 	suite: 'gui',
 	timeout: 120,
+	# heavy on the screen and its timing: alone, not beside the others
+	is_parallel: false,
 )
 
 test(
@@ -931,6 +937,8 @@ test(
 	depends: [pointer_tool],
 	suite: 'gui',
 	timeout: 90,
+	# heavy on the screen and its timing: alone, not beside the others
+	is_parallel: false,
 )
 
 test(
@@ -1166,6 +1174,8 @@ test(
 	depends: [pointer_tool],
 	suite: 'gui',
 	timeout: 120,
+	# heavy on the screen and its timing: alone, not beside the others
+	is_parallel: false,
 )
 
 test(
@@ -1305,6 +1315,8 @@ if gdk_pixbuf.found()
 		env: saver_gui_env,
 		suite: 'gui',
 			timeout: 60,
+		# heavy on the screen and its timing: alone, not beside the others
+		is_parallel: false,
 	)
 
 	test(
