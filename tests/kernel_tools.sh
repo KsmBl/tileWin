@@ -206,6 +206,7 @@ mkdir -p "$work/include/openssl"
 touch "$work/include/libelf.h" "$work/include/openssl/ssl.h"
 export PATH="$work/bin:$PATH"
 export TILEWIN_KERNEL_MIRROR=http://mirror.test TILEWIN_KERNEL_RELEASES=file://$work/releases.json
+export TILEWIN_KERNEL_ORIGIN=http://mirror.test # (never kernel.org itself)
 export TILEWIN_KERNEL_FRAGMENTS=$source_dir/kernel TILEWIN_KERNEL_INCLUDE=$work/include
 export TILEWIN_KERNEL_JOBS=2 TILEWIN_KERNEL_NEED_GB=0 TILEWIN_KERNEL_LSMOD=$work/lsmod TILEWIN_KERNEL_CONFIG=$work/base.config
 printf 'Module Size Used by\ndm_crypt 1 0\n' > "$work/lsmod"
@@ -398,6 +399,20 @@ K build 9.9 running zstd off > "$work/out" 2>&1
 check "a download that does not match its checksum fails" \
 	grep -q "does not match" "$store/9.9.0-tilewin1/progress"
 check "  and is not kept" test ! -e "$XDG_CACHE_HOME/tileWin/kernel/src/linux-9.9.tar.xz"
+
+# a release whose checksum kernel.org has not listed yet: the download is kept,
+# and once the list has it, it builds
+mk_tree 9.11 "$work/trees"
+(cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.11.tar.xz" linux-9.11)
+TILEWIN_KERNEL_SUMS_TRIES=2 TILEWIN_KERNEL_SUMS_WAIT=0 K build 9.11 device zstd off > "$work/out" 2>&1
+check "a checksum not listed yet does not count as a wrong download" \
+	grep -q "has not listed the checksum" "$store/9.11.0-tilewin1/progress"
+check "  and the download is kept" test -s "$XDG_CACHE_HOME/tileWin/kernel/src/linux-9.11.tar.xz"
+K delete 9.11.0-tilewin1
+(cd "$mirror/v9.x" && sha256sum linux-9.11.tar.xz >> sha256sums.asc)
+K build 9.11 device zstd off > "$work/out" 2>&1
+check "  once it is listed, it builds" test "$(cat "$store/9.11.0-tilewin1/state" 2>/dev/null)" = built
+K delete 9.11.0-tilewin1
 check "bad arguments are refused" bash -c "! bash '$tool' build 9.9.1 nonsense zstd on 2>/dev/null"
 
 TW_FAKE_SLOW=1 K build 9.9.1 device zstd off > "$work/out" 2>&1 &

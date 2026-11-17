@@ -180,6 +180,36 @@ signed() { # file.asc
 	gpg --batch --status-fd 1 --verify "$1" 2>/dev/null | grep -q "^\[GNUPG:\] VALIDSIG $autosigner "
 }
 
+# The line of FILE in a checksum list of kernel.org.
+sum_of() { # file sums
+	awk -v f="$1" '$2 == f { print $1 }' "$2" 2>/dev/null
+}
+
+# The checksums of kernel.org, with the line of FILE in them, to OUT.
+# kernel.org lists a new release a little after the release itself is there,
+# and its CDN may hand out the list from before for a while: then the list of
+# kernel.org itself is asked, and when that has no line for it either, it is
+# asked again every few minutes for half an hour. 1 when it cannot be
+# downloaded at all, 2 when FILE is not listed yet.
+kernel_sums() { # major file out
+	local major=$1 file=$2 out=$3 tries=0
+	local max=${TILEWIN_KERNEL_SUMS_TRIES:-7} origin=${TILEWIN_KERNEL_ORIGIN:-https://www.kernel.org/pub/linux/kernel}
+	while :; do
+		fetch "$mirror/v$major.x/sha256sums.asc" "$out" || return 1
+		[[ -n $(sum_of "$file" "$out") ]] && return 0
+		if [[ $origin != "$mirror" ]] && fetch "$origin/v$major.x/sha256sums.asc" "$out.origin" &&
+				[[ -n $(sum_of "$file" "$out.origin") ]]; then
+			mv "$out.origin" "$out"
+			return 0
+		fi
+		rm -f "$out.origin"
+		tries=$((tries + 1))
+		[[ $tries -lt $max ]] || return 2
+		progress "Waiting for kernel.org to list the checksum of $file"
+		sleep "${TILEWIN_KERNEL_SUMS_WAIT:-300}"
+	done
+}
+
 # ---------- the releases ----------
 
 releases_json() {
@@ -672,8 +702,13 @@ build() { # version profile compression livepatch native name
 		mv "$tarball.part" "$tarball"
 	fi
 	progress "Checking the download"
-	fetch "$mirror/v$major.x/sha256sums.asc" "$cache/src/sha256sums-v$major.asc" >> "$dir/log" 2>&1 ||
-		fail "could not download the checksums of kernel.org"
+	local sums_rc=0
+	kernel_sums "$major" "linux-$version.tar.xz" "$cache/src/sha256sums-v$major.asc" \
+		>> "$dir/log" 2>&1 || sums_rc=$?
+	# not listed yet is no reason to throw the download away: it is checked next time
+	[[ $sums_rc -eq 2 ]] &&
+		fail "kernel.org has not listed the checksum of Linux $version yet; it is tried again later"
+	[[ $sums_rc -eq 0 ]] || fail "could not download the checksums of kernel.org"
 	if signed "$cache/src/sha256sums-v$major.asc"; then
 		echo "signature=good" >> "$dir/info"
 	elif [[ -n ${TILEWIN_KERNEL_REQUIRE_SIGNATURE:-} ]]; then
@@ -682,7 +717,7 @@ build() { # version profile compression livepatch native name
 		echo "signature=unchecked" >> "$dir/info"
 	fi
 	local want got
-	want=$(awk -v f="linux-$version.tar.xz" '$2 == f { print $1 }' "$cache/src/sha256sums-v$major.asc")
+	want=$(sum_of "linux-$version.tar.xz" "$cache/src/sha256sums-v$major.asc")
 	got=$(sha256sum "$tarball" | cut -d' ' -f1)
 	if [[ -z $want || $want != "$got" ]]; then
 		rm -f "$tarball"
@@ -1247,7 +1282,9 @@ auto_kernel() {
 		*)
 			local started
 			started=$(info_get "$d" started)
-			if [[ $started =~ ^[0-9]+$ && $(($(date +%s) - started)) -lt 72000 ]]; then
+			# (a checksum kernel.org had not listed yet is no failure of the build)
+			if [[ $started =~ ^[0-9]+$ && $(($(date +%s) - started)) -lt 72000 ]] &&
+					! grep -q "has not listed the checksum" "$data/$d/progress" 2>/dev/null; then
 				auto_status kernel failed -1 "Linux $target did not build; it is tried again tomorrow" "$target"
 				echo "Linux $target failed lately: tried again tomorrow"
 				return 0
