@@ -140,6 +140,9 @@ struct ui_search_entry {
 };
 /* Rows and groups created from now on belong to this page (NULL stops indexing). */
 void ui_index_page(const char *name, const char *title, const char *keywords);
+/* Something found that is not a row of a page (a widget of the catalog): it leads to page. */
+void ui_index_entry(const char *page, const char *place, const char *title,
+	const char *subtitle, const char *keywords);
 /* Entries matching every word of the query, best first. Borrowed, free the array. */
 GPtrArray *ui_search(const char *query);
 /* The Updates group of the About page. */

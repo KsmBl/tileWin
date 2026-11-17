@@ -36,6 +36,20 @@ static void index_add(const char *title, const char *subtitle, GtkWidget *widget
 	g_ptr_array_add(search_index, e);
 }
 
+void ui_index_entry(const char *page, const char *place, const char *title,
+		const char *subtitle, const char *keywords) {
+	if (!search_index) {
+		search_index = g_ptr_array_new();
+	}
+	struct ui_search_entry *e = g_new0(struct ui_search_entry, 1);
+	e->page = g_strdup(page);
+	e->page_title = g_strdup(place);
+	e->title = g_strdup(title);
+	e->subtitle = g_strdup(subtitle);
+	e->keywords = g_strdup(keywords);
+	g_ptr_array_add(search_index, e);
+}
+
 void ui_index_page(const char *name, const char *title, const char *keywords) {
 	g_clear_pointer(&index_page, g_free);
 	g_clear_pointer(&index_page_title, g_free);

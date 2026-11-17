@@ -3,6 +3,7 @@
 #include <string.h>
 #include "devices.h"
 #include "settings.h"
+#include "tw_widgets.h"
 #include "tw_search.h"
 #include "tw_paths.h"
 #include "tw_theme.h"
@@ -577,10 +578,34 @@ static void on_visible_page(GObject *stack, GParamSpec *pspec, gpointer data) {
 	side_sync(gtk_stack_get_visible_child_name(GTK_STACK(stack)));
 }
 
+/*
+ * The widgets of the catalog, found by their names and what they do ("radar",
+ * "ports"): they lead to the page where they are added.
+ */
+static void index_widgets(void) {
+	for (size_t i = 0; i < tw_widget_count; i++) {
+		const struct tw_widget_info *w = &tw_widgets[i];
+		if (w->flags & TW_WIDGET_UNLISTED) {
+			continue;
+		}
+		bool taskbar = w->flags & TW_WIDGET_TASKBAR;
+		bool desktop = w->flags & TW_WIDGET_DESKTOP;
+		const char *page = taskbar ? "taskbar" : "desktop";
+		const char *place = taskbar && desktop ? "Widget for the taskbar and the desktop" :
+			taskbar ? "Widget for the taskbar" : "Widget for the desktop";
+		ui_index_entry(page, place, w->title, w->description, w->type);
+	}
+}
+
 /* Everything has to exist before the search can look through it. */
 static void lazy_build_all(void) {
+	static bool widgets_indexed;
 	for (guint i = 0; lazy_pages && i < lazy_pages->len; i++) {
 		lazy_build(lazy_pages->pdata[i]);
+	}
+	if (!widgets_indexed) {
+		widgets_indexed = true;
+		index_widgets();
 	}
 }
 
