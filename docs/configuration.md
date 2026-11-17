@@ -247,6 +247,8 @@ popup thunderbird {
     width 70%                             # of the work area (the screen without the taskbar), or pixels
     height 100%
     dim 50                                # how dark the rest gets, in percent; 0 for not at all
+    animation slide                       # slides in from its side and out again; none appears at once
+    everywhere yes                        # opening the app anywhere (taskbar, start menu...) opens the popup
 }
 ```
 
