@@ -550,7 +550,9 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 			continue;
 		}
 
-		if (root->fullscreen_global) {
+		if (tw_appopup_layer_for(floater)) {
+			layer = tw_appopup_layer_for(floater); // the popup, over a dark sheet
+		} else if (root->fullscreen_global) {
 			if (container_is_transient_for(floater, root->fullscreen_global)) {
 				layer = root->layers.fullscreen_global;
 			}

@@ -13,6 +13,7 @@
 
 struct sway_config;
 struct sway_container;
+struct sway_node;
 struct sway_cursor;
 struct sway_output;
 struct sway_seat;
@@ -564,5 +565,18 @@ void tw_screensaver_stop(void);
 struct wl_client;
 bool tw_power_is_saver_client(struct wl_client *client);
 void tw_power_fini(void);
+
+
+/* appopup.c: apps that come and go with a shortcut ("popup toggle <name>", popups.conf) */
+bool tw_appopup_toggle(const char *name, char **error);
+/* The layer a window of the popup shown is arranged in, NULL for the usual one. */
+struct wlr_scene_tree *tw_appopup_layer_for(struct sway_container *con);
+bool tw_appopup_is(struct sway_container *con);
+void tw_appopup_view_mapped(struct sway_view *view);
+void tw_appopup_container_destroyed(struct sway_container *con);
+void tw_appopup_focus_changed(struct sway_container *con);
+/* A click: true when it was on the darkened rest and must go no further. */
+bool tw_appopup_button(struct sway_node *node, struct wlr_surface *surface, bool pressed);
+void tw_appopup_outputs_changed(void);
 
 #endif

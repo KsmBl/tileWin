@@ -190,6 +190,7 @@ static const struct cmd_handler command_handlers[] = {
 	{ "opacity", cmd_opacity },
 	{ "panel", cmd_panel },
 	{ "peek", cmd_peek },
+	{ "popup", cmd_popup },
 	{ "reload", cmd_reload },
 	{ "rename", cmd_rename },
 	{ "resize", cmd_resize },

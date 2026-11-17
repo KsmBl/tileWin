@@ -745,6 +745,9 @@ static char *describe_command(const char *command, enum shortcut_group *group) {
 	}
 	char word[64];
 	int n;
+	if (sscanf(command, "popup toggle %63s", word) == 1) {
+		return g_strdup_printf("Show the app popup %s", word); // the Popups page made it
+	}
 	if (sscanf(command, "panel activate %d", &n) == 1) {
 		*group = GROUP_TASKBAR;
 		return g_strdup_printf("Open the app %d on the taskbar", n);
@@ -1403,4 +1406,19 @@ GtkWidget *keyboard_page_new(struct settings *s) {
 	s->keyboard_page = p;
 	keyboard_page_refresh(s);
 	return page;
+}
+
+/* ---------- for other pages ---------- */
+
+void keyboard_record_keys(GtkWindow *parent, void (*done)(const char *keys, gpointer data),
+		gpointer data) {
+	record_keys(parent, done, data);
+}
+
+char *keyboard_display_keys(const char *keys) {
+	return display_keys(keys);
+}
+
+char *keyboard_normalize_keys(const char *keys) {
+	return normalize_keys(keys);
 }

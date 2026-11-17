@@ -14,6 +14,7 @@ All configuration lives in `~/.config/tileWin/` and is plain text:
 | `tilemode.conf` | Tile mode: a normal sway config (`man 5 sway`) |
 | `windowmode.conf` | Window mode: same syntax, with Windows-style shortcuts |
 | `taskbar.conf` | Taskbar layouts, widgets, menus and start menu |
+| `popups.conf` | App popups: apps that come and go with a shortcut (the Popups page) |
 | `current-theme` | Name of the active theme (managed by `tilewin-theme`) |
 | `themes/<name>/` | Your own themes |
 
@@ -89,6 +90,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `pause_minimized_except <app>...` | Apps that never stop, by desktop id (`firefox.desktop`) or app id; `none` empties the list |
 | `remember_windows enable\|disable` | Apps open where their window was last closed (default enable) |
 | `remember_windows_except <app>...` | Apps that open as new windows do; `none` empties the list |
+| `popup toggle <name>` | Shows the app popup of that name in `popups.conf` (starting the app when it does not run), or hides it when it has the focus |
 | `peek <con_id>\|desktop\|off` | Shows only that window, or only the desktop, the other windows as outlines, until `peek off` or a click (the taskbar uses it) |
 | `magnifier Alt\|Super\|Ctrl\|Shift\|off` | The key that zooms the screen with the scroll wheel (default Alt) |
 | `magnify in\|out\|off\|<factor>` | Zooms the screen around the pointer, 1 to 32 |
@@ -231,6 +233,24 @@ snap_layouts {
 ```
 
 The numbers are where the line down and the line across go, 0.1 to 0.9 of the screen.
+
+## App popups: popups.conf
+
+An app popup is an app that comes and goes with a shortcut, at a place and size of its own, over the rest of the screen darkened, like the drop-down terminals of old: mail sliding in on the right, a terminal from the top. The **App popups** page of the settings (under Windows) makes them; each is a block of `~/.config/tileWin/popups.conf`:
+
+```
+popup thunderbird {
+    app org.mozilla.Thunderbird.desktop  # the app: how it starts and which windows are its
+    exec thunderbird --some-flag          # instead of the command of the desktop entry (optional)
+    app_id thunderbird                    # windows of this app_id are its too (optional)
+    position right                        # left, right, top, bottom or center
+    width 70%                             # of the work area (the screen without the taskbar), or pixels
+    height 100%
+    dim 50                                # how dark the rest gets, in percent; 0 for not at all
+}
+```
+
+and its shortcut is a line in both mode files (after their own shortcuts, so it takes keys over): `bindsym $mod+Shift+m popup toggle thunderbird`. The shortcut shows the app's window there, on the screen with the focus, in a layer above the taskbar; when the app does not run, it is started and its first window is taken, and a window of it that was open already is taken in as it is. The shortcut again, a click on the darkened rest or another app getting the focus hides it to the scratchpad, where it keeps running for the next time. Other windows of the same app (a message being written) come up with it. Its windows are known by the desktop entry their app_id leads to, by `app_id`, and while it starts by being started from it.
 
 ## Login pages of Wi-Fi: portal.conf
 

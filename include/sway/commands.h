@@ -143,6 +143,7 @@ sway_cmd cmd_remember_windows_except;
 sway_cmd cmd_magnifier;
 sway_cmd cmd_magnify;
 sway_cmd cmd_peek;
+sway_cmd cmd_popup;
 sway_cmd cmd_main_output;
 sway_cmd cmd_output_wallpaper;
 sway_cmd cmd_xdg_autostart;

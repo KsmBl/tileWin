@@ -352,6 +352,9 @@ static void handle_button(struct sway_seat *seat, uint32_t time_msec,
 	double sx, sy;
 	struct sway_node *node = node_at_coords(seat,
 			cursor->cursor->x, cursor->cursor->y, &surface, &sx, &sy);
+	if (tw_appopup_button(node, surface, state == WL_POINTER_BUTTON_STATE_PRESSED)) {
+		return; // on the darkened rest around a popup: it goes away
+	}
 
 	struct sway_container *cont = node && node->type == N_CONTAINER ?
 		node->sway_container : NULL;

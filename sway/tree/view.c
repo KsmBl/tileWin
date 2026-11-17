@@ -1046,6 +1046,7 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 		wlr_foreign_toplevel_handle_v1_set_app_id(view->foreign_toplevel, class);
 	}
 	tw_animate_open(view->container);
+	tw_appopup_view_mapped(view);
 }
 
 void view_unmap(struct sway_view *view) {

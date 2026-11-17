@@ -1259,3 +1259,24 @@ struct cmd_results *cmd_peek(int argc, char **argv) {
 	}
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
+
+/*
+ * "popup toggle <name>": the app popup of that name in popups.conf comes, or
+ * goes when it has the focus (appopup.c).
+ */
+struct cmd_results *cmd_popup(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "popup", EXPECTED_EQUAL_TO, 2))) {
+		return error;
+	}
+	if (strcasecmp(argv[0], "toggle") != 0) {
+		return cmd_results_new(CMD_INVALID, "Expected 'popup toggle <name>'");
+	}
+	char *why = NULL;
+	if (!tw_appopup_toggle(argv[1], &why)) {
+		struct cmd_results *res = cmd_results_new(CMD_FAILURE, "%s", why ? why : "failed");
+		free(why);
+		return res;
+	}
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}

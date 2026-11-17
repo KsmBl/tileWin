@@ -112,6 +112,10 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 
 Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
 
+## App popups
+
+An app that comes and goes with a shortcut: Thunderbird as high as the screen on its right, 70% wide, with the rest darkened behind it; a terminal from the top. On the **App popups** page (Windows), **Add popup** asks for the app, its position (left, right, top, bottom or the middle), its width and height in percent of the screen without the taskbar, how much to darken the rest, and the shortcut (pressed to record it), with a small picture of the screen that shows where it goes. Keys that already do something else are named; the popup takes them over. The first press starts the app if it does not run (or takes in its open window) and shows it there; pressing it again, clicking beside it or switching to another app hides it, still running, so the next press brings it back at once. ▶ on the page shows it right away to try it. The details are in [configuration.md](configuration.md#app-popups-popupsconf).
+
 ## Clipboard history
 
 `Win+V` (or `tilewinmsg panel clipboard`) lists the last 25 copied texts and pictures. Click one (or pick it with the arrow keys and Enter) to paste it into the window you were using; tileWin types Ctrl+V for you (Ctrl+Shift+V in terminals). Pin entries to keep them after a restart, × removes one, *Clear all* removes everything that isn't pinned.

@@ -294,6 +294,7 @@ void tw_container_destroy(struct sway_container *con) {
 	tw_taskview_container_destroyed(con);
 	tw_animate_container_destroyed(con);
 	tw_peek_container_destroyed(con);
+	tw_appopup_container_destroyed(con);
 }
 
 static void refresh_top(struct sway_container *con) {

@@ -710,6 +710,7 @@ static void build_window(struct settings *s) {
 		{ "animations", animations_page_new, 0 },
 		{ "windows", window_page_new, 1 },
 		{ "appwindows", appwin_page_new, 1 },
+		{ "popups", popups_page_new, 1 },
 		{ "screen", screen_page_new, 3 },
 		{ "screensaver", screensaver_page_new, 0 },
 		{ "login", login_page_new, 0 },

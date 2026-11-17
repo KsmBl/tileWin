@@ -1219,6 +1219,7 @@ static void seat_set_workspace_focus(struct sway_seat *seat, struct sway_node *n
 		tw_pause_wake(container->view);
 		tw_hung_poke(container->view);
 	}
+	tw_appopup_focus_changed(container);
 
 	if (last_workspace && last_workspace != new_workspace) {
 		wlr_ext_workspace_handle_v1_set_active(last_workspace->ext_workspace,

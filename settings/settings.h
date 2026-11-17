@@ -339,6 +339,13 @@ GtkWidget *account_page_new(struct settings *s);
 GtkWidget *backup_page_new(struct settings *s);
 /* page_clipboard.c: the clipboard history, as Windows 11's System > Clipboard */
 GtkWidget *clipboard_page_new(struct settings *s);
+/* page_popups.c: apps that come and go with a shortcut (popups.conf) */
+GtkWidget *popups_page_new(struct settings *s);
+/* page_keyboard.c, for other pages: recording keys and showing them */
+void keyboard_record_keys(GtkWindow *parent, void (*done)(const char *keys, gpointer data),
+	gpointer data);
+char *keyboard_display_keys(const char *keys);
+char *keyboard_normalize_keys(const char *keys);
 void clipboard_page_refresh(struct settings *s);
 /* snaplayouts.c: the list of Snap layouts, on the Window behavior page */
 void snaplayouts_section_attach(struct settings *s, GtkWidget *content);
