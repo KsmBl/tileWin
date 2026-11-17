@@ -251,10 +251,24 @@ static void summarize_build(const struct tw_kernel_build *b, bool fixes,
 	}
 	if (fixes) {
 		out->kind = TW_KA_FIXING;
-		SET(brief, "Making live fixes");
+		if (b->percent >= 0) {
+			SET(brief, "Making live fixes · %d%%", b->percent);
+		} else {
+			SET(brief, "Making live fixes");
+		}
 		SET(title, "Making the fixes of Linux %s", v);
-		SET(detail, "What kernel.org fixed since the running kernel's release becomes a "
-			"livepatch, applied without a restart once it is made.");
+		// what it does now, as the build says it ("Making the livepatch of Linux 7.3.5:
+		// building it with the fixes"), else what it is about
+		const char *colon = strstr(b->text, ": ");
+		if (colon && colon[2]) {
+			SET(detail, "Now %s; it goes in without a restart once it is made.", colon + 2);
+		} else if (b->text[0]) {
+			SET(detail, "%s. It becomes a livepatch, applied without a restart once it is "
+				"made.", b->text);
+		} else {
+			SET(detail, "What kernel.org fixed since the running kernel's release becomes a "
+				"livepatch, applied without a restart once it is made.");
+		}
 		return;
 	}
 	out->kind = TW_KA_BUILDING;
@@ -308,6 +322,7 @@ void tw_kernel_auto_summarize(const struct tw_kernel_auto *ka, time_t now,
 			SET(detail, "Its modules, its boot image and its entry for the next start.");
 			return;
 		}
+		// (a build that has said nothing for an hour was stopped without a word)
 		if (strcmp(ka->state, "fixes") == 0 && build_going(&ka->fixes_build) &&
 				now - ka->fixes_build.updated < 3600) {
 			summarize_build(&ka->fixes_build, true, out);

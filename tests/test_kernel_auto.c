@@ -77,6 +77,19 @@ int main(void) {
 	tw_kernel_auto_read(&ka);
 	tw_kernel_auto_summarize(&ka, now, &s);
 	CHECK(s.kind == TW_KA_DOWNLOADING && s.percent == 15, "downloading at 15%%");
+	// live fixes being made: how far, and what klp-build does now
+	snprintf(status, sizeof(status), "state=fixes\nrunning=7.3.4-tilewin1\nrunning_auto=yes\n");
+	put("/var/lib/tilewin/kernel-auto/status", status);
+	snprintf(build, sizeof(build), "kind=fixes\nphase=build\npercent=47\nversion=7.3.5\n"
+		"text=Making the livepatch of Linux 7.3.5: building it with the fixes\nupdated=%ld\n",
+		(long)now);
+	put("/var/lib/tilewin/kernel-auto/build/fixes", build);
+	tw_kernel_auto_read(&ka);
+	tw_kernel_auto_summarize(&ka, now, &s);
+	CHECK(s.kind == TW_KA_FIXING && s.percent == 47, "making fixes at 47%%: %d %d", s.kind,
+		s.percent);
+	CHECK(strcmp(s.brief, "Making live fixes · 47%") == 0, "brief: %s", s.brief);
+	CHECK(strstr(s.detail, "building it with the fixes") != NULL, "detail: %s", s.detail);
 	flock(fd, LOCK_UN);
 	close(fd);
 

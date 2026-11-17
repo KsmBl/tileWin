@@ -272,13 +272,16 @@ static int fact_lines(struct kernel_state *k, char lines[4][2][96]) {
 	if (k->ka.fixes[0]) {
 		snprintf(lines[n++][1], 96, "Linux %s", k->ka.fixes);
 	} else {
-		snprintf(lines[n++][1], 96, k->ka.running_auto ? "none needed" : "–");
+		snprintf(lines[n++][1], 96, k->sum.kind == TW_KA_FIXING ? "being made" :
+			k->ka.running_auto ? "none needed" : "–");
 	}
 	tw_kernel_auto_release(k->ka.next, rel, sizeof(rel));
 	snprintf(lines[n][0], 96, "Next start");
 	snprintf(lines[n++][1], 96, "%s%s", rel[0] ? "Linux " : "the same", rel);
 	snprintf(lines[n][0], 96, "Checked");
-	if (k->ka.checked) {
+	if (k->ka.busy) {
+		snprintf(lines[n++][1], 96, "now");
+	} else if (k->ka.checked) {
 		tw_kernel_auto_ago(k->ka.checked, now, lines[n++][1], 96);
 	} else {
 		snprintf(lines[n++][1], 96, "not yet");

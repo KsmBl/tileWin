@@ -869,6 +869,28 @@ patch_name() { # patch file
 	echo "${n:0:40}"
 }
 
+# What klp-build is at, from the last of its steps in the log since byte FROM:
+# "PERCENT<tab>words". Its two kernel builds take most of the time, so they
+# count for most of the way.
+klp_progress() { # log from
+	local last
+	last=$(tail -c +"$2" "$1" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' |
+		grep -E '^(Validating|Building|Copying|Fixing|Generating|Diffing|Finding)' | tail -n 1)
+	case $last in
+	Validating*) printf '1\tchecking the fixes' ;;
+	"Building original kernel"*) printf '2\tbuilding the kernel as it runs' ;;
+	"Copying original"*) printf '42\tkeeping its parts' ;;
+	Fixing*) printf '45\tfitting the fixes to it' ;;
+	"Building patched kernel"*) printf '47\tbuilding it with the fixes' ;;
+	"Copying patched"*) printf '82\tkeeping the fixed parts' ;;
+	"Generating original"*) printf '85\tcomparing the two' ;;
+	"Generating patched"*) printf '88\tcomparing the two' ;;
+	Diffing* | Finding*) printf '91\tfinding what changed' ;;
+	"Building patch module"*) printf '97\tmaking the module' ;;
+	*) printf '0\tgetting ready' ;;
+	esac
+}
+
 # klp-build in the kept tree, through ccache when it is there. --no-replace:
 # a livepatch goes beside the others instead of taking their place.
 klp_build() { # tree out [klp-build options --] patch...
@@ -1099,9 +1121,24 @@ security_build() { # kver
 		[[ $round -le 12 ]] || give_up "klp-build refused too many fixes: see the log"
 		step "Making the livepatch module of Linux $to (${#kept[@]} files)"
 		before=$(stat -c %s "$log")
-		if klp_build "$tree" "$out" "${opts[@]}" -- "${kept[@]}" >> "$log" 2>&1 && [[ -f $out ]]; then
-			break
-		fi
+		# how far it is, every few seconds, for the widget and the Kernel page; it
+		# also shows the build goes on, however long it takes
+		local watch
+		(
+			exec 9>&- # not the lock of the build: it ends with the build
+			while sleep "${TILEWIN_KERNEL_WATCH_S:-5}"; do
+				IFS=$'\t' read -r pct words < <(klp_progress "$log" "$((before + 1))")
+				echo "Making the livepatch module of Linux $to: $words" > "$lp/$name.progress"
+				auto_status fixes build "$pct" "Making the livepatch of Linux $to: $words" "$to"
+			done
+		) &
+		watch=$!
+		local built=no
+		klp_build "$tree" "$out" "${opts[@]}" -- "${kept[@]}" >> "$log" 2>&1 && [[ -f $out ]] && built=yes
+		pkill -P "$watch" 2>/dev/null
+		kill "$watch" 2>/dev/null
+		wait "$watch" 2>/dev/null
+		[[ $built == yes ]] && break
 		[[ -f $tree/klp-tmp/1-orig/.complete ]] && opts=(-T -S 2)
 		# the files this round's errors name
 		local errors

@@ -1577,7 +1577,8 @@ static void kernel_sample(struct info_flyout *f) {
 	if (ka->fixes[0]) {
 		snprintf(value, sizeof(value), "Linux %s", ka->fixes);
 	}
-	add_row(f, "Live fixes", ka->fixes[0] ? value : ka->running_auto ? "none needed" : "–");
+	add_row(f, "Live fixes", ka->fixes[0] ? value : sum.kind == TW_KA_FIXING ? "being made" :
+		ka->running_auto ? "none needed" : "–");
 	if (ka->fixes_left > 0) {
 		snprintf(value, sizeof(value), "%d changed file%s", ka->fixes_left,
 			ka->fixes_left == 1 ? "" : "s");
@@ -1589,7 +1590,7 @@ static void kernel_sample(struct info_flyout *f) {
 	if (ka->checked) {
 		tw_kernel_auto_ago(ka->checked, now, value, sizeof(value));
 	}
-	add_row(f, "Checked", ka->checked ? value : "not yet");
+	add_row(f, "Checked", ka->busy ? "now" : ka->checked ? value : "not yet");
 	tw_kernel_auto_schedule_words(ka, value, sizeof(value));
 	add_row(f, "Runs", value);
 	if (ka->log_count > 0) {
