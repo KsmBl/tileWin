@@ -1178,6 +1178,28 @@ security_build() { # kver
 				printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F -e "$f:" -e "${f%.c}.o:" -e "${f%.c}.o]" -e "$p" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
 			fi
 		done
+		# objtool names a module by its object, made of several files ("uvc/uvcvideo.o:
+		# error: objtool: changed data"): those of its files that are kept go, as the
+		# Makefile of its folder lists them ("uvcvideo-objs := uvc_driver.o ..."), else
+		# the kept files of that folder
+		if [[ ${#bad[@]} -eq 0 ]]; then
+			local obj dir base members
+			while read -r obj; do
+				dir=$(dirname "$obj")
+				base=$(basename "$obj" .o)
+				members=$(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$tree/$dir/Makefile" 2>/dev/null |
+					sed -n -E "s/^${base}-(objs|y)[[:space:]]*[:+]?=(.*)/\2/p" | tr -s ' \t' '\n')
+				for p in "${kept[@]}"; do
+					n=$(basename "$p" .patch)
+					f=${files_of[n]}
+					[[ $(dirname "$f") == "$dir" && " ${bad[*]} " != *" $p "* ]] || continue
+					if [[ -z $members ]] || grep -qx "$(basename "${f%.c}").o" <<<"$members"; then
+						bad+=("$p")
+						printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F "$obj:" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
+					fi
+				done
+			done < <(grep -oE '[A-Za-z0-9_./+-]+\.o: error' <<<"$errors" | sed 's/: error$//' | sort -u)
+		fi
 		[[ ${#bad[@]} -gt 0 ]] || give_up "klp-build stopped without naming a file: see the log"
 		local still=()
 		for p in "${kept[@]}"; do
