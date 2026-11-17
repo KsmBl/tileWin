@@ -27,6 +27,7 @@
 struct popup_entry {
 	char *name, *app, *position;
 	int width, height, dim; // percent
+	bool slide;             // slides in and out (animation slide|none)
 	char *keys;             // its shortcut, NULL for none
 };
 
@@ -206,6 +207,8 @@ static void load(struct popups_page *p) {
 		e->height = v ? atoi(v) : 70;
 		v = twconf_value(n, "dim");
 		e->dim = !v ? 50 : g_ascii_strcasecmp(v, "no") == 0 ? 0 : atoi(v);
+		v = twconf_value(n, "animation");
+		e->slide = !v || g_ascii_strcasecmp(v, "none") != 0;
 		find_binding(p->s, e->name, &e->keys);
 		g_ptr_array_add(p->entries, e);
 	}
@@ -219,8 +222,9 @@ static bool save(struct popups_page *p) {
 		struct popup_entry *e = p->entries->pdata[i];
 		char *app = conf_quote(e->app);
 		g_string_append_printf(out, "\npopup %s {\n\tapp %s\n\tposition %s\n\twidth %d%%\n"
-			"\theight %d%%\n\tdim %d\n}\n", e->name, app, e->position, e->width, e->height,
-			e->dim);
+			"\theight %d%%\n\tdim %d\n\tanimation %s\n", e->name, app, e->position, e->width,
+			e->height, e->dim, e->slide ? "slide" : "none");
+		g_string_append(out, "}\n");
 		g_free(app);
 	}
 	char *path = conf_path();
@@ -284,8 +288,8 @@ struct popup_dialog {
 	struct popups_page *p;
 	struct popup_entry *editing; // NULL for a new one
 	char *app, *keys;
-	GtkWidget *window, *app_button, *position, *width, *height, *dim, *keys_button, *warning,
-		*preview, *save;
+	GtkWidget *window, *app_button, *position, *width, *height, *dim, *motion, *keys_button,
+		*warning, *preview, *save;
 };
 
 static void dialog_free(gpointer data) {
@@ -450,6 +454,7 @@ static void on_save(GtkButton *button, gpointer data) {
 	e->width = (int)gtk_range_get_value(GTK_RANGE(d->width));
 	e->height = (int)gtk_range_get_value(GTK_RANGE(d->height));
 	e->dim = dims[gtk_drop_down_get_selected(GTK_DROP_DOWN(d->dim))];
+	e->slide = gtk_drop_down_get_selected(GTK_DROP_DOWN(d->motion)) == 0;
 	g_free(e->keys);
 	e->keys = d->keys && *d->keys ? g_strdup(d->keys) : NULL;
 	if (save(p)) {
@@ -545,7 +550,10 @@ static void open_dialog(struct popups_page *p, struct popup_entry *editing) {
 	gtk_widget_set_tooltip_text(clear, "No shortcut");
 	g_signal_connect(clear, "clicked", G_CALLBACK(on_clear_keys), d);
 	gtk_box_append(GTK_BOX(keys_box), clear);
-	labelled(grid, 5, "Shortcut", keys_box);
+	static const char *const motions[] = { "Slides in from its side", "Just appears", NULL };
+	d->motion = labelled(grid, 5, "Comes in", gtk_drop_down_new_from_strings(motions));
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(d->motion), editing && !editing->slide ? 1 : 0);
+	labelled(grid, 6, "Shortcut", keys_box);
 	gtk_box_append(GTK_BOX(box), grid);
 
 	d->warning = gtk_label_new(NULL);

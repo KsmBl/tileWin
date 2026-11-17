@@ -580,5 +580,7 @@ void tw_appopup_focus_changed(struct sway_container *con);
 /* A click: true when it was on the darkened rest and must go no further. */
 bool tw_appopup_button(struct sway_node *node, struct wlr_surface *surface, bool pressed);
 void tw_appopup_outputs_changed(void);
+/* How far a popup's window is moved from its place while it slides in or out. */
+void tw_appopup_offset(struct sway_container *con, double *dx, double *dy);
 
 #endif

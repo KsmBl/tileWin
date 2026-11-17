@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <wlr/types/wlr_scene.h>
 #include "log.h"
+#include "sway/config.h"
 #include "sway/desktop/transaction.h"
 #include "sway/input/input-manager.h"
 #include "sway/input/seat.h"
@@ -62,6 +63,7 @@ struct popup_def {
 	char position[16];
 	double width, height; // above 1: pixels, else a share of the work area
 	int dim;              // percent
+	bool slide;           // comes in from its side and goes out to it (animation slide|none)
 };
 
 struct popup_state {
@@ -79,6 +81,15 @@ static struct {
 	struct wlr_scene_tree *layer; // above the taskbar: the sheets, then the popup
 	struct wlr_scene_tree *sheets;
 	struct wl_event_source *hide_later;
+	// the slide: in after it is shown, out before it is hidden
+	struct {
+		struct wl_event_source *timer;
+		struct popup_state *s;
+		int64_t start;
+		double from;  // how far out it was when this one began, 0 in place to 1 off the screen
+		bool out;
+		double now;   // how far out it is
+	} slide;
 } ap;
 
 static int64_t now_ms(void) {
@@ -143,6 +154,8 @@ static bool load_def(const char *name, struct popup_def *def) {
 		def->dim = !v ? 50 : strcasecmp(v, "no") == 0 ? 0 : strcasecmp(v, "yes") == 0 ? 50 :
 			atoi(v);
 		def->dim = def->dim < 0 ? 0 : def->dim > 95 ? 95 : def->dim;
+		v = twconf_value(n, "animation");
+		def->slide = !v || strcasecmp(v, "none") != 0;
 	}
 	twconf_free(root);
 	return found;
@@ -291,6 +304,21 @@ static void draw_sheets(int dim) {
 	wlr_scene_node_lower_to_bottom(&ap.sheets->node);
 }
 
+/* The sheets as dark as that share of the popup's darkness. */
+static void sheets_alpha(double share) {
+	if (!ap.sheets || !ap.shown) {
+		return;
+	}
+	float a = (float)(ap.shown->def.dim / 100.0 * share);
+	const float color[4] = { 0, 0, 0, a };
+	struct wlr_scene_node *node;
+	wl_list_for_each(node, &ap.sheets->children, link) {
+		if (node->type == WLR_SCENE_NODE_RECT) {
+			wlr_scene_rect_set_color(wlr_scene_rect_from_node(node), color);
+		}
+	}
+}
+
 static bool same_app(struct sway_container *con) {
 	struct sway_container *popup = ap.shown ? window_of(ap.shown) : NULL;
 	return popup && con && con->view && popup->view && con != popup &&
@@ -369,7 +397,115 @@ static void undecorate(struct sway_container *con) {
 	tw_container_update_deco_state(con);
 }
 
+/* ---------- the slide ---------- */
+
+#define SLIDE_IN_MS 220
+#define SLIDE_OUT_MS 170
+
+static bool animations_on(void) {
+	return config && config->tw_animations && !tw_battery_saver_active();
+}
+
+/* How far the window is moved from its place now, toward the side it comes from. */
+void tw_appopup_offset(struct sway_container *con, double *dx, double *dy) {
+	*dx = *dy = 0;
+	struct popup_state *s = ap.slide.s;
+	if (!s || ap.slide.now <= 0 || !con || s->con_id != con->node.id) {
+		return;
+	}
+	double f = ap.slide.now;
+	const char *pos = s->def.position;
+	if (strcasecmp(pos, "right") == 0) {
+		*dx = con->current.width * f;
+	} else if (strcasecmp(pos, "left") == 0) {
+		*dx = -con->current.width * f;
+	} else if (strcasecmp(pos, "top") == 0) {
+		*dy = -con->current.height * f;
+	} else if (strcasecmp(pos, "bottom") == 0) {
+		*dy = con->current.height * f;
+	} else {
+		*dy = 48 * f; // the middle: up a little, from below
+	}
+}
+
+static void hide_now(struct popup_state *s);
+
+static void place_slid(void) {
+	struct popup_state *s = ap.slide.s;
+	struct sway_container *con = s ? window_of(s) : NULL;
+	if (con && con->scene_tree && ap.layer && con->scene_tree->node.parent == ap.layer) {
+		double dx, dy;
+		tw_appopup_offset(con, &dx, &dy);
+		wlr_scene_node_set_position(&con->scene_tree->node, (int)(con->current.x + dx),
+			(int)(con->current.y + dy));
+	}
+	sheets_alpha(1 - ap.slide.now);
+	for (int i = 0; i < root->outputs->length; i++) {
+		struct sway_output *output = root->outputs->items[i];
+		if (output->wlr_output && output->wlr_output->enabled) {
+			wlr_output_schedule_frame(output->wlr_output);
+		}
+	}
+}
+
+static int slide_tick(void *data) {
+	int length = ap.slide.out ? SLIDE_OUT_MS : SLIDE_IN_MS;
+	double t = (double)(now_ms() - ap.slide.start) / length;
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	double e = 1 - (1 - t) * (1 - t) * (1 - t); // quick at first, settling
+	ap.slide.now = ap.slide.out ? ap.slide.from + (1 - ap.slide.from) * e :
+		ap.slide.from * (1 - e);
+	place_slid();
+	if (t < 1) {
+		wl_event_source_timer_update(ap.slide.timer, 12);
+		return 0;
+	}
+	struct popup_state *s = ap.slide.s;
+	bool out = ap.slide.out;
+	ap.slide.s = NULL;
+	ap.slide.now = 0;
+	if (out && s) {
+		hide_now(s);
+	}
+	return 0;
+}
+
+static void slide(struct popup_state *s, bool out) {
+	if (!ap.slide.timer) {
+		ap.slide.timer = wl_event_loop_add_timer(server.wl_event_loop, slide_tick, NULL);
+		if (!ap.slide.timer) {
+			return;
+		}
+	}
+	// from wherever it is now: a slide out stopped by the shortcut turns back
+	ap.slide.from = ap.slide.s == s ? ap.slide.now : out ? 0 : 1;
+	ap.slide.s = s;
+	ap.slide.out = out;
+	ap.slide.start = now_ms();
+	ap.slide.now = ap.slide.from;
+	place_slid();
+	wl_event_source_timer_update(ap.slide.timer, 12);
+}
+
+static bool sliding_out(struct popup_state *s) {
+	return ap.slide.s == s && ap.slide.out;
+}
+
 static void hide(struct popup_state *s) {
+	if (s && ap.shown == s && s->def.slide && animations_on() && window_of(s)) {
+		if (!sliding_out(s)) {
+			slide(s, true);
+		}
+		return;
+	}
+	hide_now(s);
+}
+
+static void hide_now(struct popup_state *s) {
+	if (ap.slide.s == s) {
+		ap.slide.s = NULL;
+		ap.slide.now = 0;
+	}
 	struct sway_container *con = window_of(s);
 	if (ap.shown == s) {
 		ap.shown = NULL;
@@ -421,6 +557,7 @@ static void show(struct popup_state *s, struct sway_container *con) {
 	undecorate(con);
 	struct wlr_box box = popup_box(&s->def, ws);
 	tw_set_box(con, &box);
+	bool was_shown = ap.shown == s;
 	ap.shown = s;
 	ensure_layer();
 	draw_sheets(s->def.dim);
@@ -429,6 +566,13 @@ static void show(struct popup_state *s, struct sway_container *con) {
 	arrange_workspace(ws);
 	arrange_root();
 	commit();
+	if (s->def.slide && animations_on() && (!was_shown || sliding_out(s))) {
+		slide(s, false);
+	} else if (ap.slide.s == s) {
+		ap.slide.s = NULL;
+		ap.slide.now = 0;
+		place_slid();
+	}
 }
 
 static void start(struct popup_state *s) {
@@ -516,7 +660,7 @@ bool tw_appopup_toggle(const char *name, char **error) {
 	}
 	struct sway_seat *seat = input_manager_current_seat();
 	struct sway_container *focused = seat_get_focused_container(seat);
-	if (ap.shown == s && !container_is_scratchpad_hidden(con) &&
+	if (ap.shown == s && !container_is_scratchpad_hidden(con) && !sliding_out(s) &&
 			(focused == con || same_app(focused))) {
 		hide(s);
 	} else {
@@ -549,6 +693,10 @@ void tw_appopup_container_destroyed(struct sway_container *con) {
 	for (int i = 0; i < ap.count; i++) {
 		struct popup_state *s = &ap.items[i];
 		if (s->con_id == con->node.id) {
+			if (ap.slide.s == s) {
+				ap.slide.s = NULL;
+				ap.slide.now = 0;
+			}
 			s->con_id = 0;
 			if (ap.shown == s) {
 				ap.shown = NULL;

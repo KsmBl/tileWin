@@ -1,7 +1,7 @@
 #!/bin/bash
 # App popups (sway/wm/appopup.c): "popup toggle <name>" of popups.conf, bound
 # to a key, starts the app and shows its window at its place and size over a
-# darkened screen; the key again hides it, it comes back without starting
+# darkened screen, sliding in; the key again hides it, it comes back without starting
 # again, a click on the darkened rest hides it, and a window of it that was
 # open already is taken in.
 #
@@ -83,6 +83,7 @@ popup notes {
 	width 50%
 	height 40%
 	dim 0
+	animation none
 }
 EOT
 for mode in windowmode tilemode; do
@@ -109,7 +110,7 @@ cat > "$work/tilewin.conf" <<EOT
 include $XDG_CONFIG_HOME/tileWin/windowmode.conf
 wallpaper solid #204070
 session_restore no
-animations off
+animations on
 panel_command $panel
 output HEADLESS-1 mode --custom 1280x720 pos 0 0
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'

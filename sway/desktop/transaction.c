@@ -569,9 +569,12 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 		}
 
 		wlr_scene_node_reparent(&floater->scene_tree->node, layer);
+		double slide_x, slide_y; // a popup sliding in or out
+		tw_appopup_offset(floater, &slide_x, &slide_y);
 		wlr_scene_node_set_position(&floater->scene_tree->node,
-			floater->current.x + tw_animate_workspace_dx(ws),
-			floater->current.y + tw_animate_workspace_dy(ws) + tw_animate_container_dy(floater));
+			floater->current.x + tw_animate_workspace_dx(ws) + (int)slide_x,
+			floater->current.y + tw_animate_workspace_dy(ws) + tw_animate_container_dy(floater) +
+			(int)slide_y);
 		wlr_scene_node_set_enabled(&floater->scene_tree->node, !tw_animate_hides(floater) &&
 			!tw_peek_hides(floater));
 		wlr_scene_node_set_enabled(&floater->border.tree->node, true);
