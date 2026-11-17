@@ -165,6 +165,12 @@ static void record(const char *dir, const char *input, size_t len) {
 	free(path);
 	json_object_put(out);
 	json_object_put(root);
+	// and into the history, for the charts of the widget's flyout
+	struct tw_claude_usage usage;
+	if (tw_claude_usage_read(dir, &usage)) {
+		tw_claude_history_add(dir, &usage, usage.updated ? usage.updated : time(NULL));
+	}
+	tw_claude_usage_finish(&usage);
 }
 
 /* The status line command the folder had before, or NULL. */

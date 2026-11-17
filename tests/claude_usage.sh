@@ -97,6 +97,17 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":30,"resets_at":%d}}}' $((
 grep -q '5h 30%' "$work/list" && grep -q '7d 41%' "$work/list" ||
 	fail "a missing window was not kept: $(cat "$work/list")"
 
+# ---- the history, for the charts of the flyout: a line each time the values change
+history=$(ls "$XDG_STATE_HOME"/tileWin/claude-usage/*.history 2>/dev/null | head -n 1)
+[ -n "$history" ] || fail "no history was written"
+[ "$(wc -l < "$history" 2>/dev/null)" -eq 2 ] ||
+	fail "the history does not have a line for each change: $(cat "$history" 2>/dev/null)"
+grep -q " 30.0 $((now + 3600)) 41.0 $((now + 3 * 86400))\$" "$history" ||
+	fail "the last line of the history is not the values: $(tail -n 1 "$history" 2>/dev/null)"
+printf '{"rate_limits":{"five_hour":{"used_percentage":30,"resets_at":%d}}}' $((now + 3600)) |
+	sh -c "$command" >/dev/null
+[ "$(wc -l < "$history" 2>/dev/null)" -eq 2 ] || fail "the same values were written down again"
+
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
 echo '{ this is not json' > "$work/broken/settings.json"

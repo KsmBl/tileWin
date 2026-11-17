@@ -63,6 +63,10 @@ static void reload(struct widget *w) {
 	tw_claude_usage_finish(&c->usage);
 	char *dir = chosen_dir(w);
 	c->have = dir && tw_claude_usage_read(dir, &c->usage);
+	if (c->have && c->usage.updated) {
+		// into the history too (only what differs from its last line goes in)
+		tw_claude_history_add(c->usage.dir, &c->usage, c->usage.updated);
+	}
 	if (!c->usage.dir && dir) {
 		c->usage.dir = strdup(dir);
 	}

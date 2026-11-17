@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <json.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -323,4 +324,150 @@ void tw_claude_format_span(long seconds, bool brief, char *out, size_t size) {
 	} else {
 		snprintf(out, size, brief ? "%ldm" : "%ld min", minutes);
 	}
+}
+
+/* ---------- the history ---------- */
+
+#define HISTORY_DAYS 8
+#define HISTORY_MAX_BYTES (96 * 1024)
+
+char *tw_claude_history_path(const char *dir) {
+	if (!dir) {
+		return NULL;
+	}
+	char *name = strdup(dir);
+	for (char *p = name; *p; p++) {
+		if (*p == '/') {
+			*p = '-';
+		}
+	}
+	char *state = tw_state_dir();
+	char *path = format_str("%s/claude-usage/%s.history", state ? state : "/tmp", name);
+	free(state);
+	free(name);
+	return path;
+}
+
+bool tw_claude_same_window(time_t a, time_t b) {
+	return a > 0 && b > 0 && (a > b ? a - b : b - a) <= 300;
+}
+
+/* "<time> <5h used> <5h reset> <7d used> <7d reset>", "-" for what is not known. */
+static bool parse_point(const char *line, struct tw_claude_point *p) {
+	char f[4][32];
+	long long at;
+	*p = (struct tw_claude_point){ 0 };
+	if (sscanf(line, "%lld %31s %31s %31s %31s", &at, f[0], f[1], f[2], f[3]) != 5 || at <= 0) {
+		return false;
+	}
+	p->at = (time_t)at;
+	struct tw_claude_window *w[2] = { &p->five_hour, &p->seven_day };
+	for (int i = 0; i < 2; i++) {
+		if (strcmp(f[2 * i], "-") != 0) {
+			w[i]->known = true;
+			w[i]->used = strtod(f[2 * i], NULL);
+		}
+		if (strcmp(f[2 * i + 1], "-") != 0) {
+			w[i]->resets_at = (time_t)strtoll(f[2 * i + 1], NULL, 10);
+		}
+	}
+	return true;
+}
+
+static void format_window(const struct tw_claude_window *w, char *out, size_t size) {
+	char used[24] = "-", reset[24] = "-";
+	if (w->known) {
+		snprintf(used, sizeof(used), "%.1f", w->used);
+	}
+	if (w->resets_at > 0) {
+		snprintf(reset, sizeof(reset), "%lld", (long long)w->resets_at);
+	}
+	snprintf(out, size, "%s %s", used, reset);
+}
+
+int tw_claude_history_read(const char *dir, struct tw_claude_point **out) {
+	*out = NULL;
+	char *path = tw_claude_history_path(dir);
+	FILE *f = path ? fopen(path, "r") : NULL;
+	free(path);
+	if (!f) {
+		return 0;
+	}
+	int count = 0, cap = 0;
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		struct tw_claude_point p;
+		if (!parse_point(line, &p)) {
+			continue;
+		}
+		if (count == cap) {
+			cap = cap ? cap * 2 : 128;
+			struct tw_claude_point *grown = realloc(*out, cap * sizeof(**out));
+			if (!grown) {
+				break;
+			}
+			*out = grown;
+		}
+		(*out)[count++] = p;
+	}
+	fclose(f);
+	return count;
+}
+
+static bool window_differs(const struct tw_claude_window *a, const struct tw_claude_window *b) {
+	return a->known != b->known || (a->known && fabs(a->used - b->used) >= 0.05) ||
+		!(a->resets_at == b->resets_at || tw_claude_same_window(a->resets_at, b->resets_at));
+}
+
+void tw_claude_history_add(const char *dir, const struct tw_claude_usage *usage, time_t now) {
+	char *path = tw_claude_history_path(dir);
+	if (!path) {
+		return;
+	}
+	char *slash = strrchr(path, '/');
+	if (slash) {
+		*slash = '\0';
+		tw_mkdir_p(path);
+		*slash = '/';
+	}
+	struct tw_claude_point *points;
+	int n = tw_claude_history_read(dir, &points);
+	if (n > 0 && !window_differs(&points[n - 1].five_hour, &usage->five_hour) &&
+			!window_differs(&points[n - 1].seven_day, &usage->seven_day)) {
+		free(points);
+		free(path);
+		return; // the same as the last line
+	}
+	char five[64], seven[64];
+	format_window(&usage->five_hour, five, sizeof(five));
+	format_window(&usage->seven_day, seven, sizeof(seven));
+	struct stat st;
+	if (stat(path, &st) == 0 && st.st_size > HISTORY_MAX_BYTES) {
+		// grown: written again with only the last days
+		char *tmp = format_str("%s.new", path);
+		FILE *f = fopen(tmp, "w");
+		for (int i = 0; f && i < n; i++) {
+			if (points[i].at < now - HISTORY_DAYS * 24 * 3600) {
+				continue;
+			}
+			char a[64], b[64];
+			format_window(&points[i].five_hour, a, sizeof(a));
+			format_window(&points[i].seven_day, b, sizeof(b));
+			fprintf(f, "%lld %s %s\n", (long long)points[i].at, a, b);
+		}
+		if (f) {
+			fprintf(f, "%lld %s %s\n", (long long)now, five, seven);
+			fclose(f);
+			rename(tmp, path);
+		}
+		free(tmp);
+	} else {
+		FILE *f = fopen(path, "a");
+		if (f) {
+			fprintf(f, "%lld %s %s\n", (long long)now, five, seven);
+			fclose(f);
+		}
+	}
+	free(points);
+	free(path);
 }

@@ -57,6 +57,25 @@ void tw_claude_usage_list_free(list_t *list);
  */
 double tw_claude_window_now(const struct tw_claude_window *window, time_t now);
 
+/* ---------- what was used when: the history ---------- */
+
+/*
+ * Each time the values change, tilewin-claude-usage adds a line to
+ * ~/.local/state/tileWin/claude-usage/<folder>.history; the last eight days
+ * are kept. The flyout of the widget draws its charts from it.
+ */
+struct tw_claude_point {
+	time_t at;
+	struct tw_claude_window five_hour, seven_day;
+};
+char *tw_claude_history_path(const char *dir);
+/* Adds the values as of now, when they differ from the last line. */
+void tw_claude_history_add(const char *dir, const struct tw_claude_usage *usage, time_t now);
+/* The points, oldest first, in a new array; how many (0 for none, *out NULL). */
+int tw_claude_history_read(const char *dir, struct tw_claude_point **out);
+/* Whether two reset times are those of the same window (they may wobble by a minute). */
+bool tw_claude_same_window(time_t a, time_t b);
+
 /* ---------- what the widget shows ---------- */
 
 /*
