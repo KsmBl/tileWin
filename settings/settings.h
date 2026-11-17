@@ -344,6 +344,8 @@ GtkWidget *backup_page_new(struct settings *s);
 GtkWidget *clipboard_page_new(struct settings *s);
 /* page_popups.c: apps that come and go with a shortcut (popups.conf) */
 GtkWidget *popups_page_new(struct settings *s);
+/* page_quickweb.c: the words of the keys of Quick web, and its shortcut */
+GtkWidget *quickweb_page_new(struct settings *s);
 /* page_keyboard.c, for other pages: recording keys and showing them */
 void keyboard_record_keys(GtkWindow *parent, void (*done)(const char *keys, gpointer data),
 	gpointer data);

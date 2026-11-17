@@ -54,6 +54,7 @@ executable(
 		'livewall.c',
 		'wifiradar.c',
 		'claudecharts.c',
+		'quickweb.c',
 		'main.c',
 		'emoji_data.c',
 		'emojipicker.c',

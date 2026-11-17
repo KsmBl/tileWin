@@ -1413,6 +1413,15 @@ test(
 )
 
 test(
+	'quick-web',
+	find_program('quick_web.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [keyboard_tool],
+	suite: 'gui',
+	timeout: 90,
+)
+
+test(
 	'workspaces-drag',
 	find_program('workspaces_drag.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

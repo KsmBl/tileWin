@@ -14,6 +14,7 @@ All configuration lives in `~/.config/tileWin/` and is plain text:
 | `tilemode.conf` | Tile mode: a normal sway config (`man 5 sway`) |
 | `windowmode.conf` | Window mode: same syntax, with Windows-style shortcuts |
 | `taskbar.conf` | Taskbar layouts, widgets, menus and start menu |
+| `quickweb.conf` | The words of the keys of Quick web (the Quick web page) |
 | `popups.conf` | App popups: apps that come and go with a shortcut (the Popups page) |
 | `current-theme` | Name of the active theme (managed by `tilewin-theme`) |
 | `themes/<name>/` | Your own themes |

@@ -665,6 +665,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		}
 	} else if (strcmp(cmd, "command") == 0) {
 		command_center_toggle(panel, panel_main_output(panel));
+	} else if (strcmp(cmd, "quickweb") == 0) {
+		quickweb_toggle(panel, output ? output : panel_focused_output(panel));
 	} else if (strcmp(cmd, "launcher") == 0) {
 		if (output) {
 			launcher_toggle(panel, output);

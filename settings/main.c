@@ -763,6 +763,7 @@ static void build_window(struct settings *s) {
 		{ "taskbar", taskbar_page_new, 2 },
 		{ "startmenu", startmenu_page_new, 2 },
 		{ "launcher", launcher_page_new, 2 },
+		{ "quickweb", quickweb_page_new, 2 },
 		{ "devices", devices_page_new, 6 },
 		{ "keyboard", keyboard_page_new, 3 },
 		{ "mouse", mouse_page_new, 3 },

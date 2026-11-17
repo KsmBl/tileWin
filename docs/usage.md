@@ -112,6 +112,17 @@ The taskbar is the notification service of the desktop (`org.freedesktop.Notific
 
 Wi-Fi uses NetworkManager (`nmcli`), airplane mode `rfkill`, the volume `pactl`, the brightness `brightnessctl`.
 
+## Quick web
+
+A web address typed a word a key. Give keys their words on the **Quick web** page (Taskbar & Start), for example g for `github.com/` and, after it, k for `ksmbl/`, and a shortcut to open it. Pressing g types `github.com/` at once, k then `ksmbl/`, and the keys that come next are shown under the field with their words. A key without a word types itself, and from there on the keys are letters; Shift types the letter itself anyway. Backspace takes a whole word back, Enter opens the address in the browser (with `https://` when it has no scheme of its own), Escape closes. There are no words until you give some. `panel quickweb` opens it too; the words are in `~/.config/tileWin/quickweb.conf`:
+
+```
+key g "github.com/" {
+    key k "ksmbl/"
+}
+key y "youtube.com"
+```
+
 ## App popups
 
 An app that comes and goes with a shortcut: Thunderbird as high as the screen on its right, 70% wide, with the rest darkened behind it; a terminal from the top. On the **App popups** page (Windows), **Add popup** asks for the app, its position (left, right, top, bottom or the middle), its width and height in percent of the screen without the taskbar, how much to darken the rest, and the shortcut (pressed to record it), with a small picture of the screen that shows where it goes. Keys that already do something else are named; the popup takes them over. The first press starts the app if it does not run (or takes in its open window) and shows it there; pressing it again, clicking beside it or switching to another app hides it, still running, so the next press brings it back at once. ▶ on the page shows it right away to try it. It has no frame, slides in from its side and out again with the darkness fading along (**Comes in**: Slides in from its side, or Just appears; the animations of the settings switch it off too), and with **Open as popup everywhere** opening the app from the taskbar, the start menu, search, the desktop or the Command Center opens it as the popup as well. The details are in [configuration.md](configuration.md#app-popups-popupsconf).

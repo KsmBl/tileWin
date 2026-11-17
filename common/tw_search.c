@@ -67,6 +67,8 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"input-mouse-symbolic" },
 	{ "apps", "Apps", "default browser email startup autostart programs",
 		"applications-system-symbolic" },
+	{ "quickweb", "Quick web", "quick web address url browser open website key word shortcut "
+		"github bookmark", "web-browser-symbolic" },
 	{ "popups", "App popups", "popup drop down quake shortcut app window side slide dim darken "
 		"scratchpad thunderbird terminal", "window-new-symbolic" },
 	{ "clipboard", "Clipboard", "clipboard history copy paste win+v pinned clear cut",

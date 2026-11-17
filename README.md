@@ -81,6 +81,7 @@ New lately:
 - **Message dialogs** of GTK 3 apps ("Save changes?") in the look of the theme.
 - **Brightness and volume up to 130%**, a battery chart of the last 24 hours, and a limit on the clock of each processor core.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
+- **Quick web:** a shortcut opens a field where a single key types a whole word of a web address you gave it (g for `github.com/`, then k for `ksmbl/`), and Enter opens it.
 - **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running. Made on the App popups page of the settings: [docs/usage.md](docs/usage.md#app-popups).
 - **Charts that answer the pointer** everywhere (CPU, memory, battery, network, Claude Code usage, the desktop's charts), and **windows dragged between desktops** in the workspaces widget, as on KDE.
 - **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, with the Bluetooth devices as diamonds; the pointer on one shows its signal, security and band, a click connects to it and a right click opens its menu.

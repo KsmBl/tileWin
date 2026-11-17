@@ -555,6 +555,7 @@ enum popup_kind {
 	POPUP_HUNG,
 	POPUP_SNAPLAYOUTS,
 	POPUP_SHORTCUTS,
+	POPUP_QUICKWEB,
 };
 struct popup_anchor {
 	struct panel_output *output;
@@ -582,6 +583,8 @@ void rundialog_open_with(struct panel *panel, struct panel_output *output,
 /* flyouts.c: the clock and calendar flyout of the clock widget */
 void calendar_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
 void launcher_toggle(struct panel *panel, struct panel_output *output);
+/* quickweb.c: a web address typed a word a key ("panel quickweb", quickweb.conf) */
+void quickweb_toggle(struct panel *panel, struct panel_output *output);
 struct popup_anchor popup_anchor_for_bar(struct psurface *bar, int x, int width);
 /* A menu entry of a tray icon was clicked ("panel tray_event <service> <path> <id>"). */
 void tray_handle_event_command(struct panel *panel, const char *service,
