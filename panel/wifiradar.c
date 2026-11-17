@@ -149,7 +149,7 @@ static void scan_done(void *data, const char *output) {
 	enum { S_RADIO, S_DEV, S_WIFI, S_KNOWN } section = S_RADIO;
 	bool radio = false, device = false, missing = strstr(output, "--missing") != NULL;
 	bool seen[RADAR_MAX] = { false };
-	char known[RADAR_MAX][2][96];
+	char known[RADAR_MAX][3][96];
 	int known_count = 0;
 	char *copy = strdup(output);
 	char *save = NULL;
@@ -180,11 +180,13 @@ static void scan_done(void *data, const char *output) {
 				device = true;
 			}
 		} else if (section == S_KNOWN) {
-			// "<uuid>:<ssid>", written by the query itself, not escaped
+			// "<uuid>:<autoconnect>:<ssid>", written by the query itself, not escaped
 			char *colon = strchr(line, ':');
-			if (colon && colon[1] && known_count < RADAR_MAX) {
+			char *second = colon ? strchr(colon + 1, ':') : NULL;
+			if (second && second[1] && known_count < RADAR_MAX) {
 				snprintf(known[known_count][0], 96, "%.*s", (int)(colon - line), line);
-				snprintf(known[known_count][1], 96, "%s", colon + 1);
+				snprintf(known[known_count][2], 96, "%.*s", (int)(second - colon - 1), colon + 1);
+				snprintf(known[known_count][1], 96, "%s", second + 1);
 				known_count++;
 			}
 		} else if (radio) {
@@ -252,6 +254,7 @@ static void scan_done(void *data, const char *output) {
 		for (int k = 0; k < known_count; k++) {
 			if (strcmp(known[k][1], n->ssid) == 0) {
 				n->known = true;
+				n->autoconnect = strcmp(known[k][2], "no") != 0;
 				snprintf(n->uuid, sizeof(n->uuid), "%s", known[k][0]);
 				break;
 			}
@@ -295,7 +298,8 @@ static void scan(bool rescan) {
 		"while IFS=: read -r uuid type; do "
 		"[ \"$type\" = 802-11-wireless ] || continue; "
 		"ssid=$(nmcli -g 802-11-wireless.ssid connection show uuid \"$uuid\" 2>/dev/null); "
-		"[ -n \"$ssid\" ] && printf '%%s:%%s\\n' \"$uuid\" \"$ssid\"; done",
+		"auto=$(nmcli -g connection.autoconnect connection show uuid \"$uuid\" 2>/dev/null); "
+		"[ -n \"$ssid\" ] && printf '%%s:%%s:%%s\\n' \"$uuid\" \"${auto:-yes}\" \"$ssid\"; done",
 		rescan ? "auto" : "no");
 	rd.proc = proc_run(rd.panel, cmd, false, NULL, scan_done, NULL);
 	free(cmd);
@@ -477,6 +481,117 @@ static void connect_to(const struct radar_net *n, struct popup_anchor anchor) {
 	rd.link_proc = proc_run(rd.panel, cmd, false, NULL, link_done, NULL);
 	free(cmd);
 	changed();
+}
+
+/* ---------- the menu of a contact ---------- */
+
+static char *hex_of(const char *text) {
+	size_t len = strlen(text);
+	char *out = malloc(2 * len + 1);
+	for (size_t i = 0; i < len; i++) {
+		sprintf(out + 2 * i, "%02x", (unsigned char)text[i]);
+	}
+	out[2 * len] = '\0';
+	return out;
+}
+
+static bool unhex(const char *hex, char *out, size_t size) {
+	size_t len = strlen(hex);
+	if (len % 2 || len / 2 >= size) {
+		return false;
+	}
+	for (size_t i = 0; i < len / 2; i++) {
+		unsigned v;
+		if (sscanf(hex + 2 * i, "%2x", &v) != 1) {
+			return false;
+		}
+		out[i] = (char)v;
+	}
+	out[len / 2] = '\0';
+	return true;
+}
+
+static void command_done(void *data, const char *output) {
+	wifiradar_rescan();
+}
+
+static void add_item(list_t *items, const char *label, const char *action, const char *hex,
+		bool checked) {
+	char *cmd = format_str("panel radar %s %s", action, hex);
+	struct menu_item *item = menu_item_new(label, cmd);
+	item->checked = checked;
+	list_add(items, item);
+	free(cmd);
+}
+
+bool wifiradar_menu(const struct radar_geom *g, const struct radar_look *look, double x,
+		double y, struct popup_anchor anchor) {
+	int i = wifiradar_hit(g, look, x, y);
+	if (i < 0) {
+		return false;
+	}
+	const struct radar_net *n = &rd.nets[i];
+	char *hex = hex_of(n->ssid);
+	list_t *items = create_list();
+	struct menu_item *title = menu_item_new(n->ssid, NULL);
+	title->bold = true;
+	title->disabled = true;
+	list_add(items, title);
+	add_item(items, n->active ? "Disconnect" : "Connect", n->active ? "disconnect" : "connect",
+		hex, false);
+	add_item(items, "Details", "details", hex, false);
+	if (n->known) {
+		add_item(items, "Connect automatically", n->autoconnect ? "autoconnect-off" :
+			"autoconnect-on", hex, n->autoconnect);
+		list_add(items, menu_item_separator());
+		add_item(items, "Forget this network", "forget", hex, false);
+	}
+	list_add(items, menu_item_separator());
+	list_add(items, menu_item_new("Look again", "panel radar rescan"));
+	free(hex);
+	rd.anchor = anchor;
+	menu_open(rd.panel, items, true, anchor, NULL);
+	return true;
+}
+
+void wifiradar_command(struct panel *panel, int argc, char **argv) {
+	if (argc < 1 || !rd.panel) {
+		return;
+	}
+	if (strcmp(argv[0], "rescan") == 0) {
+		rd.ping_at = now_s();
+		wifiradar_rescan();
+		changed();
+		return;
+	}
+	char ssid[96];
+	if (argc < 2 || !unhex(argv[1], ssid, sizeof(ssid))) {
+		return;
+	}
+	const struct radar_net *n = find(ssid);
+	if (!n) {
+		return;
+	}
+	char *uuid = n->uuid[0] ? g_shell_quote(n->uuid) : NULL;
+	char *cmd = NULL;
+	if (strcmp(argv[0], "connect") == 0) {
+		connect_to(n, rd.anchor);
+	} else if (strcmp(argv[0], "details") == 0) {
+		flyout_network_open_for(panel, rd.anchor, n->ssid, false);
+	} else if (strcmp(argv[0], "disconnect") == 0 && uuid) {
+		cmd = format_str("nmcli connection down uuid %s 2>&1", uuid);
+	} else if (strcmp(argv[0], "forget") == 0 && uuid) {
+		cmd = format_str("nmcli connection delete uuid %s 2>&1", uuid);
+	} else if (strcmp(argv[0], "autoconnect-on") == 0 && uuid) {
+		cmd = format_str("nmcli connection modify uuid %s connection.autoconnect yes 2>&1", uuid);
+	} else if (strcmp(argv[0], "autoconnect-off") == 0 && uuid) {
+		cmd = format_str("nmcli connection modify uuid %s connection.autoconnect no 2>&1", uuid);
+	}
+	if (cmd) {
+		proc_run(rd.panel, cmd, false, NULL, command_done, NULL);
+		free(cmd);
+	}
+	g_free(uuid);
 }
 
 /* ---------- geometry ---------- */

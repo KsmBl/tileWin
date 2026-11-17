@@ -18,6 +18,7 @@ struct radar_net {
 	char ssid[96], security[48], uuid[48];
 	int signal, freq;
 	bool active, known, secured;
+	bool autoconnect; // a saved one: NetworkManager connects to it by itself
 	double angle;               // radians clockwise from the top, from the name
 	double r_from, r_to, moved; // share of the radius, eased from r_from to r_to since moved
 	double appeared, gone;      // when it came, when it left (0 while it is there)
@@ -91,6 +92,11 @@ bool wifiradar_in_disc(const struct radar_geom *g, double x, double y);
  */
 void wifiradar_click(const struct radar_geom *g, const struct radar_look *look, double x,
 	double y, struct popup_anchor anchor);
+/* The menu of the contact at a point (right click); false when there is none there. */
+bool wifiradar_menu(const struct radar_geom *g, const struct radar_look *look, double x,
+	double y, struct popup_anchor anchor);
+/* "panel radar <connect|disconnect|forget|autoconnect-on|autoconnect-off|details|rescan> [hex ssid]" */
+void wifiradar_command(struct panel *panel, int argc, char **argv);
 /* Small radar for the taskbar in a size x size square, with the strongest contacts. */
 void wifiradar_draw_icon(cairo_t *cr, double x, double y, double size, uint32_t fg,
 	uint32_t sweep, bool square);

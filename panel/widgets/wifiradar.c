@@ -365,6 +365,10 @@ static struct popup_anchor anchor_at(struct psurface *s, double x, double y) {
 static bool radar_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
 	struct radar_widget *st = w->data;
+	if (button == BTN_RIGHT && radar_style(w) && st->drawn) {
+		// a contact's own menu; elsewhere the widget's
+		return wifiradar_menu(&st->geom, &st->look, x, y, anchor_at(s, x, y));
+	}
 	if (button != BTN_LEFT) {
 		return false;
 	}

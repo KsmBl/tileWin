@@ -14,6 +14,7 @@ compositor=$build/sway/tilewin
 msg=$build/swaymsg/tilewinmsg
 panel=$build/panel/tilewin-panel
 pointer=$build/tests/pointer-tool
+keyboard=$build/tests/keyboard-tool
 
 for needed in "$compositor" "$msg" "$panel" "$pointer"; do
 	if [ ! -x "$needed" ]; then
@@ -158,6 +159,21 @@ wait_until 6 sh -c "[ \"\$(grim -g '720,150 400x480' - 2>/dev/null | md5sum)\" !
 grep -q "device wifi connect Studio Three" "$FAKE_NM/calls" &&
 	fail "the network with a password was connected to without one"
 ipc panel close >/dev/null 2>&1
+
+# a right click on a network: its menu; what it offers reaches NetworkManager
+menu() { grim -g "320,20 400x380" - 2>/dev/null | md5sum; }
+closed=$(menu)
+"$pointer" 1280 720 rightclick 425 260 >/dev/null 2>&1
+wait_until 5 sh -c "[ \"\$(grim -g '320,20 400x380' - 2>/dev/null | md5sum)\" != '$closed' ]" ||
+	fail "a right click on a network opened no menu"
+"$keyboard" key none escape >/dev/null 2>&1
+hex=$(printf %s Garden | od -An -tx1 | tr -d ' \n')
+ipc panel radar autoconnect-off "$hex" >/dev/null 2>&1
+wait_until 5 called "connection modify uuid uuid-garden connection.autoconnect no" ||
+	fail "Connect automatically did not reach NetworkManager"
+ipc panel radar forget "$hex" >/dev/null 2>&1
+wait_until 5 called "connection delete uuid uuid-garden" ||
+	fail "Forget this network did not reach NetworkManager"
 
 # Wi-Fi off: a click on the radar turns it on
 # (the first click sends a ping, so the radar looks again and finds it off)

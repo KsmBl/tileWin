@@ -5,6 +5,7 @@
 #include "draw.h"
 #include "log.h"
 #include "panel.h"
+#include "wifiradar.h"
 #include "portguard.h"
 #include "stringop.h"
 #include "tw_paths.h"
@@ -682,6 +683,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		struct popup_anchor anchor = popup_anchor_for_bar(output->bar, output->width, 0);
 		anchor.right_align = true;
 		calendar_toggle(panel, anchor, NULL);
+	} else if (strcmp(cmd, "radar") == 0 && argc > 1) {
+		wifiradar_command(panel, argc - 1, argv + 1); // from the menu of a radar's contact
 	} else if (strcmp(cmd, "ports") == 0 && argc > 1) {
 		if (strcmp(argv[1], "copy") == 0 && argc > 2) {
 			clipboard_copy_text(panel, argv[2]); // from the menu of the Open ports flyout
