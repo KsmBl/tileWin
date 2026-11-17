@@ -411,6 +411,9 @@ static void desk_render(struct psurface *s, cairo_t *cr) {
 		.card = dw->card,
 		.hover = ds->inside && !ds->dragging,
 		.pressed = ds->pressed && !ds->dragging,
+		.pointer = ds->inside && !ds->dragging,
+		.px = ds->px,
+		.py = ds->py,
 	};
 	if (gadget_draw(&gadget)) {
 		// the whole card is the widget: clicks and tooltips as on the taskbar

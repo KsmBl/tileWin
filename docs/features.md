@@ -50,7 +50,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, Claude Code usage, open ports.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, Claude Code usage, open ports, the Wi-Fi radar.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -79,6 +79,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
 - **Battery chart** of the last 24 hours in the battery flyout, the times it charged in green.
 - **Login pages of public Wi-Fi** accepted in the background: the terms ticked, the right button pressed, a page that wants your email opened for you.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, when they reset and how long they last at this pace, from what Claude Code shows its status line, never from its login.
+- **Wi-Fi radar** on the desktop and the taskbar, in every theme: the networks in reach as contacts on a radar whose sweep goes round, the stronger the nearer the middle; the pointer on one shows its signal, security and band, and a click connects to it (a saved or open network at once, with the link drawn as it is made, a new one through the field for its password in the network flyout).
 - **Open ports** on the taskbar and the desktop: every TCP port that listens and UDP port that waits, with its program, and whether it can only be reached from this computer (local), from a private network (LAN) or from every network (public). Switched on in the network settings, a program of yours that opens a port to the network has to be allowed first, as with Windows' firewall: tileWin asks once for each program and keeps the answer, also when it is started again.
 - **Processor page** (Advanced): a limit on the clock of each core, P-cores and E-cores apart, kept after a restart.
 - **Battery saver**, like the one of Windows: on battery at or below 20% (`battery_saver`, "Battery saver" on the Screen page) the animations, the trail of the pointer and the charts the taskbar widgets keep in the background stop until the computer is plugged in, and the taskbar says so in a notification.

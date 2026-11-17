@@ -23,6 +23,7 @@
 #include "tw_brightness.h"
 #include "tw_volume.h"
 #include "wifi_caps.h"
+#include "wifiradar.h"
 
 /*
  * Flyouts of the network, volume and battery widgets. They only exist while
@@ -657,6 +658,9 @@ struct net_flyout {
 	bool wrong_password; // and it failed for its password
 	bool have_nmcli, wifi_enabled, loaded, rescanned;
 	char *expanded; // SSID of the expanded row
+	char *pending;  // SSID to open once the networks are there (flyout_network_open_for)
+	bool pending_password; // and to ask for its password
+	int pending_looks;
 	char *secret_ssid; // saved network whose password was asked for
 	char secret[128];  // its password, empty while NetworkManager is asked
 	bool asking_password;
@@ -956,6 +960,45 @@ static void net_order_free(struct net_flyout *f) {
 	f->order_count = 0;
 }
 
+/*
+ * The network asked for by flyout_network_open_for, once the list has it:
+ * opened, in sight, and with the field for its password when one is needed.
+ * Not there after the scan either, it is given up.
+ */
+static void net_open_pending(struct net_flyout *f) {
+	f->filter[0] = '\0';
+	f->filter_cursor = (struct text_cursor){ 0 };
+	net_filter_apply(f);
+	for (int i = 0; i < f->shown->length; i++) {
+		struct wifi_net *n = f->shown->items[i];
+		if (strcmp(n->ssid, f->pending) != 0) {
+			continue;
+		}
+		free(f->expanded);
+		f->expanded = strdup(n->ssid);
+		bool secured = n->security[0] && strcmp(n->security, "--") != 0;
+		f->asking_password = f->pending_password && secured;
+		memset(f->password, 0, sizeof(f->password));
+		f->password_cursor = (struct text_cursor){ 0 };
+		if (f->asking_password && n->known) {
+			snprintf(f->status, sizeof(f->status), "The password is wrong. Type it again.");
+			f->status_error = true;
+		}
+		int visible = net_visible_rows(f);
+		if (i < f->scroll || i >= f->scroll + visible) {
+			int max = f->shown->length - visible;
+			f->scroll = i < max ? i : max > 0 ? max : 0;
+		}
+		free(f->pending);
+		f->pending = NULL;
+		return;
+	}
+	if (++f->pending_looks >= 2) {
+		free(f->pending);
+		f->pending = NULL;
+	}
+}
+
 static void net_query_done(void *data, const char *output) {
 	struct net_flyout *f = net_current;
 	if (!f) {
@@ -1107,6 +1150,9 @@ static void net_query_done(void *data, const char *output) {
 	int max = f->shown->length - net_visible_rows(f);
 	f->scroll = f->scroll > max ? (max > 0 ? max : 0) : f->scroll;
 	f->loaded = true;
+	if (f->pending) {
+		net_open_pending(f);
+	}
 	if (!f->rescanned && f->have_nmcli && f->wifi_device && f->wifi_enabled) {
 		f->rescanned = true;
 		net_query(f, true);
@@ -1202,6 +1248,7 @@ static void net_action_done(void *data, const char *output) {
 	}
 	net_query(f, false);
 	net_update(f);
+	wifiradar_rescan(); // the radar shows it too
 }
 
 static void net_run_action(struct net_flyout *f, const char *command, const char *status) {
@@ -2046,6 +2093,7 @@ static void net_destroy(struct popup *p) {
 	list_free(f->shown);
 	net_order_free(f);
 	free(f->expanded);
+	free(f->pending);
 	free(f->connecting);
 	free(f->failed);
 	free(f->base.settings);
@@ -2091,6 +2139,23 @@ void flyout_network_toggle(struct panel *panel, struct popup_anchor anchor,
 	net_current = f;
 	net_query(f, false);
 	net_stats_tick(NULL);
+}
+
+void flyout_network_open_for(struct panel *panel, struct popup_anchor anchor, const char *ssid,
+		bool password) {
+	if (popup_is_open(panel, POPUP_NETWORK)) {
+		popup_close_all(panel);
+	}
+	flyout_network_toggle(panel, anchor, NULL);
+	if (net_current && ssid) {
+		net_current->pending = strdup(ssid);
+		net_current->pending_password = password;
+		net_current->pending_looks = 0;
+	}
+}
+
+const char *flyout_network_connecting(void) {
+	return net_current && !net_current->disconnecting ? net_current->connecting : NULL;
 }
 
 /* ================= volume ================= */

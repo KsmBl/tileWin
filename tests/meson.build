@@ -1399,6 +1399,15 @@ test(
 )
 
 test(
+	'wifi-radar',
+	find_program('wifi_radar.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 90,
+)
+
+test(
 	'command-center',
 	find_program('command_center.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

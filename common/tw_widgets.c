@@ -104,6 +104,17 @@ static const struct tw_widget_option opts_ports[] = {
 	{ 0 },
 };
 
+static const char *const choice_radar_text[] = { "count", "name", "none", NULL };
+static const char *const choice_radar_turn[] = { "3", "4", "6", "10", "15", NULL };
+static const struct tw_widget_option opts_wifiradar[] = {
+	{ "text", "Text on the taskbar", "count: how many networks are in reach; name: the one "
+		"connected to; none: the radar alone", choice_radar_text },
+	{ "turn", "Seconds for a round", "How fast the sweep goes round, 6 by default",
+		choice_radar_turn },
+	{ "color", "Color of the sweep", "e.g. #3b82f6; the accent of the theme by default", NULL },
+	{ 0 },
+};
+
 static const char *const choice_ports_text[] = { "full", "short", "none", NULL };
 
 /* How the ports widget looks on the taskbar. */
@@ -397,6 +408,12 @@ static const struct tw_widget_style styles_ports[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_wifiradar[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "radar", "Radar with the networks in reach", 3, 3 },
+	{ "tile", "Tile with its name", 2, 2 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_meter[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "chart", "Chart of the last measurements", 3, 2 },
@@ -471,6 +488,9 @@ const struct tw_widget_info tw_widgets[] = {
 		styles_kernel },
 	{ "ports", "Open ports", "The ports this computer listens on and whether each is only "
 		"for this computer, a local network or public", STATUS, opts_ports, styles_ports },
+	{ "wifiradar", "Wi-Fi radar", "The Wi-Fi networks in reach on a radar, the stronger "
+		"the nearer the middle; a click on one connects to it", STATUS, opts_wifiradar,
+		styles_wifiradar },
 	{ "clock", "Clock", "Time and date with a calendar", STATUS, opts_clock, styles_clock },
 	{ "notifications", "Notifications", "Opens the Action Center with the notification history",
 		STATUS, opts_notifications, styles_plain },
@@ -494,6 +514,7 @@ const char *tw_widget_desktop_style(const char *type) {
 		{ "claude", "list" },
 		{ "kernel", "card" },
 		{ "ports", "list" },
+		{ "wifiradar", "radar" },
 	};
 	for (size_t i = 0; type && i < sizeof(own) / sizeof(own[0]); i++) {
 		if (strcmp(own[i].type, type) == 0) {

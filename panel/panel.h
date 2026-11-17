@@ -392,6 +392,7 @@ extern const struct widget_impl widget_git;
 extern const struct widget_impl widget_claude;
 extern const struct widget_impl widget_kernel;
 extern const struct widget_impl widget_ports;
+extern const struct widget_impl widget_wifiradar;
 
 /* ---------- panel ---------- */
 
@@ -633,6 +634,8 @@ struct gadget_ctx {
 	double scale;         // how big the text is drawn, 1 for a cell of 100 pixels
 	bool card;            // draws the background of the card
 	bool hover, pressed;
+	bool pointer;         // the pointer is over the card, at px, py
+	double px, py;
 };
 /* The colors the desktop styles are drawn in, from the theme and its scheme. */
 struct gadget_palette {
@@ -669,6 +672,15 @@ double gadget_draw_caption(struct gadget_ctx *ctx, const struct gadget_palette *
 /* Anchor at the tray end of the taskbar on an output. */
 struct popup_anchor flyout_anchor(struct panel *panel, struct panel_output *output);
 void flyout_network_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
+/*
+ * The network flyout with that network open, scrolled to it; with password,
+ * its field for the password (a new network, or a saved one whose password
+ * was turned down).
+ */
+void flyout_network_open_for(struct panel *panel, struct popup_anchor anchor, const char *ssid,
+	bool password);
+/* The network the flyout connects to now, NULL for none. */
+const char *flyout_network_connecting(void);
 void flyout_volume_toggle(struct panel *panel, struct popup_anchor anchor, const char *mixer);
 void flyout_power_toggle(struct panel *panel, struct popup_anchor anchor, const char *settings);
 /* Takes down the charge of the battery for the chart of the power flyout, for

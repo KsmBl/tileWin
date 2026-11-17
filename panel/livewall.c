@@ -3,10 +3,9 @@
  * gets, over its own still wallpaper, a few panels of the desktop that move and
  * tell how the computer is. The Starship Console's:
  *
- *   - a sensor: rings with a sweep going round, and as contacts the Wi-Fi
- *     networks in reach, the stronger the nearer the middle, named as the sweep
- *     passes them; the pointer on a contact names it, a click opens the network
- *     flyout;
+ *   - a sensor: the Wi-Fi radar (wifiradar.c), rings with a sweep going
+ *     round and the networks in reach as contacts; the pointer on a contact
+ *     shows its card, a click connects to it;
  *   - a panel of readouts: the time, the date, the processor (and its last
  *     minute), memory, disk, network, battery, temperature, uptime and the
  *     windows open; a row lights up under the pointer, and a click opens what
@@ -37,25 +36,17 @@
 #include "log.h"
 #include "panel.h"
 #include "tw_battery.h"
+#include "wifiradar.h"
 
 #define SWEEP_MS 80          // a frame of the sweep, some twelve a second
 #define SWEEP_SAVER_MS 500   // with the battery saver on
 #define SWEEP_TURN 6.0       // seconds for a round
 #define SAMPLE_MS 1000
-#define WIFI_MS 60000 // NetworkManager scans again when its list is older than that
 #define HISTORY 60
-#define MAX_CONTACTS 48
 #define READOUT_W 380
 #define ROW_H 24
 
 enum part { PART_SENSOR, PART_READOUT, PART_COUNT };
-
-struct contact {
-	char name[64];
-	int signal;
-	bool active;
-	double angle; // radians, from the name: the same place every time
-};
 
 struct row {
 	const char *label;
@@ -83,9 +74,8 @@ static struct {
 	struct wl_list outputs; // struct live_output
 	bool inited;
 	char *scene;
-	struct loop_timer *sweep_timer, *sample_timer, *wifi_timer;
-	struct proc *wifi_proc;
-	double started;
+	struct loop_timer *sweep_timer, *sample_timer;
+	bool radar_held;
 	// readings
 	unsigned long long cpu_total, cpu_idle;
 	double cpu, cpu_history[HISTORY];
@@ -96,8 +86,6 @@ static struct {
 	double disk_used;
 	int samples;
 	struct row rows[ROW_COUNT];
-	struct contact contacts[MAX_CONTACTS];
-	int contact_count;
 } lw;
 
 static double now_s(void) {
@@ -315,67 +303,6 @@ static void sample(void) {
 		windows);
 }
 
-/* ---------- the contacts of the sensor: Wi-Fi networks ---------- */
-
-static double angle_of(const char *name) {
-	unsigned long h = 5381;
-	for (const char *c = name; *c; c++) {
-		h = h * 33 + (unsigned char)*c;
-	}
-	return (h % 3600) / 3600.0 * 2 * M_PI;
-}
-
-/* nmcli -t: "IN-USE:SIGNAL:SSID", the colons of the name escaped. */
-static void wifi_done(void *data, const char *output) {
-	lw.wifi_proc = NULL;
-	lw.contact_count = 0;
-	char *copy = strdup(output);
-	char *save = NULL;
-	for (char *line = strtok_r(copy, "\n", &save); line && lw.contact_count < MAX_CONTACTS;
-			line = strtok_r(NULL, "\n", &save)) {
-		char *a = strchr(line, ':');
-		char *b = a ? strchr(a + 1, ':') : NULL;
-		if (!b || !b[1]) {
-			continue;
-		}
-		*a = *b = '\0';
-		char name[64];
-		size_t n = 0;
-		for (const char *c = b + 1; *c && n < sizeof(name) - 1; c++) {
-			if (*c == '\\' && c[1]) {
-				c++;
-			}
-			name[n++] = *c;
-		}
-		name[n] = '\0';
-		bool known = false;
-		for (int i = 0; i < lw.contact_count && !known; i++) {
-			known = strcmp(lw.contacts[i].name, name) == 0;
-		}
-		if (known) {
-			continue; // one network, several access points: the strongest came first
-		}
-		struct contact *c = &lw.contacts[lw.contact_count++];
-		snprintf(c->name, sizeof(c->name), "%s", name);
-		c->signal = atoi(a + 1);
-		c->active = strcmp(line, "*") == 0;
-		c->angle = angle_of(name);
-	}
-	free(copy);
-}
-
-static void wifi_tick(void *data) {
-	lw.wifi_timer = NULL;
-	if (!lw.wifi_proc) {
-		lw.wifi_proc = proc_run(lw.panel, "nmcli -t -f IN-USE,SIGNAL,SSID device wifi list "
-			"--rescan auto 2>/dev/null", false, NULL, wifi_done, NULL);
-	}
-	// the first look asks for a scan, which the second one, soon after, shows
-	static int looks;
-	lw.wifi_timer = loop_add_timer_lazy(lw.panel->loop, looks++ == 0 ? 8000 : WIFI_MS,
-		wifi_tick, NULL);
-}
-
 /* ---------- drawing ---------- */
 
 static uint32_t pal(int i) {
@@ -391,107 +318,52 @@ static const char *font_of(bool bold, int size, char *buf, size_t n) {
 	return buf;
 }
 
-static double sweep_angle(void) {
-	double t = now_s() - lw.started;
-	return fmod(t / SWEEP_TURN, 1.0) * 2 * M_PI - M_PI / 2;
+/* The radar in the colors of the console, the names in capitals. */
+static void sensor_look(struct radar_look *look, double S) {
+	memset(look, 0, sizeof(*look));
+	const char *base = tw_theme_str(lw.panel->theme, "panel.font", "Sans 11");
+	const char *space = strrchr(base, ' ');
+	snprintf(look->family, sizeof(look->family), "%.*s",
+		space ? (int)(space - base) : (int)strlen(base), base);
+	look->disc = 0x000000a8;
+	look->ring = look->sweep = pal(0);
+	look->fg = tw_theme_color(lw.panel->theme, "panel.fg", 0xd3d6ffff);
+	look->dim = pal(2);
+	look->blip = pal(4);
+	look->linked = pal(1);
+	look->bad = 0xe0606aff;
+	look->card_bg = 0x000000e8;
+	look->card_fg = look->fg;
+	look->card_border = pal(0);
+	look->upper = true;
+	look->bearings = true;
+	look->scale = 1;
+	look->turn = 6;
+	look->cards_x = 0;
+	look->cards_y = 20;
+	look->cards_w = S;
+	look->cards_h = S - 40;
 }
 
-/* The radius of the outer ring: room around it for the ticks and the bearings. */
-static double sensor_radius(double size) {
-	return size / 2 - 34;
+static void sensor_geom(double S, struct radar_look *look, struct radar_geom *g) {
+	sensor_look(look, S);
+	wifiradar_geom(0, 0, S, S, look, g);
 }
 
 static void sensor_render(struct psurface *s, cairo_t *cr) {
 	struct live_output *lo = s->data;
-	double S = s->width, cx = S / 2, cy = S / 2, R = sensor_radius(S);
-	uint32_t frame = pal(0), dim = (pal(0) & 0xffffff00) | 0x50, faint = (pal(0) & 0xffffff00) | 0x26;
+	double S = s->width;
+	struct radar_look look;
+	struct radar_geom g;
+	sensor_geom(S, &look, &g);
+	wifiradar_draw(cr, &g, &look, lo->hover_contact);
 	char font[160], small[160];
 	font_of(true, 11, font, sizeof(font));
 	font_of(false, 9, small, sizeof(small));
-
-	// a dark disc, so the stars do not run through the readings
-	cairo_arc(cr, cx, cy, R + 14, 0, 2 * M_PI);
-	pd_color(cr, 0x000000a0);
-	cairo_fill(cr);
-	// rings, the cross, ticks every ten degrees, the bearings
-	cairo_set_line_width(cr, 1);
-	for (int i = 1; i <= 4; i++) {
-		cairo_new_path(cr);
-		cairo_arc(cr, cx, cy, R * i / 4, 0, 2 * M_PI);
-		pd_color(cr, i == 4 ? dim : faint);
-		cairo_stroke(cr);
-	}
-	cairo_new_path(cr);
-	cairo_move_to(cr, cx - R, cy);
-	cairo_line_to(cr, cx + R, cy);
-	cairo_move_to(cr, cx, cy - R);
-	cairo_line_to(cr, cx, cy + R);
-	pd_color(cr, faint);
-	cairo_stroke(cr);
-	for (int d = 0; d < 360; d += 10) {
-		double a = d * M_PI / 180 - M_PI / 2;
-		double in = R + (d % 30 == 0 ? 3 : 6), out = R + 10;
-		cairo_new_path(cr);
-		cairo_move_to(cr, cx + cos(a) * in, cy + sin(a) * in);
-		cairo_line_to(cr, cx + cos(a) * out, cy + sin(a) * out);
-		pd_color(cr, d % 90 == 0 ? frame : dim);
-		cairo_set_line_width(cr, d % 90 == 0 ? 2 : 1);
-		cairo_stroke(cr);
-	}
-	static const char *const bearings[] = { "000", "090", "180", "270" };
-	for (int i = 0; i < 4; i++) {
-		double a = i * M_PI / 2 - M_PI / 2;
-		double bx = cx + cos(a) * (R + 20), by = cy + sin(a) * (R + 20);
-		pd_text(cr, small, bearings[i], bx - 16, by - 8, 32, 16, frame, PD_CENTER);
-	}
-
-	// the sweep, with its trail fading behind it
-	double sweep = sweep_angle();
-	for (int k = 0; k < 24; k++) {
-		double a1 = sweep - k * 0.03, a0 = a1 - 0.03;
-		cairo_new_path(cr);
-		cairo_move_to(cr, cx, cy);
-		cairo_arc(cr, cx, cy, R, a0, a1);
-		cairo_close_path(cr);
-		uint32_t alpha = (uint32_t)(0x60 * (1 - k / 24.0));
-		pd_color(cr, (frame & 0xffffff00) | alpha);
-		cairo_fill(cr);
-	}
-	cairo_new_path(cr);
-	cairo_move_to(cr, cx, cy);
-	cairo_line_to(cr, cx + cos(sweep) * R, cy + sin(sweep) * R);
-	pd_color(cr, frame);
-	cairo_set_line_width(cr, 2);
-	cairo_stroke(cr);
-
-	// the contacts: bright where the sweep just passed, fading for a round
-	for (int i = 0; i < lw.contact_count; i++) {
-		const struct contact *c = &lw.contacts[i];
-		double r = R * (0.12 + 0.86 * (1 - fmin(fmax(c->signal, 0), 100) / 100.0));
-		double a = c->angle - M_PI / 2;
-		double bx = cx + cos(a) * r, by = cy + sin(a) * r;
-		double since = fmod(sweep - a + 4 * M_PI, 2 * M_PI) / (2 * M_PI); // 0: just passed
-		bool hover = lo->hover_contact == i;
-		double glow = hover ? 1 : 0.25 + 0.75 * (1 - since);
-		uint32_t color = c->active ? pal(1) : pal(4);
-		cairo_new_path(cr);
-		cairo_arc(cr, bx, by, hover || c->active ? 5 : 3.5, 0, 2 * M_PI);
-		pd_color(cr, (color & 0xffffff00) | (uint32_t)(0xff * glow));
-		cairo_fill(cr);
-		if (glow > 0.7 || hover || c->active) {
-			char label[80];
-			snprintf(label, sizeof(label), "%s", c->name);
-			char *up = g_utf8_strup(label, -1);
-			double alpha = hover || c->active ? 1 : (glow - 0.7) / 0.3;
-			pd_text(cr, small, up, bx + 8, by - 8, S - bx - 8, 16,
-				(color & 0xffffff00) | (uint32_t)(0xff * alpha), PD_LEFT);
-			g_free(up);
-		}
-	}
+	int n = wifiradar_count();
 	char count[48];
-	snprintf(count, sizeof(count), lw.contact_count ? "%d CONTACTS" : "NO CONTACTS",
-		lw.contact_count);
-	pd_text(cr, font, "SENSORS", 0, 0, S, 18, frame, PD_LEFT);
+	snprintf(count, sizeof(count), n ? "%d CONTACTS" : "NO CONTACTS", n);
+	pd_text(cr, font, "SENSORS", 0, 0, S, 18, pal(0), PD_LEFT);
 	pd_text(cr, small, count, 0, S - 16, S, 16, pal(2), PD_RIGHT);
 }
 
@@ -713,15 +585,17 @@ static void sample_tick(void *data) {
 }
 
 static void stop_timers(void) {
-	struct loop_timer **timers[] = { &lw.sweep_timer, &lw.sample_timer, &lw.wifi_timer };
+	struct loop_timer **timers[] = { &lw.sweep_timer, &lw.sample_timer };
 	for (size_t i = 0; i < sizeof(timers) / sizeof(timers[0]); i++) {
 		if (*timers[i]) {
 			loop_remove_timer(lw.panel->loop, *timers[i]);
 			*timers[i] = NULL;
 		}
 	}
-	proc_cancel(lw.wifi_proc);
-	lw.wifi_proc = NULL;
+	if (lw.radar_held) {
+		lw.radar_held = false;
+		wifiradar_release();
+	}
 }
 
 /* ---------- which screens ---------- */
@@ -752,7 +626,6 @@ void livewall_update(struct panel *panel) {
 		lw.panel = panel;
 		wl_list_init(&lw.outputs);
 		lw.inited = true;
-		lw.started = now_s();
 		for (int i = 0; i < ROW_COUNT; i++) {
 			lw.rows[i].bar = -1;
 		}
@@ -806,8 +679,9 @@ void livewall_update(struct panel *panel) {
 	if (!lw.sample_timer) {
 		sample_tick(NULL);
 	}
-	if (!lw.wifi_timer) {
-		wifi_tick(NULL);
+	if (!lw.radar_held) {
+		lw.radar_held = true;
+		wifiradar_hold(panel);
 	}
 }
 
@@ -857,17 +731,10 @@ static int contact_at(struct live_output *lo, double x, double y) {
 	if (!lo->parts[PART_SENSOR] || !pbox_contains(&b, x, y)) {
 		return -1;
 	}
-	double S = b.width, R = sensor_radius(S);
-	for (int i = 0; i < lw.contact_count; i++) {
-		const struct contact *c = &lw.contacts[i];
-		double r = R * (0.12 + 0.86 * (1 - fmin(fmax(c->signal, 0), 100) / 100.0));
-		double a = c->angle - M_PI / 2;
-		double bx = b.x + S / 2 + cos(a) * r, by = b.y + S / 2 + sin(a) * r;
-		if ((x - bx) * (x - bx) + (y - by) * (y - by) < 100) {
-			return i;
-		}
-	}
-	return -1;
+	struct radar_look look;
+	struct radar_geom g;
+	sensor_geom(b.width, &look, &g);
+	return wifiradar_hit(&g, &look, x - b.x, y - b.y);
 }
 
 bool livewall_pointer(struct panel_output *output, double x, double y) {
@@ -905,9 +772,20 @@ bool livewall_click(struct panel_output *output, double x, double y) {
 	if (lo->parts[PART_SENSOR] && pbox_contains(&lo->boxes[PART_SENSOR], x, y)) {
 		// within the rings, not the empty corners
 		struct pbox b = lo->boxes[PART_SENSOR];
-		double dx = x - b.x - b.width / 2.0, dy = y - b.y - b.height / 2.0;
-		if (dx * dx + dy * dy < (b.width / 2.0) * (b.width / 2.0)) {
-			bar_run_command(lw.panel, "panel network", NULL);
+		struct radar_look look;
+		struct radar_geom g;
+		sensor_geom(b.width, &look, &g);
+		double lx = x - b.x, ly = y - b.y;
+		if (wifiradar_in_disc(&g, lx, ly) || wifiradar_hit(&g, &look, lx, ly) >= 0) {
+			bool above = y > output->height / 2;
+			struct popup_anchor anchor = {
+				.output = output,
+				.x = (int)x,
+				.y = above ? (int)y - 16 : (int)y + 16,
+				.above = above,
+			};
+			wifiradar_click(&g, &look, lx, ly, anchor);
+			psurface_set_dirty(lo->parts[PART_SENSOR]);
 			return true;
 		}
 	}
