@@ -944,9 +944,14 @@ check "  and the user is told" bash -c "grep -q '^critical	New kernel did not st
 # the next release starts well: the old kernels go
 mk_tree 9.9.5 "$work/trees"
 (cd "$work/trees" && tar -cJf "$mirror/v9.x/linux-9.9.5.tar.xz" linux-9.9.5)
-(cd "$mirror/v9.x" && sha256sum linux-9.9.5.tar.xz >> sha256sums.asc)
 sed -i 's/"9.9.4"/"9.9.5"/g' "$work/releases.json"
 rm -f "$astore/cache/tileWin/kernel/releases.json"
+# out, but its checksum not listed yet: another look in an hour, and then it builds
+TILEWIN_KERNEL_RETRY_LOG=$work/retries TILEWIN_KERNEL_SUMS_TRIES=1 TILEWIN_KERNEL_RUNNING=$a1 \
+	R auto-run > "$work/out" 2>&1
+check "a release whose checksum kernel.org has not listed yet is looked at again in an hour" \
+	grep -qx "retry in 1h" "$work/retries"
+(cd "$mirror/v9.x" && sha256sum linux-9.9.5.tar.xz >> sha256sums.asc)
 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 a3=9.9.5-tilewin1
 check "the release after it is built and set" test "$(status next)" = "$a3"

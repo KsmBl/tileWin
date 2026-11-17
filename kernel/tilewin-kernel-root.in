@@ -795,6 +795,19 @@ auto_list() {
 listed() { [[ -f $auto_state/$1 ]] && grep -qxF -- "$2" "$auto_state/$1"; }
 
 # A build of the system user, waited for; for the tests, without systemd.
+# Another run in an hour, once (a transient timer of systemd; the tests note it).
+retry_soon() {
+	if [[ -n ${TILEWIN_KERNEL_RETRY_LOG:-} ]]; then
+		echo "retry in 1h" >> "$TILEWIN_KERNEL_RETRY_LOG"
+		return 0
+	fi
+	systemctl is-active --quiet tilewin-kernel-auto-retry.timer 2>/dev/null && return 0
+	systemd-run --quiet --unit=tilewin-kernel-auto-retry --on-active=1h \
+		--description="tileWin's kernel updates: another look for a checksum not listed yet" \
+		systemctl start --no-block tilewin-kernel-auto.service >/dev/null 2>&1 || true
+	auto_log "kernel.org has not listed the checksum yet: another look in an hour"
+}
+
 auto_unit() { # fixes|kernel
 	if [[ -n ${TILEWIN_KERNEL_AUTO_INLINE:-} ]]; then
 		TILEWIN_KERNEL_STATUS=$auto_state/build/$1 TILEWIN_KERNEL_AUTO_CONF=$auto_conf \
@@ -1140,8 +1153,14 @@ auto_run() {
 		st power ""
 		st state building
 		st message "Looking for a new release"
-		auto_unit kernel ||
-			st error "The new kernel could not be built: $(sed -n 's/^text=//p' "$auto_state/build/kernel" 2>/dev/null)"
+		if ! auto_unit kernel; then
+			local why
+			why=$(sed -n 's/^text=//p' "$auto_state/build/kernel" 2>/dev/null)
+			st error "The new kernel could not be built: $why"
+			# kernel.org lists a release's checksum a little after the release: another
+			# look in an hour, not at the next run a day later
+			[[ $why == *"has not listed the checksum"* ]] && retry_soon
+		fi
 	else
 		st power battery
 	fi
