@@ -19,6 +19,8 @@
  */
 #define _GNU_SOURCE
 #include <glib.h>
+#include <linux/input-event-codes.h>
+#include <pango/pangocairo.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +32,7 @@
 #include "stringop.h"
 #include "textfield.h"
 #include "tw_paths.h"
+#include "tw_theme.h"
 #include "twconf.h"
 
 #define WIDTH 620
@@ -188,76 +191,107 @@ static void quickweb_key(struct popup *p, xkb_keysym_t sym, const char *utf8, ui
 	popup_set_dirty(p);
 }
 
+enum { QW_HS_CLOSE = 1 };
+
+/* The font of the theme's dialogs, a quarter bigger, for the address. */
+static void field_font(struct panel *panel, char *out, size_t size) {
+	PangoFontDescription *desc = pango_font_description_from_string(bar_font(panel));
+	int pts = pango_font_description_get_size(desc);
+	pango_font_description_set_size(desc, pts > 0 ? pts * 5 / 4 : 12 * PANGO_SCALE);
+	char *text = pango_font_description_to_string(desc);
+	snprintf(out, size, "%s", text);
+	g_free(text);
+	pango_font_description_free(desc);
+}
+
+/*
+ * A dialog of the theme, as the Run dialog: its frame and title bar, the field
+ * for the address, the keys that come next as the theme's buttons with their
+ * words beside them, and what the keys do.
+ */
 static void quickweb_render(struct popup *p, cairo_t *cr) {
 	struct quickweb *q = p->data;
-	struct fly_style st;
-	fly_style_init(&st, p->panel);
-	fly_draw_frame(p, cr, &st);
-	int M = popup_shadow_margin(p->panel);
-	int W = p->surface->width, x0 = M + 18, cw = W - 2 * M - 36;
-	int y = M + 14;
-	pd_text(cr, st.font, "Quick web", x0, y, cw, 18, st.dim, PD_LEFT);
-	y += 22;
-	// the field, in a large font
+	struct panel *panel = p->panel;
+	const struct tw_theme *t = panel->theme;
+	int w, h;
+	double top;
+	popup_dialog_chrome(p, cr, "Quick web", QW_HS_CLOSE, &w, &h, &top);
+	bool console = panel_console(panel);
+	uint32_t fg = tw_theme_color(t, "dialog.fg", console ? 0xd3d6ffff : 0x000000ff);
+	uint32_t field_fg = tw_theme_color(t, "dialog.field_fg", 0x000000ff);
+	// what is said less loudly: the theme's own, else the text a little lighter
+	uint32_t dim = tw_theme_color(t, "dialog.dim_fg", (fg & 0xffffff00) | 0xb0);
+	const char *font = bar_font(panel);
 	char big[200];
-	const char *base = st.font;
-	const char *space = strrchr(base, ' ');
-	snprintf(big, sizeof(big), "%.*s 17", space ? (int)(space - base) : (int)strlen(base), base);
-	pd_rounded(cr, x0, y, cw, 40, 6);
-	pd_color(cr, st.field_bg);
-	cairo_fill(cr);
-	pd_rect(cr, x0, y + 38, cw, 2, st.accent);
+	field_font(panel, big, sizeof(big));
+	double x0 = console ? 20 : 16, cw = w - x0 - 16;
+	double y = top + 12;
+	// the field
+	double fh = 32;
+	popup_dialog_field(panel, cr, x0, y, cw, fh);
 	if (q->text[0]) {
 		struct text_style ts = { .font = big, .caret = true };
-		text_style_colors(p->panel, &ts);
-		ts.fg = st.field_fg;
-		text_draw(cr, &ts, q->text, &q->tc, x0 + 12, y, cw - 24, 40);
+		text_style_colors(panel, &ts);
+		ts.fg = field_fg;
+		text_draw(cr, &ts, q->text, &q->tc, x0 + 7, y, cw - 14, fh);
 	} else {
-		pd_text(cr, big, q->any ? "Press a key for its word" : "Type an address", x0 + 12, y,
-			cw - 24, 40, (st.field_fg & 0xffffff00) | 0x70, PD_LEFT);
-		pd_rect(cr, x0 + 12, y + 10, 1.5, 20, st.field_fg);
+		pd_text(cr, big, q->any ? "Press a key for its word" : "Type an address", x0 + 7, y,
+			cw - 14, fh, (field_fg & 0xffffff00) | 0x80, PD_LEFT);
+		pd_rect(cr, x0 + 7, y + 7, 1, fh - 14, field_fg);
 	}
-	y += 52;
-	// the keys that come next, as chips
-	int x = x0;
-	int shown = 0;
+	y += fh + 12;
+	// the keys that come next: the key as a button of the theme, its word beside it
+	double x = x0;
+	int shown = 0, rows = 1;
+	double bh = 22;
 	for (int i = 0; q->at && i < twconf_count(q->at); i++) {
 		const struct twconf_node *k = twconf_at(q->at, i);
 		if (strcmp(k->name, "key") != 0 || k->argc < 2) {
 			continue;
 		}
 		int kw = 0, ww = 0;
-		pd_text_size(cr, st.bold, k->argv[0], &kw, NULL);
-		pd_text_size(cr, st.font, k->argv[1], &ww, NULL);
-		int chip = 8 + (kw < 14 ? 14 : kw) + 8 + ww + 10;
-		if (x + chip > x0 + cw) {
-			if (y > M + 88 + 30) {
+		pd_text_size(cr, bar_bold_font(panel), k->argv[0], &kw, NULL);
+		pd_text_size(cr, font, k->argv[1], &ww, NULL);
+		double bw = (kw < 12 ? 12 : kw) + 16;
+		double item = bw + 6 + ww + 16;
+		if (x + item > x0 + cw && x > x0) {
+			if (rows == 2) {
 				break; // two rows are enough
 			}
+			rows++;
 			x = x0;
-			y += 30;
+			y += bh + 6;
 		}
-		pd_rounded(cr, x, y, chip, 24, 12);
-		pd_color(cr, (st.fg & 0xffffff00) | 0x14);
-		cairo_fill(cr);
-		pd_rounded(cr, x + 3, y + 3, (kw < 14 ? 14 : kw) + 10, 18, 9);
-		pd_color(cr, st.accent);
-		cairo_fill(cr);
-		pd_text(cr, st.bold, k->argv[0], x + 3, y + 3, (kw < 14 ? 14 : kw) + 10, 18,
-			0xffffffff, PD_CENTER);
-		pd_text(cr, st.font, k->argv[1], x + 8 + (kw < 14 ? 14 : kw) + 8, y, ww + 4, 24, st.fg,
-			PD_LEFT);
-		x += chip + 6;
+		popup_dialog_button(panel, cr, x, y, bw, bh, k->argv[0], true);
+		pd_text(cr, font, k->argv[1], x + bw + 6, y, ww + 2, bh, fg, PD_LEFT);
+		x += item;
 		shown++;
 	}
 	if (!shown) {
-		pd_text(cr, st.font, !q->any ? "No words yet: give keys their words on the Quick web "
+		pd_text(cr, font, !q->any ? "No words yet: give keys their words on the Quick web "
 			"page of the settings" : q->text[0] ? "No more words here: type on" : "",
-			x0, y, cw, 24, st.dim, PD_LEFT);
+			x0, y, cw, bh, dim, PD_LEFT);
 	}
-	int fy = p->surface->height - M - 30;
-	pd_text(cr, st.font, "Enter opens it · Shift types a letter itself · Backspace takes a "
-		"word back · Esc closes", x0, fy, cw, 22, st.dim, PD_LEFT);
+	// what the keys do, shorter where the font is wide (the Atari's)
+	const char *help = "Enter opens it · Shift types the letter itself · Backspace takes a "
+		"word back · Esc closes";
+	int hw = 0;
+	pd_text_size(cr, font, help, &hw, NULL);
+	if (hw > cw) {
+		help = "Enter opens · Shift: the letter · Backspace: a word back · Esc";
+	}
+	pd_text(cr, font, help, x0, h - 30, cw, 20, dim, PD_LEFT);
+}
+
+static void quickweb_button(struct popup *p, double x, double y, uint32_t button,
+		bool pressed) {
+	if (pressed || button != BTN_LEFT) {
+		return;
+	}
+	struct hotspot *hs = psurface_hotspot_at(p->surface, x, y);
+	if (hs && hs->kind == QW_HS_CLOSE) {
+		popup_close_later(p->panel);
+	}
 }
 
 static void quickweb_destroy(struct popup *p) {
@@ -273,6 +307,7 @@ static bool quickweb_typing(struct popup *p) {
 
 static const struct popup_vtable quickweb_vtable = {
 	.render = quickweb_render,
+	.button = quickweb_button,
 	.key = quickweb_key,
 	.destroy = quickweb_destroy,
 	.typing = quickweb_typing,
@@ -291,7 +326,7 @@ void quickweb_toggle(struct panel *panel, struct panel_output *output) {
 	q->at = q->root;
 	q->any = key_count(q->root) > 0;
 	int M = popup_shadow_margin(panel);
-	int width = WIDTH + 2 * M, height = 172 + 2 * M;
+	int width = WIDTH + 2 * M, height = 176 + 2 * M;
 	int x = (output->width - width) / 2;
 	int y = output->height / 5;
 	if (!popup_create(panel, POPUP_QUICKWEB, NULL, output, x, y, width, height,

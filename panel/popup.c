@@ -1336,6 +1336,34 @@ static void save_history(list_t *list, const char *entry) {
 	free(content);
 }
 
+/* The field of a dialog in the theme's look: sunken in Windows 95, a line under it in 10 and 11. */
+void popup_dialog_field(struct panel *panel, cairo_t *cr, double fx, double fy, double fw,
+		double fh) {
+	enum pstyle style = panel_style(panel);
+	pd_rect(cr, fx, fy, fw, fh, tw_theme_color(panel->theme, "dialog.field_bg", 0xffffffff));
+	if (panel_atari(panel)) {
+		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
+		pd_color(cr, tw_theme_color(panel->theme, "dialog.fg", 0x000000ff));
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	} else if (panel_console(panel)) {
+		pd_rect(cr, fx, fy + fh - 2, fw, 2, panel_console_color(panel, 0));
+	} else if (style == PS_CLASSIC) {
+		pd_bevel(cr, fx, fy, fw, fh, true);
+	} else if (style == PS_FLAT || style == PS_FLUENT) {
+		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
+		pd_color(cr, 0x00000040);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+		pd_rect(cr, fx, fy + fh - 2, fw, 2, 0x0067c0ff);
+	} else {
+		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
+		pd_color(cr, tw_theme_color(panel->theme, "dialog.field_border", 0x7f9db9ff));
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	}
+}
+
 static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, double y,
 		double w, double h, const char *label, bool is_default) {
 	enum pstyle style = panel_style(panel);
@@ -1559,21 +1587,7 @@ static void rundialog_render(struct popup *p, cairo_t *cr) {
 	pd_text(cr, bar_font(panel), "Open:", bx, fy, 50, 24,
 		tw_theme_color(panel->theme, "dialog.fg", 0x000000ff), PD_LEFT);
 	double fx = bx + 48, fw = w - fx - 16, fh = 24;
-	pd_rect(cr, fx, fy, fw, fh, tw_theme_color(panel->theme, "dialog.field_bg", 0xffffffff));
-	if (style == PS_CLASSIC) {
-		pd_bevel(cr, fx, fy, fw, fh, true);
-	} else if (style == PS_FLAT || style == PS_FLUENT) {
-		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
-		pd_color(cr, 0x00000040);
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-		pd_rect(cr, fx, fy + fh - 2, fw, 2, 0x0067c0ff);
-	} else {
-		cairo_rectangle(cr, fx + 0.5, fy + 0.5, fw - 1, fh - 1);
-		pd_color(cr, tw_theme_color(panel->theme, "dialog.field_border", 0x7f9db9ff));
-		cairo_set_line_width(cr, 1);
-		cairo_stroke(cr);
-	}
+	popup_dialog_field(panel, cr, fx, fy, fw, fh);
 	struct text_style ts = { .font = bar_font(panel), .caret = true };
 	text_style_colors(panel, &ts);
 	ts.fg = tw_theme_color(panel->theme, "dialog.field_fg", 0x000000ff);
@@ -2236,4 +2250,16 @@ void hungdialog_close(struct panel *panel, int64_t con_id) {
 			popup_close_later(panel);
 		}
 	}
+}
+
+/* ---------- for other dialogs of the panel (quickweb.c) ---------- */
+
+void popup_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, int close_kind,
+		int *width, int *height, double *content_y) {
+	draw_dialog_chrome(p, cr, title, close_kind, width, height, content_y);
+}
+
+void popup_dialog_button(struct panel *panel, cairo_t *cr, double x, double y, double w,
+		double h, const char *label, bool is_default) {
+	draw_dialog_button(panel, cr, x, y, w, h, label, is_default);
 }

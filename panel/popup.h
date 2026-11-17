@@ -58,6 +58,17 @@ enum menu_look { MENU_LOOK_THEME, MENU_LOOK_GEM, MENU_LOOK_CONSOLE };
 void menu_open_start_classic(struct panel *panel, struct panel_output *output,
 	list_t *items, int x, int y, bool above, enum menu_look look);
 cairo_t *popup_scratch_cairo(void);
+/*
+ * The pieces of the panel's dialogs, in the theme's look (the Run dialog's):
+ * the frame and title bar with a close button (leaves cr at the dialog's top
+ * left, gives its size and where the room below the title begins), a field and
+ * a button.
+ */
+void popup_dialog_chrome(struct popup *p, cairo_t *cr, const char *title, int close_kind,
+	int *width, int *height, double *content_y);
+void popup_dialog_field(struct panel *panel, cairo_t *cr, double x, double y, double w, double h);
+void popup_dialog_button(struct panel *panel, cairo_t *cr, double x, double y, double w,
+	double h, const char *label, bool is_default);
 /* Background, border and shadow shared by menus and flyouts. */
 void popup_draw_frame(struct panel *panel, cairo_t *cr, int width, int height,
 	int margin, const char *prefix);
