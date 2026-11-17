@@ -1140,16 +1140,19 @@ security_build() { # kver
 		wait "$watch" 2>/dev/null
 		[[ $built == yes ]] && break
 		[[ -f $tree/klp-tmp/1-orig/.complete ]] && opts=(-T -S 2)
-		# the files this round's errors name
+		# the files this round's errors name; the compiler names some by a detour
+		# ("drivers/gpu/drm/amd/amdgpu/../amdkfd/x.c" for drivers/gpu/drm/amd/amdkfd/x.c),
+		# which is taken out first, and make names an object as "x.o]"
 		local errors
-		errors=$(tail -c +"$((before + 1))" "$log" | grep -iE 'error|did not apply|unsupported|fatal')
+		errors=$(tail -c +"$((before + 1))" "$log" | grep -iE 'error|did not apply|unsupported|fatal' |
+			sed -E ':a; s#(^|[ /])[^/ :.][^/ :]*/\.\./#\1#; ta')
 		bad=()
 		for p in "${kept[@]}"; do
 			n=$(basename "$p" .patch)
 			f=${files_of[n]}
-			if grep -qF -e "$f:" -e "${f%.c}.o:" -e "$p" <<<"$errors"; then
+			if grep -qF -e "$f:" -e "${f%.c}.o:" -e "${f%.c}.o]" -e "$p" <<<"$errors"; then
 				bad+=("$p")
-				printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F -e "$f:" -e "${f%.c}.o:" -e "$p" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
+				printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F -e "$f:" -e "${f%.c}.o:" -e "${f%.c}.o]" -e "$p" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
 			fi
 		done
 		[[ ${#bad[@]} -gt 0 ]] || give_up "klp-build stopped without naming a file: see the log"
