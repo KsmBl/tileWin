@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+<title>tileWin modernCC wallpaper: soft fields of colour (original artwork)</title>
+<defs><radialGradient id="b0" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#8b97ff" stop-opacity="0.55"/><stop offset="0.55" stop-color="#8b97ff" stop-opacity="0.25"/><stop offset="1" stop-color="#8b97ff" stop-opacity="0"/></radialGradient><radialGradient id="b1" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#6fd3c4" stop-opacity="0.45"/><stop offset="0.55" stop-color="#6fd3c4" stop-opacity="0.20"/><stop offset="1" stop-color="#6fd3c4" stop-opacity="0"/></radialGradient><radialGradient id="b2" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffc7a8" stop-opacity="0.50"/><stop offset="0.55" stop-color="#ffc7a8" stop-opacity="0.23"/><stop offset="1" stop-color="#ffc7a8" stop-opacity="0"/></radialGradient><radialGradient id="b3" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#c3a6ff" stop-opacity="0.40"/><stop offset="0.55" stop-color="#c3a6ff" stop-opacity="0.18"/><stop offset="1" stop-color="#c3a6ff" stop-opacity="0"/></radialGradient><radialGradient id="b4" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0.25"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs>
+<rect width="1920" height="1080" fill="#e9ecf5"/>
+<ellipse cx="380" cy="260" rx="950" ry="760" fill="url(#b0)"/>
+<ellipse cx="1500" cy="220" rx="850" ry="680" fill="url(#b1)"/>
+<ellipse cx="1180" cy="900" rx="1025" ry="820" fill="url(#b2)"/>
+<ellipse cx="320" cy="980" rx="750" ry="600" fill="url(#b3)"/>
+<ellipse cx="960" cy="520" rx="650" ry="520" fill="url(#b4)"/>
+</svg>

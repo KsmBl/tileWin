@@ -556,6 +556,8 @@ bool popup_is_open(struct panel *panel, enum popup_kind kind);
 void menu_open(struct panel *panel, list_t *items, bool owns_items,
 	struct popup_anchor anchor, const char *context_id);
 void startmenu_toggle(struct panel *panel, struct panel_output *output, bool search);
+/* commandcenter.c: the Command Center of modernCC (startmenu.layout command) */
+void command_center_toggle(struct panel *panel, struct panel_output *output);
 /* shutdown.c: the shut down dialog of the theme */
 void shutdown_dialog_open(struct panel *panel, struct panel_output *output, bool logoff);
 void rundialog_open(struct panel *panel, struct panel_output *output);

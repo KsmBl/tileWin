@@ -26,6 +26,7 @@ enum style {
 	STYLE_WIN10,
 	STYLE_WIN11,
 	STYLE_CONSOLE, // Starship Console: bars and elbows of colour on black
+	STYLE_CC,      // modernCC: a quiet frame, the title in the middle, round buttons
 };
 
 enum glyph {
@@ -60,6 +61,8 @@ static enum style get_style(const struct tw_theme *theme) {
 		return STYLE_WIN11;
 	} else if (strcasecmp(s, "console") == 0) {
 		return STYLE_CONSOLE;
+	} else if (strcasecmp(s, "cc") == 0 || strcasecmp(s, "moderncc") == 0) {
+		return STYLE_CC;
 	}
 	return STYLE_WIN10;
 }
@@ -78,6 +81,7 @@ static void get_metrics(const struct tw_theme *t, bool maximized, struct metrics
 		[STYLE_WIN10] = { 31, 30, 1, 6, 0 },
 		[STYLE_WIN11] = { 33, 32, 1, 8, 8 },
 		[STYLE_CONSOLE] = { 36, 32, 3, 6, 0 },
+		[STYLE_CC] = { 38, 34, 1, 10, 12 },
 	};
 	enum style s = get_style(t);
 	int border = tw_theme_int(t, "decoration.border_width", defaults[s].border);
@@ -197,6 +201,16 @@ void tw_style_buttons(const struct tw_theme *t, int width, bool maximized,
 		b->close = (struct wlr_box){ right - 70, 0, 70, bh };
 		b->maximize = (struct wlr_box){ b->close.x - 6 - 60, 0, 60, bh };
 		b->minimize = (struct wlr_box){ b->maximize.x - 6 - 60, 0, 60, bh };
+		break;
+	}
+	case STYLE_CC: {
+		// small round buttons at the right end, each in a box as high as the bar, so
+		// they are easy to hit; the close button outermost
+		int bw = tw_theme_int(t, "decoration.button_width", 30);
+		int right = width - m.side - 8;
+		b->close = (struct wlr_box){ right - bw, 0, bw, m.top };
+		b->maximize = (struct wlr_box){ b->close.x - bw, 0, bw, m.top };
+		b->minimize = (struct wlr_box){ b->maximize.x - bw, 0, bw, m.top };
 		break;
 	}
 	case STYLE_WIN10:
@@ -1416,6 +1430,99 @@ static void draw_modern(cairo_t *cr, const struct tw_theme *t,
 	(void)state_str;
 }
 
+/* ---------- modernCC ---------- */
+
+/*
+ * A quiet frame: the bar in the colour of the window, one thin line round it,
+ * the corners round; the title in the middle of the bar, the app's icon to its
+ * left; three small round buttons at the right end that show their sign while
+ * the pointer is over them, the close button red then.
+ */
+static void draw_cc(cairo_t *cr, const struct tw_theme *t, const struct tw_frame *f,
+		const struct metrics *m) {
+	int W = f->width, H = f->height;
+	double r = m->radius;
+	if (m->grab > 0) {
+		draw_shadow(cr, W, H, m->grab, r, tw_theme_color(t, "decoration.shadow", 0x00000040));
+	}
+	cairo_save(cr);
+	rounded_path(cr, 0, 0, W, H, r, r, r, r);
+	cairo_clip(cr);
+	fill_rect(cr, 0, 0, W, H, state_color(t, f, "title_bg", 0xf6f7f9ff, 0xeef0f3ff));
+
+	struct tw_buttons b;
+	frame_buttons(t, f, W, &b);
+	const struct {
+		const struct wlr_box *box;
+		enum tw_hit hit;
+		enum glyph glyph;
+	} buttons[] = {
+		{ &b.minimize, TW_HIT_MINIMIZE, GLYPH_MINIMIZE },
+		{ &b.maximize, TW_HIT_MAXIMIZE, max_glyph(f) },
+		{ &b.close, TW_HIT_CLOSE, GLYPH_CLOSE },
+	};
+	uint32_t fg = state_color(t, f, "title_fg", 0x1b1d22ff, 0x8a8f99ff);
+	uint32_t dot = state_color(t, f, "glyph", 0x00000026, 0x0000001a);
+	// the signs show on every button while the pointer is over any of them
+	bool near = f->hover == TW_HIT_MINIMIZE || f->hover == TW_HIT_MAXIMIZE ||
+		f->hover == TW_HIT_CLOSE;
+	for (size_t i = 0; i < 3; i++) {
+		const struct wlr_box *box = buttons[i].box;
+		if (box->width <= 0) {
+			continue;
+		}
+		bool close = buttons[i].hit == TW_HIT_CLOSE;
+		bool hover = f->hover == buttons[i].hit;
+		bool pressed = hover && f->pressed == buttons[i].hit;
+		double d = 14, cx = box->x + box->width / 2.0, cy = box->y + box->height / 2.0;
+		uint32_t fill = dot;
+		if (hover) {
+			fill = close ? tw_theme_color(t, "decoration.close.hover", 0xe5484dff) :
+				tw_theme_color(t, "decoration.button.hover", 0x0000004d);
+		}
+		if (pressed) {
+			fill = close ? tw_theme_color(t, "decoration.close.pressed", 0xc4373cff) :
+				tw_theme_color(t, "decoration.button.pressed", 0x00000070);
+		}
+		cairo_new_path(cr);
+		cairo_arc(cr, cx, cy, d / 2, 0, 2 * M_PI);
+		cairo_set_source_u32(cr, fill);
+		cairo_fill(cr);
+		if (near) {
+			struct wlr_box g = { (int)(cx - 5), (int)(cy - 5), 10, 10 };
+			draw_vector_glyph(cr, buttons[i].glyph, &g, 8, 1.2,
+				hover && close ? 0xffffffff : fg, true);
+		}
+	}
+
+	// the title in the middle of the window, as long as it does not run into the
+	// buttons; the icon just before it
+	const char *font = tw_theme_str(t, "decoration.title_font",
+		"Inter, Cantarell, Noto Sans, Sans Semi-Bold 10");
+	double left = m->side + 12, right = b.minimize.width > 0 ? b.minimize.x - 8 :
+		b.close.x - 8;
+	double room = right - left - 24;
+	if (f->title && *f->title && room > 30) {
+		PangoLayout *layout = make_layout(cr, font, f->title, room);
+		int tw, th;
+		pango_layout_get_pixel_size(layout, &tw, &th);
+		g_object_unref(layout);
+		double width = tw < room ? tw : room;
+		double tx = (W - width) / 2;
+		tx = tx < left + 24 ? left + 24 : tx + width > right ? right - width : tx;
+		if (f->icon) {
+			draw_icon(cr, f->icon, tx - 22, floor((m->top - 16) / 2.0), 16);
+		}
+		draw_text(cr, font, f->title, tx, 0, width + 1, m->top, fg, false, TEXT_PLAIN, 0);
+	}
+	cairo_restore(cr);
+
+	rounded_path(cr, 0.5, 0.5, W - 1, H - 1, r, r, r, r);
+	cairo_set_source_u32(cr, state_color(t, f, "frame", 0x00000033, 0x00000022));
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+}
+
 /* ---------- Windows 8 ---------- */
 
 static void draw_win8(cairo_t *cr, const struct tw_theme *t,
@@ -1520,6 +1627,9 @@ void tw_style_draw_frame(cairo_t *cr, const struct tw_theme *theme,
 		break;
 	case STYLE_WIN11:
 		draw_modern(cr, theme, frame, &m, true);
+		break;
+	case STYLE_CC:
+		draw_cc(cr, theme, frame, &m);
 		break;
 	}
 }

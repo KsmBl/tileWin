@@ -38,7 +38,7 @@ static enum era era_of(const struct tw_theme *t) {
 		{ "win95", ERA_CLASSIC }, { "classic", ERA_CLASSIC }, { "winxp", ERA_XP },
 		{ "luna", ERA_XP }, { "win7", ERA_WIN7 }, { "aero", ERA_WIN7 },
 		{ "win8", ERA_FLAT }, { "metro", ERA_FLAT }, { "win10", ERA_FLAT },
-		{ "win11", ERA_WIN11 }, { "fluent", ERA_WIN11 },
+		{ "win11", ERA_WIN11 }, { "fluent", ERA_WIN11 }, { "cc", ERA_WIN11 },
 	};
 	for (size_t i = 0; i < G_N_ELEMENTS(eras); i++) {
 		if (g_ascii_strcasecmp(s, eras[i].name) == 0) {

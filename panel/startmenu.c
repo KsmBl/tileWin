@@ -1913,6 +1913,11 @@ void startmenu_toggle(struct panel *panel, struct panel_output *output, bool sea
 		open_classic(panel, output, layout_name[0] == 'd' ? MENU_LOOK_GEM : MENU_LOOK_CONSOLE);
 		return;
 	}
+	// modernCC: no menu to look through, the Command Center to type into
+	if (strcmp(layout_name, "command") == 0) {
+		command_center_toggle(panel, output);
+		return;
+	}
 	enum sm_layout layout = strcmp(layout_name, "classic") == 0 ? SM_CLASSIC :
 		strcmp(layout_name, "twocolumn") == 0 ? SM_TWOCOLUMN :
 		strcmp(layout_name, "list") == 0 ? SM_LIST :
