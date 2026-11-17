@@ -1085,7 +1085,7 @@ static void git_free(void *data) {
 	free(s);
 }
 
-/* ---------- Claude Code usage ---------- */
+/* ---------- Claude Code and Codex usage ---------- */
 
 /* One window: its share with a bar, when it resets and how long it lasts. */
 static void claude_window(struct info_flyout *f, const struct tw_claude_window *win,
@@ -1184,7 +1184,8 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 }
 
 static void claude_sample(struct info_flyout *f) {
-	const struct tw_claude_usage *u = claude_widget_usage(f->widget);
+	const struct tw_usage_tool *tool;
+	const struct tw_claude_usage *u = claude_widget_usage(f->widget, &tool);
 	time_t now = time(NULL);
 	struct claude_charts *charts = f->state;
 	if (!charts) {
@@ -1193,11 +1194,15 @@ static void claude_sample(struct info_flyout *f) {
 	if (charts) {
 		claude_charts_load(charts, u, now);
 	}
-	snprintf(f->subtitle, sizeof(f->subtitle), "Claude Code%s%s", u && u->account ? " · " : "",
+	snprintf(f->subtitle, sizeof(f->subtitle), "%s%s%s", tool->name, u && u->account ? " · " : "",
 		u && u->account ? u->account : "");
 	if (!u || !u->updated) {
-		snprintf(f->title, sizeof(f->title), u && u->connected ?
-			"The limits come with the next answer of Claude Code" : "Not connected");
+		if (u && (u->connected || !tool->connects)) {
+			snprintf(f->title, sizeof(f->title), "The limits come with the next answer of %s",
+				tool->name);
+		} else {
+			snprintf(f->title, sizeof(f->title), "Not connected");
+		}
 	} else {
 		double five = tw_claude_window_now(&u->five_hour, now);
 		double seven = tw_claude_window_now(&u->seven_day, now);
@@ -1217,7 +1222,9 @@ static void claude_sample(struct info_flyout *f) {
 			tw_claude_format_span(ago, false, span, sizeof(span));
 			snprintf(value, sizeof(value), "%s ago", span);
 		}
-		add_row(f, "Claude Code showed them", value);
+		char shown[64];
+		snprintf(shown, sizeof(shown), "%s showed them", tool->name);
+		add_row(f, shown, value);
 	}
 	if (u && u->dir) {
 		const char *home = getenv("HOME");
@@ -1230,8 +1237,11 @@ static void claude_sample(struct info_flyout *f) {
 		}
 		add_row(f, "Folder", folder);
 	}
-	add_action(f, "Usage on claude.ai", "exec xdg-open https://claude.ai/settings/usage", NULL);
-	if (u && u->dir) {
+	char usage_label[64], *usage_command = format_str("exec xdg-open %s", tool->usage_url);
+	snprintf(usage_label, sizeof(usage_label), "Usage on %s", tool->usage_site);
+	add_action(f, usage_label, usage_command, NULL);
+	free(usage_command);
+	if (u && u->dir && tool->connects) {
 		char *quoted = g_shell_quote(u->dir);
 		char *command = format_str("exec tilewin-claude-usage %s %s",
 			u->connected ? "disconnect" : "connect", quoted);
@@ -1477,6 +1487,8 @@ static const struct info_source sources[] = {
 	{ "git", 2000, git_sample, git_free, 0, NULL, NULL, NULL },
 	// the charts want the room
 	{ "claude", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
+		claude_charts_draw },
+	{ "codex", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
 		claude_charts_draw },
 	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL },
 	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL }, // the addresses want the room

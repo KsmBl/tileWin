@@ -140,6 +140,7 @@ bool tw_claude_usage_read(const char *dir, struct tw_claude_usage *out) {
 		return false;
 	}
 	out->connected = tw_claude_connected(out->dir);
+	out->history = tw_claude_history_path(out->dir);
 	char *path = tw_claude_cache_path(out->dir);
 	json_object *root = read_json(path);
 	free(path);
@@ -166,6 +167,7 @@ bool tw_claude_usage_read(const char *dir, struct tw_claude_usage *out) {
 void tw_claude_usage_finish(struct tw_claude_usage *usage) {
 	free(usage->dir);
 	free(usage->account);
+	free(usage->history);
 	*usage = (struct tw_claude_usage){ 0 };
 }
 
@@ -246,6 +248,17 @@ double tw_claude_window_now(const struct tw_claude_window *window, time_t now) {
 	}
 	return window->used < 0 ? 0 : window->used > 100 ? 100 : window->used;
 }
+
+const struct tw_usage_tool tw_claude_tool = {
+	.type = "claude",
+	.name = "Claude Code",
+	.usage_site = "claude.ai",
+	.usage_url = "https://claude.ai/settings/usage",
+	.connects = true,
+	.default_dir = tw_claude_default_dir,
+	.read = tw_claude_usage_read,
+	.all = tw_claude_usage_all,
+};
 
 /* ---------- what the widget shows ---------- */
 
@@ -331,7 +344,7 @@ void tw_claude_format_span(long seconds, bool brief, char *out, size_t size) {
 #define HISTORY_DAYS 8
 #define HISTORY_MAX_BYTES (96 * 1024)
 
-char *tw_claude_history_path(const char *dir) {
+char *tw_usage_history_path(const char *kind, const char *dir) {
 	if (!dir) {
 		return NULL;
 	}
@@ -342,10 +355,14 @@ char *tw_claude_history_path(const char *dir) {
 		}
 	}
 	char *state = tw_state_dir();
-	char *path = format_str("%s/claude-usage/%s.history", state ? state : "/tmp", name);
+	char *path = format_str("%s/%s/%s.history", state ? state : "/tmp", kind, name);
 	free(state);
 	free(name);
 	return path;
+}
+
+char *tw_claude_history_path(const char *dir) {
+	return tw_usage_history_path("claude-usage", dir);
 }
 
 bool tw_claude_same_window(time_t a, time_t b) {
@@ -385,11 +402,9 @@ static void format_window(const struct tw_claude_window *w, char *out, size_t si
 	snprintf(out, size, "%s %s", used, reset);
 }
 
-int tw_claude_history_read(const char *dir, struct tw_claude_point **out) {
+int tw_claude_history_read(const char *path, struct tw_claude_point **out) {
 	*out = NULL;
-	char *path = tw_claude_history_path(dir);
 	FILE *f = path ? fopen(path, "r") : NULL;
-	free(path);
 	if (!f) {
 		return 0;
 	}
@@ -419,8 +434,9 @@ static bool window_differs(const struct tw_claude_window *a, const struct tw_cla
 		!(a->resets_at == b->resets_at || tw_claude_same_window(a->resets_at, b->resets_at));
 }
 
-void tw_claude_history_add(const char *dir, const struct tw_claude_usage *usage, time_t now) {
-	char *path = tw_claude_history_path(dir);
+void tw_claude_history_add(const char *history, const struct tw_claude_usage *usage,
+		time_t now) {
+	char *path = history ? strdup(history) : NULL;
 	if (!path) {
 		return;
 	}
@@ -431,7 +447,7 @@ void tw_claude_history_add(const char *dir, const struct tw_claude_usage *usage,
 		*slash = '/';
 	}
 	struct tw_claude_point *points;
-	int n = tw_claude_history_read(dir, &points);
+	int n = tw_claude_history_read(path, &points);
 	// within the same window what was used only grows: a lower value is an older
 	// one from another session of Claude Code (see tilewin-claude-usage)
 	struct tw_claude_usage u = *usage;

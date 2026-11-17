@@ -27,8 +27,28 @@ struct tw_claude_usage {
 	char *account;  // its email, NULL when not known
 	time_t updated; // when Claude Code last showed the values; 0 for never
 	struct tw_claude_window five_hour, seven_day;
-	bool connected; // its status line writes the values down
+	bool connected; // its status line writes the values down (Codex: it has session logs)
+	char *history;  // the file of its history (tw_claude_history_*)
 };
+
+/*
+ * A coding agent whose usage limits the widgets show: Claude Code (claude) or
+ * Codex (codex, tw_codex_usage.h). Both have the same two windows, so the
+ * widgets, their flyout and their charts are the same for each.
+ */
+struct tw_usage_tool {
+	const char *type;       // the widget, "claude"
+	const char *name;       // "Claude Code"
+	const char *usage_site; // "claude.ai", its page of the limits
+	const char *usage_url;
+	bool connects;          // a folder is connected first (tilewin-claude-usage), else read as it is
+	char *(*default_dir)(void);
+	bool (*read)(const char *dir, struct tw_claude_usage *out);
+	list_t *(*all)(void);
+	// fills the history of a folder from what the tool kept itself, NULL for none
+	int (*backfill)(const char *dir, time_t now);
+};
+extern const struct tw_usage_tool tw_claude_tool;
 
 /* The folder of the installed Claude Code: $CLAUDE_CONFIG_DIR or ~/.claude. */
 char *tw_claude_default_dir(void);
@@ -69,10 +89,12 @@ struct tw_claude_point {
 	struct tw_claude_window five_hour, seven_day;
 };
 char *tw_claude_history_path(const char *dir);
-/* Adds the values as of now, when they differ from the last line. */
-void tw_claude_history_add(const char *dir, const struct tw_claude_usage *usage, time_t now);
-/* The points, oldest first, in a new array; how many (0 for none, *out NULL). */
-int tw_claude_history_read(const char *dir, struct tw_claude_point **out);
+/* The file of a history of a folder in ~/.local/state/tileWin/<kind>/. */
+char *tw_usage_history_path(const char *kind, const char *dir);
+/* Adds the values as of now to that history file, when they differ from the last line. */
+void tw_claude_history_add(const char *path, const struct tw_claude_usage *usage, time_t now);
+/* The points of a history file, oldest first, in a new array; how many (0 for none, *out NULL). */
+int tw_claude_history_read(const char *path, struct tw_claude_point **out);
 /* Whether two reset times are those of the same window (they may wobble by a minute). */
 bool tw_claude_same_window(time_t a, time_t b);
 

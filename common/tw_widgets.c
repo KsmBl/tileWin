@@ -31,6 +31,18 @@ static const struct tw_widget_option opts_claude[] = {
 	{ 0 },
 };
 
+static const struct tw_widget_option opts_codex[] = {
+	{ "account", "Account", "The Codex folder whose limits it shows: ~/.codex ($CODEX_HOME) "
+		"for the installed one by default", NULL },
+	// "show" has an editor of its own in the settings, as the Claude widget's
+	{ "show", "Shows", "What, in this order: usage_5h usage_7d reset_5h reset_7d left_5h "
+		"left_7d", NULL },
+	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
+		"80 by default", NULL },
+	{ "critical", "Critical above", "Percent; 95 by default", NULL },
+	{ 0 },
+};
+
 static const char *const choice_labels_taskbar[] = { "short", "none", NULL };
 static const char *const choice_labels_desktop[] = { "long", "short", NULL };
 static const char *const choice_bar_width[] = { "20", "34", "50", "80", "120", NULL };
@@ -38,7 +50,7 @@ static const char *const choice_bar_height[] = { "2", "4", "6", "8", "10", "14",
 static const char *const choice_desk_bar[] = { "4", "6", "8", "12", "16", "24", NULL };
 static const char *const choice_text_size[] = { "10", "11", "13", "15", "18", "22", NULL };
 
-/* How the Claude widget looks on the taskbar: in its widget block. */
+/* How the Claude and the Codex widget look on the taskbar: in their widget block. */
 const struct tw_widget_option tw_claude_taskbar_look[] = {
 	{ "bars", "Bars", "A bar beside each usage", choice_yes_no },
 	{ "bar_width", "Bar width", "Pixels, 34 by default", choice_bar_width },
@@ -51,7 +63,7 @@ const struct tw_widget_option tw_claude_taskbar_look[] = {
 
 /* How it looks on the desktop: in its desktop_widgets entry, apart from the taskbar. */
 const struct tw_widget_option tw_claude_desktop_look[] = {
-	{ "title", "Title", "Claude Code and the account at the top", choice_yes_no },
+	{ "title", "Title", "Claude Code or Codex and the account at the top", choice_yes_no },
 	{ "updated", "How old", "\"As of ... ago\" at the bottom", choice_yes_no },
 	{ "bars", "Bars and rings", "The bar under each usage, the ring of the Ring style",
 		choice_yes_no },
@@ -135,7 +147,7 @@ static const struct tw_widget_option ports_desktop_look[] = {
 };
 
 const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
-	if (type && strcmp(type, "claude") == 0) {
+	if (type && (strcmp(type, "claude") == 0 || strcmp(type, "codex") == 0)) {
 		return desktop ? tw_claude_desktop_look : tw_claude_taskbar_look;
 	}
 	if (type && strcmp(type, "kernel") == 0) {
@@ -487,6 +499,8 @@ const struct tw_widget_info tw_widgets[] = {
 		STATUS, opts_git, styles_plain },
 	{ "claude", "Claude Code usage", "The 5-hour and weekly usage limits of a Claude Code "
 		"account, when they reset and how long they last", STATUS, opts_claude, styles_claude },
+	{ "codex", "Codex usage", "The 5-hour and weekly usage limits of the ChatGPT plan Codex "
+		"works with, when they reset and how long they last", STATUS, opts_codex, styles_claude },
 	{ "kernel", "Kernel updates", "The automatic kernel updates: fixes applied live, a new "
 		"kernel downloaded and built, ready for the next restart", STATUS, opts_kernel,
 		styles_kernel },
@@ -516,6 +530,7 @@ const char *tw_widget_desktop_style(const char *type) {
 		const char *type, *style;
 	} own[] = {
 		{ "claude", "list" },
+		{ "codex", "list" },
 		{ "kernel", "card" },
 		{ "ports", "list" },
 		{ "wifiradar", "radar" },

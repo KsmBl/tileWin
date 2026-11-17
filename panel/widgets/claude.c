@@ -1,6 +1,8 @@
 /*
- * The claude widget: the usage limits of a Claude Code account, the 5-hour and
- * the weekly window, on the taskbar and on the desktop.
+ * The claude and the codex widget: the usage limits of a Claude Code account
+ * or of the ChatGPT plan of Codex, the 5-hour and the weekly window, on the
+ * taskbar and on the desktop. Both are the same widget for another tool
+ * (struct tw_usage_tool); what differs is where the values come from.
  *
  *   widget claude {
  *       account ~/.claude                 # a Claude Code folder; the one with the
@@ -11,7 +13,9 @@
  * The values come from tilewin-claude-usage, which Claude Code runs as its status
  * line once the folder is connected: Claude Code itself shows them, tileWin never
  * touches a login of Claude's. A folder that is not connected says so, and a
- * click connects it. On the desktop "show" of its desktop_widgets entry counts
+ * click connects it. Codex writes them into its session logs itself, so a
+ * codex widget reads them from there (tw_codex_usage.h), nothing to connect;
+ * "account" is its folder (~/.codex). On the desktop "show" of its desktop_widgets entry counts
  * (more by default), and the style "list" gives each item a line of its own.
  *
  * What it shows:
@@ -31,6 +35,7 @@
 #include "panel.h"
 #include "claudecharts.h"
 #include "tw_claude_usage.h"
+#include "tw_codex_usage.h"
 #include "tw_theme.h"
 
 #define RELOAD_MS 5000
@@ -39,6 +44,7 @@
 #define GAP 12
 
 struct claude_state {
+	const struct tw_usage_tool *tool;
 	struct tw_claude_usage usage;
 	bool have; // values written down at least once
 	struct loop_timer *timer;
@@ -46,15 +52,16 @@ struct claude_state {
 
 /* ---------- the values ---------- */
 
-/* The folder to show: the one set, else the one Claude Code showed values for last. */
+/* The folder to show: the one set, else the one the tool showed values for last. */
 static char *chosen_dir(struct widget *w) {
+	struct claude_state *c = w->data;
 	const char *set = widget_conf(w, "account", NULL);
 	if (set && *set) {
 		return tw_claude_normalize_dir(set);
 	}
-	list_t *all = tw_claude_usage_all();
+	list_t *all = c->tool->all();
 	char *dir = all->length > 0 ?
-		strdup(((struct tw_claude_usage *)all->items[0])->dir) : tw_claude_default_dir();
+		strdup(((struct tw_claude_usage *)all->items[0])->dir) : c->tool->default_dir();
 	tw_claude_usage_list_free(all);
 	return dir;
 }
@@ -63,10 +70,13 @@ static void reload(struct widget *w) {
 	struct claude_state *c = w->data;
 	tw_claude_usage_finish(&c->usage);
 	char *dir = chosen_dir(w);
-	c->have = dir && tw_claude_usage_read(dir, &c->usage);
+	if (dir && c->tool->backfill) {
+		c->tool->backfill(dir, time(NULL)); // once: what the tool kept before tileWin looked
+	}
+	c->have = dir && c->tool->read(dir, &c->usage);
 	if (c->have && c->usage.updated) {
 		// into the history too (only what differs from its last line goes in)
-		tw_claude_history_add(c->usage.dir, &c->usage, c->usage.updated);
+		tw_claude_history_add(c->usage.history, &c->usage, c->usage.updated);
 	}
 	if (!c->usage.dir && dir) {
 		c->usage.dir = strdup(dir);
@@ -240,7 +250,7 @@ static const char *long_name(const struct tw_claude_item *item, bool brief) {
 static const char *not_connected_text = "Claude: click to connect";
 
 static bool show_connect(struct claude_state *c) {
-	return !c->have && !c->usage.connected;
+	return c->tool->connects && !c->have && !c->usage.connected;
 }
 
 /* The taskbar look: bars yes|no, bar_width, labels short|none. */
@@ -290,7 +300,7 @@ static void claude_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 		render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
 	}
 	const char *font = bar_font(ctx->panel);
-	uint32_t fg = widget_fg(ctx->panel, "claude");
+	uint32_t fg = widget_fg(ctx->panel, c->tool->type);
 	uint32_t dim = (fg & 0xffffff00) | 0xa0;
 	// the color of the bars of the flyouts (navy in Windows 95), else the taskbar's accent
 	uint32_t accent = bar_color(w, tw_theme_color(ctx->panel->theme, "flyout.accent",
@@ -374,7 +384,7 @@ static double desk_title(struct claude_state *c, struct gadget_ctx *ctx,
 		return y;
 	}
 	char title[160];
-	snprintf(title, sizeof(title), "Claude Code%s%s", c->usage.account ? " · " : "",
+	snprintf(title, sizeof(title), "%s%s%s", c->tool->name, c->usage.account ? " · " : "",
 		c->usage.account ? c->usage.account : "");
 	pd_text(ctx->cairo, l->bold, title, l->pad, y, ctx->width - 2 * l->pad, l->text * 1.4,
 		pal->fg, PD_LEFT);
@@ -682,7 +692,7 @@ static char *claude_tooltip(struct widget *w, struct hotspot *hs) {
 		return NULL; // the chart shows the reading under the pointer instead
 	}
 	struct claude_state *c = w->data;
-	GString *t = g_string_new("Claude Code");
+	GString *t = g_string_new(c->tool->name);
 	if (c->usage.account) {
 		g_string_append_printf(t, " · %s", c->usage.account);
 	}
@@ -693,7 +703,8 @@ static char *claude_tooltip(struct widget *w, struct hotspot *hs) {
 		return g_string_free(t, FALSE);
 	}
 	if (!c->have) {
-		g_string_append(t, "\nConnected: the limits come with the next answer of Claude Code.");
+		g_string_append_printf(t, "\n%s limits come with the next answer of %s.",
+			c->tool->connects ? "Connected: the" : "The", c->tool->name);
 		return g_string_free(t, FALSE);
 	}
 	append_window(t, c, false);
@@ -701,7 +712,7 @@ static char *claude_tooltip(struct widget *w, struct hotspot *hs) {
 	long ago = (long)(time(NULL) - c->usage.updated);
 	char span[48];
 	tw_claude_format_span(ago, false, span, sizeof(span));
-	g_string_append_printf(t, "\nAs Claude Code showed them %s ago", span);
+	g_string_append_printf(t, "\nAs %s showed them %s ago", c->tool->name, span);
 	return g_string_free(t, FALSE);
 }
 
@@ -718,7 +729,7 @@ static bool claude_click(struct widget *w, struct psurface *s, struct hotspot *h
 		info_flyout_toggle(w, anchor);
 		return true;
 	}
-	if (!c->usage.dir) {
+	if (!c->usage.dir || !c->tool->connects) {
 		return false;
 	}
 	char *quoted = g_shell_quote(c->usage.dir);
@@ -748,10 +759,15 @@ static bool claude_sample(struct widget *w, struct widget_sample *out) {
 }
 
 /* What the widget shows, for its flyout; NULL when nothing was written down yet. */
-const struct tw_claude_usage *claude_widget_usage(struct widget *w) {
-	struct claude_state *c = w && w->impl == &widget_claude ? w->data : NULL;
+const struct tw_claude_usage *claude_widget_usage(struct widget *w,
+		const struct tw_usage_tool **tool) {
+	struct claude_state *c = w && (w->impl == &widget_claude || w->impl == &widget_codex) ?
+		w->data : NULL;
 	if (c) {
 		reload(w); // the newest, as the flyout opens or reads again
+	}
+	if (tool) {
+		*tool = c ? c->tool : &tw_claude_tool;
 	}
 	return c && c->usage.dir ? &c->usage : NULL;
 }
@@ -768,9 +784,19 @@ static void claude_set_active(struct widget *w, bool active) {
 	}
 }
 
-static void claude_init(struct widget *w) {
-	w->data = calloc(1, sizeof(struct claude_state));
+static void usage_init(struct widget *w, const struct tw_usage_tool *tool) {
+	struct claude_state *c = calloc(1, sizeof(struct claude_state));
+	c->tool = tool;
+	w->data = c;
 	reload(w);
+}
+
+static void claude_init(struct widget *w) {
+	usage_init(w, &tw_claude_tool);
+}
+
+static void codex_init(struct widget *w) {
+	usage_init(w, &tw_codex_tool);
 }
 
 static void claude_destroy(struct widget *w) {
@@ -785,6 +811,19 @@ static void claude_destroy(struct widget *w) {
 const struct widget_impl widget_claude = {
 	.type = "claude",
 	.init = claude_init,
+	.destroy = claude_destroy,
+	.measure = claude_measure,
+	.render = claude_render,
+	.click = claude_click,
+	.tooltip = claude_tooltip,
+	.set_active = claude_set_active,
+	.sample = claude_sample,
+	.draw_gadget = claude_draw_gadget,
+};
+
+const struct widget_impl widget_codex = {
+	.type = "codex",
+	.init = codex_init,
 	.destroy = claude_destroy,
 	.measure = claude_measure,
 	.render = claude_render,

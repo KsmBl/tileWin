@@ -2,6 +2,7 @@
 #include <string.h>
 #include "settings.h"
 #include "tw_claude_usage.h"
+#include "tw_codex_usage.h"
 #include "tw_desktop.h"
 #include "tw_disks.h"
 #include "tw_widgets.h"
@@ -80,6 +81,23 @@ static void list_claude_accounts(GPtrArray *values, GPtrArray *labels) {
 	tw_claude_usage_list_free(all);
 }
 
+/* The Codex folders of this computer, each with the plan it works with. */
+static void list_codex_accounts(GPtrArray *values, GPtrArray *labels) {
+	g_ptr_array_add(labels, g_strdup("The installed one (~/.codex)"));
+	list_t *all = tw_codex_usage_all();
+	const char *home = g_get_home_dir();
+	for (int i = 0; i < all->length; i++) {
+		struct tw_claude_usage *u = all->items[i];
+		bool in_home = g_str_has_prefix(u->dir, home) && u->dir[strlen(home)] == '/';
+		char *shown = in_home ? g_strdup_printf("~%s", u->dir + strlen(home)) : g_strdup(u->dir);
+		g_ptr_array_add(values, g_strdup(shown));
+		g_ptr_array_add(labels, g_strdup_printf("%s (%s)", u->account ? u->account :
+			"No limits seen yet", shown));
+		g_free(shown);
+	}
+	tw_claude_usage_list_free(all);
+}
+
 static void list_calendars(GPtrArray *values, GPtrArray *labels) {
 	g_ptr_array_add(values, g_strdup("exec tilewin-settings --page datetime"));
 	g_ptr_array_add(labels, g_strdup("Date & time settings"));
@@ -99,6 +117,7 @@ static const struct {
 	{ "power", "device", ui_list_batteries },
 	{ "clock", "settings", list_calendars },
 	{ "claude", "account", list_claude_accounts },
+	{ "codex", "account", list_codex_accounts },
 	{ NULL, "interval", list_seconds },
 	{ NULL, "width", list_pixels },
 	{ NULL, "max_width", list_pixels },
@@ -348,7 +367,8 @@ static bool list_styles(const char *widget, GPtrArray *values, GPtrArray *labels
 static void add_option_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt, bool desktop) {
 	char *row_type = widget_type_of(widget);
-	bool own_editor = strcmp(row_type, "claude") == 0 && strcmp(opt->key, "show") == 0;
+	bool own_editor = (strcmp(row_type, "claude") == 0 || strcmp(row_type, "codex") == 0) &&
+		strcmp(opt->key, "show") == 0;
 	g_free(row_type);
 	if (own_editor) {
 		return; // ticked and sorted in a group of its own
@@ -885,7 +905,7 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
-	if (strcmp(type, "claude") == 0) {
+	if (strcmp(type, "claude") == 0 || strcmp(type, "codex") == 0) {
 		show_editor_attach(s, content, name, desktop); // what it shows comes first
 	}
 	const struct tw_widget_option *own_look = tw_widget_look(type, desktop);

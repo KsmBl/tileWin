@@ -43,7 +43,7 @@ struct tw_widget_info {
 extern const struct tw_widget_info tw_widgets[];
 extern const size_t tw_widget_count;
 
-/* How the Claude widget looks on the taskbar and on the desktop, each its own. */
+/* How the Claude and the Codex widget look on the taskbar and on the desktop, each its own. */
 extern const struct tw_widget_option tw_claude_taskbar_look[];
 extern const struct tw_widget_option tw_claude_desktop_look[];
 
