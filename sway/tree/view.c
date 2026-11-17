@@ -537,6 +537,12 @@ void view_set_csd_from_server(struct sway_view *view, bool enabled) {
 void view_update_csd_from_client(struct sway_view *view, bool enabled) {
 	sway_log(SWAY_DEBUG, "View %p updated CSD to %i", view, enabled);
 	struct sway_container *con = view->container;
+	if (enabled && con && tw_appopup_owns(con)) {
+		// an app popup has no frame: the app is asked again to leave its own off
+		view_set_csd_from_server(view, false);
+		view->using_csd = false;
+		return;
+	}
 	if (enabled && con && con->pending.border != B_CSD) {
 		con->saved_border = con->pending.border;
 		if (container_is_floating(con)) {

@@ -572,6 +572,8 @@ bool tw_appopup_toggle(const char *name, char **error);
 /* The layer a window of the popup shown is arranged in, NULL for the usual one. */
 struct wlr_scene_tree *tw_appopup_layer_for(struct sway_container *con);
 bool tw_appopup_is(struct sway_container *con);
+/* Whether the window is an app popup's (shown or hidden): it has no frame. */
+bool tw_appopup_owns(struct sway_container *con);
 void tw_appopup_view_mapped(struct sway_view *view);
 void tw_appopup_container_destroyed(struct sway_container *con);
 void tw_appopup_focus_changed(struct sway_container *con);

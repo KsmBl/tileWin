@@ -250,7 +250,7 @@ popup thunderbird {
 }
 ```
 
-and its shortcut is a line in both mode files (after their own shortcuts, so it takes keys over): `bindsym $mod+Shift+m popup toggle thunderbird`. The shortcut shows the app's window there, on the screen with the focus, in a layer above the taskbar; when the app does not run, it is started and its first window is taken, and a window of it that was open already is taken in as it is. The shortcut again, a click on the darkened rest or another app getting the focus hides it to the scratchpad, where it keeps running for the next time. Other windows of the same app (a message being written) come up with it. Its windows are known by the desktop entry their app_id leads to, by `app_id`, and while it starts by being started from it.
+and its shortcut is a line in both mode files (after their own shortcuts, so it takes keys over): `bindsym $mod+Shift+m popup toggle thunderbird`. The shortcut shows the app's window there without a frame (no title bar or borders, and the app is asked to leave off its own; apps that always draw their own header bar, like GTK 4 ones, keep that), on the screen with the focus, in a layer above the taskbar; when the app does not run, it is started and its first window is taken, and a window of it that was open already is taken in as it is. The shortcut again, a click on the darkened rest or another app getting the focus hides it to the scratchpad, where it keeps running for the next time. Other windows of the same app (a message being written) come up with it. Its windows are known by the desktop entry their app_id leads to, by `app_id`, and while it starts by being started from it.
 
 ## Login pages of Wi-Fi: portal.conf
 

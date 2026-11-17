@@ -43,7 +43,7 @@
  *   }
  *
  * and "popup toggle mail" (bound to a key, "bindsym $mod+m popup toggle mail")
- * shows it: its window when it runs (one that was open already is taken in),
+ * shows it, without a frame: its window when it runs (one that was open already is taken in),
  * else it starts it and takes its first window. It floats on the screen with
  * the focus, in a layer of its own above the taskbar, over a dark sheet. The
  * shortcut again, a click on the darkened rest, or the focus going to another
@@ -343,6 +343,32 @@ static void commit(void) {
 	}
 }
 
+bool tw_appopup_owns(struct sway_container *con) {
+	for (int i = 0; con && i < ap.count; i++) {
+		if (ap.items[i].con_id && ap.items[i].con_id == con->node.id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+ * No frame: neither tileWin's title bar and borders nor the app's own, which
+ * it is asked to leave off (xdg-decoration; an app that insists on drawing its
+ * own, like GTK 4's header bars, keeps that).
+ */
+static void undecorate(struct sway_container *con) {
+	if (con->view && con->view->using_csd) {
+		view_set_csd_from_server(con->view, false);
+	}
+	con->pending.border = B_NONE;
+	con->pending.border_thickness = 0;
+	if (con->view) {
+		con->view->using_csd = false;
+	}
+	tw_container_update_deco_state(con);
+}
+
 static void hide(struct popup_state *s) {
 	struct sway_container *con = window_of(s);
 	if (ap.shown == s) {
@@ -392,6 +418,7 @@ static void show(struct popup_state *s, struct sway_container *con) {
 	if (!container_is_floating(con)) {
 		container_set_floating(con, true);
 	}
+	undecorate(con);
 	struct wlr_box box = popup_box(&s->def, ws);
 	tw_set_box(con, &box);
 	ap.shown = s;

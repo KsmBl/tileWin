@@ -111,7 +111,7 @@ void tw_container_update_deco_state(struct sway_container *con) {
 	con->pending.tw_deco = tw_mode == TW_MODE_WINDOW && con->view &&
 		container_is_floating(con) &&
 		con->pending.border != B_CSD && con->pending.border != B_NONE &&
-		con->pending.fullscreen_mode == FULLSCREEN_NONE;
+		con->pending.fullscreen_mode == FULLSCREEN_NONE && !tw_appopup_owns(con);
 }
 
 /*
