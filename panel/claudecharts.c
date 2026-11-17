@@ -367,7 +367,10 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	int tw = 0;
 	pd_text_size(cr, st->font, label, &tw, NULL);
 	double lx = now_x + 6 + tw > g.x + g.width - 4 ? now_x - 6 - tw : now_x + 6;
-	pd_text(cr, st->font, label, lx, g.y + 2, tw + 2, 16, st->fg, PD_LEFT);
+	bool hovering = f->inside && pbox_contains(&g, f->px, f->py);
+	if (!hovering) { // (the reading under the pointer says it then)
+		pd_text(cr, st->font, label, lx, g.y + 2, tw + 2, 16, st->fg, PD_LEFT);
+	}
 	// at the time under the pointer: what was used, or where this pace leads
 	if (f->inside && pbox_contains(&g, f->px, f->py)) {
 		time_t t = time_at(g, start, end, f->px);

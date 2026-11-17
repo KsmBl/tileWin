@@ -62,8 +62,8 @@ New lately:
 | ![An app popup](docs/screenshots/app-popup.png) | ![The Wi-Fi radar widget](docs/screenshots/wifi-radar.png) |
 | **Claude Code usage**: the last 5-hour windows and the week, with the reading under the pointer | **Kernel updates** making the live fixes of a new release, and how far they are |
 | ![The charts of Claude Code usage](docs/screenshots/claude-charts.png) | ![The kernel updates widget making live fixes](docs/screenshots/kernel-live-fixes.png) |
-| **Workspaces**: a window dragged from one desktop to another, as on KDE | |
-| ![A window dragged in the workspaces widget](docs/screenshots/workspaces-drag.png) | |
+| **Workspaces**: a window dragged from one desktop to another, as on KDE | **Codex usage**: the same charts, from the session logs Codex writes itself |
+| ![A window dragged in the workspaces widget](docs/screenshots/workspaces-drag.png) | ![The charts of Codex usage](docs/screenshots/codex-usage.png) |
 
 ## What it has
 
