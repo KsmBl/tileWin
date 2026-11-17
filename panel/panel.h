@@ -400,6 +400,7 @@ extern const struct widget_impl widget_custom;
 extern const struct widget_impl widget_notifications;
 extern const struct widget_impl widget_git;
 extern const struct widget_impl widget_claude;
+extern const struct widget_impl widget_codex;
 extern const struct widget_impl widget_kernel;
 extern const struct widget_impl widget_ports;
 extern const struct widget_impl widget_wifiradar;
@@ -725,8 +726,13 @@ void custom_run_now(struct widget *w);
 const char *custom_output(struct widget *w);
 const char *git_widget_repo(struct widget *w);
 struct tw_claude_usage;
-/* widgets/claude.c: what the Claude widget shows, for its flyout; NULL for none. */
-const struct tw_claude_usage *claude_widget_usage(struct widget *w);
+struct tw_usage_tool;
+/*
+ * widgets/claude.c: what the Claude or Codex widget shows, for its flyout; NULL
+ * for none. *tool (when given) becomes the tool it shows.
+ */
+const struct tw_claude_usage *claude_widget_usage(struct widget *w,
+	const struct tw_usage_tool **tool);
 struct tw_kernel_auto;
 struct tw_kernel_auto_summary;
 /* widgets/kernel.c: the state of the kernel updates, read again now; NULL for another widget. */

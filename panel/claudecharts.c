@@ -23,7 +23,7 @@ static void chart_bg(cairo_t *cr, const struct claude_look *st, struct pbox g) {
 void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u, time_t now) {
 	free(c->points);
 	c->points = NULL;
-	c->count = u && u->dir ? tw_claude_history_read(u->dir, &c->points) : 0;
+	c->count = u && u->history ? tw_claude_history_read(u->history, &c->points) : 0;
 	c->now = now;
 	c->five_hour = u ? u->five_hour : (struct tw_claude_window){ 0 };
 	c->seven_day = u ? u->seven_day : (struct tw_claude_window){ 0 };

@@ -181,7 +181,7 @@ static void record(const char *dir, const char *input, size_t len) {
 	// and into the history, for the charts of the widget's flyout
 	struct tw_claude_usage usage;
 	if (tw_claude_usage_read(dir, &usage)) {
-		tw_claude_history_add(dir, &usage, usage.updated ? usage.updated : time(NULL));
+		tw_claude_history_add(usage.history, &usage, usage.updated ? usage.updated : time(NULL));
 	}
 	tw_claude_usage_finish(&usage);
 }

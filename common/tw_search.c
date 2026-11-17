@@ -51,7 +51,7 @@ const struct tw_settings_page tw_settings_pages[] = {
 		"pi-hole ads adblock trackers hosts allow",
 		"network-server-symbolic" },
 	{ "taskbar", "Taskbar", "panel bar widgets tray clock notifications right "
-		"click context menu open ports kernel claude git cpu memory",
+		"click context menu open ports kernel claude codex git cpu memory",
 		"view-continuous-symbolic" },
 	{ "startmenu", "Start menu", "start pinned apps places power tiles layout",
 		"start-here-symbolic" },

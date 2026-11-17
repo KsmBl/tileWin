@@ -267,6 +267,18 @@ test(
 )
 
 test(
+	'codex-usage',
+	executable(
+		'test-codex-usage',
+		'test_codex_usage.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [jsonc, math],
+	),
+	suite: 'unit',
+)
+
+test(
 	'widgets',
 	executable(
 		'test-widgets',
@@ -1460,6 +1472,15 @@ test(
 test(
 	'claude-usage',
 	find_program('claude_usage.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
+	'codex-usage-widget',
+	find_program('codex_usage.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
 	depends: [pointer_tool],
 	suite: 'gui',
