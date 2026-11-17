@@ -132,6 +132,8 @@ while [ $# -gt 0 ]; do
 	esac
 done
 [ -f .config ] || { echo "error: not a kernel tree"; exit 1; }
+# a build that fails without naming a file (TW_KLP_FAIL)
+[ -n "${TW_KLP_FAIL:-}" ] && { echo "error: klp-build: patched kernel build failed"; exit 1; }
 for patch in "${patches[@]}"; do
 	if grep -q broken "$patch"; then
 		f=$(sed -n 's|^+++ b/||p' "$patch" | head -n 1)
@@ -867,6 +869,16 @@ TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
 check "at its start it is noted as started well" test "$(cat "$auto/good" 2>/dev/null)" = "$a1"
 check "  and set to start once again" grep -qx "bootctl set-oneshot tilewin-$a1.efi" "$calls"
 check "  nothing waits for the next start" test -z "$(status next)"
+
+# fixes that cannot be made: the user is told once, not at every run that tries again
+: > "$work/notes"
+TW_KLP_FAIL=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "fixes that cannot be made are told" \
+	bash -c "grep -q '^normal	Kernel fixes could not be made' '$work/notes'"
+check "  and the status says why" grep -q "^error=The fixes could not be made" "$auto/status"
+TW_KLP_FAIL=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "  once" test "$(grep -c 'Kernel fixes could not be made' "$work/notes")" = 1
+rm -rf "$akernels/$a1/livepatches"/security_9_9_3*
 
 # the fixes of kernel.org for it (9.9.3), with a kernel that complains at once
 : > "$calls"

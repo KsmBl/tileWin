@@ -1119,8 +1119,18 @@ auto_run() {
 	if [[ -d $(auto_kernels)/$running ]]; then
 		st state fixes
 		st message "Looking for fixes of kernel.org"
-		auto_unit fixes ||
-			st error "The fixes could not be made: $(sed -n 's/^text=//p' "$auto_state/build/fixes" 2>/dev/null)"
+		if ! auto_unit fixes; then
+			local why to
+			why=$(sed -n 's/^text=//p' "$auto_state/build/fixes" 2>/dev/null)
+			to=$(sed -n 's/^version=//p' "$auto_state/build/fixes" 2>/dev/null)
+			st error "The fixes could not be made: $why"
+			# told once for each release, not at every run that tries again
+			if [[ -n $to && $(cat "$auto_state/fixes_failed_told" 2>/dev/null) != "$to" ]]; then
+				echo "$to" > "$auto_state/fixes_failed_told"
+				auto_log "The fixes of Linux $to could not be made: $why"
+				notify "Kernel fixes could not be made" "The security fixes of Linux $to could not be made into a live patch ($why). The running kernel stays as it is; the next kernel brings them with a restart." normal
+			fi
+		fi
 		auto_fixes_state
 		auto_fixes
 	else
