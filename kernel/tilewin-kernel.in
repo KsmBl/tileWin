@@ -876,19 +876,29 @@ klp_progress() { # log from
 	local last
 	last=$(tail -c +"$2" "$1" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' |
 		grep -E '^(Validating|Building|Copying|Fixing|Generating|Diffing|Finding)' | tail -n 1)
+	# "start<tab>end<tab>words": the share of the way this step spans
 	case $last in
-	Validating*) printf '1\tchecking the fixes' ;;
-	"Building original kernel"*) printf '2\tbuilding the kernel as it runs' ;;
-	"Copying original"*) printf '42\tkeeping its parts' ;;
-	Fixing*) printf '45\tfitting the fixes to it' ;;
-	"Building patched kernel"*) printf '47\tbuilding it with the fixes' ;;
-	"Copying patched"*) printf '82\tkeeping the fixed parts' ;;
-	"Generating original"*) printf '85\tcomparing the two' ;;
-	"Generating patched"*) printf '88\tcomparing the two' ;;
-	Diffing* | Finding*) printf '91\tfinding what changed' ;;
-	"Building patch module"*) printf '97\tmaking the module' ;;
-	*) printf '0\tgetting ready' ;;
+	Validating*) printf '1\t2\tchecking the fixes' ;;
+	"Building original kernel"*) printf '2\t62\tbuilding the kernel as it runs' ;;
+	"Copying original"*) printf '62\t64\tkeeping its parts' ;;
+	Fixing*) printf '64\t66\tfitting the fixes to it' ;;
+	"Building patched kernel"*) printf '66\t82\tbuilding it with the fixes' ;;
+	"Copying patched"*) printf '82\t85\tkeeping the fixed parts' ;;
+	"Generating original"*) printf '85\t88\tcomparing the two' ;;
+	"Generating patched"*) printf '88\t91\tcomparing the two' ;;
+	Diffing* | Finding*) printf '91\t97\tfinding what changed' ;;
+	"Building patch module"*) printf '97\t99\tmaking the module' ;;
+	*) printf '0\t1\tgetting ready' ;;
 	esac
+}
+
+# The objects of the tree written since FILE was touched, and all there are,
+# without klp-build's own copies: how far one of its kernel builds is.
+klp_objects() { # tree since-file
+	local newer all
+	newer=$(nice -n 19 find "$1" -path "$1/klp-tmp" -prune -o -name '*.o' -newer "$2" -print 2>/dev/null | wc -l)
+	all=$(nice -n 19 find "$1" -path "$1/klp-tmp" -prune -o -name '*.o' -print 2>/dev/null | wc -l)
+	printf '%s\t%s' "$newer" "$all"
 }
 
 # klp-build in the kept tree, through ccache when it is there. --no-replace:
@@ -1126,8 +1136,17 @@ security_build() { # kver
 		local watch
 		(
 			exec 9>&- # not the lock of the build: it ends with the build
+			local seen="" marker=$lp/$name.step a b words pct newer all
 			while sleep "${TILEWIN_KERNEL_WATCH_S:-5}"; do
-				IFS=$'\t' read -r pct words < <(klp_progress "$log" "$((before + 1))")
+				IFS=$'\t' read -r a b words < <(klp_progress "$log" "$((before + 1))")
+				[[ $words == "$seen" ]] || { seen=$words; touch "$marker"; }
+				pct=$a
+				# within a kernel build: by the objects written since it began
+				if [[ $words == building* && $b -gt $a ]]; then
+					IFS=$'\t' read -r newer all < <(klp_objects "$tree" "$marker")
+					[[ $all -gt 0 ]] && pct=$((a + (b - a) * newer / all))
+					[[ $pct -ge $b ]] && pct=$((b - 1))
+				fi
 				echo "Making the livepatch module of Linux $to: $words" > "$lp/$name.progress"
 				auto_status fixes build "$pct" "Making the livepatch of Linux $to: $words" "$to"
 			done
@@ -1138,6 +1157,7 @@ security_build() { # kver
 		pkill -P "$watch" 2>/dev/null
 		kill "$watch" 2>/dev/null
 		wait "$watch" 2>/dev/null
+		rm -f "$lp/$name.step"
 		[[ $built == yes ]] && break
 		[[ -f $tree/klp-tmp/1-orig/.complete ]] && opts=(-T -S 2)
 		# the files this round's errors name; the compiler names some by a detour
