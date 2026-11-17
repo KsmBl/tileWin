@@ -1128,7 +1128,7 @@ security_build() { # kver
 		[[ ${#kept[@]} -gt 0 ]] ||
 			give_up "None of the $total fixed files of Linux $to can be applied live: they need a restart"
 		round=$((round + 1))
-		[[ $round -le 12 ]] || give_up "klp-build refused too many fixes: see the log"
+		[[ $round -le 20 ]] || give_up "klp-build refused too many fixes: see the log"
 		step "Making the livepatch module of Linux $to (${#kept[@]} files)"
 		before=$(stat -c %s "$log")
 		# how far it is, every few seconds, for the widget and the Kernel page; it
@@ -1164,7 +1164,10 @@ security_build() { # kver
 		# ("drivers/gpu/drm/amd/amdgpu/../amdkfd/x.c" for drivers/gpu/drm/amd/amdkfd/x.c),
 		# which is taken out first, and make names an object as "x.o]"
 		local errors
-		errors=$(tail -c +"$((before + 1))" "$log" | grep -iE 'error|did not apply|unsupported|fatal' |
+		# (the linker says "undefined reference" and "multiple definition", without
+		# the word error, of a fix that needs a function from a file left out)
+		errors=$(tail -c +"$((before + 1))" "$log" |
+			grep -iE 'error|did not apply|unsupported|fatal|undefined reference|multiple definition' |
 			sed -E ':a; s#(^|[ /])[^/ :.][^/ :]*/\.\./#\1#; ta')
 		bad=()
 		for p in "${kept[@]}"; do
