@@ -16,6 +16,7 @@
  */
 #define _GNU_SOURCE
 #include <math.h>
+#include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -225,6 +226,39 @@ int main(void) {
 	int again = tw_claude_history_read(history, &points);
 	check(again == n, "filling again adds nothing");
 	free(points);
+
+	// ---- a long day of the same values: one line of history, written in one go
+	{
+		char *busy_home = NULL;
+		if (asprintf(&busy_home, "%s/busy", root) < 0) {
+			return 1;
+		}
+		char saved[600];
+		snprintf(saved, sizeof(saved), "%s", home);
+		snprintf(home, sizeof(home), "%s", busy_home);
+		GString *lines = g_string_new(NULL);
+		for (int i = 0; i < 3000; i++) {
+			char *l = limits_line(now - 3600 + i, 20, now + 7200, 30, now + 86400, false);
+			g_string_append(lines, l);
+			free(l);
+		}
+		free(session(now - 3600, "busy", lines->str, now - 10));
+		g_string_free(lines, TRUE);
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		tw_codex_history_backfill(busy_home, now);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		double seconds = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
+		char *busy_history = tw_codex_history_path(busy_home);
+		struct tw_claude_point *busy_points;
+		int busy_n = tw_claude_history_read(busy_history, &busy_points);
+		check(busy_n == 1, "3000 lines of the same values are one line of the history");
+		check(seconds < 2, "the history is filled in one go, not line by line");
+		free(busy_points);
+		free(busy_history);
+		snprintf(home, sizeof(home), "%s", saved);
+		free(busy_home);
+	}
 
 	// ---- the list and the tool
 	list_t *all = tw_codex_usage_all();

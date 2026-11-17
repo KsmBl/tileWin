@@ -434,6 +434,50 @@ static bool window_differs(const struct tw_claude_window *a, const struct tw_cla
 		!(a->resets_at == b->resets_at || tw_claude_same_window(a->resets_at, b->resets_at));
 }
 
+bool tw_claude_history_write(const char *path, const struct tw_claude_point *points, int n) {
+	char *dir = path ? strdup(path) : NULL;
+	char *slash = dir ? strrchr(dir, '/') : NULL;
+	if (slash) {
+		*slash = '\0';
+		tw_mkdir_p(dir);
+	}
+	free(dir);
+	FILE *f = path ? fopen(path, "a") : NULL;
+	if (!f) {
+		return false;
+	}
+	struct tw_claude_point last = { 0 };
+	bool any = false;
+	for (int i = 0; i < n; i++) {
+		struct tw_claude_point p = points[i];
+		if (any) {
+			// within the same window what was used only grows
+			if (p.five_hour.known && last.five_hour.known &&
+					tw_claude_same_window(p.five_hour.resets_at, last.five_hour.resets_at) &&
+					last.five_hour.used > p.five_hour.used) {
+				p.five_hour.used = last.five_hour.used;
+			}
+			if (p.seven_day.known && last.seven_day.known &&
+					tw_claude_same_window(p.seven_day.resets_at, last.seven_day.resets_at) &&
+					last.seven_day.used > p.seven_day.used) {
+				p.seven_day.used = last.seven_day.used;
+			}
+			if (!window_differs(&last.five_hour, &p.five_hour) &&
+					!window_differs(&last.seven_day, &p.seven_day)) {
+				continue; // the same as the line before
+			}
+		}
+		char a[64], b[64];
+		format_window(&p.five_hour, a, sizeof(a));
+		format_window(&p.seven_day, b, sizeof(b));
+		fprintf(f, "%lld %s %s\n", (long long)p.at, a, b);
+		last = p;
+		any = true;
+	}
+	fclose(f);
+	return true;
+}
+
 void tw_claude_history_add(const char *history, const struct tw_claude_usage *usage,
 		time_t now) {
 	char *path = history ? strdup(history) : NULL;

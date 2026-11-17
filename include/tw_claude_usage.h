@@ -93,6 +93,12 @@ char *tw_claude_history_path(const char *dir);
 char *tw_usage_history_path(const char *kind, const char *dir);
 /* Adds the values as of now to that history file, when they differ from the last line. */
 void tw_claude_history_add(const char *path, const struct tw_claude_usage *usage, time_t now);
+/*
+ * Writes the points (oldest first) as the start of a history file that is not
+ * there yet, in one go, by the rules of tw_claude_history_add: a point the same
+ * as the one before is left out, and a window's usage only grows.
+ */
+bool tw_claude_history_write(const char *path, const struct tw_claude_point *points, int n);
 /* The points of a history file, oldest first, in a new array; how many (0 for none, *out NULL). */
 int tw_claude_history_read(const char *path, struct tw_claude_point **out);
 /* Whether two reset times are those of the same window (they may wobble by a minute). */

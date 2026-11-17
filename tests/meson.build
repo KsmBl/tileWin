@@ -273,7 +273,7 @@ test(
 		'test_codex_usage.c',
 		include_directories: sway_inc,
 		link_with: lib_sway_common,
-		dependencies: [jsonc, math],
+		dependencies: [jsonc, math, glib],
 	),
 	suite: 'unit',
 )

@@ -165,11 +165,17 @@ static void collect(const char *base, const char *rel, int depth, const char *cu
 					strcmp(de->d_name + n - 6, ".jsonl") == 0 && stat(file, &st) == 0 &&
 					S_ISREG(st.st_mode)) {
 				if (out->count == out->cap) {
-					out->cap = out->cap ? out->cap * 2 : 32;
-					out->items = realloc(out->items, out->cap * sizeof(*out->items));
+					int cap = out->cap ? out->cap * 2 : 32;
+					struct log_file *grown = realloc(out->items, cap * sizeof(*out->items));
+					if (grown) {
+						out->items = grown;
+						out->cap = cap;
+					}
 				}
-				out->items[out->count++] = (struct log_file){ file, st.st_mtime };
-				file = NULL;
+				if (out->count < out->cap) {
+					out->items[out->count++] = (struct log_file){ file, st.st_mtime };
+					file = NULL;
+				}
 			}
 			free(file);
 		}
@@ -371,8 +377,13 @@ int tw_codex_history_backfill(const char *dir, time_t now) {
 				continue;
 			}
 			if (count == cap) {
-				cap = cap ? cap * 2 : 256;
-				points = realloc(points, cap * sizeof(*points));
+				int grown_cap = cap ? cap * 2 : 256;
+				struct codex_point *grown = realloc(points, grown_cap * sizeof(*points));
+				if (!grown) {
+					break;
+				}
+				points = grown;
+				cap = grown_cap;
 			}
 			points[count++] = p;
 		}
@@ -385,24 +396,14 @@ int tw_codex_history_backfill(const char *dir, time_t now) {
 	if (count > 1) {
 		qsort(points, count, sizeof(*points), oldest_point_first);
 	}
-	// the folder and the file, even empty: filled once, not looked for again
-	char *slash = strrchr(path, '/');
-	if (slash) {
-		*slash = '\0';
-		tw_mkdir_p(path);
-		*slash = '/';
+	// in one go, the file even when empty: filled once, not looked for again
+	struct tw_claude_point *plain = count > 0 ? malloc(count * sizeof(*plain)) : NULL;
+	for (int i = 0; plain && i < count; i++) {
+		plain[i] = points[i].p;
 	}
-	FILE *f = fopen(path, "a");
-	if (f) {
-		fclose(f);
-	}
-	int added = 0;
-	for (int i = 0; i < count; i++) {
-		struct tw_claude_usage u = { .five_hour = points[i].p.five_hour,
-			.seven_day = points[i].p.seven_day };
-		tw_claude_history_add(path, &u, points[i].p.at);
-		added++;
-	}
+	tw_claude_history_write(path, plain, plain ? count : 0);
+	int added = plain ? count : 0;
+	free(plain);
 	free(points);
 	free(path);
 	free(normal);
