@@ -5,6 +5,17 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.9
+
+- **Drag windows between desktops** in the workspaces widget on the taskbar, as on KDE: press a window's outline on one desktop's small screen, carry it to another's and let go.
+- **App popups slide in** from their side and out again, the darkness fading along (or just appear, as you like), and can open **wherever their app is opened**: the taskbar, the start menu, search, the desktop and the Command Center then bring the popup.
+- **Every chart answers the pointer**: the flyouts of CPU, memory, battery, disk, GPU, network and power, the Claude Code charts and the charts on the desktop show the reading under the pointer and when it was; the week of Claude Code also where the pace so far leads.
+- **Claude Code usage on the desktop** as charts of the week and of the last three 5-hour windows. A window's usage only grows: an older value another session of Claude Code shows no longer pulls the charts down.
+- **Wi-Fi radar:** a right click on a network opens its menu (connect or disconnect, details, connect automatically, forget), and **Bluetooth devices** are on it too, as diamonds that connect, disconnect or pair with a click.
+- **Kernel updates:** the live fixes of a release now get past fixes the compiler names by a detour or the linker cannot link, as those of Linux 7.3.5 needed; they show how far they are while klp-build builds, a notification says when they cannot be made, and a release whose checksum kernel.org has not listed yet is looked at again in an hour.
+- **Settings search** finds the widgets by their names and what they do.
+- **Fixes:** the taskbar no longer crashes when the pointer moves over a chart on the desktop.
+
 ## 1.8
 
 - **modernCC, an experimental theme of a faster way to work.** The **Command Center**, opened with Super or the capsule of the bar, finds apps, open windows, actions, settings pages, files and sums as you type, ranks them by how well they match and how often you use them, shows the open windows and what you use often before you type, keeps to actions, windows or settings after `>`, `@` or `#`, and offers what else can be done with the chosen row (Tab, Alt+1 to Alt+3). A top bar of floating capsules, quiet window frames and soft wallpapers, light and dark.

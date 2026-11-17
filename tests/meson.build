@@ -726,6 +726,8 @@ test(
 	env: saver_gui_env,
 	suite: 'gui',
 	timeout: 120,
+	# measures how little the taskbar works while idle: alone, not beside the others
+	is_parallel: false,
 )
 
 test(

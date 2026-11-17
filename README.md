@@ -1,4 +1,4 @@
-# tileWin
+ # tileWin
 
 tileWin is a Wayland compositor with two modes you can switch between at any time:
 
@@ -55,13 +55,15 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 
 Windows 10 is the window mode screenshot at the top.
 
-The Wi-Fi radar, connecting to a saved network, and in the Starship Console:
+New lately:
 
-![The Wi-Fi radar widget](docs/screenshots/wifi-radar.png)
-
-Windows can be closed with an explosion (`animation close explode`), one of the styles on the Animations page:
-
-![A window closing with the explosion animation](docs/screenshots/explosion.png)
+| An app popup: mail on its shortcut, at the right, over the darkened rest | The Wi-Fi radar, connecting to a saved network, and in the Starship Console |
+|---|---|
+| ![An app popup](docs/screenshots/app-popup.png) | ![The Wi-Fi radar widget](docs/screenshots/wifi-radar.png) |
+| **Claude Code usage**: the last 5-hour windows and the week, with the reading under the pointer | **Kernel updates** making the live fixes of a new release, and how far they are |
+| ![The charts of Claude Code usage](docs/screenshots/claude-charts.png) | ![The kernel updates widget making live fixes](docs/screenshots/kernel-live-fixes.png) |
+| **Workspaces**: a window dragged from one desktop to another, as on KDE | |
+| ![A window dragged in the workspaces widget](docs/screenshots/workspaces-drag.png) | |
 
 ## What it has
 
@@ -80,7 +82,8 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Brightness and volume up to 130%**, a battery chart of the last 24 hours, and a limit on the clock of each processor core.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
 - **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running. Made on the App popups page of the settings: [docs/usage.md](docs/usage.md#app-popups).
-- **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, the pointer on one shows its signal, security and band, and a click connects to it.
+- **Charts that answer the pointer** everywhere (CPU, memory, battery, network, Claude Code usage, the desktop's charts), and **windows dragged between desktops** in the workspaces widget, as on KDE.
+- **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, with the Bluetooth devices as diamonds; the pointer on one shows its signal, security and band, a click connects to it and a right click opens its menu.
 - **Open ports** on the taskbar and the desktop: every port a program listens on, and whether it is only for this computer, a local network or public; switched on in the network settings, a program that opens a port to the network is asked about first, once.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
