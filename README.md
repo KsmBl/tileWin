@@ -55,6 +55,10 @@ Every theme brings its own title bars, taskbar, start menu and wallpaper:
 
 Windows 10 is the window mode screenshot at the top.
 
+The Wi-Fi radar, connecting to a saved network, and in the Starship Console:
+
+![The Wi-Fi radar widget](docs/screenshots/wifi-radar.png)
+
 Windows can be closed with an explosion (`animation close explode`), one of the styles on the Animations page:
 
 ![A window closing with the explosion animation](docs/screenshots/explosion.png)
@@ -75,8 +79,8 @@ Windows can be closed with an explosion (`animation close explode`), one of the 
 - **Message dialogs** of GTK 3 apps ("Save changes?") in the look of the theme.
 - **Brightness and volume up to 130%**, a battery chart of the last 24 hours, and a limit on the clock of each processor core.
 - **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
-- **App popups:** any app on a shortcut of its own, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running.
-- **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, and a click on one connects to it.
+- **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running. Made on the App popups page of the settings: [docs/usage.md](docs/usage.md#app-popups).
+- **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, the pointer on one shows its signal, security and band, and a click connects to it.
 - **Open ports** on the taskbar and the desktop: every port a program listens on, and whether it is only for this computer, a local network or public; switched on in the network settings, a program that opens a port to the network is asked about first, once.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.
