@@ -5,6 +5,15 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.8
+
+- **modernCC, an experimental theme of a faster way to work.** The **Command Center**, opened with Super or the capsule of the bar, finds apps, open windows, actions, settings pages, files and sums as you type, ranks them by how well they match and how often you use them, shows the open windows and what you use often before you type, keeps to actions, windows or settings after `>`, `@` or `#`, and offers what else can be done with the chosen row (Tab, Alt+1 to Alt+3). A top bar of floating capsules, quiet window frames and soft wallpapers, light and dark.
+- **Wi-Fi radar** widget for the desktop and the taskbar, in every theme: the networks in reach as contacts on a radar whose sweep goes round, the stronger the nearer the middle. The pointer on one shows its signal, security and band; a click connects to it, a saved or open network at once with the link drawn as it is made, a new one through the field for its password. The Starship Console's moving wallpaper uses the same radar.
+- **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right. The first press starts it; the shortcut again, a click beside it or another app hides it, still running, so it comes back at once. Made on the new **App popups** page of the settings.
+- **Claude Code usage charts:** the widget's flyout shows the last three 5-hour windows in one chart along the hours, and the week from its start to its reset like the chart of copying files: the usage up to the line of now and a dashed line on at the pace so far.
+- **Kernel updates:** a new release whose checksum kernel.org has not listed yet is no longer taken for a broken download and thrown away; the list of kernel.org itself is asked, it is waited for, and the next run tries again instead of a day later.
+- **Settings:** when the tileWin that runs is older than the settings and does not know something yet, the settings say so and offer to restart into the new one.
+
 ## 1.7
 
 - **Starship Console, renewed.** The cooler palette of the later consoles: lavender frames, lilac bars, steel blue buttons, peach for the menu and the clock. Its menus are framed as its windows, the start menu with the elbow and a bar to MENU, and its title bars are taller and easier to grab.
