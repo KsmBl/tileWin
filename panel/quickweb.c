@@ -85,6 +85,23 @@ static void append(struct quickweb *q, const char *s) {
 	text_cursor_end(q->text, &q->tc, false);
 }
 
+static struct panel *opening_panel;
+
+/* xdg-open said nothing went wrong, or why it could not: then a notification says so. */
+static void opened(void *data, const char *output) {
+	char *address = data;
+	const char *rc = strstr(output, "rc=");
+	if (opening_panel && rc && atoi(rc + 3) != 0) {
+		char *body = format_str("Nothing opens web addresses here: no browser is set to "
+			"open links (xdg-open %s failed). Set one as the default browser in its own "
+			"settings, or with xdg-settings set default-web-browser.", address);
+		notify_local(opening_panel, "Quick web", "web-browser", "Could not open the address",
+			body);
+		free(body);
+	}
+	free(address);
+}
+
 static void open_address(struct panel *panel, const char *text) {
 	const char *t = text;
 	while (*t == ' ') {
@@ -95,7 +112,13 @@ static void open_address(struct panel *panel, const char *text) {
 	}
 	char *url = strstr(t, "://") ? strdup(t) : format_str("https://%s", t);
 	char *quoted = g_shell_quote(url);
-	ipc_panel_commandf(panel, "exec xdg-open %s", quoted);
+	// run here, not by the compositor, so a failure can be told
+	char *cmd = format_str("xdg-open %s >/dev/null 2>&1 & pid=$!; sleep 2; "
+		"if kill -0 $pid 2>/dev/null; then echo rc=0; else wait $pid; echo \"rc=$?\"; fi",
+		quoted);
+	opening_panel = panel;
+	proc_run(panel, cmd, false, NULL, opened, strdup(url));
+	free(cmd);
 	g_free(quoted);
 	free(url);
 }
