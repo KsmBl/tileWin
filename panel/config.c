@@ -667,6 +667,7 @@ void widget_destroy(struct widget *w) {
 	if (!w) {
 		return;
 	}
+	bar_widget_gone(w);
 	if (w->impl->destroy) {
 		w->impl->destroy(w);
 	}

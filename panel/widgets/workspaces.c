@@ -1,4 +1,6 @@
 #include <linux/input-event-codes.h>
+#include <glib.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +15,9 @@
  * color of the taskbar's indicator. A click goes to a desktop, the wheel walks
  * through them, the right button moves, makes and closes desktops, and resting
  * on one shows a preview of it with its windows as they look (thumbnails.c).
+ * A window is dragged from one desktop to another, as on KDE: pressed on its
+ * outline, carried along with the pointer, and let go on the desktop it goes
+ * to.
  *
  *   widget workspaces { labels yes; icons yes }
  *
@@ -24,6 +29,56 @@
 
 #define REFRESH_MS 1000
 #define GAP 4
+#define DRAG_START 4   // pixels the pointer moves before a press becomes a drag
+#define MAX_SHOWN 128
+#define MAX_DESKS 32
+#define MAX_BARS 8
+
+/* Where the desktops and their windows were drawn on one taskbar, for the pointer. */
+struct pager_layout {
+	struct psurface *surface;
+	struct { struct pbox box; int64_t id; char *workspace; } wins[MAX_SHOWN];
+	int win_count;
+	struct { struct pbox box; char *name; } desks[MAX_DESKS];
+	int desk_count;
+};
+
+struct pager_state {
+	struct pager_layout bars[MAX_BARS];
+	// the window pressed on, and dragged once the pointer moved far enough
+	int64_t drag_id;
+	struct psurface *drag_surface;
+	struct pbox drag_box; // its outline when it was pressed
+	double press_x, press_y, px, py;
+	bool dragging;
+};
+
+static struct pager_layout *layout_of(struct pager_state *st, struct psurface *s) {
+	struct pager_layout *free_slot = NULL;
+	for (int i = 0; i < MAX_BARS; i++) {
+		if (st->bars[i].surface == s) {
+			return &st->bars[i];
+		}
+		if (!st->bars[i].surface && !free_slot) {
+			free_slot = &st->bars[i];
+		}
+	}
+	if (!free_slot) {
+		free_slot = &st->bars[0];
+	}
+	free_slot->surface = s;
+	return free_slot;
+}
+
+static void layout_clear(struct pager_layout *l) {
+	for (int i = 0; i < l->win_count; i++) {
+		free(l->wins[i].workspace);
+	}
+	for (int i = 0; i < l->desk_count; i++) {
+		free(l->desks[i].name);
+	}
+	l->win_count = l->desk_count = 0;
+}
 
 static struct loop_timer *refresh_timer;
 static int pagers; // widgets there are, which want the tree read again
@@ -58,10 +113,19 @@ static void workspaces_set_active(struct widget *w, bool active) {
 	}
 }
 
+static void workspaces_init(struct widget *w) {
+	w->data = calloc(1, sizeof(struct pager_state));
+}
+
 static void workspaces_destroy(struct widget *w) {
 	if (w->active) {
 		workspaces_set_active(w, false);
 	}
+	struct pager_state *st = w->data;
+	for (int i = 0; st && i < MAX_BARS; i++) {
+		layout_clear(&st->bars[i]);
+	}
+	free(st);
 }
 
 /* The size of one small screen: as high as the taskbar allows, as wide as the screen is. */
@@ -125,6 +189,10 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 	int y = box.y + (box.height - dh) / 2;
 	double radius = tw_theme_double(t, "workspaces.radius", 0);
 	radius = radius > dh / 3.0 ? dh / 3.0 : radius;
+	struct pager_state *st = w->data;
+	struct pager_layout *lay = layout_of(st, ctx->surface);
+	layout_clear(lay);
+	bool dragging_here = st->dragging && st->drag_surface == ctx->surface;
 	list_t *wss = panel->state.workspaces;
 	for (int i = 0; wss && i < wss->length; i++) {
 		struct pworkspace *ws = wss->items[i];
@@ -132,7 +200,12 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 			continue;
 		}
 		struct pbox d = { x, y, dw, dh };
-		bool hover = render_hover(ctx, d);
+		bool hover = dragging_here ? st->px >= d.x && st->px < d.x + d.width :
+			render_hover(ctx, d);
+		if (lay->desk_count < MAX_DESKS) {
+			lay->desks[lay->desk_count].box = d;
+			lay->desks[lay->desk_count++].name = strdup(ws->name);
+		}
 		// the screen, lighter when the pointer is on it
 		cairo_new_path(cr);
 		pd_rounded(cr, d.x, d.y, d.width, d.height, radius);
@@ -159,6 +232,21 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 			double ww = win->width * scale, wh = win->height * scale;
 			ww = ww < 3 ? 3 : ww;
 			wh = wh < 3 ? 3 : wh;
+			if (lay->win_count < MAX_SHOWN) {
+				// the ones drawn later lie on top, and are found first
+				lay->wins[lay->win_count].box = (struct pbox){ (int)wx, (int)wy,
+					(int)ww, (int)wh };
+				lay->wins[lay->win_count].id = win->id;
+				lay->wins[lay->win_count++].workspace = strdup(ws->name);
+			}
+			if (dragging_here && win->id == st->drag_id) {
+				// carried away: only where it was
+				cairo_rectangle(cr, wx + 0.5, wy + 0.5, ww - 1, wh - 1);
+				pd_color(cr, (fg & 0xffffff00) | 0x50);
+				cairo_set_line_width(cr, 1);
+				cairo_stroke(cr);
+				continue;
+			}
 			pd_rect(cr, wx, wy, ww, wh, (fg & 0xffffff00) | (win->focused ? 0x70 : 0x48));
 			cairo_rectangle(cr, wx + 0.5, wy + 0.5, ww - 1, wh - 1);
 			pd_color(cr, (fg & 0xffffff00) | 0xc0);
@@ -185,9 +273,112 @@ static void workspaces_render(struct widget *w, struct render_ctx *ctx, struct p
 			pd_color(cr, tw_theme_color(t, "workspaces.urgent_bg", 0xe8112360));
 			cairo_fill(cr);
 		}
+		if (dragging_here && hover) {
+			// where it goes when let go
+			cairo_new_path(cr);
+			pd_rounded(cr, d.x + 1, d.y + 1, d.width - 2, d.height - 2, radius);
+			pd_color(cr, accent);
+			cairo_set_line_width(cr, 2);
+			cairo_stroke(cr);
+		}
 		psurface_add_hotspot(ctx->surface, d.x, d.y, d.width, d.height, w, 0, i, ws->name);
 		x += dw + GAP;
 	}
+	// the window carried along with the pointer
+	if (dragging_here) {
+		list_t *windows = panel->state.windows;
+		for (int j = 0; windows && j < windows->length; j++) {
+			struct pwindow *win = windows->items[j];
+			if (win->id != st->drag_id) {
+				continue;
+			}
+			double gw = st->drag_box.width, gh = st->drag_box.height;
+			double gx = st->drag_box.x + (st->px - st->press_x);
+			double gy = st->drag_box.y + (st->py - st->press_y);
+			pd_rect(cr, gx, gy, gw, gh, (fg & 0xffffff00) | 0x90);
+			cairo_rectangle(cr, gx + 0.5, gy + 0.5, gw - 1, gh - 1);
+			pd_color(cr, accent);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+			double is = gh - 4 < gw - 4 ? gh - 4 : gw - 4;
+			is = is > 16 ? 16 : is;
+			if (icons && is >= 8) {
+				cairo_surface_t *icon = apps_icon_for_window(panel, win,
+					(int)(is * ctx->surface->scale));
+				pd_icon(cr, icon, gx + (gw - is) / 2, gy + (gh - is) / 2, is);
+			}
+		}
+	}
+}
+
+/* ---------- dragging a window to another desktop ---------- */
+
+static bool workspaces_press(struct widget *w, struct psurface *s, struct hotspot *hs,
+		double x, double y) {
+	struct pager_state *st = w->data;
+	if (names_only(w)) {
+		return false;
+	}
+	struct pager_layout *lay = layout_of(st, s);
+	for (int i = lay->win_count - 1; i >= 0; i--) {
+		if (pbox_contains(&lay->wins[i].box, x, y)) {
+			st->drag_id = lay->wins[i].id;
+			st->drag_box = lay->wins[i].box;
+			st->drag_surface = s;
+			st->press_x = st->px = x;
+			st->press_y = st->py = y;
+			st->dragging = false;
+			return true;
+		}
+	}
+	return false;
+}
+
+static void workspaces_drag(struct widget *w, struct psurface *s, double x, double y) {
+	struct pager_state *st = w->data;
+	st->px = x;
+	st->py = y;
+	if (!st->dragging && (fabs(x - st->press_x) >= DRAG_START ||
+			fabs(y - st->press_y) >= DRAG_START)) {
+		st->dragging = true;
+		tooltip_cancel(w->panel);
+	}
+}
+
+static bool workspaces_drop(struct widget *w, struct psurface *s, double x, double y) {
+	struct pager_state *st = w->data;
+	bool was = st->dragging;
+	st->dragging = false;
+	if (!was) {
+		return false; // a click
+	}
+	struct pager_layout *lay = layout_of(st, s);
+	const char *from = NULL;
+	for (int i = 0; i < lay->win_count; i++) {
+		if (lay->wins[i].id == st->drag_id) {
+			from = lay->wins[i].workspace;
+		}
+	}
+	for (int i = 0; i < lay->desk_count; i++) {
+		struct pbox b = lay->desks[i].box;
+		if (x >= b.x && x < b.x + b.width && (!from || strcmp(from, lay->desks[i].name) != 0)) {
+			// the name may hold anything: escaped as sway reads it
+			GString *name = g_string_new(NULL);
+			for (const char *c = lay->desks[i].name; *c; c++) {
+				if (*c == '"' || *c == '\\') {
+					g_string_append_c(name, '\\');
+				}
+				g_string_append_c(name, *c);
+			}
+			ipc_panel_commandf(w->panel, "[con_id=%lld] move container to workspace \"%s\"",
+				(long long)st->drag_id, name->str);
+			g_string_free(name, TRUE);
+			ipc_panel_refresh_tree(w->panel);
+			break;
+		}
+	}
+	widget_set_dirty(w);
+	return true;
 }
 
 /* ---------- the names only: a button for each desktop ---------- */
@@ -346,6 +537,7 @@ static char *workspaces_tooltip(struct widget *w, struct hotspot *hs) {
 
 const struct widget_impl widget_workspaces = {
 	.type = "workspaces",
+	.init = workspaces_init,
 	.set_active = workspaces_set_active,
 	.destroy = workspaces_destroy,
 	.measure = workspaces_measure,
@@ -353,4 +545,7 @@ const struct widget_impl widget_workspaces = {
 	.click = workspaces_click,
 	.scroll = workspaces_scroll,
 	.tooltip = workspaces_tooltip,
+	.press = workspaces_press,
+	.drag = workspaces_drag,
+	.drop = workspaces_drop,
 };

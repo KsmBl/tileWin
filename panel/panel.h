@@ -320,6 +320,14 @@ struct widget_impl {
 	/* A desktop style of its own (ctx->style); false leaves it to the common ones. */
 	bool (*draw_gadget)(struct widget *w, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal);
+	/*
+	 * Dragging on the taskbar: a press of the left button on the widget (true when
+	 * it may drag from there), the pointer moving while the button is held, and
+	 * the button let go (true when it was a drag, which then is no click).
+	 */
+	bool (*press)(struct widget *w, struct psurface *s, struct hotspot *hs, double x, double y);
+	void (*drag)(struct widget *w, struct psurface *s, double x, double y);
+	bool (*drop)(struct widget *w, struct psurface *s, double x, double y);
 };
 
 struct widget {
@@ -351,6 +359,8 @@ bool widget_handle_button(struct panel *panel, struct psurface *s, struct hotspo
 void widget_handle_scroll(struct panel *panel, struct psurface *s, struct hotspot *hs,
 	int direction);
 void widget_destroy(struct widget *w);
+/* bar.c: a widget that goes is no longer dragged from. */
+void bar_widget_gone(struct widget *w);
 /*
  * The command that opens the settings of this widget where it is: its dialog
  * over the Taskbar page, or for a widget on the desktop over the Desktop page.

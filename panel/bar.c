@@ -18,6 +18,17 @@ struct bar {
 	bool pressed;
 };
 
+/* The widget a press of the left button went to that may drag from there. */
+static struct widget *pressing;
+static struct psurface *pressing_surface;
+
+void bar_widget_gone(struct widget *w) {
+	if (pressing == w) {
+		pressing = NULL;
+		pressing_surface = NULL;
+	}
+}
+
 static int default_height(enum pstyle style) {
 	switch (style) {
 	case PS_CLASSIC:
@@ -364,6 +375,13 @@ static void bar_update_hover(struct psurface *s) {
 
 static void bar_pointer_motion(struct psurface *s, double x, double y) {
 	struct bar *bar = s->data;
+	if (pressing && pressing_surface == s) {
+		bar->px = x;
+		bar->py = y;
+		pressing->impl->drag(pressing, s, x, y);
+		psurface_set_dirty(s);
+		return;
+	}
 	struct hotspot *before = bar->inside ? psurface_hotspot_at(s, bar->px, bar->py) : NULL;
 	bar->px = x;
 	bar->py = y;
@@ -447,7 +465,21 @@ static void bar_pointer_button(struct psurface *s, double x, double y,
 	psurface_set_dirty(s);
 	if (pressed) {
 		tooltip_cancel(panel);
+		struct hotspot *at = psurface_hotspot_at(s, x, y);
+		if (button == BTN_LEFT && at && at->widget && at->widget->impl->press &&
+				at->widget->impl->drag && at->widget->impl->drop &&
+				at->widget->impl->press(at->widget, s, at, x, y)) {
+			pressing = at->widget;
+			pressing_surface = s;
+		}
 		return;
+	}
+	if (pressing && button == BTN_LEFT) {
+		struct widget *w = pressing;
+		pressing = NULL;
+		if (pressing_surface == s && w->impl->drop(w, s, x, y)) {
+			return; // a drag: no click
+		}
 	}
 	struct hotspot *hs = psurface_hotspot_at(s, x, y);
 	if (!hs) {
@@ -507,6 +539,10 @@ static void bar_pointer_axis(struct psurface *s, double x, double y, int directi
 
 static void bar_closed(struct psurface *s) {
 	struct bar *bar = s->data;
+	if (pressing_surface == s) {
+		pressing = NULL;
+		pressing_surface = NULL;
+	}
 	bar->output->bar = NULL;
 	free(bar);
 	psurface_destroy(s);

@@ -1411,6 +1411,15 @@ test(
 )
 
 test(
+	'workspaces-drag',
+	find_program('workspaces_drag.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 90,
+)
+
+test(
 	'app-popup',
 	find_program('app_popup.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
