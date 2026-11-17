@@ -529,9 +529,9 @@ static void desk_motion(struct psurface *s, double x, double y) {
 	ds->py = y;
 	ds->inside = true;
 	struct hotspot *after = hotspot_at(ds, x, y);
-	if (!compact(ds->dw) && !tile(ds->dw)) {
-		psurface_set_dirty(s); // a chart shows the reading under the pointer
-	}
+	// (a chart shows the reading under the pointer: drawn again below, after the
+	// hotspots are used, as drawing frees them)
+	bool chart = !compact(ds->dw) && !tile(ds->dw);
 	if (before != after || !after || entered) {
 		// drawing again frees the hotspots, so the tooltip gets a copy
 		struct hotspot hovered = after ? *after : (struct hotspot){ 0 };
@@ -544,6 +544,8 @@ static void desk_motion(struct psurface *s, double x, double y) {
 			tooltip_cancel(s->panel);
 		}
 		free(str);
+	} else if (chart) {
+		psurface_set_dirty(s);
 	}
 }
 
