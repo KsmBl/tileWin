@@ -1136,15 +1136,38 @@ security_build() { # kver
 		local watch
 		(
 			exec 9>&- # not the lock of the build: it ends with the build
-			local seen="" marker=$lp/$name.step a b words pct newer all
+			local seen="" marker=$lp/$name.step a b words pct newer all started=0 key
+			local times=$lp/$name.times # how long each step took the last time, in seconds
 			while sleep "${TILEWIN_KERNEL_WATCH_S:-5}"; do
 				IFS=$'\t' read -r a b words < <(klp_progress "$log" "$((before + 1))")
-				[[ $words == "$seen" ]] || { seen=$words; touch "$marker"; }
+				if [[ $words != "$seen" ]]; then
+					# the step before is over: how long it took, for the next round
+					if [[ -n $seen && $started -gt 0 ]]; then
+						key=${seen// /_}
+						{ grep -v "^$key " "$times" 2>/dev/null; echo "$key $(($(date +%s) - started))"; } \
+							> "$times.new" && mv "$times.new" "$times"
+					fi
+					seen=$words
+					started=$(date +%s)
+					touch "$marker"
+				fi
 				pct=$a
-				# within a kernel build: by the objects written since it began
+				# within a kernel build: by the objects written since it began, or by the
+				# time it took the last round (the build with the fixes compiles little and
+				# spends its time linking), whichever is further; never to its end
 				if [[ $words == building* && $b -gt $a ]]; then
+					local by_objects=0 by_time expected elapsed
 					IFS=$'\t' read -r newer all < <(klp_objects "$tree" "$marker")
-					[[ $all -gt 0 ]] && pct=$((a + (b - a) * newer / all))
+					[[ $all -gt 0 ]] && by_objects=$((1000 * newer / all))
+					expected=$(awk -v k="${words// /_}" '$1 == k { print $2 }' "$times" 2>/dev/null)
+					[[ $expected =~ ^[0-9]+$ && $expected -gt 0 ]] ||
+						case $words in *fixes*) expected=900 ;; *) expected=2400 ;; esac
+					elapsed=$(($(date +%s) - started))
+					# per mille, nearing the end ever more slowly past what was expected
+					by_time=$(awk -v t="$elapsed" -v e="$expected" 'BEGIN { f = t / e;
+						if (f > 0.9) f = 0.9 + 0.09 * (1 - exp(-(f - 0.9) * 3)); print int(f * 1000) }')
+					[[ $by_time -gt $by_objects ]] && by_objects=$by_time
+					pct=$((a + (b - a) * by_objects / 1000))
 					[[ $pct -ge $b ]] && pct=$((b - 1))
 				fi
 				echo "Making the livepatch module of Linux $to: $words" > "$lp/$name.progress"
