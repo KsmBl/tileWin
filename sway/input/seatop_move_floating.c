@@ -119,7 +119,10 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 		}
 		// Keep the cursor at the same relative spot of the title bar.
 		double frac = e->con->pending.width > 0 ? e->dx / e->con->pending.width : 0.5;
+		// at once, under the pointer: an animation would fly to where it was
+		tw_animate_resize_off = true;
 		tw_restore(e->con);
+		tw_animate_resize_off = false;
 		e->before = e->con->tw.restore_box;
 		e->dx = frac * e->con->pending.width;
 		struct tw_insets in = tw_deco_insets(false);

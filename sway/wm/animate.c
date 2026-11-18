@@ -775,8 +775,10 @@ void tw_animate_minimize(struct sway_container *con, bool minimize) {
 	apply_copy(a, 0);
 }
 
+bool tw_animate_resize_off = false;
+
 void tw_animate_resize(struct sway_container *con) {
-	if (!enabled(TW_ANIM_MAXIMIZE) || !con || !floating_shown(con)) {
+	if (tw_animate_resize_off || !enabled(TW_ANIM_MAXIMIZE) || !con || !floating_shown(con)) {
 		return;
 	}
 	struct wlr_box old = { con->current.x, con->current.y, con->current.width,
