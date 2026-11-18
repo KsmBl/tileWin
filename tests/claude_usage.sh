@@ -126,6 +126,23 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":61,"resets_at":%d}}}' $((
 tail -n 1 "$history" | grep -q " 0.0 $((now + 18000)) " ||
 	fail "the history went back to the older window: $(tail -n 1 "$history")"
 
+# ---- a reset by hand that keeps the reset time: a session's answer lower than before
+# is taken, while another session redrawing what it showed before changes nothing
+week=$((now + 3 * 86400))
+printf '{"session_id":"a","rate_limits":{"seven_day":{"used_percentage":97,"resets_at":%d}}}' $week |
+	sh -c "$command" >/dev/null
+printf '{"session_id":"b","rate_limits":{"seven_day":{"used_percentage":96,"resets_at":%d}}}' $week |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '7d 96%' || fail "a new session's first answer was not taken: $("$tool" list)"
+printf '{"session_id":"b","rate_limits":{"seven_day":{"used_percentage":4,"resets_at":%d}}}' $week |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '7d 4%' || fail "usage reset by hand was not taken: $("$tool" list)"
+printf '{"session_id":"a","rate_limits":{"seven_day":{"used_percentage":97,"resets_at":%d}}}' $week |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '7d 4%' || fail "a session redrawing its stale value raised it again: $("$tool" list)"
+tail -n 1 "$history" | grep -q " 4.0 $week\$" ||
+	fail "the history did not take the reset by hand: $(tail -n 1 "$history")"
+
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
 echo '{ this is not json' > "$work/broken/settings.json"

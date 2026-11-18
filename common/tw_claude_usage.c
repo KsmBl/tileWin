@@ -504,8 +504,8 @@ void tw_claude_history_add(const char *history, const struct tw_claude_usage *us
 	}
 	struct tw_claude_point *points;
 	int n = tw_claude_history_read(path, &points);
-	// within the same window what was used only grows: a lower value is an older
-	// one from another session of Claude Code (see tilewin-claude-usage)
+	// the values are those tilewin-claude-usage took, which tells a stale session
+	// from a fresh answer: lower in the same window is usage reset by hand
 	struct tw_claude_usage u = *usage;
 	if (n > 0) {
 		const struct tw_claude_point *last = &points[n - 1];
@@ -515,16 +515,6 @@ void tw_claude_history_add(const char *history, const struct tw_claude_usage *us
 		}
 		if (tw_claude_window_older(&u.seven_day, &last->seven_day)) {
 			u.seven_day = last->seven_day;
-		}
-		if (u.five_hour.known && last->five_hour.known &&
-				tw_claude_same_window(u.five_hour.resets_at, last->five_hour.resets_at) &&
-				last->five_hour.used > u.five_hour.used) {
-			u.five_hour.used = last->five_hour.used;
-		}
-		if (u.seven_day.known && last->seven_day.known &&
-				tw_claude_same_window(u.seven_day.resets_at, last->seven_day.resets_at) &&
-				last->seven_day.used > u.seven_day.used) {
-			u.seven_day.used = last->seven_day.used;
 		}
 	}
 	usage = &u;

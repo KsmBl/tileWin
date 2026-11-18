@@ -74,15 +74,14 @@ static int window_series(const struct claude_charts *c, bool week, time_t reset,
 			continue;
 		}
 		ts[n] = c->points[i].at;
-		// only growing: a lower value is an older one of another session
-		vs[n] = n > 0 && vs[n - 1] > w->used ? vs[n - 1] : w->used;
+		vs[n] = w->used; // (lower in the same window: reset by hand)
 		n++;
 	}
 	const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
 	if (cur->known && tw_claude_same_window(cur->resets_at, reset) && c->now < end &&
 			n < max) {
 		ts[n] = c->now;
-		vs[n] = n > 0 && vs[n - 1] > cur->used ? vs[n - 1] : cur->used;
+		vs[n] = cur->used;
 		n++;
 	} else if (c->now >= end && n < max) {
 		// over: what was used stays until it ended

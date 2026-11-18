@@ -120,11 +120,35 @@ static char *state_path(const char *dir) {
 
 /* ---------- statusline ---------- */
 
-static void copy_window(json_object *limits, const char *key, json_object *out) {
+static void copy_window(json_object *limits, const char *key, json_object *out,
+		json_object *session) {
 	json_object *window, *used, *resets;
 	if (!limits || !json_object_object_get_ex(limits, key, &window) ||
 			!json_object_object_get_ex(window, "used_percentage", &used)) {
 		return; // not shown this time: what was written before stays
+	}
+	// with the session known: what a session shows again unchanged is only its
+	// status line redrawn, with what it saw at its last answer, which may be long
+	// before the others' (stale); what it shows changed came with an answer just
+	// now, and is the truth, also lower (usage reset by hand in the same window)
+	bool fresh = false;
+	if (session) {
+		json_object *seen, *seen_used, *seen_resets;
+		int64_t now_resets = json_object_object_get_ex(window, "resets_at", &resets) ?
+			json_object_get_int64(resets) : 0;
+		fresh = !json_object_object_get_ex(session, key, &seen) ||
+			!json_object_object_get_ex(seen, "used_percentage", &seen_used) ||
+			json_object_get_double(seen_used) != json_object_get_double(used) ||
+			!json_object_object_get_ex(seen, "resets_at", &seen_resets) ||
+			json_object_get_int64(seen_resets) != now_resets;
+		json_object *mark = json_object_new_object();
+		json_object_object_add(mark, "used_percentage",
+			json_object_new_double(json_object_get_double(used)));
+		json_object_object_add(mark, "resets_at", json_object_new_int64(now_resets));
+		json_object_object_add(session, key, mark);
+		if (!fresh) {
+			return;
+		}
 	}
 	// several sessions of Claude Code each show the limits as of their own last
 	// answer, so an older, lower value can come after a newer one: within the same
@@ -140,7 +164,7 @@ static void copy_window(json_object *limits, const char *key, json_object *out) 
 			json_object_get_int64(resets) + 300 < json_object_get_int64(before_resets)) {
 		return; // stale: what was written stays
 	}
-	if (json_object_object_get_ex(out, key, &before) &&
+	if (!fresh && json_object_object_get_ex(out, key, &before) &&
 			json_object_object_get_ex(before, "used_percentage", &before_used) &&
 			json_object_object_get_ex(before, "resets_at", &before_resets) &&
 			json_object_object_get_ex(window, "resets_at", &resets) &&
@@ -180,9 +204,39 @@ static void record(const char *dir, const char *input, size_t len) {
 		json_object_object_add(out, "account", json_object_new_string(account));
 		free(account);
 	}
-	json_object_object_add(out, "updated", json_object_new_int64((int64_t)time(NULL)));
-	copy_window(limits, "five_hour", out);
-	copy_window(limits, "seven_day", out);
+	time_t now = time(NULL);
+	json_object_object_add(out, "updated", json_object_new_int64((int64_t)now));
+	// what each session showed last, to tell a fresh answer from a redrawn one;
+	// sessions not heard of for a week are forgotten
+	json_object *session = NULL, *id;
+	if (json_object_object_get_ex(root, "session_id", &id) &&
+			json_object_is_type(id, json_type_string) && *json_object_get_string(id)) {
+		json_object *sessions;
+		if (!json_object_object_get_ex(out, "sessions", &sessions) ||
+				!json_object_is_type(sessions, json_type_object)) {
+			sessions = json_object_new_object();
+			json_object_object_add(out, "sessions", sessions);
+		}
+		const char *gone[64];
+		int ngone = 0;
+		json_object_object_foreach(sessions, sid, s) {
+			json_object *at;
+			if (ngone < 64 && (!json_object_object_get_ex(s, "at", &at) ||
+					json_object_get_int64(at) < (int64_t)now - 7 * 86400)) {
+				gone[ngone++] = sid;
+			}
+		}
+		for (int i = 0; i < ngone; i++) {
+			json_object_object_del(sessions, gone[i]);
+		}
+		if (!json_object_object_get_ex(sessions, json_object_get_string(id), &session)) {
+			session = json_object_new_object();
+			json_object_object_add(sessions, json_object_get_string(id), session);
+		}
+		json_object_object_add(session, "at", json_object_new_int64((int64_t)now));
+	}
+	copy_window(limits, "five_hour", out, session);
+	copy_window(limits, "seven_day", out, session);
 	write_atomic(path, json_object_to_json_string_ext(out, JSON_C_TO_STRING_PRETTY), 0600);
 	free(path);
 	json_object_put(out);
