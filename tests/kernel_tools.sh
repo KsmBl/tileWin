@@ -87,10 +87,11 @@ EOF
 	echo four > "$t/fs/c.c"
 	echo five > "$t/fs/d.c"
 	echo six > "$t/fs/e.c"
+	echo seven > "$t/fs/f.c"
 	printf 'mod-objs := e.o \\\n\tother.o\nobj-y += mod.o\n' > "$t/fs/Makefile"
 	echo three > "$t/drivers/unbuilt.c"
 	mkdir -p "$t/Documentation"; echo doc > "$t/Documentation/x.txt"
-	touch "$t/fs/a.o" "$t/fs/b.o" "$t/fs/c.o" "$t/fs/d.o" "$t/fs/e.o"
+	touch "$t/fs/a.o" "$t/fs/b.o" "$t/fs/c.o" "$t/fs/d.o" "$t/fs/e.o" "$t/fs/f.o"
 	cat > "$t/scripts/config" <<'EOF'
 #!/bin/bash
 file=.config
@@ -141,6 +142,12 @@ for patch in "${patches[@]}"; do
 	if grep -q broken "$patch"; then
 		f=$(sed -n 's|^+++ b/||p' "$patch" | head -n 1)
 		echo "${f:-x.c}:1:1: error: changed data: cannot be patched live"
+		exit 1
+	fi
+	# one whose changed data objtool names, in a module of files from other folders
+	if grep -q symdata "$patch"; then
+		echo "drivers/big/big.o: error: objtool: changed data: special_table_funcs"
+		echo "error: klp-build: objtool klp diff failed"
 		exit 1
 	fi
 	# one of a module made of several files: objtool names the module's object
@@ -360,11 +367,12 @@ mkdir -p "$work/stable/a/fs" "$work/stable/a/drivers" "$work/stable/a/include/li
 (
 	cd "$work/stable"
 	echo one > a/fs/a.c; echo two > a/fs/b.c; echo three > a/drivers/unbuilt.c; echo four > a/fs/c.c
-	echo five > a/fs/d.c; echo six > a/fs/e.c
+	echo five > a/fs/d.c; echo six > a/fs/e.c; echo seven > a/fs/f.c
 	echo '/* header */' > a/include/linux/foo.h; echo doc > a/Documentation/x.txt
 	cp -a a b1; echo fixed1 >> b1/fs/a.c
 	cp -a a b3; printf 'fixed1\nfixed3\n' >> b3/fs/a.c; echo broken >> b3/fs/b.c
 	echo detour >> b3/fs/c.c; echo needsgone >> b3/fs/d.c; echo moddata >> b3/fs/e.c
+	printf 'symdata\nstatic const struct x special_table_funcs = {};\n' >> b3/fs/f.c
 	echo fixed > b3/drivers/unbuilt.c; echo '/* fixed */' >> b3/include/linux/foo.h
 	echo fixed >> b3/Documentation/x.txt
 	mv a linux-9.9 && mv b1 linux-9.9.1 && mv b3 linux-9.9.3
@@ -386,9 +394,11 @@ check "  what the kernel lacks of them goes in" grep -q "^klp-build .* --no-repl
 check "  only that: what 9.9.1 had already is not in it" \
 	bash -c "grep -qx '+fixed3' '$lp/security_9_9_3.patch' && ! grep -q '^+fixed1' '$lp/security_9_9_3.patch'"
 check "  a file klp-build refuses is left out, and the rest goes in again" \
-	test "$(grep -c . "$TW_KLP_CALLS")" = 5
+	test "$(grep -c . "$TW_KLP_CALLS")" = 6
 check "  without building the kernel without them once more" grep -q -- "-S 2" "$TW_KLP_CALLS"
 check "  the file it refused is listed" grep -q "^fs/b.c	klp-build: " "$lp/security_9_9_3.left"
+check "  also one whose changed data objtool names, wherever its file is" \
+	grep -q "^fs/f.c	klp-build: " "$lp/security_9_9_3.left"
 check "  also one of a module objtool names by the module's object" \
 	grep -q "^fs/e.c	klp-build: " "$lp/security_9_9_3.left"
 check "  also one the linker cannot link, which it names by its whole path" \
@@ -398,7 +408,7 @@ check "  also one the compiler names by a detour through another folder" \
 check "  and a header" grep -q "^include/linux/foo.h	a header" "$lp/security_9_9_3.left"
 check "  but not what is not built into it, nor the documentation" \
 	bash -c "! grep -qE 'unbuilt|Documentation' '$lp/security_9_9_3.left'"
-check "  and the list says how many" grep -q "1 files live; 5 need a restart" "$lp/security_9_9_3.progress"
+check "  and the list says how many" grep -q "1 files live; 6 need a restart" "$lp/security_9_9_3.progress"
 check "  its work is gone, and klp-build's" \
 	test ! -e "$lp/security_9_9_3.work" -a ! -e "$XDG_CACHE_HOME/tileWin/kernel/build/$k1/klp-tmp"
 K security-build $k1 > "$work/out" 2>&1
@@ -920,7 +930,7 @@ echo "100000.0 100.0" > "$work/uptime" # later: the old complaint is past
 TILEWIN_KERNEL_AUTO_MANUAL=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "fixes the kernel takes well stay" test -d "$sb/sys/kernel/livepatch/livepatch_security_9_9_3"
 check "  and are applied at every start of it" test -f "$sb/usr/lib/modules/$a1/livepatch/livepatch_security_9_9_3.ko"
-check "  the status names them and what needs a restart" bash -c "[ '$(status fixes)' = 9.9.3 ] && [ '$(status fixes_left)' = 5 ]"
+check "  the status names them and what needs a restart" bash -c "[ '$(status fixes)' = 9.9.3 ] && [ '$(status fixes_left)' = 6 ]"
 check "  and the user is told" bash -c "grep -q 'Kernel fixed without a restart' '$work/notes'"
 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "  once" test "$(grep -c 'Kernel fixed' "$work/notes")" = 1
