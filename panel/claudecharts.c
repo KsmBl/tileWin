@@ -73,18 +73,42 @@ static int window_series(const struct claude_charts *c, bool week, time_t reset,
 }
 
 /* The usage at a time between the points of a series; below 0 outside it. */
-static double value_at(const time_t *ts, const double *vs, int n, time_t t) {
+/*
+ * Readings far apart that rose meanwhile: what was used in between was not seen
+ * from here (on another computer, or before the history), only that it was
+ * somewhere between the two, and when is not known.
+ */
+#define GAP_S (15 * 60)
+#define GAP_RISE 3.0 // percent; less is a long answer here
+
+static bool is_gap(const time_t *ts, const double *vs, int i) {
+	return i > 0 && ts[i] - ts[i - 1] > GAP_S && vs[i] - vs[i - 1] >= GAP_RISE;
+}
+
+/*
+ * What was used at a time: *lo and *hi the same where it is known (between
+ * readings close together), the two readings around a gap; false outside the series.
+ */
+static bool range_at(const time_t *ts, const double *vs, int n, time_t t, double *lo,
+		double *hi) {
 	if (n < 1 || t < ts[0] || t > ts[n - 1]) {
-		return -1;
+		return false;
 	}
 	for (int i = 1; i < n; i++) {
 		if (t <= ts[i]) {
+			if (is_gap(ts, vs, i) && t < ts[i]) {
+				*lo = vs[i - 1];
+				*hi = vs[i];
+				return true;
+			}
 			double span = (double)(ts[i] - ts[i - 1]);
 			double share = span > 0 ? (double)(t - ts[i - 1]) / span : 1;
-			return vs[i - 1] + (vs[i] - vs[i - 1]) * share;
+			*lo = *hi = vs[i - 1] + (vs[i] - vs[i - 1]) * share;
+			return true;
 		}
 	}
-	return vs[n - 1];
+	*lo = *hi = vs[n - 1];
+	return true;
 }
 
 /* The time under the pointer, for a chart from start to end. */
@@ -132,19 +156,61 @@ static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
 		vs++;
 		n--;
 	}
+	// the area under what is known: across a gap only what was used before it
 	cairo_new_path(cr);
 	cairo_move_to(cr, chart_x(g, start, end, ts[0]), g.y + g.height);
 	for (int i = 0; i < n; i++) {
+		if (is_gap(ts, vs, i)) {
+			cairo_line_to(cr, chart_x(g, start, end, ts[i]), chart_y(g, vs[i - 1]));
+		}
 		cairo_line_to(cr, chart_x(g, start, end, ts[i]), chart_y(g, vs[i]));
 	}
 	cairo_line_to(cr, chart_x(g, start, end, ts[n - 1]), g.y + g.height);
 	cairo_close_path(cr);
 	pd_color(cr, (color & 0xffffff00) | 0x48);
 	cairo_fill(cr);
+	// a gap: hatched between the two readings, "used somewhere in here"
+	for (int i = 1; i < n; i++) {
+		if (!is_gap(ts, vs, i)) {
+			continue;
+		}
+		double x0 = chart_x(g, start, end, ts[i - 1]), x1 = chart_x(g, start, end, ts[i]);
+		double y0 = chart_y(g, vs[i]), y1 = chart_y(g, vs[i - 1]);
+		cairo_save(cr);
+		cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+		cairo_clip(cr);
+		pd_color(cr, (color & 0xffffff00) | 0x14);
+		cairo_paint(cr);
+		cairo_new_path(cr);
+		for (double d = -(y1 - y0); d < x1 - x0; d += 5) {
+			cairo_move_to(cr, x0 + d, y1);
+			cairo_line_to(cr, x0 + d + (y1 - y0), y0);
+		}
+		pd_color(cr, (color & 0xffffff00) | 0x50);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+		cairo_restore(cr);
+	}
+	// the line: solid where it is known, dashed across a gap (held, then risen)
 	cairo_new_path(cr);
 	for (int i = 0; i < n; i++) {
 		double x = chart_x(g, start, end, ts[i]), y = chart_y(g, vs[i]);
 		if (i == 0) {
+			cairo_move_to(cr, x, y);
+		} else if (is_gap(ts, vs, i)) {
+			pd_color(cr, color);
+			cairo_set_line_width(cr, 1.5);
+			cairo_stroke(cr);
+			double dash[] = { 3, 3 };
+			double hold = chart_y(g, vs[i - 1]);
+			cairo_move_to(cr, chart_x(g, start, end, ts[i - 1]), hold);
+			cairo_line_to(cr, x, hold);
+			cairo_line_to(cr, x, y);
+			cairo_set_dash(cr, dash, 2, 0);
+			pd_color(cr, (color & 0xffffff00) | 0xa0);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+			cairo_set_dash(cr, NULL, 0, 0);
 			cairo_move_to(cr, x, y);
 		} else {
 			cairo_line_to(cr, x, y);
@@ -289,11 +355,16 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 			time_t ts[256];
 			double vs[256];
 			int n = window_series(c, false, reset, TW_CLAUDE_FIVE_HOURS, ts, vs, 256);
-			double v = value_at(ts, vs, n, t);
-			if (v >= 0) {
-				ys[0] = chart_y(g, v);
-				colors[0] = usage_color(st, v);
-				snprintf(text, sizeof(text), "%s\n%.0f%% used", when, v);
+			double lo, hi;
+			if (range_at(ts, vs, n, t, &lo, &hi) && hi - lo >= 0.5) {
+				ys[0] = chart_y(g, lo);
+				colors[0] = usage_color(st, hi);
+				snprintf(text, sizeof(text), "%s\nbetween %.0f%% and %.0f%%, when is not known",
+					when, lo, hi);
+			} else if (range_at(ts, vs, n, t, &lo, &hi)) {
+				ys[0] = chart_y(g, lo);
+				colors[0] = usage_color(st, lo);
+				snprintf(text, sizeof(text), "%s\n%.0f%% used", when, lo);
 			} else {
 				snprintf(text, sizeof(text), "%s\nstill to come", when);
 			}
@@ -378,11 +449,17 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 		when_words(t, true, when, sizeof(when));
 		double ys[1] = { -1 };
 		uint32_t colors[1] = { color };
-		double v = value_at(ts, vs, n, t);
-		if (t <= c->now && v >= 0) {
-			ys[0] = chart_y(g, v);
-			colors[0] = usage_color(st, v);
-			snprintf(text, sizeof(text), "%s\n%.0f%% used", when, v);
+		double lo = -1, hi = -1;
+		bool known = t <= c->now && range_at(ts, vs, n, t, &lo, &hi);
+		if (known && hi - lo >= 0.5) {
+			ys[0] = chart_y(g, lo);
+			colors[0] = usage_color(st, hi);
+			snprintf(text, sizeof(text), "%s\nbetween %.0f%% and %.0f%%, when is not known",
+				when, lo, hi);
+		} else if (known) {
+			ys[0] = chart_y(g, lo);
+			colors[0] = usage_color(st, lo);
+			snprintf(text, sizeof(text), "%s\n%.0f%% used", when, lo);
 		} else if (t > c->now && c->now > start && used > 0) {
 			double ahead = fmin(used + used / (double)(c->now - start) * (double)(t - c->now), 100);
 			ys[0] = chart_y(g, ahead);
