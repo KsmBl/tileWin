@@ -87,7 +87,7 @@ EOF
 	echo four > "$t/fs/c.c"
 	echo five > "$t/fs/d.c"
 	echo six > "$t/fs/e.c"
-	echo seven > "$t/fs/f.c"
+	{ echo 'static const struct x special_table_funcs = {};'; seq 1 12; echo seven; } > "$t/fs/f.c"
 	printf 'mod-objs := e.o \\\n\tother.o\nobj-y += mod.o\n' > "$t/fs/Makefile"
 	echo three > "$t/drivers/unbuilt.c"
 	mkdir -p "$t/Documentation"; echo doc > "$t/Documentation/x.txt"
@@ -367,12 +367,12 @@ mkdir -p "$work/stable/a/fs" "$work/stable/a/drivers" "$work/stable/a/include/li
 (
 	cd "$work/stable"
 	echo one > a/fs/a.c; echo two > a/fs/b.c; echo three > a/drivers/unbuilt.c; echo four > a/fs/c.c
-	echo five > a/fs/d.c; echo six > a/fs/e.c; echo seven > a/fs/f.c
+	echo five > a/fs/d.c; echo six > a/fs/e.c; { echo 'static const struct x special_table_funcs = {};'; seq 1 12; echo seven; } > a/fs/f.c
 	echo '/* header */' > a/include/linux/foo.h; echo doc > a/Documentation/x.txt
 	cp -a a b1; echo fixed1 >> b1/fs/a.c
 	cp -a a b3; printf 'fixed1\nfixed3\n' >> b3/fs/a.c; echo broken >> b3/fs/b.c
 	echo detour >> b3/fs/c.c; echo needsgone >> b3/fs/d.c; echo moddata >> b3/fs/e.c
-	printf 'symdata\nstatic const struct x special_table_funcs = {};\n' >> b3/fs/f.c
+	echo symdata >> b3/fs/f.c # (changes what the table holds, not a line of it)
 	echo fixed > b3/drivers/unbuilt.c; echo '/* fixed */' >> b3/include/linux/foo.h
 	echo fixed >> b3/Documentation/x.txt
 	mv a linux-9.9 && mv b1 linux-9.9.1 && mv b3 linux-9.9.3

@@ -1202,7 +1202,8 @@ security_build() { # kver
 			fi
 		done
 		# objtool names what changed that it cannot patch ("amdgpu.o: error: objtool:
-		# changed data: smu_v13_0_7_ppt_funcs"): the fixes that touch that name go
+		# changed data: smu_v13_0_7_ppt_funcs"): the fixes that touch that name go, or
+		# whose file has it (a fix can change a table without a line of it in the fix)
 		if [[ ${#bad[@]} -eq 0 ]]; then
 			local sym
 			while read -r sym; do
@@ -1210,8 +1211,8 @@ security_build() { # kver
 				[[ ${#sym} -ge 4 ]] || continue
 				for p in "${kept[@]}"; do
 					[[ " ${bad[*]} " != *" $p "* ]] || continue
-					if grep -qw -- "$sym" "$p"; then
-						n=$(basename "$p" .patch)
+					n=$(basename "$p" .patch)
+					if grep -qw -- "$sym" "$p" || grep -qw -- "$sym" "$tree/${files_of[n]}" 2>/dev/null; then
 						bad+=("$p")
 						printf '%s\t%s\n' "${files_of[n]}" "klp-build: $(grep -m1 -F -- "$sym" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
 					fi
