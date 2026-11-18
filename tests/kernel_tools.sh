@@ -144,18 +144,6 @@ for patch in "${patches[@]}"; do
 		echo "${f:-x.c}:1:1: error: changed data: cannot be patched live"
 		exit 1
 	fi
-	# one whose changed data objtool names, in a module of files from other folders
-	if grep -q symdata "$patch"; then
-		echo "drivers/big/big.o: error: objtool: changed data: special_table_funcs"
-		echo "error: klp-build: objtool klp diff failed"
-		exit 1
-	fi
-	# one of a module made of several files: objtool names the module's object
-	if grep -q moddata "$patch"; then
-		echo "fs/mod.o: error: objtool: changed data: __mod_device_table__x"
-		echo "error: klp-build: objtool klp diff failed"
-		exit 1
-	fi
 	# one that needs what a file left out had: the linker names it with the whole path
 	if grep -q needsgone "$patch"; then
 		f=$(sed -n 's|^+++ b/||p' "$patch" | head -n 1)
@@ -174,8 +162,40 @@ for patch in "${patches[@]}"; do
 		exit 1
 	fi
 done
+# built: objtool compares each changed object, and klp-build stops at the first it
+# refuses, leaving them all compared: one whose changed data objtool names, in a
+# module of files from other folders, and one of a module made of several files,
+# named by the module's object
+rm -rf klp-tmp/3-checksum-orig klp-tmp/3-checksum-patched
+for patch in "${patches[@]}"; do
+	o=
+	grep -q symdata "$patch" && o=drivers/big/big.o d="changed data: special_table_funcs"
+	grep -q moddata "$patch" && o=fs/mod.o d="changed data: __mod_device_table__x"
+	[ -n "$o" ] || continue
+	mkdir -p "klp-tmp/3-checksum-orig/$(dirname "$o")" "klp-tmp/3-checksum-patched/$(dirname "$o")"
+	echo ok > "klp-tmp/3-checksum-orig/$o"
+	echo "$d" > "klp-tmp/3-checksum-patched/$o"
+done
+if [ -d klp-tmp/3-checksum-patched ]; then
+	for f in $(cd klp-tmp/3-checksum-patched && find . -name '*.o' | sed 's|^\./||' | sort); do
+		(cd klp-tmp/3-checksum-orig && ../../tools/objtool/objtool klp diff "$f" \
+			"$PWD/../3-checksum-patched/$f" /dev/null) ||
+			{ echo "error: klp-build: objtool klp diff failed"; exit 1; }
+	done
+fi
 echo "livepatch module" > "$out"
 KLP
+	mkdir -p "$t/tools/objtool"
+	cat > "$t/tools/objtool/objtool" <<'OBJTOOL'
+#!/bin/bash
+# klp diff orig patched out: refuses what changed data
+[ "$1 $2" = "klp diff" ] || exit 2
+if grep -q "changed data" "$4"; then
+	echo "$3: error: objtool: $(cat "$4")" >&2
+	exit 1
+fi
+OBJTOOL
+	chmod +x "$t/tools/objtool/objtool"
 	chmod +x "$t/scripts/livepatch/klp-build"
 	cat > "$t/Makefile" <<EOF
 .PHONY: olddefconfig localmodconfig allmodconfig syncconfig kernelrelease bzImage modules modules_install
@@ -394,7 +414,9 @@ check "  what the kernel lacks of them goes in" grep -q "^klp-build .* --no-repl
 check "  only that: what 9.9.1 had already is not in it" \
 	bash -c "grep -qx '+fixed3' '$lp/security_9_9_3.patch' && ! grep -q '^+fixed1' '$lp/security_9_9_3.patch'"
 check "  a file klp-build refuses is left out, and the rest goes in again" \
-	test "$(grep -c . "$TW_KLP_CALLS")" = 6
+	test "$(grep -c . "$TW_KLP_CALLS")" = 5
+check "  what objtool refuses of every module is learned in one round" \
+	grep -q "Asking objtool what else it refuses" "$lp/security_9_9_3.log"
 check "  without building the kernel without them once more" grep -q -- "-S 2" "$TW_KLP_CALLS"
 check "  the file it refused is listed" grep -q "^fs/b.c	klp-build: " "$lp/security_9_9_3.left"
 check "  also one whose changed data objtool names, wherever its file is" \

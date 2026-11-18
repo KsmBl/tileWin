@@ -920,6 +920,23 @@ klp_build() { # tree out [klp-build options --] patch...
 	)
 }
 
+# What objtool refuses of every changed object, where klp-build stops at the
+# first one it refuses: one round learns them all, instead of one per build of
+# the kernel with the fixes.
+klp_diff_all() { # tree
+	local tree=$1 orig=$1/klp-tmp/3-checksum-orig patched=$1/klp-tmp/3-checksum-patched
+	local objtool=$1/tools/objtool/objtool scratch f rel
+	[[ -d $orig && -d $patched && -x $objtool ]] || return 0
+	scratch=$(mktemp -d "$tree/klp-tmp/tw-diff.XXXXXX") || return 0
+	while IFS= read -r f; do
+		rel=${f#"$patched"/}
+		mkdir -p "$scratch/$(dirname "$rel")"
+		(cd "$orig" && nice -n 15 "$objtool" klp diff "$rel" "$f" "$scratch/$rel" 2>&1 >/dev/null) |
+			grep -E ': error: objtool: ' || true
+	done < <(find "$patched" -type f -name '*.o' | sort)
+	rm -rf "$scratch"
+}
+
 # The tree a kernel kept for its livepatches, or the reason there is none.
 klp_tree() { # kver
 	local tree
@@ -1192,6 +1209,16 @@ security_build() { # kver
 		errors=$(tail -c +"$((before + 1))" "$log" |
 			grep -iE 'error|did not apply|unsupported|fatal|undefined reference|multiple definition' |
 			sed -E ':a; s#(^|[ /])[^/ :.][^/ :]*/\.\./#\1#; ta')
+		# objtool refused one module: what it refuses of all the others too
+		if grep -q "objtool klp diff failed" <<<"$errors"; then
+			local more
+			step "Asking objtool what else it refuses"
+			more=$(klp_diff_all "$tree")
+			if [[ -n $more ]]; then
+				echo "$more" >> "$log"
+				errors+=$'\n'$more
+			fi
+		fi
 		bad=()
 		for p in "${kept[@]}"; do
 			n=$(basename "$p" .patch)
@@ -1201,47 +1228,48 @@ security_build() { # kver
 				printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F -e "$f:" -e "${f%.c}.o:" -e "${f%.c}.o]" -e "$p" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
 			fi
 		done
-		# objtool names what changed that it cannot patch ("amdgpu.o: error: objtool:
-		# changed data: smu_v13_0_7_ppt_funcs"): the fixes that touch that name go, or
-		# whose file has it (a fix can change a table without a line of it in the fix)
-		if [[ ${#bad[@]} -eq 0 ]]; then
-			local sym
-			while read -r sym; do
-				sym=${sym%%.*} # without .constprop.0, .isra.0 and the like
-				[[ ${#sym} -ge 4 ]] || continue
-				for p in "${kept[@]}"; do
-					[[ " ${bad[*]} " != *" $p "* ]] || continue
-					n=$(basename "$p" .patch)
-					if grep -qw -- "$sym" "$p" || grep -qw -- "$sym" "$tree/${files_of[n]}" 2>/dev/null; then
-						bad+=("$p")
-						printf '%s\t%s\n' "${files_of[n]}" "klp-build: $(grep -m1 -F -- "$sym" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
-					fi
-				done
-			done < <(grep -oE 'error: objtool: [^:]+: [A-Za-z_][A-Za-z0-9_.]*' <<<"$errors" |
-				sed -E 's/.*: //' | sort -u)
-		fi
-		# objtool names a module by its object, made of several files ("uvc/uvcvideo.o:
-		# error: objtool: changed data"): those of its files that are kept go, as the
-		# Makefile of its folder lists them ("uvcvideo-objs := uvc_driver.o ..."), else
-		# the kept files of that folder
-		if [[ ${#bad[@]} -eq 0 ]]; then
-			local obj dir base members
-			while read -r obj; do
-				dir=$(dirname "$obj")
-				base=$(basename "$obj" .o)
-				members=$(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$tree/$dir/Makefile" 2>/dev/null |
-					sed -n -E "s/^${base}-(objs|y)[[:space:]]*[:+]?=(.*)/\2/p" | tr -s ' \t' '\n')
+		# each refusal of objtool: it names what changed that it cannot patch
+		# ("amdgpu.o: error: objtool: changed data: smu_v13_0_7_ppt_funcs"), and the
+		# fixes that touch that name go, or whose file has it (a fix can change a table
+		# without a line of it in the fix); else, a name of no file (the compiler's
+		# "__UNIQUE_ID_ddebug_404.14") or none, the kept files of the module it names
+		# by its object, as the Makefile of its folder lists them ("uvcvideo-objs :=
+		# uvc_driver.o ..."), else the kept files of that folder
+		local line obj sym hit dir base members
+		while IFS= read -r line; do
+			obj=${line%%: error: objtool: *}
+			obj=${obj##* }
+			sym=""
+			[[ ${line#*: error: objtool: } =~ ^[^:]+:\ ([A-Za-z_][A-Za-z0-9_.]*) ]] &&
+				sym=${BASH_REMATCH[1]%%.*} # without .constprop.0, .isra.0 and the like
+			hit=no
+			if [[ ${#sym} -ge 4 ]]; then
 				for p in "${kept[@]}"; do
 					n=$(basename "$p" .patch)
-					f=${files_of[n]}
-					[[ $(dirname "$f") == "$dir" && " ${bad[*]} " != *" $p "* ]] || continue
-					if [[ -z $members ]] || grep -qx "$(basename "${f%.c}").o" <<<"$members"; then
+					if grep -qw -- "$sym" "$p" ||
+							grep -qw -- "$sym" "$tree/${files_of[n]}" 2>/dev/null; then
+						hit=yes
+						[[ " ${bad[*]} " != *" $p "* ]] || continue
 						bad+=("$p")
-						printf '%s\t%s\n' "$f" "klp-build: $(grep -m1 -F "$obj:" <<<"$errors" | cut -c1-160)" >> "$lp/$name.left"
+						printf '%s\t%s\n' "${files_of[n]}" "klp-build: $(cut -c1-160 <<<"$line")" >> "$lp/$name.left"
 					fi
 				done
-			done < <(grep -oE '[A-Za-z0-9_./+-]+\.o: error' <<<"$errors" | sed 's/: error$//' | sort -u)
-		fi
+			fi
+			[[ $hit == no ]] || continue
+			dir=$(dirname "$obj")
+			base=$(basename "$obj" .o)
+			members=$(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$tree/$dir/Makefile" 2>/dev/null |
+				sed -n -E "s/^${base}-(objs|y)[[:space:]]*[:+]?=(.*)/\2/p" | tr -s ' \t' '\n')
+			for p in "${kept[@]}"; do
+				n=$(basename "$p" .patch)
+				f=${files_of[n]}
+				[[ $(dirname "$f") == "$dir" && " ${bad[*]} " != *" $p "* ]] || continue
+				if [[ -z $members ]] || grep -qx "$(basename "${f%.c}").o" <<<"$members"; then
+					bad+=("$p")
+					printf '%s\t%s\n' "$f" "klp-build: $(cut -c1-160 <<<"$line")" >> "$lp/$name.left"
+				fi
+			done
+		done < <(grep -E '\.o: error: objtool: ' <<<"$errors" | sort -u)
 		[[ ${#bad[@]} -gt 0 ]] || give_up "klp-build stopped without naming a file: see the log"
 		local still=()
 		for p in "${kept[@]}"; do
