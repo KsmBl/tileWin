@@ -58,6 +58,8 @@ enum menu_look { MENU_LOOK_THEME, MENU_LOOK_GEM, MENU_LOOK_CONSOLE };
 void menu_open_start_classic(struct panel *panel, struct panel_output *output,
 	list_t *items, int x, int y, bool above, enum menu_look look);
 cairo_t *popup_scratch_cairo(void);
+/* Whether the left button is down in that box of a popup's surface, or was a moment ago. */
+bool popup_press_at(double x, double y, double w, double h);
 /*
  * The pieces of the panel's dialogs, in the theme's look (the Run dialog's):
  * the frame and title bar with a close button (leaves cr at the dialog's top

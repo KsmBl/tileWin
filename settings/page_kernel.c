@@ -87,6 +87,7 @@ struct kernel_page {
 	// the automatic updates: the card at the top, the options, the facts
 	GtkWidget *hero_shield, *hero_title, *hero_detail, *hero_progress, *hero_when;
 	GtkWidget *btn_turn_on, *btn_update, *btn_stop, *btn_restart, *btn_update_also;
+	time_t update_clicked; // when Update now was pressed, 0 for not lately
 	GtkWidget *auto_switch, *auto_when, *auto_time, *auto_catchup, *auto_battery;
 	GtkWidget *auto_profile, *auto_series, *auto_native;
 	GtkWidget *fact_running, *fact_fixes, *fact_next, *activity_list, *livepatch_warning;
@@ -1812,6 +1813,16 @@ static void auto_show(struct kernel_page *p) {
 	gtk_widget_set_visible(p->hero_when, when != NULL);
 	g_free(when);
 	gtk_widget_set_visible(p->btn_turn_on, !on);
+	// a button that started something is itself again once the card shows it
+	// (or a run that was over before the card looked again: checked since the click)
+	if (ka.busy || (p->update_clicked && ka.checked >= p->update_clicked)) {
+		ui_button_ready(p->btn_update);
+		ui_button_ready(p->btn_update_also);
+		p->update_clicked = 0;
+	}
+	if (!ka.busy) {
+		ui_button_ready(p->btn_stop);
+	}
 	gtk_widget_set_visible(p->btn_update, on && !ka.busy && sum.kind != TW_KA_RESTART);
 	gtk_widget_set_visible(p->btn_stop, on && ka.busy);
 	gtk_widget_set_visible(p->btn_restart, sum.kind == TW_KA_RESTART);
@@ -2019,12 +2030,18 @@ static void on_auto_option(GObject *object, GParamSpec *pspec, gpointer data) {
 static void on_systemctl_done(struct kernel_page *p, bool ok, const char *out, const char *err) {
 	if (!ok) {
 		set_message(p, *err ? err : "That did not work");
+		ui_button_ready(p->btn_update);
+		ui_button_ready(p->btn_update_also);
+		ui_button_ready(p->btn_stop);
 	}
 	auto_show(p);
 }
 
 static void on_update_now(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
+	// the run takes a moment to start: the button says so at once
+	ui_button_busy(GTK_WIDGET(button), "Starting...", 60);
+	p->update_clicked = time(NULL);
 	const char *argv[] = { "systemctl", "start", "--no-block", "tilewin-kernel-auto-now.service",
 		NULL };
 	run(p, argv, on_systemctl_done);
@@ -2032,6 +2049,7 @@ static void on_update_now(GtkButton *button, gpointer data) {
 
 static void on_stop(GtkButton *button, gpointer data) {
 	struct kernel_page *p = data;
+	ui_button_busy(GTK_WIDGET(button), "Stopping...", 60);
 	const char *argv[] = { "systemctl", "stop", "tilewin-kernel-auto.service",
 		"tilewin-kernel-auto-now.service", "tilewin-kernel-auto-build@fixes.service",
 		"tilewin-kernel-auto-build@kernel.service", NULL };

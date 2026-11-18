@@ -235,9 +235,72 @@ static void ps_leave(struct psurface *s) {
 	}
 }
 
+/*
+ * Where the left button went down in a popup, while it is held and for a
+ * moment after, so the button there is drawn pressed and a quick click shows
+ * too (popup_press_at).
+ */
+#define PRESS_SHOWN_MS 160
+
+static struct {
+	struct popup *p;
+	double x, y;
+	bool down;
+	struct timespec released;
+	struct loop_timer *timer;
+} press;
+
+static void press_over(void *data) {
+	press.timer = NULL;
+	if (press.p && !press.down) {
+		struct popup *p = press.p;
+		press.p = NULL;
+		popup_set_dirty(p);
+	}
+}
+
+bool popup_press_at(double x, double y, double w, double h) {
+	if (!press.p) {
+		return false;
+	}
+	if (!press.down) {
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		long ms = (now.tv_sec - press.released.tv_sec) * 1000 +
+			(now.tv_nsec - press.released.tv_nsec) / 1000000;
+		if (ms > PRESS_SHOWN_MS) {
+			return false;
+		}
+	}
+	return press.x >= x && press.x < x + w && press.y >= y && press.y < y + h;
+}
+
+static void note_press(struct popup *p, double x, double y, uint32_t button, bool pressed) {
+	if (button != BTN_LEFT) {
+		return;
+	}
+	if (pressed) {
+		press.p = p;
+		press.x = x;
+		press.y = y;
+		press.down = true;
+	} else if (press.p == p) {
+		press.down = false;
+		clock_gettime(CLOCK_MONOTONIC, &press.released);
+		if (press.timer) {
+			loop_remove_timer(p->panel->loop, press.timer);
+		}
+		press.timer = loop_add_timer(p->panel->loop, PRESS_SHOWN_MS + 10, press_over, NULL);
+	}
+	popup_set_dirty(p);
+}
+
 static void ps_button(struct psurface *s, double x, double y, uint32_t button,
 		bool pressed) {
 	struct popup *p = popup_from_surface(s);
+	if (p) {
+		note_press(p, x, y, button, pressed);
+	}
 	if (p && p->vtable->button) {
 		p->vtable->button(p, x, y, button, pressed);
 	}
@@ -389,6 +452,9 @@ void popup_move_resize(struct popup *p, int x, int y, int width, int height) {
 void popup_destroy(struct popup *p) {
 	if (!p) {
 		return;
+	}
+	if (press.p == p) {
+		press.p = NULL;
 	}
 	if (p->child) {
 		popup_destroy(p->child);
@@ -1367,9 +1433,12 @@ void popup_dialog_field(struct panel *panel, cairo_t *cr, double fx, double fy, 
 static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, double y,
 		double w, double h, const char *label, bool is_default) {
 	enum pstyle style = panel_style(panel);
+	// pressed now, or a moment ago (the dialog is drawn a margin in from its surface)
+	int M = popup_shadow_margin(panel);
+	bool down = popup_press_at(x + M, y + M, w, h);
 	if (panel_console(panel)) {
-		// a block with round ends, the default one orange
-		pd_console_block(cr, x, y, w, h, true, true, is_default ?
+		// a block with round ends, the default one orange; bright while pressed
+		pd_console_block(cr, x, y, w, h, true, true, down ? 0xd3d6ffff : is_default ?
 			panel_console_color(panel, 0) : panel_console_color(panel, 3));
 		char *upper = g_utf8_strup(label, -1);
 		pd_text(cr, bar_bold_font(panel), upper, x + 4, y, w - 8, h, 0x000000ff, PD_CENTER);
@@ -1377,7 +1446,7 @@ static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, doubl
 		return;
 	}
 	if (panel_atari(panel)) {
-		pd_atari_button(cr, x, y, w, h, bar_font(panel), label, is_default, false,
+		pd_atari_button(cr, x, y, w, h, bar_font(panel), label, is_default, down,
 			tw_theme_color(panel->theme, "dialog.fg", 0x000000ff),
 			tw_theme_color(panel->theme, "dialog.bg", 0xffffffff));
 		return;
@@ -1390,11 +1459,20 @@ static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, doubl
 			cairo_set_line_width(cr, 1);
 			cairo_stroke(cr);
 		}
-		pd_bevel(cr, x, y, w, h, false);
-		pd_text(cr, bar_font(panel), label, x, y, w, h, 0x000000ff, PD_CENTER);
+		// pressed: the edge sunken, the label a pixel in
+		pd_bevel(cr, x, y, w, h, down);
+		pd_text(cr, bar_font(panel), label, x + (down ? 1 : 0), y + (down ? 1 : 0), w, h,
+			0x000000ff, PD_CENTER);
 		return;
 	}
 	double r = style == PS_LUNA ? 3 : style == PS_FLUENT ? 4 : 2;
+	if (down) {
+		// pressed in a little
+		x += 1;
+		y += 1;
+		w -= 2;
+		h -= 2;
+	}
 	pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
 	if (style == PS_LUNA || style == PS_AERO) {
 		cairo_pattern_t *g = pd_gradient(tw_theme_str(panel->theme, "dialog.button_gradient",
@@ -1410,6 +1488,11 @@ static void draw_dialog_button(struct panel *panel, cairo_t *cr, double x, doubl
 		style == PS_FLAT || style == PS_FLUENT ? (is_default ? 0x0067c0ff : 0x00000028) : 0x707070ff));
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
+	if (down) {
+		pd_rounded(cr, x + 0.5, y + 0.5, w - 1, h - 1, r);
+		pd_color(cr, 0x00000026);
+		cairo_fill(cr);
+	}
 	bool light = is_default && (style == PS_FLAT || style == PS_FLUENT);
 	pd_text(cr, bar_font(panel), label, x, y, w, h,
 		light ? 0xffffffff : tw_theme_color(panel->theme, "dialog.button_fg", 0x000000ff), PD_CENTER);

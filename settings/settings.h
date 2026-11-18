@@ -223,6 +223,12 @@ GtkWidget *ui_icon_button(const char *icon, const char *tooltip, bool sensitive,
 		GCallback callback, gpointer data);
 void ui_closure_free(gpointer data, GClosure *closure);
 GtkWidget *ui_app_icon(const char *icon, int size);
+/*
+ * A button that started something slow: a spinner and text in it at once, not
+ * clickable, until ui_button_ready (or after seconds, 30 for 0).
+ */
+void ui_button_busy(GtkWidget *button, const char *text, guint seconds);
+void ui_button_ready(GtkWidget *button);
 /* Every installed app that is meant to be shown, cached. Borrowed. */
 list_t *ui_all_apps(void);
 const struct tw_desktop_entry *ui_find_app(const char *id);

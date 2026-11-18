@@ -721,6 +721,35 @@ static void add_win11(GString *css, const struct tw_theme *t, bool dark, uint32_
 		dark ? "#2c2c2c" : "#f9f9f9", C(fg), dark ? "#1d1d1d" : "#e5e5e5", C(fg));
 }
 
+/*
+ * How a button answers a click, in the manner of the theme: the old ones push
+ * their label in by a pixel at once, as their buttons did; XP to 11 press in a
+ * little and fade back; the console's block flashes bright and fades. A button
+ * busy with what it started (ui_button_busy) shows its spinner.
+ */
+static void add_press(GString *css, enum era era) {
+	switch (era) {
+	case ERA_CLASSIC:
+	case ERA_ATARI:
+		g_string_append(css,
+			"button:active > *, button:checked:active > * { transform: translate(1px, 1px); }\n");
+		break;
+	case ERA_CONSOLE:
+		g_string_append(css,
+			"button { transition: background-color 280ms ease-out, color 280ms ease-out; }\n"
+			"button:active { transition-duration: 0ms; }\n");
+		break;
+	default:
+		g_string_append(css,
+			"button { transition: background-color 180ms ease-out, background-image 180ms "
+			"ease-out, box-shadow 180ms ease-out, transform 140ms ease-out; }\n"
+			"button:active { transform: scale(0.96); transition-duration: 40ms; }\n");
+		break;
+	}
+	g_string_append(css, "button.tw-busy { opacity: 0.85; }\n"
+		"button.tw-busy spinner { min-width: 14px; min-height: 14px; }\n");
+}
+
 char *settings_theme_css(const struct tw_theme *t) {
 	GString *css = g_string_new(NULL);
 	if (!t) {
@@ -759,6 +788,7 @@ char *settings_theme_css(const struct tw_theme *t) {
 		add_win11(css, t, dark, accent);
 		break;
 	}
+	add_press(css, era);
 	// the brightness over 100 %, the gamma boost of the night light (page_screen.c),
 	// amber as on the quick settings of the taskbar
 	g_string_append(css, "scale.tw-boost > trough > highlight { background-color: #f0a030; "

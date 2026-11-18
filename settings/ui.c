@@ -1522,3 +1522,52 @@ void ui_taskbar_keys_refresh(GPtrArray *keys) {
 		r->refreshing = false;
 	}
 }
+
+/* ---------- a button busy with what it started ---------- */
+
+static gboolean busy_over(gpointer data) {
+	GtkWidget *button = data;
+	ui_button_ready(button);
+	g_object_unref(button);
+	return G_SOURCE_REMOVE;
+}
+
+void ui_button_busy(GtkWidget *button, const char *text, guint seconds) {
+	if (!button || g_object_get_data(G_OBJECT(button), "tw-busy-label")) {
+		return;
+	}
+	const char *label = gtk_button_get_label(GTK_BUTTON(button));
+	g_object_set_data_full(G_OBJECT(button), "tw-busy-label", g_strdup(label ? label : ""),
+		g_free);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+	GtkWidget *spinner = gtk_spinner_new();
+	gtk_spinner_start(GTK_SPINNER(spinner));
+	gtk_box_append(GTK_BOX(box), spinner);
+	gtk_box_append(GTK_BOX(box), gtk_label_new(text));
+	gtk_button_set_child(GTK_BUTTON(button), box);
+	gtk_widget_set_sensitive(button, FALSE);
+	gtk_widget_add_css_class(button, "tw-busy");
+	guint id = g_timeout_add_seconds(seconds ? seconds : 30, busy_over, g_object_ref(button));
+	g_object_set_data(G_OBJECT(button), "tw-busy-timer", GUINT_TO_POINTER(id));
+}
+
+void ui_button_ready(GtkWidget *button) {
+	char *label = button ? g_object_steal_data(G_OBJECT(button), "tw-busy-label") : NULL;
+	if (!label) {
+		return;
+	}
+	guint id = GPOINTER_TO_UINT(g_object_steal_data(G_OBJECT(button), "tw-busy-timer"));
+	if (id) {
+		// its own timer: let it go without a second unref
+		GSource *source = g_main_context_find_source_by_id(NULL, id);
+		if (source && !g_source_is_destroyed(source)) {
+			g_source_destroy(source);
+			g_object_unref(button);
+		}
+	}
+	gtk_button_set_label(GTK_BUTTON(button), label);
+	gtk_widget_set_sensitive(button, TRUE);
+	gtk_widget_remove_css_class(button, "tw-busy");
+	g_free(label);
+}

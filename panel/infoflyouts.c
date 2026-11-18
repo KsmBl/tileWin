@@ -1844,8 +1844,15 @@ static void info_render(struct popup *p, cairo_t *cr) {
 			int tw = 0;
 			pd_text_size(cr, st.font, f->actions[i].label, &tw, NULL);
 			struct pbox link = { x, y + 1, tw, FOOTER - 1 };
-			pd_text(cr, st.font, f->actions[i].label, link.x, link.y, link.width, link.height,
-				color, PD_LEFT);
+			// pressed: a shade behind it, the word a pixel in, as a link answers a click
+			bool down = popup_press_at(link.x, link.y, link.width, link.height);
+			if (down) {
+				pd_rounded(cr, link.x - 4, link.y + link.height / 2.0 - 11, tw + 8, 22, 3);
+				pd_color(cr, (color & 0xffffff00) | 0x30);
+				cairo_fill(cr);
+			}
+			pd_text(cr, st.font, f->actions[i].label, link.x + (down ? 1 : 0),
+				link.y + (down ? 1 : 0), link.width, link.height, color, PD_LEFT);
 			if (hovered(f, link)) {
 				pd_rect(cr, link.x, link.y + link.height / 2.0 + 9, tw, 1, color);
 			}

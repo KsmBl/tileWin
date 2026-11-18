@@ -459,12 +459,21 @@ void draw_switch(cairo_t *cr, const struct fly_style *st, int x, int y, bool on)
 
 void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 		const char *label, bool primary, bool hover) {
+	bool down = popup_press_at(b.x, b.y, b.width, b.height);
 	if (st->style == PS_CLASSIC) {
+		// pressed: sunken, the label a pixel in
 		pd_rect(cr, b.x, b.y, b.width, b.height, 0xc0c0c0ff);
-		pd_bevel(cr, b.x, b.y, b.width, b.height, primary);
-		pd_text(cr, primary ? st->bold : st->font, label, b.x, b.y, b.width, b.height,
-			0x000000ff, PD_CENTER);
+		pd_bevel(cr, b.x, b.y, b.width, b.height, primary || down);
+		pd_text(cr, primary ? st->bold : st->font, label, b.x + (down ? 1 : 0),
+			b.y + (down ? 1 : 0), b.width, b.height, 0x000000ff, PD_CENTER);
 		return;
+	}
+	if (down) {
+		// pressed in a little, and darker
+		b.x += 1;
+		b.y += 1;
+		b.width -= 2;
+		b.height -= 2;
 	}
 	cairo_new_path(cr);
 	pd_rounded(cr, b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1, 4);
@@ -473,10 +482,16 @@ void draw_button(cairo_t *cr, const struct fly_style *st, struct pbox b,
 	pd_color(cr, st->button_border);
 	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
-	if (primary && hover) {
+	if (primary && hover && !down) {
 		cairo_new_path(cr);
 		pd_rounded(cr, b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1, 4);
 		pd_color(cr, 0xffffff30);
+		cairo_fill(cr);
+	}
+	if (down) {
+		cairo_new_path(cr);
+		pd_rounded(cr, b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1, 4);
+		pd_color(cr, st->dark ? 0xffffff1c : 0x00000026);
 		cairo_fill(cr);
 	}
 	pd_text(cr, st->font, label, b.x, b.y, b.width, b.height,
