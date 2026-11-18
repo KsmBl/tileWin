@@ -114,6 +114,18 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":%d}}}' $((
 "$tool" list | grep -q '5h 30%' || fail "an older, lower value lowered the 5-hour usage: $("$tool" list)"
 [ "$(wc -l < "$history" 2>/dev/null)" -eq 2 ] || fail "an older, lower value went into the history"
 
+# ---- a reset by hand: a newer window at 0%, then a session still running shows the old
+# window: it is stale, the new window stays, also in the history
+printf '{"rate_limits":{"five_hour":{"used_percentage":0,"resets_at":%d}}}' $((now + 18000)) |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '5h 0%' || fail "the window started by a reset was not taken: $("$tool" list)"
+printf '{"rate_limits":{"five_hour":{"used_percentage":61,"resets_at":%d}}}' $((now + 3600)) |
+	sh -c "$command" >/dev/null
+"$tool" list | grep -q '5h 0%' ||
+	fail "a stale session's older window replaced the one after the reset: $("$tool" list)"
+tail -n 1 "$history" | grep -q " 0.0 $((now + 18000)) " ||
+	fail "the history went back to the older window: $(tail -n 1 "$history")"
+
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
 echo '{ this is not json' > "$work/broken/settings.json"

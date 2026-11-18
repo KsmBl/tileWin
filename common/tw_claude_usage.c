@@ -369,6 +369,11 @@ bool tw_claude_same_window(time_t a, time_t b) {
 	return a > 0 && b > 0 && (a > b ? a - b : b - a) <= 300;
 }
 
+bool tw_claude_window_older(const struct tw_claude_window *a, const struct tw_claude_window *b) {
+	return a->known && b->known && a->resets_at > 0 && b->resets_at > 0 &&
+		a->resets_at + 300 < b->resets_at;
+}
+
 /* "<time> <5h used> <5h reset> <7d used> <7d reset>", "-" for what is not known. */
 static bool parse_point(const char *line, struct tw_claude_point *p) {
 	char f[4][32];
@@ -451,6 +456,13 @@ bool tw_claude_history_write(const char *path, const struct tw_claude_point *poi
 	for (int i = 0; i < n; i++) {
 		struct tw_claude_point p = points[i];
 		if (any) {
+			// a window never goes back (a stale session's after a reset by hand)
+			if (tw_claude_window_older(&p.five_hour, &last.five_hour)) {
+				p.five_hour = last.five_hour;
+			}
+			if (tw_claude_window_older(&p.seven_day, &last.seven_day)) {
+				p.seven_day = last.seven_day;
+			}
 			// within the same window what was used only grows
 			if (p.five_hour.known && last.five_hour.known &&
 					tw_claude_same_window(p.five_hour.resets_at, last.five_hour.resets_at) &&
@@ -497,6 +509,13 @@ void tw_claude_history_add(const char *history, const struct tw_claude_usage *us
 	struct tw_claude_usage u = *usage;
 	if (n > 0) {
 		const struct tw_claude_point *last = &points[n - 1];
+		// a window never goes back: an older one is a stale session's
+		if (tw_claude_window_older(&u.five_hour, &last->five_hour)) {
+			u.five_hour = last->five_hour;
+		}
+		if (tw_claude_window_older(&u.seven_day, &last->seven_day)) {
+			u.seven_day = last->seven_day;
+		}
 		if (u.five_hour.known && last->five_hour.known &&
 				tw_claude_same_window(u.five_hour.resets_at, last->five_hour.resets_at) &&
 				last->five_hour.used > u.five_hour.used) {

@@ -176,12 +176,12 @@ int main(void) {
 	iso(now - 40, when, sizeof(when));
 	snprintf(relative, sizeof(relative), "{\"timestamp\":\"%s\",\"type\":\"event_msg\","
 		"\"payload\":{\"type\":\"token_count\",\"info\":null,\"rate_limits\":{\"primary\":"
-		"{\"used_percent\":50.0,\"window_minutes\":300,\"resets_in_seconds\":1200},"
+		"{\"used_percent\":50.0,\"window_minutes\":300,\"resets_in_seconds\":3640},"
 		"\"secondary\":{\"used_percent\":60.0,\"window_minutes\":10080,"
-		"\"resets_in_seconds\":7200}}}}\n", when);
+		"\"resets_in_seconds\":259240}}}}\n", when);
 	free(session(now, "relative", relative, now - 40));
-	check(tw_codex_usage_read(dir, &u) && u.five_hour.resets_at == now - 40 + 1200 &&
-		u.seven_day.resets_at == now - 40 + 7200, "resets_in_seconds counts from its line");
+	check(tw_codex_usage_read(dir, &u) && u.five_hour.resets_at == now - 40 + 3640 &&
+		u.seven_day.resets_at == now - 40 + 259240, "resets_in_seconds counts from its line");
 	check(u.account == NULL, "no plan named: no account");
 	tw_claude_usage_finish(&u);
 
@@ -214,7 +214,7 @@ int main(void) {
 			"\"token_count\",\"info\":null,\"rate_limits\":{\"primary\":{\"used_percent\":45.0,"
 			"\"window_minutes\":300,\"resets_at\":%lld},\"secondary\":{\"used_percent\":60.0,"
 			"\"window_minutes\":10080,\"resets_at\":%lld}}}}\n", when,
-			(long long)(now - 40 + 1200), (long long)(now - 40 + 7200)) < 0) {
+			(long long)(now - 40 + 3640), (long long)(now - 40 + 259240)) < 0) {
 		return 1;
 	}
 	free(session(now, "lower", l6, now - 30));

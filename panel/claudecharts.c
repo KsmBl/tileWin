@@ -40,8 +40,29 @@ static double chart_y(struct pbox g, double used) {
 }
 
 /* The usage of one window: 0 at its start, its points, now while it runs. */
+/*
+ * When a window was over: at its reset, or earlier when a newer one began
+ * before it (usage reset by hand), at the first reading of that one.
+ */
+static time_t window_end(const struct claude_charts *c, bool week, time_t reset) {
+	time_t end = reset;
+	for (int i = 0; i < c->count; i++) {
+		const struct tw_claude_window *w = week ? &c->points[i].seven_day :
+			&c->points[i].five_hour;
+		if (w->known && w->resets_at > reset + 300 && c->points[i].at < end) {
+			end = c->points[i].at;
+		}
+	}
+	const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
+	if (cur->known && cur->resets_at > reset + 300 && c->now < end) {
+		end = c->now;
+	}
+	return end;
+}
+
 static int window_series(const struct claude_charts *c, bool week, time_t reset, time_t length,
 		time_t *ts, double *vs, int max) {
+	time_t end = window_end(c, week, reset);
 	int n = 0;
 	ts[n] = reset - length;
 	vs[n++] = 0;
@@ -49,7 +70,7 @@ static int window_series(const struct claude_charts *c, bool week, time_t reset,
 		const struct tw_claude_window *w = week ? &c->points[i].seven_day :
 			&c->points[i].five_hour;
 		if (!w->known || !tw_claude_same_window(w->resets_at, reset) ||
-				c->points[i].at < reset - length || c->points[i].at > reset) {
+				c->points[i].at < reset - length || c->points[i].at > end) {
 			continue;
 		}
 		ts[n] = c->points[i].at;
@@ -58,14 +79,14 @@ static int window_series(const struct claude_charts *c, bool week, time_t reset,
 		n++;
 	}
 	const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
-	if (cur->known && tw_claude_same_window(cur->resets_at, reset) && c->now < reset &&
+	if (cur->known && tw_claude_same_window(cur->resets_at, reset) && c->now < end &&
 			n < max) {
 		ts[n] = c->now;
 		vs[n] = n > 0 && vs[n - 1] > cur->used ? vs[n - 1] : cur->used;
 		n++;
-	} else if (c->now >= reset && n < max) {
-		// over: what was used stays until the reset
-		ts[n] = reset;
+	} else if (c->now >= end && n < max) {
+		// over: what was used stays until it ended
+		ts[n] = end;
 		vs[n] = vs[n - 1];
 		n++;
 	}
@@ -311,7 +332,9 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 	uint32_t now_color = st->chart_line;
 	for (int i = first; i < nr; i++) {
 		time_t reset = resets[i], wstart = reset - TW_CLAUDE_FIVE_HOURS;
-		double x0 = chart_x(g, start, end, wstart), x1 = chart_x(g, start, end, reset);
+		// (a window reset by hand ends where the next one began)
+		time_t over = window_end(c, false, reset);
+		double x0 = chart_x(g, start, end, wstart), x1 = chart_x(g, start, end, over);
 		// the window: a band, its edges marked
 		pd_rect(cr, x0, g.y, x1 - x0, g.height, (st->chart_line & 0xffffff00) | 0x10);
 		pd_rect(cr, round(x0), g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
@@ -325,7 +348,7 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		}
 		uint32_t color = usage_color(st, peak);
 		draw_series(cr, g, start, end, ts, vs, n, color);
-		bool running = c->now >= wstart && c->now < reset;
+		bool running = c->now >= wstart && c->now < over;
 		if (running && n > 0) {
 			now_used = vs[n - 1];
 			now_color = color;

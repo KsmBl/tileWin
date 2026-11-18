@@ -103,6 +103,12 @@ bool tw_claude_history_write(const char *path, const struct tw_claude_point *poi
 int tw_claude_history_read(const char *path, struct tw_claude_point **out);
 /* Whether two reset times are those of the same window (they may wobble by a minute). */
 bool tw_claude_same_window(time_t a, time_t b);
+/*
+ * Whether window a is older than window b: it resets earlier, so b came after it
+ * (its reset, or one started by hand). A session of Claude Code still running
+ * shows the window it saw last, so values of an older window are stale.
+ */
+bool tw_claude_window_older(const struct tw_claude_window *a, const struct tw_claude_window *b);
 
 /* ---------- what the widget shows ---------- */
 

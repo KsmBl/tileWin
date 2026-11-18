@@ -131,6 +131,15 @@ static void copy_window(json_object *limits, const char *key, json_object *out) 
 	// window what was used only grows, and the highest seen stays
 	double value = json_object_get_double(used);
 	json_object *before, *before_used, *before_resets;
+	// and a window never goes back: after a reset by hand a session still running
+	// shows the window before it, which resets earlier than the one written down
+	if (json_object_object_get_ex(out, key, &before) &&
+			json_object_object_get_ex(before, "resets_at", &before_resets) &&
+			json_object_object_get_ex(window, "resets_at", &resets) &&
+			json_object_get_int64(resets) > 0 &&
+			json_object_get_int64(resets) + 300 < json_object_get_int64(before_resets)) {
+		return; // stale: what was written stays
+	}
 	if (json_object_object_get_ex(out, key, &before) &&
 			json_object_object_get_ex(before, "used_percentage", &before_used) &&
 			json_object_object_get_ex(before, "resets_at", &before_resets) &&

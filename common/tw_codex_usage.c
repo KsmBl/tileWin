@@ -280,6 +280,10 @@ static char *plan_name(const char *plan) {
 
 /* Within the same window what was used only grows: what the history has stays. */
 static void keep_highest(struct tw_claude_window *w, const struct tw_claude_window *seen) {
+	if (tw_claude_window_older(w, seen)) {
+		*w = *seen; // a window never goes back
+		return;
+	}
 	if (w->known && seen->known && tw_claude_same_window(w->resets_at, seen->resets_at) &&
 			seen->used > w->used) {
 		w->used = seen->used;
