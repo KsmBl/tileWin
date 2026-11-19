@@ -1399,7 +1399,8 @@ void view_save_buffer(struct sway_view *view) {
 
 bool view_is_transient_for(struct sway_view *child,
 		struct sway_view *ancestor) {
-	return child->impl->is_transient_for &&
+	// (a window of its own though it names an owner does not stay on top of it)
+	return child->impl->is_transient_for && !tw_view_owned_but_own(child) &&
 		child->impl->is_transient_for(child, ancestor);
 }
 
