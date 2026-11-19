@@ -754,7 +754,8 @@ static void ipc_json_describe_container(struct sway_container *c, json_object *o
 		owner = view_from_wlr_xwayland_surface(c->view->wlr_xwayland_surface->parent);
 	}
 #endif
-	if (owner && owner->container && owner->container != c) {
+	if (owner && owner->container && owner->container != c &&
+			!tw_view_owned_but_own(c->view)) {
 		json_object_object_add(object, "transient_for",
 			json_object_new_int64((int64_t)owner->container->node.id));
 	}

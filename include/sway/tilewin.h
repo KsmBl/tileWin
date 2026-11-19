@@ -287,6 +287,12 @@ void tw_floating_resize_in_place(struct sway_container *con);
 void tw_update_content_fill(struct sway_container *con);
 void tw_place_new_window(struct sway_container *con);
 bool tw_view_is_dialog(struct sway_view *view);
+/*
+ * A window that names another as its own but is a window of its own (the window
+ * of a browser extension, "Extension: (Name) - ..."): its own button on the
+ * taskbar, where it opened, not over the other.
+ */
+bool tw_view_owned_but_own(struct sway_view *view);
 /* The desktop of the window a dialog belongs to, NULL if it names none. */
 struct sway_workspace *tw_dialog_parent_workspace(struct sway_view *view);
 /* For a dialog naming no window: its app's window used last, else the main display. */

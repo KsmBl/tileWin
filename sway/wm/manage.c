@@ -705,8 +705,16 @@ bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double 
 	return false;
 }
 
+bool tw_view_owned_but_own(struct sway_view *view) {
+	const char *title = view ? view_get_title(view) : NULL;
+	return title && strncmp(title, "Extension: (", 12) == 0;
+}
+
 /* A dialog, a splash screen or anything else of a size of its own. */
 bool tw_view_is_dialog(struct sway_view *view) {
+	if (tw_view_owned_but_own(view)) {
+		return false;
+	}
 	switch (view->type) {
 	case SWAY_VIEW_XDG_SHELL:
 		if (view->wlr_xdg_toplevel->parent) {
