@@ -100,6 +100,7 @@ static const struct cmd_handler handlers[] = {
 	{ "not_responding", cmd_not_responding },
 	{ "output", cmd_output },
 	{ "output_wallpaper", cmd_output_wallpaper },
+	{ "own_window", cmd_own_window },
 	{ "panel_command", cmd_panel_command },
 	{ "pause_minimized", cmd_pause_minimized },
 	{ "pause_minimized_except", cmd_pause_minimized_except },

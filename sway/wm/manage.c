@@ -27,6 +27,7 @@
 #include "sway/tree/view.h"
 #include "sway/tree/workspace.h"
 #include "list.h"
+#include "sway/criteria.h"
 #include "tw_grid.h"
 #include "log.h"
 #include "stringop.h"
@@ -706,8 +707,20 @@ bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double 
 }
 
 bool tw_view_owned_but_own(struct sway_view *view) {
-	const char *title = view ? view_get_title(view) : NULL;
-	return title && strncmp(title, "Extension: (", 12) == 0;
+	if (!view) {
+		return false;
+	}
+	// built in: the window of a browser extension, and the progress of copying
+	// files of a file browser (Thunar's and those made from it)
+	const char *title = view_get_title(view);
+	if (title && (strncmp(title, "Extension: (", 12) == 0 ||
+			strcmp(title, "File Operation Progress") == 0)) {
+		return true;
+	}
+	list_t *rules = config ? criteria_for_view(view, CT_OWN_WINDOW) : NULL;
+	bool own = rules && rules->length > 0;
+	list_free(rules);
+	return own;
 }
 
 /* A dialog, a splash screen or anything else of a size of its own. */

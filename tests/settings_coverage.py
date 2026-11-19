@@ -68,6 +68,7 @@ COMPOSITOR_COMMANDS_WITHOUT_A_CONTROL = {
     "new_float": "sway: tile mode borders",
     "new_window": "sway: tile mode borders",
     "no_focus": "sway: rules per window",
+    "own_window": "rules per window, as for_window and no_focus; the usual ones are built in",
     "screensaver": "runtime only: starts or ends the screen saver right away",
     "keep_awake": "runtime only: the switch of the power flyout, never kept for the next session",
     "screensaver_command": "which program draws the screen saver; tilewin-screensaver by default",

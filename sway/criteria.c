@@ -878,7 +878,7 @@ bool criteria_is_equal(struct criteria *left, struct criteria *right) {
 		return false;
 	}
 	// XXX Only implemented for CT_NO_FOCUS for now.
-	if (left->type == CT_NO_FOCUS) {
+	if (left->type == CT_NO_FOCUS || left->type == CT_OWN_WINDOW) {
 		return strcmp(left->raw, right->raw) == 0;
 	}
 	if (left->type == CT_COMMAND) {
@@ -892,7 +892,8 @@ bool criteria_already_exists(struct criteria *criteria) {
 	// XXX Only implemented for CT_NO_FOCUS and CT_COMMAND for now.
 	// While criteria_is_equal also obeys this limitation, this is a shortcut
 	// to avoid processing the list.
-	if (criteria->type != CT_NO_FOCUS && criteria->type != CT_COMMAND) {
+	if (criteria->type != CT_NO_FOCUS && criteria->type != CT_COMMAND &&
+			criteria->type != CT_OWN_WINDOW) {
 		return false;
 	}
 
