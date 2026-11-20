@@ -138,6 +138,28 @@ static bool range_at(const time_t *ts, const double *vs, int n, time_t t, double
 	return true;
 }
 
+/*
+ * How fast the week is used, in percent a second: since the week began, or
+ * since its usage was last reset by hand (a drop of 5 points or more; less is
+ * the wobble of sessions a point apart), as what came before is gone.
+ */
+#define RESET_DROP 5.0
+
+static double week_pace(const time_t *ts, const double *vs, int n, time_t start, time_t now,
+		double used) {
+	time_t from = start;
+	double base = 0;
+	for (int i = 1; i < n; i++) {
+		if (vs[i] < vs[i - 1] - RESET_DROP) {
+			from = ts[i];
+			base = vs[i];
+		}
+	}
+	// an hour at least, so a reset just now does not make a pace of a few readings
+	double span = fmax((double)(now - from), 3600);
+	return now > from && used > base ? (used - base) / span : 0;
+}
+
 /* The time under the pointer, for a chart from start to end. */
 static time_t time_at(struct pbox g, time_t start, time_t end, double px) {
 	double share = g.width > 0 ? (px - g.x) / g.width : 0;
@@ -442,8 +464,8 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	draw_behind(cr, st, g, now_x);
 	draw_series(cr, g, start, end, ts, vs, n, color);
 	// on at the pace of the week so far: dashed, to its end or to where it runs out
-	if (c->now > start && used > 0) {
-		double pace = used / (double)(c->now - start); // percent a second
+	double pace = week_pace(ts, vs, n, start, c->now, used);
+	if (c->now > start && pace > 0) {
 		time_t until = end;
 		double at_end = used + pace * (double)(end - c->now);
 		if (at_end > 100) {
@@ -489,8 +511,8 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 			ys[0] = chart_y(g, lo);
 			colors[0] = usage_color(st, lo);
 			snprintf(text, sizeof(text), "%s\n%.0f%% used", when, lo);
-		} else if (t > c->now && c->now > start && used > 0) {
-			double ahead = fmin(used + used / (double)(c->now - start) * (double)(t - c->now), 100);
+		} else if (t > c->now && c->now > start && pace > 0) {
+			double ahead = fmin(used + pace * (double)(t - c->now), 100);
 			ys[0] = chart_y(g, ahead);
 			colors[0] = usage_color(st, ahead);
 			snprintf(text, sizeof(text), "%s\nat this pace %.0f%%", when, ahead);
