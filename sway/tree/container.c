@@ -590,6 +590,10 @@ struct sway_container *container_obstructing_fullscreen_container(struct sway_co
 		if (container_is_transient_for(container, workspace->fullscreen)) {
 			return NULL;
 		}
+		// in window mode it goes over the full screen one when focused
+		if (tw_fullscreen_under(container)) {
+			return NULL;
+		}
 		return workspace->fullscreen;
 	}
 
@@ -1233,6 +1237,10 @@ static void container_fullscreen_workspace(struct sway_container *con) {
 
 	if (con->pending.workspace) {
 		con->pending.workspace->fullscreen = con;
+		// on top of the windows raised before: those raised after it show over it
+		if (container_is_floating(con)) {
+			container_raise_floating(con);
+		}
 		struct sway_seat *seat;
 		struct sway_workspace *focus_ws;
 		wl_list_for_each(seat, &server.input->seats, link) {
@@ -1668,6 +1676,12 @@ void container_raise_floating(struct sway_container *con) {
 
 		list_t *floating = floater->pending.workspace->floating;
 		list_move_to_end(floating, floater);
+		// the full screen window on top again: the windows shown over it go under
+		if (floater->pending.workspace->fullscreen == floater) {
+			for (int i = 0; i < floating->length; i++) {
+				((struct sway_container *)floating->items[i])->tw.over_fullscreen = false;
+			}
+		}
 		// its dialogs stay on top of it, as on Windows: a window raised (clicked,
 		// focused by an app starting) does not cover the dialog it has open
 		int count = floating->length;

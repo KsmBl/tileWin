@@ -706,6 +706,20 @@ bool tw_snap_at(struct sway_container *con, const char *slot, double fx, double 
 	return false;
 }
 
+struct sway_container *tw_fullscreen_under(struct sway_container *con) {
+	if (!con || tw_mode != TW_MODE_WINDOW || root->fullscreen_global) {
+		return NULL;
+	}
+	con = container_toplevel_ancestor(con);
+	struct sway_workspace *ws = con->pending.workspace;
+	struct sway_container *fs = ws ? ws->fullscreen : NULL;
+	if (!fs || fs == con || !container_is_floating(con) ||
+			list_find(ws->floating, fs) < 0) {
+		return NULL;
+	}
+	return fs;
+}
+
 bool tw_view_owned_but_own(struct sway_view *view) {
 	if (!view) {
 		return false;

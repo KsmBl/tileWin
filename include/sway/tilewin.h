@@ -88,6 +88,9 @@ struct tw_container {
 	// (0: in the middle); moved by resizing a snapped window at such a line
 	double split_x, split_y;
 	bool above; // kept over the other floating windows
+	// focused while a floating window of its desktop is full screen: shown over
+	// it, as on Windows, until that one is raised again
+	bool over_fullscreen;
 	struct wlr_box restore_box; // geometry before maximize/snap
 	// double-clicking a frame side: the size before, and after stretching
 	int expand_axis; // 0: none, 1: width, 2: height
@@ -293,6 +296,9 @@ bool tw_view_is_dialog(struct sway_view *view);
  * taskbar, where it opened, not over the other.
  */
 bool tw_view_owned_but_own(struct sway_view *view);
+/* The full screen window of con's desktop, when focusing con in window mode may
+ * show it over that one instead of being refused (both floating). */
+struct sway_container *tw_fullscreen_under(struct sway_container *con);
 /* The desktop of the window a dialog belongs to, NULL if it names none. */
 struct sway_workspace *tw_dialog_parent_workspace(struct sway_view *view);
 /* For a dialog naming no window: its app's window used last, else the main display. */

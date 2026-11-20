@@ -976,6 +976,15 @@ test(
 )
 
 # the two kinds of animation side by side
+test(
+	'fullscreen-focus',
+	find_program('fullscreen_focus.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	env: saver_gui_env,
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 90,
+)
 foreach expensive : ['no', 'yes']
 	test(
 		'snap-animated-' + (expensive == 'yes' ? 'expensive' : 'picture'),

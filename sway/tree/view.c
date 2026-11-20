@@ -1304,7 +1304,8 @@ bool view_is_visible(struct sway_view *view) {
 	struct sway_container *fs = root->fullscreen_global ?
 		root->fullscreen_global : workspace->fullscreen;
 	if (fs && !container_is_fullscreen_or_child(view->container) &&
-			!container_is_transient_for(view->container, fs)) {
+			!container_is_transient_for(view->container, fs) &&
+			!container_toplevel_ancestor(view->container)->tw.over_fullscreen) {
 		return false;
 	}
 	return true;

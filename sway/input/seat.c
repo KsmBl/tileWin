@@ -1163,6 +1163,9 @@ static void seat_set_workspace_focus(struct sway_seat *seat, struct sway_node *n
 		tw_minimize(container, false);
 	}
 	if (container && tw_mode == TW_MODE_WINDOW) {
+		if (tw_fullscreen_under(container)) {
+			container_toplevel_ancestor(container)->tw.over_fullscreen = true;
+		}
 		container_raise_floating(container);
 	}
 

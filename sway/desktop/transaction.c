@@ -537,6 +537,13 @@ static void arrange_fullscreen(struct wlr_scene_tree *tree,
 }
 
 static void arrange_workspace_floating(struct sway_workspace *ws) {
+	// a window raised after the one full screen (focused, clicked on the taskbar,
+	// chosen with Alt+Tab) is over it, as on Windows; the full screen one stays as
+	// it is behind, and comes back on top when it is raised again
+	int fs_at = -1;
+	if (ws->current.fullscreen && !root->fullscreen_global) {
+		fs_at = list_find(ws->current.floating, ws->current.fullscreen);
+	}
 	for (int i = 0; i < ws->current.floating->length; i++) {
 		struct sway_container *floater = ws->current.floating->items[i];
 		struct wlr_scene_tree *layer = root->layers.floating;
@@ -565,6 +572,10 @@ static void arrange_workspace_floating(struct sway_workspace *ws) {
 						container_is_transient_for(floater, active->fullscreen)) {
 					layer = root->layers.fullscreen;
 				}
+			}
+			if (fs_at >= 0 && i > fs_at && floater->tw.over_fullscreen && ws->output &&
+					ws->output->current.active_workspace == ws) {
+				layer = root->layers.fullscreen;
 			}
 		}
 
