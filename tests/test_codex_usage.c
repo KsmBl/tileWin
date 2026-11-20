@@ -282,6 +282,38 @@ int main(void) {
 	free(yesterday);
 	free(today);
 	char cmd[700];
+	// ---- the pace after a reset by hand: from the drop, not from the window's start
+	{
+		time_t reset = now + 2 * 86400, start = reset - TW_CLAUDE_SEVEN_DAYS;
+		struct tw_claude_point week[] = {
+			{ .at = start + 3600, .seven_day = { true, 10, reset } },
+			{ .at = now - 3 * 86400, .seven_day = { true, 90, reset } },
+			{ .at = now - 2 * 86400, .seven_day = { true, 6, reset } }, // reset by hand
+			{ .at = now - 2 * 86400 + 600, .seven_day = { true, 5, reset } }, // a wobble
+			{ .at = now, .seven_day = { true, 66, reset } },
+		};
+		char *paced = g_build_filename(root, "paced.history", NULL);
+		FILE *hf = fopen(paced, "w");
+		for (int i = 0; hf && i < 5; i++) { // as tilewin-claude-usage writes them
+			fprintf(hf, "%lld - - %.1f %lld\n", (long long)week[i].at, week[i].seven_day.used,
+				(long long)reset);
+		}
+		if (hf) {
+			fclose(hf);
+		}
+		struct tw_claude_usage pu = { .history = paced,
+			.seven_day = { true, 66, reset } };
+		tw_claude_usage_pace(&pu);
+		check(pu.seven_day.pace_from == now - 2 * 86400 && near(pu.seven_day.pace_base, 6),
+			"the pace is measured from the reset by hand, not from a wobble after it");
+		double pace = tw_claude_window_pace(&pu.seven_day, TW_CLAUDE_SEVEN_DAYS, now, 66);
+		check(fabs(pace * 86400 - 30) < 0.5, "the pace since the reset is 30% a day");
+		bool known;
+		long left = tw_claude_window_left(&pu.seven_day, TW_CLAUDE_SEVEN_DAYS, now, &known);
+		check(known && labs(left - 34L * 86400 / 30) < 120,
+			"at that pace the week is used up in about 27 hours, not lasting until it resets");
+		g_free(paced);
+	}
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
 	if (system(cmd) != 0) {
 		fprintf(stderr, "could not remove %s\n", root);

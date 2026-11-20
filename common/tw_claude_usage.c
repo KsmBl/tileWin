@@ -161,7 +161,39 @@ bool tw_claude_usage_read(const char *dir, struct tw_claude_usage *out) {
 	read_window(root, "five_hour", &out->five_hour);
 	read_window(root, "seven_day", &out->seven_day);
 	json_object_put(root);
+	tw_claude_usage_pace(out);
 	return true;
+}
+
+static void pace_start(const struct tw_claude_point *points, int n, bool week,
+		struct tw_claude_window *w) {
+	w->pace_from = 0;
+	w->pace_base = 0;
+	if (!w->known || w->resets_at <= 0) {
+		return;
+	}
+	bool any = false;
+	double before = 0;
+	for (int i = 0; i < n; i++) {
+		const struct tw_claude_window *p = week ? &points[i].seven_day : &points[i].five_hour;
+		if (!p->known || !tw_claude_same_window(p->resets_at, w->resets_at)) {
+			continue;
+		}
+		if (any && p->used < before - TW_CLAUDE_RESET_DROP) {
+			w->pace_from = points[i].at;
+			w->pace_base = p->used;
+		}
+		before = p->used;
+		any = true;
+	}
+}
+
+void tw_claude_usage_pace(struct tw_claude_usage *u) {
+	struct tw_claude_point *points = NULL;
+	int n = u->history ? tw_claude_history_read(u->history, &points) : 0;
+	pace_start(points, n, false, &u->five_hour);
+	pace_start(points, n, true, &u->seven_day);
+	free(points);
 }
 
 void tw_claude_usage_finish(struct tw_claude_usage *usage) {
@@ -301,6 +333,24 @@ const struct tw_claude_preset tw_claude_desktop_presets[] = {
 	{ 0 },
 };
 
+double tw_claude_window_pace(const struct tw_claude_window *window, long length, time_t now,
+		double used) {
+	time_t from = window->resets_at - length;
+	double base = 0;
+	if (window->pace_from > from && window->pace_from <= now) {
+		from = window->pace_from;
+		base = window->pace_base;
+		// an hour at least, so a reset just now does not make a pace of a few readings
+		if (now - from < 3600) {
+			from = now - 3600;
+		}
+	}
+	if (now - from < 60 || used <= base) {
+		return 0;
+	}
+	return (used - base) / (double)(now - from);
+}
+
 long tw_claude_window_left(const struct tw_claude_window *window, long length, time_t now,
 		bool *known) {
 	double used = tw_claude_window_now(window, now);
@@ -311,13 +361,12 @@ long tw_claude_window_left(const struct tw_claude_window *window, long length, t
 	if (used >= 100) {
 		return 0;
 	}
-	// the pace since the window started: the share used over the time gone
-	time_t start = window->resets_at - length;
-	double gone = (double)(now - start);
-	if (used <= 0 || gone < 60) {
+	// the pace since the window started, or since it was reset by hand
+	double pace = tw_claude_window_pace(window, length, now, used);
+	if (pace <= 0) {
 		return -1;
 	}
-	double left = (100 - used) * gone / used;
+	double left = (100 - used) / pace;
 	if (now + left >= window->resets_at) {
 		return -1; // lasts until it resets
 	}

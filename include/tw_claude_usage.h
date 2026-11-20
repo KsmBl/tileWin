@@ -20,6 +20,10 @@ struct tw_claude_window {
 	bool known;
 	double used;      // percent of the window used, 0 to 100
 	time_t resets_at; // 0 when not known
+	// where its pace is measured from: the start of the window (0), or when its
+	// usage was last reset by hand, then at pace_base percent (tw_claude_usage_pace)
+	time_t pace_from;
+	double pace_base;
 };
 
 struct tw_claude_usage {
@@ -147,6 +151,19 @@ extern const struct tw_claude_preset tw_claude_desktop_presets[];
  */
 long tw_claude_window_left(const struct tw_claude_window *window, long length, time_t now,
 	bool *known);
+/*
+ * How fast the window is used, in percent a second: since it started, or since
+ * its usage was last reset by hand. used is what is used now.
+ */
+double tw_claude_window_pace(const struct tw_claude_window *window, long length, time_t now,
+	double used);
+/*
+ * A drop of this many points within one window is its usage reset by hand;
+ * less is the wobble of sessions a point apart.
+ */
+#define TW_CLAUDE_RESET_DROP 5.0
+/* Finds in the history where the pace of each window of u is measured from. */
+void tw_claude_usage_pace(struct tw_claude_usage *u);
 /* A span of time, "2 d 4 h", "1 h 12 min", "12 min"; short gives "2d 4h", "1h 12m". */
 void tw_claude_format_span(long seconds, bool brief, char *out, size_t size);
 

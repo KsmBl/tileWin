@@ -332,6 +332,7 @@ bool tw_codex_usage_read(const char *dir, struct tw_claude_usage *out) {
 	out->five_hour = best.p.five_hour;
 	out->seven_day = best.p.seven_day;
 	out->account = plan_name(best.plan);
+	tw_claude_usage_pace(out);
 	return true;
 }
 
