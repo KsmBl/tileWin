@@ -73,6 +73,13 @@ static int window_series(const struct claude_charts *c, bool week, time_t reset,
 				c->points[i].at < reset - length || c->points[i].at > end) {
 			continue;
 		}
+		// a run of the same value is its first and last reading: the line is the
+		// same, and a week of readings (most of them changes of the other window)
+		// fits instead of running out of room before now
+		if (n >= 2 && vs[n - 1] == w->used && vs[n - 2] == w->used) {
+			ts[n - 1] = c->points[i].at;
+			continue;
+		}
 		ts[n] = c->points[i].at;
 		vs[n] = w->used; // (lower in the same window: reset by hand)
 		n++;
