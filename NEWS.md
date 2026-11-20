@@ -5,6 +5,16 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.10
+
+- **Codex usage widget** for the taskbar and the desktop: the 5-hour and weekly limits of the ChatGPT plan, with the same looks, styles, charts and flyout as the Claude Code widget (contributed by Hawkynt).
+- **Quick web:** a popup that opens a web address typed a word per key: each key types the word given to it, the next key one of the words that follow, set up on a page of its own in the settings and drawn like the theme's dialogs.
+- **Buttons answer a click at once** in the manner of each theme: the old ones push the label in, XP to 11 and modernCC press in and fade back, the Starship Console flashes. **Update now** on the Kernel page shows Starting... right away.
+- **Claude Code and Codex charts** draw usage that came from another computer as a hatched box between the readings around it, instead of a climb as if it were used here, and follow a **usage reset by hand**: a session still showing the old values no longer holds the widget at them.
+- **Windows of their own:** the windows of browser extensions and the copy progress of file browsers get their own taskbar button and are no longer kept on top of their app; `own_window [criteria]` does the same for others.
+- **A maximized window torn off by its title bar** goes back to its size at once under the pointer, as on Windows.
+- **Kernel updates:** the live fixes learn all that objtool refuses in one round instead of one module per build, find the file of a changed table also when the fix has no line of it, and the bar keeps moving while the kernel with the fixes is built.
+
 ## 1.9
 
 - **Drag windows between desktops** in the workspaces widget on the taskbar, as on KDE: press a window's outline on one desktop's small screen, carry it to another's and let go.
