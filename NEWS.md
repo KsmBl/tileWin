@@ -5,6 +5,11 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.11
+
+- **Windows over a full screen one:** a window chosen with Alt+Tab, the taskbar or a click comes over a window that is full screen, as on Windows, instead of nothing happening; the full screen window stays so behind it and is on top again when it is clicked or chosen.
+- **Fixes:** the week chart of Claude Code and Codex no longer runs out of room after a few days of readings and draws the rest of the week as usage not seen from here.
+
 ## 1.10
 
 - **Codex usage widget** for the taskbar and the desktop: the 5-hour and weekly limits of the ChatGPT plan, with the same looks, styles, charts and flyout as the Claude Code widget (contributed by Hawkynt).

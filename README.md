@@ -68,7 +68,7 @@ New lately:
 ## What it has
 
 - **Two modes, switched live** with Super+Shift+W: tile mode is sway, window mode is Windows. Your windows keep running.
-- **Window mode like Windows:** title bars with their buttons, snapping to edges and corners, Snap Layouts, Alt+Tab, Task view with virtual desktops, the window menu and animations.
+- **Window mode like Windows:** title bars with their buttons, snapping to edges and corners, Snap Layouts, Alt+Tab, Task view with virtual desktops, the window menu and animations. A window chosen with Alt+Tab or the taskbar comes over one that is full screen, which stays so behind it, and the windows of browser extensions or copy progress get a taskbar button of their own.
 - **A taskbar** with a start menu, window previews, tray, clock and calendar, quick settings, notifications, and widgets from CPU and network charts to the weather of your own script. Its flyouts work from the keyboard, and it stays sharp on screens at 125% or 150%.
 - **Search** in the start menu and the launcher: apps, settings pages (`dark mode`, `wifi`), files and folders in your home, and sums (`6*7`).
 - **Help when you need it:** a welcome at the first start, `Super+/` for the keys of the current mode, and a word on how to get back after switching the mode.

@@ -1,7 +1,7 @@
 project(
 	'tilewin',
 	'c',
-	version: '1.10',
+	version: '1.11',
 	license: 'MIT',
 	meson_version: '>=1.3',
 	default_options: [
