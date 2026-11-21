@@ -161,6 +161,32 @@ static uint32_t usage_color(const struct claude_look *st, double used) {
 	return st->chart_line;
 }
 
+/*
+ * On from now at a pace (percent a second): dashed, to the end of the window or
+ * to where it runs out.
+ */
+static void draw_pace(cairo_t *cr, const struct claude_look *st, struct pbox g, time_t start,
+		time_t end, time_t now, time_t over, double used, double pace) {
+	if (pace <= 0 || now >= over) {
+		return;
+	}
+	time_t until = over;
+	double at_end = used + pace * (double)(over - now);
+	if (at_end > 100) {
+		until = now + (time_t)((100 - used) / pace);
+		at_end = 100;
+	}
+	double dash[] = { 4, 3 };
+	cairo_new_path(cr);
+	cairo_move_to(cr, chart_x(g, start, end, now), chart_y(g, used));
+	cairo_line_to(cr, chart_x(g, start, end, until), chart_y(g, at_end));
+	cairo_set_dash(cr, dash, 2, 0);
+	pd_color(cr, usage_color(st, at_end)); // (see-through it is lost on a dark chart)
+	cairo_set_line_width(cr, 1.25);
+	cairo_stroke(cr);
+	cairo_set_dash(cr, NULL, 0, 0);
+}
+
 /* The line and the area under it, through the points of the series. */
 static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
 		const time_t *ts, const double *vs, int n, uint32_t color) {
@@ -358,6 +384,12 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		if (running && n > 0) {
 			now_used = vs[n - 1];
 			now_color = color;
+			// on at the pace of the window so far, to its reset or where it runs out
+			if (c->five_hour.known && tw_claude_same_window(c->five_hour.resets_at, reset)) {
+				draw_pace(cr, st, g, start, end, c->now, over, now_used,
+					tw_claude_window_pace(&c->five_hour, TW_CLAUDE_FIVE_HOURS, c->now,
+						now_used));
+			}
 		}
 		// what it came to, at its top
 		char label[16];
@@ -394,6 +426,16 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 				ys[0] = chart_y(g, lo);
 				colors[0] = usage_color(st, lo);
 				snprintf(text, sizeof(text), "%s\n%.0f%% used", when, lo);
+			} else if (t > c->now && c->five_hour.known &&
+					tw_claude_same_window(c->five_hour.resets_at, reset) && n > 0 &&
+					tw_claude_window_pace(&c->five_hour, TW_CLAUDE_FIVE_HOURS, c->now,
+						vs[n - 1]) > 0) {
+				double pace = tw_claude_window_pace(&c->five_hour, TW_CLAUDE_FIVE_HOURS,
+					c->now, vs[n - 1]);
+				double ahead = fmin(vs[n - 1] + pace * (double)(t - c->now), 100);
+				ys[0] = chart_y(g, ahead);
+				colors[0] = usage_color(st, ahead);
+				snprintf(text, sizeof(text), "%s\nat this pace %.0f%%", when, ahead);
 			} else {
 				snprintf(text, sizeof(text), "%s\nstill to come", when);
 			}
@@ -445,22 +487,8 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	// (since the week began, or since it was reset by hand: as the flyout's text says)
 	double pace = c->seven_day.known ? tw_claude_window_pace(&c->seven_day,
 		TW_CLAUDE_SEVEN_DAYS, c->now, used) : 0;
-	if (c->now > start && pace > 0) {
-		time_t until = end;
-		double at_end = used + pace * (double)(end - c->now);
-		if (at_end > 100) {
-			until = c->now + (time_t)((100 - used) / pace);
-			at_end = 100;
-		}
-		double dash[] = { 4, 3 };
-		cairo_new_path(cr);
-		cairo_move_to(cr, now_x, chart_y(g, used));
-		cairo_line_to(cr, chart_x(g, start, end, until), chart_y(g, at_end));
-		cairo_set_dash(cr, dash, 2, 0);
-		pd_color(cr, usage_color(st, at_end)); // (see-through it is lost on a dark chart)
-		cairo_set_line_width(cr, 1.25);
-		cairo_stroke(cr);
-		cairo_set_dash(cr, NULL, 0, 0);
+	if (c->now > start) {
+		draw_pace(cr, st, g, start, end, c->now, end, used, pace);
 	}
 	draw_now(cr, st, g, now_x, used, color);
 	// what now is, by the line: on its left near the end, else on its right
