@@ -312,6 +312,23 @@ int main(void) {
 		long left = tw_claude_window_left(&pu.seven_day, TW_CLAUDE_SEVEN_DAYS, now, &known);
 		check(known && labs(left - 34L * 86400 / 30) < 120,
 			"at that pace the week is used up in about 27 hours, not lasting until it resets");
+		// an old value of a session that stayed behind, and the usage back above it:
+		// no reset by hand, the pace is that of the whole window
+		time_t five = now + 4 * 3600;
+		FILE *bf = fopen(paced, "w");
+		if (bf) {
+			fprintf(bf, "%lld 40.0 %lld - -\n", (long long)(now - 600), (long long)five);
+			fprintf(bf, "%lld 42.0 %lld - -\n", (long long)(now - 300), (long long)five);
+			fprintf(bf, "%lld 21.0 %lld - -\n", (long long)(now - 120), (long long)five);
+			fprintf(bf, "%lld 43.0 %lld - -\n", (long long)(now - 60), (long long)five);
+			fclose(bf);
+		}
+		struct tw_claude_usage bu = { .history = paced, .five_hour = { true, 43, five } };
+		tw_claude_usage_pace(&bu);
+		check(bu.five_hour.pace_from == 0,
+			"a drop the usage climbs back above is no reset by hand");
+		check(tw_claude_window_pace(&bu.five_hour, TW_CLAUDE_FIVE_HOURS, now, 43) > 0,
+			"after such a drop there is a pace, and so a line ahead");
 		g_free(paced);
 	}
 	snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);

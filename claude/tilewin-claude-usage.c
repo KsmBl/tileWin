@@ -127,51 +127,60 @@ static void copy_window(json_object *limits, const char *key, json_object *out,
 			!json_object_object_get_ex(window, "used_percentage", &used)) {
 		return; // not shown this time: what was written before stays
 	}
-	// with the session known: what a session shows again unchanged is only its
-	// status line redrawn, with what it saw at its last answer, which may be long
-	// before the others' (stale); what it shows changed came with an answer just
-	// now, and is the truth, also lower (usage reset by hand in the same window)
-	bool fresh = false;
+	double value = json_object_get_double(used);
+	int64_t now_resets = json_object_object_get_ex(window, "resets_at", &resets) ?
+		json_object_get_int64(resets) : 0;
+	json_object *before, *before_used, *before_resets;
+	// a window never goes back: after a reset by hand a session still running
+	// shows the window before it, which resets earlier than the one written down
+	bool stale_window = json_object_object_get_ex(out, key, &before) &&
+		json_object_object_get_ex(before, "resets_at", &before_resets) &&
+		now_resets > 0 && now_resets + 300 < json_object_get_int64(before_resets);
+	// what is written down of this window, when it is the same window
+	bool have_before = !stale_window && json_object_object_get_ex(out, key, &before) &&
+		json_object_object_get_ex(before, "used_percentage", &before_used) &&
+		json_object_object_get_ex(before, "resets_at", &before_resets) &&
+		tw_claude_same_window((time_t)json_object_get_int64(before_resets), (time_t)now_resets);
+	double written = have_before ? json_object_get_double(before_used) : -1;
+	/*
+	 * Several sessions of Claude Code each show the limits as of their own last
+	 * answer, so an older, lower value can come after a newer one. Within the same
+	 * window what was used only grows, except after a reset by hand: a session
+	 * showing a lower value than written down counts only once it shows that
+	 * changing again, still below (6, then 7, after a reset to 6); a session that
+	 * stayed behind shows the same old value on and on, or its first value of
+	 * this window when its status line is first drawn in it.
+	 */
+	bool session_prev_same = false, session_moved = false;
+	double session_prev = -1;
 	if (session) {
 		json_object *seen, *seen_used, *seen_resets;
-		int64_t now_resets = json_object_object_get_ex(window, "resets_at", &resets) ?
-			json_object_get_int64(resets) : 0;
-		fresh = !json_object_object_get_ex(session, key, &seen) ||
-			!json_object_object_get_ex(seen, "used_percentage", &seen_used) ||
-			json_object_get_double(seen_used) != json_object_get_double(used) ||
-			!json_object_object_get_ex(seen, "resets_at", &seen_resets) ||
-			json_object_get_int64(seen_resets) != now_resets;
+		if (json_object_object_get_ex(session, key, &seen) &&
+				json_object_object_get_ex(seen, "used_percentage", &seen_used) &&
+				json_object_object_get_ex(seen, "resets_at", &seen_resets) &&
+				tw_claude_same_window((time_t)json_object_get_int64(seen_resets),
+					(time_t)now_resets)) {
+			session_prev_same = true;
+			session_prev = json_object_get_double(seen_used);
+			session_moved = session_prev != value;
+		}
 		json_object *mark = json_object_new_object();
-		json_object_object_add(mark, "used_percentage",
-			json_object_new_double(json_object_get_double(used)));
+		json_object_object_add(mark, "used_percentage", json_object_new_double(value));
 		json_object_object_add(mark, "resets_at", json_object_new_int64(now_resets));
 		json_object_object_add(session, key, mark);
-		if (!fresh) {
-			return;
-		}
 	}
-	// several sessions of Claude Code each show the limits as of their own last
-	// answer, so an older, lower value can come after a newer one: within the same
-	// window what was used only grows, and the highest seen stays
-	double value = json_object_get_double(used);
-	json_object *before, *before_used, *before_resets;
-	// and a window never goes back: after a reset by hand a session still running
-	// shows the window before it, which resets earlier than the one written down
-	if (json_object_object_get_ex(out, key, &before) &&
-			json_object_object_get_ex(before, "resets_at", &before_resets) &&
-			json_object_object_get_ex(window, "resets_at", &resets) &&
-			json_object_get_int64(resets) > 0 &&
-			json_object_get_int64(resets) + 300 < json_object_get_int64(before_resets)) {
+	if (stale_window) {
 		return; // stale: what was written stays
 	}
-	if (!fresh && json_object_object_get_ex(out, key, &before) &&
-			json_object_object_get_ex(before, "used_percentage", &before_used) &&
-			json_object_object_get_ex(before, "resets_at", &before_resets) &&
-			json_object_object_get_ex(window, "resets_at", &resets) &&
-			tw_claude_same_window((time_t)json_object_get_int64(before_resets),
-				(time_t)json_object_get_int64(resets)) &&
-			json_object_get_double(before_used) > value) {
-		value = json_object_get_double(before_used);
+	if (session_prev_same && !session_moved) {
+		return; // its status line redrawn with what it showed already: nothing new
+	}
+	if (have_before && value < written) {
+		bool reset_by_hand = session && session_prev_same && session_moved &&
+			session_prev < written;
+		if (!reset_by_hand) {
+			return; // an older value: what was written stays
+		}
 	}
 	json_object *copy = json_object_new_object();
 	json_object_object_add(copy, "used_percentage", json_object_new_double(value));

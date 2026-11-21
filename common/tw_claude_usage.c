@@ -173,7 +173,7 @@ static void pace_start(const struct tw_claude_point *points, int n, bool week,
 		return;
 	}
 	bool any = false;
-	double before = 0;
+	double before = 0, dropped_from = 0;
 	for (int i = 0; i < n; i++) {
 		const struct tw_claude_window *p = week ? &points[i].seven_day : &points[i].five_hour;
 		if (!p->known || !tw_claude_same_window(p->resets_at, w->resets_at)) {
@@ -182,6 +182,12 @@ static void pace_start(const struct tw_claude_point *points, int n, bool week,
 		if (any && p->used < before - TW_CLAUDE_RESET_DROP) {
 			w->pace_from = points[i].at;
 			w->pace_base = p->used;
+			dropped_from = before;
+		} else if (w->pace_from && p->used >= dropped_from - TW_CLAUDE_RESET_DROP) {
+			// back up where it was before the drop: an old value of a session that
+			// stayed behind, not a reset by hand
+			w->pace_from = 0;
+			w->pace_base = 0;
 		}
 		before = p->used;
 		any = true;

@@ -133,7 +133,8 @@ printf '{"session_id":"a","rate_limits":{"seven_day":{"used_percentage":97,"rese
 	sh -c "$command" >/dev/null
 printf '{"session_id":"b","rate_limits":{"seven_day":{"used_percentage":96,"resets_at":%d}}}' $week |
 	sh -c "$command" >/dev/null
-"$tool" list | grep -q '7d 96%' || fail "a new session's first answer was not taken: $("$tool" list)"
+"$tool" list | grep -q '7d 97%' ||
+	fail "a new session's first, lower value counted (it may be from long ago): $("$tool" list)"
 printf '{"session_id":"b","rate_limits":{"seven_day":{"used_percentage":4,"resets_at":%d}}}' $week |
 	sh -c "$command" >/dev/null
 "$tool" list | grep -q '7d 4%' || fail "usage reset by hand was not taken: $("$tool" list)"
@@ -142,6 +143,32 @@ printf '{"session_id":"a","rate_limits":{"seven_day":{"used_percentage":97,"rese
 "$tool" list | grep -q '7d 4%' || fail "a session redrawing its stale value raised it again: $("$tool" list)"
 tail -n 1 "$history" | grep -q " 4.0 $week\$" ||
 	fail "the history did not take the reset by hand: $(tail -n 1 "$history")"
+
+# ---- a session that stayed behind: its first value in a window, lower than the
+# others' answers, and its redraws change nothing; a reset by hand counts once the
+# session that shows it shows its value change again below what was written down
+five=$((now + 6 * 3600)) # (after the window of the reset above)
+send() { # session 5h
+	printf '{"session_id":"%s","rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%d}}}' \
+		"$1" "$2" $five | sh -c "$command" >/dev/null
+}
+send c 30
+send c 42
+send d 21 # its first value in this window, from an answer long ago
+"$tool" list | grep -q '5h 42%' || fail "a session's first, older value lowered the usage: $("$tool" list)"
+send d 21
+"$tool" list | grep -q '5h 42%' || fail "a session redrawing its older value lowered the usage: $("$tool" list)"
+tail -n 1 "$history" | grep -q " 42.0 $five " ||
+	fail "the older value went into the history: $(tail -n 1 "$history")"
+send c 43
+send c 6 # reset by hand: not yet, it may be an older answer
+"$tool" list | grep -q '5h 43%' || fail "one lower value of a session counted as a reset: $("$tool" list)"
+send c 7
+"$tool" list | grep -q '5h 7%' || fail "a reset by hand was not taken once it went on: $("$tool" list)"
+send d 21 # the one behind, redrawn: higher than after the reset, but old
+"$tool" list | grep -q '5h 7%' || fail "a redrawn old value undid the reset by hand: $("$tool" list)"
+send d 22 # an answer it got now
+"$tool" list | grep -q '5h 22%' || fail "a new answer after the reset was not taken: $("$tool" list)"
 
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
