@@ -34,6 +34,8 @@ struct claude_hover {
 	double px, py;
 };
 
+void claude_chart_surface(cairo_t *cr, const struct claude_look *st, struct pbox box);
+uint32_t claude_desktop_chart_bg(const struct gadget_palette *pal);
 void claude_chart_five_hours(const struct claude_hover *f, const struct claude_charts *c,
 	cairo_t *cr, const struct claude_look *st, struct pbox box);
 void claude_chart_week(const struct claude_hover *f, const struct claude_charts *c,

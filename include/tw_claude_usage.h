@@ -49,6 +49,7 @@ struct tw_usage_tool {
 	int (*backfill)(const char *dir, time_t now);
 };
 extern const struct tw_usage_tool tw_claude_tool;
+char *tw_usage_select_dir(const struct tw_usage_tool *tool, const char *account);
 
 /* The folder of the installed Claude Code: $CLAUDE_CONFIG_DIR or ~/.claude. */
 char *tw_claude_default_dir(void);

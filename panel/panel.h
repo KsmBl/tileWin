@@ -401,6 +401,7 @@ extern const struct widget_impl widget_notifications;
 extern const struct widget_impl widget_git;
 extern const struct widget_impl widget_claude;
 extern const struct widget_impl widget_codex;
+extern const struct widget_impl widget_agents;
 extern const struct widget_impl widget_kernel;
 extern const struct widget_impl widget_ports;
 extern const struct widget_impl widget_wifiradar;

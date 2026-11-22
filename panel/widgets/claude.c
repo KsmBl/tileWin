@@ -52,24 +52,10 @@ struct claude_state {
 
 /* ---------- the values ---------- */
 
-/* The folder to show: the one set, else the one the tool showed values for last. */
-static char *chosen_dir(struct widget *w) {
-	struct claude_state *c = w->data;
-	const char *set = widget_conf(w, "account", NULL);
-	if (set && *set) {
-		return tw_claude_normalize_dir(set);
-	}
-	list_t *all = c->tool->all();
-	char *dir = all->length > 0 ?
-		strdup(((struct tw_claude_usage *)all->items[0])->dir) : c->tool->default_dir();
-	tw_claude_usage_list_free(all);
-	return dir;
-}
-
 static void reload(struct widget *w) {
 	struct claude_state *c = w->data;
 	tw_claude_usage_finish(&c->usage);
-	char *dir = chosen_dir(w);
+	char *dir = tw_usage_select_dir(c->tool, widget_conf(w, "account", NULL));
 	if (dir && c->tool->backfill) {
 		c->tool->backfill(dir, time(NULL)); // once: what the tool kept before tileWin looked
 	}
@@ -598,7 +584,7 @@ static void desk_chart(struct widget *w, struct gadget_ctx *ctx, const struct ga
 	bool light_text = (pal->fg >> 24 & 0xff) + (pal->fg >> 16 & 0xff) + (pal->fg >> 8 & 0xff) > 384;
 	struct claude_look look = {
 		.fg = pal->fg, .dim = pal->dim,
-		.chart_bg = pal->mono ? pal->bg : (pal->track & 0xffffff00) | 0x50,
+		.chart_bg = claude_desktop_chart_bg(pal),
 		.chart_grid = pal->grid,
 		.chart_line = pal->mono ? pal->fg : pal->accent,
 		.label_bg = light_text ? 0x202020ff : 0xffffffff,

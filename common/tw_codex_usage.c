@@ -355,16 +355,13 @@ static int oldest_point_first(const void *a, const void *b) {
 	return pa->p.at < pb->p.at ? -1 : pa->p.at > pb->p.at ? 1 : 0;
 }
 
-int tw_codex_history_backfill(const char *dir, time_t now) {
-	char *normal = tw_claude_normalize_dir(dir);
-	char *path = tw_codex_history_path(normal);
-	if (!path || access(path, F_OK) == 0) {
-		free(path);
-		free(normal);
-		return 0; // there already: tileWin keeps it from here on
+int tw_codex_history_points(const char *dir, time_t now, struct tw_claude_point **out) {
+	*out = NULL;
+	if (!dir) {
+		return 0;
 	}
 	time_t from = now - HISTORY_DAYS * 24 * 3600;
-	struct log_list logs = session_logs(normal, now);
+	struct log_list logs = session_logs(dir, now);
 	struct codex_point *points = NULL;
 	int count = 0, cap = 0;
 	for (int i = 0; i < logs.count; i++) {
@@ -400,18 +397,30 @@ int tw_codex_history_backfill(const char *dir, time_t now) {
 	if (count > 1) {
 		qsort(points, count, sizeof(*points), oldest_point_first);
 	}
-	// in one go, the file even when empty: filled once, not looked for again
 	struct tw_claude_point *plain = count > 0 ? malloc(count * sizeof(*plain)) : NULL;
 	for (int i = 0; plain && i < count; i++) {
 		plain[i] = points[i].p;
 	}
-	tw_claude_history_write(path, plain, plain ? count : 0);
-	int added = plain ? count : 0;
-	free(plain);
+	free(points);
+	*out = plain;
+	return plain ? count : 0;
+}
+
+int tw_codex_history_backfill(const char *dir, time_t now) {
+	char *normal = tw_claude_normalize_dir(dir);
+	char *path = tw_codex_history_path(normal);
+	if (!path || access(path, F_OK) == 0) {
+		free(path);
+		free(normal);
+		return 0;
+	}
+	struct tw_claude_point *points = NULL;
+	int count = tw_codex_history_points(normal, now, &points);
+	tw_claude_history_write(path, points, count);
 	free(points);
 	free(path);
 	free(normal);
-	return added;
+	return count;
 }
 
 const struct tw_usage_tool tw_codex_tool = {

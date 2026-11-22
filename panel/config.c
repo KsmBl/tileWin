@@ -572,6 +572,7 @@ static const struct widget_impl *impls[] = {
 	&widget_git,
 	&widget_claude,
 	&widget_codex,
+	&widget_agents,
 	&widget_kernel,
 	&widget_ports,
 	&widget_wifiradar,
