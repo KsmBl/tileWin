@@ -110,12 +110,17 @@ words() { # x y w h
 	grim -g "$1,$2 ${3}x$4" "$work/part.png" 2>/dev/null || return 1
 	python3 - "$work/part.png" "$1" "$2" <<'PY'
 import subprocess, sys
-from PIL import Image
+from PIL import Image, ImageOps, ImageStat
 path, ox, oy = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 im = Image.open(path).convert("L")
+# dark text on light ground reads best: light text on a dark taskbar is turned round
+if ImageStat.Stat(im).mean[0] < 128:
+    im = ImageOps.invert(im)
+im = ImageOps.autocontrast(im)
 im = im.resize((im.width * 3, im.height * 3), Image.LANCZOS)
 im.save(path)
-tsv = subprocess.run(["tesseract", path, "-", "tsv"], capture_output=True, text=True).stdout
+tsv = subprocess.run(["tesseract", path, "-", "--psm", "11", "tsv"], capture_output=True,
+    text=True).stdout  # (sparse text: words scattered along a taskbar)
 for line in tsv.splitlines()[1:]:
     f = line.split("\t")
     if len(f) == 12 and f[11].strip():
@@ -192,6 +197,21 @@ ipc panel reload >/dev/null 2>&1
 bar_until "37" 10 || # (tesseract reads the % sign as 9 at times)
 	fail "the claude widget of an older config does not show Claude Code's 37%: $(tr '\n' ' ' < "$work/seen")"
 has Codex && fail "the claude widget of an older config shows Codex too"
+
+# ---- on the desktop, two accounts in lines: each as high as its lines need, a chart
+# of the week under each, as there is room (in the top right corner, 3 by 8 cells)
+printf 'desktop_widgets {\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s\n\t\tsize 3x8\n\t}\n}\n' \
+	"$codex" "$claude" >> "$conf"
+ipc panel reload >/dev/null 2>&1
+for _ in $(seq 1 15); do
+	words 880 0 400 680 > "$work/seen"
+	grep -q "^Claude " "$work/seen" && [ "$(grep -c "^now" "$work/seen")" -ge 2 ] && break
+	sleep 1
+done
+has Codex && has Claude ||
+	fail "the desktop widget does not show both accounts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+[ "$(grep -c "^now" "$work/seen")" -ge 2 ] ||
+	fail "the desktop widget has no chart of the week under each account: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

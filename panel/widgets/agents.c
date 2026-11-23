@@ -367,9 +367,10 @@ static int source_items(struct widget *w, const struct source *s,
 	if (s->account.agent != TW_AGENT_COPILOT) {
 		return count;
 	}
+	// its allowance and when it resets: no week, and no pace of a window of a known length
 	int kept = 0;
 	for (int i = 0; i < count; i++) {
-		if (!items[i]->seven_day) {
+		if (!items[i]->seven_day && items[i]->kind != TW_CLAUDE_LEFT) {
 			items[kept++] = items[i];
 		}
 	}
@@ -491,6 +492,9 @@ static const char *long_name(const struct source *s, const struct tw_claude_item
 		bool brief) {
 	if (s->account.agent == TW_AGENT_COPILOT && item->kind == TW_CLAUDE_USAGE) {
 		return s->allowance[0] ? s->allowance : "Allowance";
+	}
+	if (s->account.agent == TW_AGENT_COPILOT && item->kind == TW_CLAUDE_RESET) {
+		return "Allowance resets";
 	}
 	if (brief) {
 		return item->label;
@@ -940,47 +944,152 @@ static void desk_chart(const struct source *s, struct gadget_ctx *ctx,
 	free(charts.points);
 }
 
+/* Why an account shows no values yet, in a line; NULL when it has them. */
+static const char *desk_missing(struct widget *w, const struct source *s) {
+	if (show_connect(s)) {
+		return "Not connected: click to let Claude Code show its limits here";
+	}
+	if (s->have) {
+		return NULL;
+	}
+	if (s->account.agent == TW_AGENT_COPILOT && !widget_conf_bool(w, "account_checks", false)) {
+		return "Allowance: turn on Ask the accounts"; // (in its settings)
+	}
+	return "The limits come with its next answer";
+}
+
+/* Whether an account has a history to draw a chart of (Claude Code and Codex). */
+static bool desk_has_chart(const struct source *s) {
+	return s->tool && s->have && s->usage.history && s->usage.seven_day.resets_at > 0;
+}
+
+/* One account the old way: the whole card, as with one account. */
+static void desk_whole(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, const char *style) {
+	double y = desk_title(s, ctx, pal, l, l->pad);
+	const char *missing = desk_missing(w, s);
+	if (missing) {
+		pd_text(ctx->cairo, l->font, missing, l->pad, y, ctx->width - 2 * l->pad, 40 * l->sc,
+			pal->dim, PD_LEFT);
+		return;
+	}
+	double bottom = ctx->height - l->pad;
+	bottom -= desk_foot(s, ctx, pal, l, bottom);
+	if (strcmp(style, "week") == 0 || strcmp(style, "windows") == 0) {
+		desk_chart(s, ctx, pal, l, y, bottom, strcmp(style, "week") == 0);
+	} else if (strcmp(style, "list") == 0) {
+		desk_list(w, s, ctx, pal, l, y, bottom);
+	} else if (strcmp(style, "bar") == 0) {
+		desk_bars(w, s, ctx, pal, l, y, bottom);
+	} else {
+		desk_rings(w, s, ctx, pal, l, y, bottom);
+	}
+}
+
+/*
+ * Several accounts, one under the other, each as high as what it shows needs:
+ * its title, its lines (bars, rings) or why it has none yet, how old they
+ * are. In the chart styles each account with a history has a chart, sharing
+ * the room; in the list the room left over goes to a chart of the week under
+ * each account that has one.
+ */
+static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, struct desk_look *l, const char *style) {
+	struct agents_state *st = w->data;
+	bool charts = strcmp(style, "week") == 0 || strcmp(style, "windows") == 0;
+	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0;
+	double title = l->title ? l->text * 1.8 : 0, gap = l->text * 1.1;
+	double row = l->text * 2.3, line = l->text * 1.6, foot = l->updated ? l->text * 1.3 : 0;
+	double need[32] = { 0 }, total = 0;
+	int count = st->count < 32 ? st->count : 32, with_chart = 0;
+	for (int k = 0; k < count; k++) {
+		const struct source *s = &st->src[k];
+		const struct tw_claude_item *items[MAX_ITEMS];
+		int n = source_items(w, s, items);
+		bool seven[2];
+		int windows = usage_windows(items, n, seven);
+		need[k] = title;
+		if (desk_missing(w, s)) {
+			need[k] += show_connect(s) ? line * 2 : line;
+		} else if (charts) {
+			need[k] += desk_has_chart(s) ? 0 : line;
+			need[k] += desk_has_chart(s) && s->usage.updated ? foot : 0;
+		} else {
+			need[k] += list ? n * row : bars ? windows * l->text * 4.4 :
+				l->text * (8 + 1.3 * (n - windows));
+			need[k] += s->usage.updated ? foot : 0;
+		}
+		with_chart += (charts || list) && !desk_missing(w, s) && desk_has_chart(s);
+		total += need[k] + (k > 0 ? gap : 0);
+	}
+	double room = ctx->height - 2 * l->pad;
+	// what is left: the charts (the chart styles need room for them at all)
+	double spare = room - total, chart = 0;
+	if (with_chart > 0 && spare > 0) {
+		chart = spare / with_chart;
+		if (list) {
+			chart = fmin(chart, l->text * 10); // a chart under the lines, not a wall
+			if (chart < l->text * 5) {
+				chart = 0; // too little room: the lines alone
+			}
+		}
+	}
+	// too little room for it all: everything a little smaller
+	double scale = spare < 0 && total > 0 ? room / total : 1;
+	double y = l->pad;
+	for (int k = 0; k < count; k++) {
+		const struct source *s = &st->src[k];
+		double top = y, bottom = y + need[k] * scale;
+		bool chart_here = chart > 0 && desk_has_chart(s) && !desk_missing(w, s);
+		if (chart_here) {
+			bottom += chart;
+		}
+		y = desk_title(s, ctx, pal, l, top);
+		const char *missing = desk_missing(w, s);
+		if (missing) {
+			pd_text(ctx->cairo, l->font, missing, l->pad, y, ctx->width - 2 * l->pad,
+				bottom - y, pal->dim, PD_LEFT);
+		} else {
+			double end = bottom - (s->usage.updated ? desk_foot(s, ctx, pal, l, bottom) : 0);
+			if (charts) {
+				if (chart_here) {
+					desk_chart(s, ctx, pal, l, y, end, strcmp(style, "week") == 0);
+				} else {
+					pd_text(ctx->cairo, l->font, "Nothing written down yet", l->pad, y,
+						ctx->width - 2 * l->pad, line, pal->dim, PD_LEFT);
+				}
+			} else {
+				double lines = end - (chart_here ? chart : 0);
+				if (list) {
+					desk_list(w, s, ctx, pal, l, y, lines);
+				} else if (bars) {
+					desk_bars(w, s, ctx, pal, l, y, lines);
+				} else {
+					desk_rings(w, s, ctx, pal, l, y, lines);
+				}
+				if (chart_here) {
+					desk_chart(s, ctx, pal, l, lines + l->text * 0.4, end, true);
+				}
+			}
+		}
+		y = bottom + gap * scale;
+	}
+}
+
 static bool agents_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal) {
 	const char *style = ctx->style ? ctx->style : "";
-	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0,
-		rings = strcmp(style, "ring") == 0, week = strcmp(style, "week") == 0,
-		windows = strcmp(style, "windows") == 0;
-	if (!list && !bars && !rings && !week && !windows) {
+	if (strcmp(style, "list") != 0 && strcmp(style, "bar") != 0 && strcmp(style, "ring") != 0 &&
+			strcmp(style, "week") != 0 && strcmp(style, "windows") != 0) {
 		return false; // compact and tile: the taskbar look
 	}
 	struct agents_state *st = w->data;
 	struct desk_look l;
 	desk_look(w, ctx, pal, &l);
-	// a chart is of one account: the first that has one; the others share the height
-	int first = 0;
-	for (int i = 0; (week || windows) && i < st->count; i++) {
-		if (st->src[i].have && st->src[i].tool) {
-			first = i;
-			break;
-		}
-	}
-	int parts = week || windows ? (st->count > 0) : st->count;
-	double part = parts > 0 ? (ctx->height - l.pad) / parts : 0;
-	for (int k = 0; k < parts; k++) {
-		const struct source *s = &st->src[week || windows ? first : k];
-		double top = l.pad + part * k, bottom = top + part - l.pad;
-		double y = desk_title(s, ctx, pal, &l, top);
-		if (show_connect(s)) {
-			pd_text(ctx->cairo, l.font, "Not connected: click to let Claude Code show its limits "
-				"here", l.pad, y, ctx->width - 2 * l.pad, 40 * l.sc, pal->dim, PD_LEFT);
-			continue;
-		}
-		bottom -= desk_foot(s, ctx, pal, &l, bottom);
-		if (week || windows) {
-			desk_chart(s, ctx, pal, &l, y, bottom, week);
-		} else if (list) {
-			desk_list(w, s, ctx, pal, &l, y, bottom);
-		} else if (bars) {
-			desk_bars(w, s, ctx, pal, &l, y, bottom);
-		} else {
-			desk_rings(w, s, ctx, pal, &l, y, bottom);
-		}
+	if (st->count == 1) {
+		desk_whole(w, &st->src[0], ctx, pal, &l, style);
+	} else if (st->count > 1) {
+		desk_accounts(w, ctx, pal, &l, style);
 	}
 	return true;
 }
