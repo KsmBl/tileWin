@@ -32,7 +32,7 @@ work=$(mktemp -d)
 sock=$work/tilewin.sock
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
-export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
+export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 TILEWIN_NO_AGENT_SCAN=1 GSETTINGS_BACKEND=memory
 export GIO_USE_VFS=local CLAUDE_CONFIG_DIR=$work/claude CODEX_HOME=$work/no-codex
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" \
 	"$work/claude"
@@ -83,12 +83,12 @@ click 1166 1119 # the gear of the AI agent usage widget (claude in its config) i
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
-click 382 1700 # tick: Time until the 5-hour limit resets (under the accounts)
+click 382 1750 # tick: Time until the 5-hour limit resets (under the accounts)
 wait_until 5 sh -c "[ \"\$(sed -n '/^widget claude {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
 	fail "ticking wrote nothing: $(shows)"
 [ "$(shows)" = "usage_5h usage_7d reset_5h" ] || fail "after the tick it shows '$(shows)'"
 wait_still 5 screen
-click 847 1700 # its arrow up
+click 847 1750 # its arrow up
 wait_until 5 sh -c "sed -n '/^widget claude {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
 	fail "the arrow did not move it up: '$(shows)'"
 "$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"' ||

@@ -79,6 +79,8 @@ struct agents_state {
 	GAsyncQueue *pending;
 	struct agent_usage *collected;
 	time_t collected_at;
+	char *found;      // the ids of all accounts found, when none are named
+	time_t found_at;  // looked for once a minute: it reads the running programs
 };
 
 /* ---------- which accounts ---------- */
@@ -115,17 +117,23 @@ static char *wanted_accounts(struct widget *w) {
 		free(dir);
 		return strdup(id);
 	}
-	struct tw_agent_account *found;
-	int n = tw_agent_accounts_found(&found);
-	GString *all = g_string_new(NULL);
-	for (int i = 0; i < n; i++) {
-		g_string_append_printf(all, "%s%s", all->len ? " " : "", found[i].id);
+	time_t now = time(NULL);
+	if (!st->found || now < st->found_at || now - st->found_at >= COLLECT_S) {
+		struct tw_agent_account *found;
+		int n = tw_agent_accounts_found(&found);
+		GString *all = g_string_new(NULL);
+		for (int i = 0; i < n; i++) {
+			g_string_append_printf(all, "%s%s", all->len ? " " : "", found[i].id);
+		}
+		tw_agent_accounts_free(found, n);
+		if (!all->len) {
+			g_string_append(all, "claude"); // none at all: the one to connect
+		}
+		free(st->found);
+		st->found = g_string_free(all, FALSE);
+		st->found_at = now;
 	}
-	tw_agent_accounts_free(found, n);
-	if (!all->len) {
-		g_string_append(all, "claude"); // none at all: the one to connect
-	}
-	return g_string_free(all, FALSE);
+	return strdup(st->found);
 }
 
 static void free_sources(struct agents_state *st) {
@@ -1215,6 +1223,7 @@ static void agents_destroy(struct widget *w) {
 	agent_usage_free(st->collected);
 	free_sources(st);
 	free(st->accounts);
+	free(st->found);
 	free(st);
 }
 

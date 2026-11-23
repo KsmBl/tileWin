@@ -720,6 +720,7 @@ struct accounts_editor {
 	char *widget;
 	bool desktop, legacy;
 	GPtrArray *ids;     // all, in the order shown
+	GPtrArray *titles;  // of each, "Claude Code · ~/.claude"
 	GHashTable *ticked; // id -> id
 	GtkWidget *list;
 	bool updating;
@@ -727,8 +728,9 @@ struct accounts_editor {
 
 static void accounts_editor_free(gpointer data) {
 	struct accounts_editor *e = data;
+	g_hash_table_unref(e->ticked); // (its keys are in ids)
 	g_ptr_array_unref(e->ids);
-	g_hash_table_unref(e->ticked);
+	g_ptr_array_unref(e->titles);
 	g_free(e->widget);
 	g_free(e);
 }
@@ -780,6 +782,99 @@ static char *account_title(const struct tw_agent_account *a) {
 	return g_strdup_printf("%s · %s", tw_agent_names[a->agent], colon ? colon + 1 : a->dir);
 }
 
+static void accounts_rebuild(struct accounts_editor *e);
+
+/* A folder picked: a Claude Code or a Codex account of its own, ticked and kept. */
+static void on_account_folder(GObject *source, GAsyncResult *result, gpointer data) {
+	struct accounts_editor *e = data;
+	GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, NULL);
+	char *path = file ? g_file_get_path(file) : NULL;
+	if (path) {
+		char *dir = tw_claude_normalize_dir(path);
+		bool codex = tw_agent_folder_is_codex(dir);
+		char id[300];
+		tw_agent_account_id(codex ? TW_AGENT_CODEX : TW_AGENT_CLAUDE, dir, id, sizeof(id));
+		tw_agent_accounts_remember(id); // listed from now on, here and on the taskbar
+		guint at;
+		if (!g_ptr_array_find_with_equal_func(e->ids, id, g_str_equal, &at)) {
+			struct tw_agent_account a;
+			g_ptr_array_add(e->ids, g_strdup(id));
+			g_ptr_array_add(e->titles, tw_agent_account_parse(id, &a) ? account_title(&a) :
+				g_strdup(id));
+			tw_agent_account_finish(&a);
+			at = e->ids->len - 1;
+		}
+		g_hash_table_add(e->ticked, e->ids->pdata[at]);
+		accounts_write(e);
+		accounts_rebuild(e);
+		settings_status(e->s, codex ? "Codex folder added" : "Claude Code folder added");
+		free(dir);
+	}
+	g_free(path);
+	if (file) {
+		g_object_unref(file);
+	}
+}
+
+static void on_account_add(GtkButton *button, gpointer data) {
+	struct accounts_editor *e = data;
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "The folder of a Claude Code or Codex");
+	GFile *home = g_file_new_for_path(g_get_home_dir());
+	gtk_file_dialog_set_initial_folder(dialog, home);
+	g_object_unref(home);
+	GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(button));
+	gtk_file_dialog_select_folder(dialog, GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL, NULL,
+		on_account_folder, e);
+	g_object_unref(dialog);
+}
+
+/* A tick for each account, then the button that adds a folder. */
+static void accounts_rebuild(struct accounts_editor *e) {
+	e->updating = true;
+	GtkWidget *child;
+	while ((child = gtk_widget_get_first_child(e->list))) {
+		gtk_list_box_remove(GTK_LIST_BOX(e->list), child);
+	}
+	for (guint i = 0; i < e->ids->len; i++) {
+		GtkWidget *check = gtk_check_button_new_with_label(e->titles->pdata[i]);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
+			g_hash_table_contains(e->ticked, e->ids->pdata[i]));
+		g_object_set_data(G_OBJECT(check), "account", e->ids->pdata[i]);
+		g_signal_connect(check, "toggled", G_CALLBACK(on_account_tick), e);
+		gtk_widget_set_margin_start(check, 12);
+		gtk_widget_set_margin_end(check, 12);
+		gtk_widget_set_margin_top(check, 4);
+		gtk_widget_set_margin_bottom(check, 4);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), check);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+	}
+	// a Claude Code or Codex somewhere else (portable, another folder)
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	gtk_widget_set_margin_start(box, 12);
+	gtk_widget_set_margin_end(box, 12);
+	gtk_widget_set_margin_top(box, 6);
+	gtk_widget_set_margin_bottom(box, 6);
+	GtkWidget *hint = gtk_label_new(e->ids->len ? "Installed somewhere else?" :
+		"No AI agent found on this computer");
+	gtk_widget_add_css_class(hint, "dim-label");
+	gtk_widget_set_hexpand(hint, TRUE);
+	gtk_label_set_xalign(GTK_LABEL(hint), 0);
+	gtk_box_append(GTK_BOX(box), hint);
+	GtkWidget *add = gtk_button_new_with_label("Add a folder…");
+	gtk_widget_set_tooltip_text(add, "A Claude Code folder (its .claude, or the one "
+		"$CLAUDE_CONFIG_DIR names) or a Codex folder ($CODEX_HOME)");
+	g_signal_connect(add, "clicked", G_CALLBACK(on_account_add), e);
+	gtk_box_append(GTK_BOX(box), add);
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+	gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+	e->updating = false;
+}
+
 static void accounts_editor_attach(struct settings *s, GtkWidget *content, const char *widget,
 		const char *type, bool desktop) {
 	struct accounts_editor *e = g_new0(struct accounts_editor, 1);
@@ -796,7 +891,8 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 		block = confdoc_block(s->taskbar, "widget", widget, false);
 		value = cstmt_join(confdoc_child(block, "accounts", NULL), 0);
 	}
-	GPtrArray *titles = g_ptr_array_new_with_free_func(g_free);
+	e->titles = g_ptr_array_new_with_free_func(g_free);
+	GPtrArray *titles = e->titles;
 	struct tw_agent_account *found;
 	int n = tw_agent_accounts_found(&found);
 	for (int i = 0; i < n; i++) {
@@ -850,31 +946,7 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 	gtk_list_box_set_selection_mode(GTK_LIST_BOX(e->list), GTK_SELECTION_NONE);
 	gtk_widget_add_css_class(e->list, "boxed-list");
 	gtk_widget_set_margin_bottom(e->list, 8);
-	e->updating = true;
-	for (guint i = 0; i < e->ids->len; i++) {
-		GtkWidget *check = gtk_check_button_new_with_label(titles->pdata[i]);
-		gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
-			g_hash_table_contains(e->ticked, e->ids->pdata[i]));
-		g_object_set_data(G_OBJECT(check), "account", e->ids->pdata[i]);
-		g_signal_connect(check, "toggled", G_CALLBACK(on_account_tick), e);
-		gtk_widget_set_margin_start(check, 12);
-		gtk_widget_set_margin_end(check, 12);
-		gtk_widget_set_margin_top(check, 4);
-		gtk_widget_set_margin_bottom(check, 4);
-		GtkWidget *row = gtk_list_box_row_new();
-		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), check);
-		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
-	}
-	if (e->ids->len == 0) {
-		GtkWidget *none = gtk_label_new("No AI agent found on this computer");
-		gtk_widget_add_css_class(none, "dim-label");
-		gtk_widget_set_margin_top(none, 8);
-		gtk_widget_set_margin_bottom(none, 8);
-		gtk_list_box_append(GTK_LIST_BOX(e->list), none);
-	}
-	e->updating = false;
-	g_ptr_array_unref(titles);
+	accounts_rebuild(e);
 	GtkWidget *holder = gtk_list_box_row_new();
 	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(holder), e->list);
 	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(holder), FALSE);

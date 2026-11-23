@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "agentusage.h"
+#include "tw_agent_accounts.h"
 #include "tw_codex_usage.h"
 #include "tw_paths.h"
 
@@ -597,9 +598,12 @@ static struct agent_limit *read_account(struct collect *c, enum agent_kind kind,
 
 /* Query only the account quota. The CLI handles authentication and no thread is started. */
 static json_object *codex_rpc(void) {
+	// (a portable Codex: where it was found running, tw_agent_command)
+	char *program = tw_agent_command(TW_AGENT_CODEX);
 	GSubprocess *proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDIN_PIPE |
 		G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
-		"codex", "app-server", "--listen", "stdio://", NULL);
+		program ? program : "codex", "app-server", "--listen", "stdio://", NULL);
+	free(program);
 	if (!proc) {
 		return NULL;
 	}
@@ -667,9 +671,12 @@ static json_object *codex_rpc(void) {
 static json_object *copilot_quota_query(void) {
 	static const char request[] =
 		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"account.getQuota\",\"params\":{}}";
+	// (also the Copilot that comes with VS Code, tw_agent_command)
+	char *program = tw_agent_command(TW_AGENT_COPILOT);
 	GSubprocess *proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDIN_PIPE |
 		G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
-		"copilot", "--headless", "--stdio", "--no-auto-update", NULL);
+		program ? program : "copilot", "--headless", "--stdio", "--no-auto-update", NULL);
+	free(program);
 	if (!proc) {
 		return NULL;
 	}
@@ -1213,9 +1220,10 @@ struct agent_usage *agent_usage_collect(bool account_checks) {
 	usage->limits = g_ptr_array_new_with_free_func(limit_free);
 	struct collect c = { .usage = usage };
 	for (int i = 0; i < AGENT_COUNT; i++) {
-		char *command = g_find_program_in_path(commands[i]);
+		// on $PATH, or where it was found running (enum agent_kind: tw_agent's order)
+		char *command = tw_agent_command((enum tw_agent)i);
 		usage->installed[i] = command != NULL;
-		g_free(command);
+		free(command);
 		c.sessions[i] = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
 			i == AGENT_AGY ? session_free : NULL);
 	}

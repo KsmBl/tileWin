@@ -47,7 +47,7 @@ claude=$work/claude-folder
 codex=$work/codex-folder
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
-export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
+export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 TILEWIN_NO_AGENT_SCAN=1 GSETTINGS_BACKEND=memory
 export CLAUDE_CONFIG_DIR=$claude CODEX_HOME=$codex
 day=$(date +%Y/%m/%d)
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" \
@@ -144,7 +144,7 @@ where() { grep -m1 "^$1 " "$work/seen" | cut -d' ' -f2,3; }
 bar_until "Codex " 20
 has Claude || fail "the taskbar does not name Claude: $(tr '\n' ' ' < "$work/seen")"
 has Codex || fail "the taskbar does not name Codex: $(tr '\n' ' ' < "$work/seen")"
-grep -q "^37%" "$work/seen" && grep -q "^23%" "$work/seen" ||
+grep -q "^37" "$work/seen" && grep -q "^23" "$work/seen" ||
 	fail "the taskbar does not show both accounts' values: $(tr '\n' ' ' < "$work/seen")"
 
 # ---- a click on Codex opens its flyout, the others listed as accounts
@@ -154,14 +154,14 @@ if [ $# -eq 2 ]; then
 	sleep 1.5
 	above > "$work/seen"
 	has Accounts || fail "the flyout lists no accounts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	grep -q "^23%" "$work/seen" || fail "the flyout of Codex does not show its 23%"
+	grep -q "^23" "$work/seen" || fail "the flyout of Codex does not show its 23%"
 	# a click on the row of Claude Code shows that account instead, the flyout open
 	set -- $(grep "^Claude " "$work/seen" | sort -k3 -n | tail -n 1 | cut -d' ' -f2,3)
 	if [ $# -eq 2 ]; then
 		"$pointer" 1280 720 click "$1" "$2" >/dev/null 2>&1
 		sleep 1.5
 		above > "$work/seen"
-		grep -q "^37%" "$work/seen" || fail "a click on Claude Code's row did not show it"
+		grep -q "^37" "$work/seen" || fail "a click on Claude Code's row did not show it"
 		has Accounts || fail "the flyout closed at the click on an account"
 	else
 		fail "no row of Claude Code in the flyout"
@@ -176,15 +176,20 @@ fi
 codex_id=codex:$codex
 printf '\nwidget agents {\n\taccounts %s\n}\n' "$codex_id" >> "$conf"
 ipc panel reload >/dev/null 2>&1
-bar_until ! "Claude " 10 ||
-	fail "with accounts $codex_id the taskbar still shows Claude"
-bar > "$work/seen"
-grep -q "^23%" "$work/seen" || fail "with accounts $codex_id Codex is gone too"
+# (until the taskbar is back from reloading: Codex's values there, Claude not)
+for _ in $(seq 1 15); do
+	bar > "$work/seen"
+	grep -qE "^(23|41)" "$work/seen" && ! grep -q "^Claude " "$work/seen" && break
+	sleep 1
+done
+has Claude && fail "with accounts $codex_id the taskbar still shows Claude"
+grep -qE "^(23|41)" "$work/seen" ||
+	fail "with accounts $codex_id Codex is gone too: $(tr '\n' ' ' < "$work/seen")"
 
 # ---- the claude widget of an older config: the same widget, of its account alone
 sed -i -e 's/\tright agents tray/\tright claude tray/' -e '/^widget agents {/,/^}/d' "$conf"
 ipc panel reload >/dev/null 2>&1
-bar_until "37%" 10 ||
+bar_until "37" 10 || # (tesseract reads the % sign as 9 at times)
 	fail "the claude widget of an older config does not show Claude Code's 37%: $(tr '\n' ' ' < "$work/seen")"
 has Codex && fail "the claude widget of an older config shows Codex too"
 

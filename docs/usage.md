@@ -192,7 +192,7 @@ Only programs of users are guarded (those in `user.slice`); the services of the 
 
 ## AI agent usage
 
-The **AI agent usage** widget (taskbar and desktop) shows the usage limits of the accounts of Claude Code, Codex, GitHub Copilot CLI and Antigravity, one after the other. Under **Accounts** in its settings each account found on this computer has a tick: every Claude Code folder something was written down for and the installed one, the Codex folder, Copilot and Antigravity when their command is installed; all of them by default, so one added later comes along. In `taskbar.conf` that is `accounts`, the ids in their order:
+The **AI agent usage** widget (taskbar and desktop) shows the usage limits of the accounts of Claude Code, Codex, GitHub Copilot CLI and Antigravity, one after the other. Under **Accounts** in its settings each account found on this computer has a tick: every Claude Code folder something was written down for and the installed one, the Codex folder, Copilot and Antigravity when their program or their folder is there (`~/.copilot`, the Copilot that comes with VS Code, `~/.gemini/antigravity-cli`), and the accounts of agents running now, portable ones too, by the folder their environment names (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, else their own `$HOME`). Each account found is kept in `~/.local/state/tileWin/agent-accounts`, so it stays in the list when its agent does not run. **Add a folder…** adds a Claude Code or a Codex installed somewhere else (a Codex folder is told by its `sessions`, `config.toml` or `auth.json`). All of them are ticked by default, so one added later comes along. In `taskbar.conf` that is `accounts`, the ids in their order:
 
 ```
 widget agents {

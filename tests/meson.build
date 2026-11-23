@@ -267,6 +267,18 @@ test(
 )
 
 test(
+	'agent-accounts',
+	executable(
+		'test-agent-accounts',
+		'test_agent_accounts.c',
+		include_directories: sway_inc,
+		link_with: lib_sway_common,
+		dependencies: [jsonc, math, glib],
+	),
+	suite: 'unit',
+)
+
+test(
 	'codex-usage',
 	executable(
 		'test-codex-usage',

@@ -38,7 +38,7 @@ sock=$work/tilewin.sock
 claude=$work/claude-folder
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
-export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
+export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 TILEWIN_NO_AGENT_SCAN=1 GSETTINGS_BACKEND=memory
 export CLAUDE_CONFIG_DIR=$claude
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$claude"
 
