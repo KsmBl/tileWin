@@ -287,6 +287,17 @@ double tw_claude_window_now(const struct tw_claude_window *window, time_t now) {
 	return window->used < 0 ? 0 : window->used > 100 ? 100 : window->used;
 }
 
+char *tw_usage_select_dir(const struct tw_usage_tool *tool, const char *account) {
+	if (account && *account) {
+		return tw_claude_normalize_dir(account);
+	}
+	list_t *all = tool->all();
+	char *dir = all->length > 0 ?
+		strdup(((struct tw_claude_usage *)all->items[0])->dir) : tool->default_dir();
+	tw_claude_usage_list_free(all);
+	return dir;
+}
+
 const struct tw_usage_tool tw_claude_tool = {
 	.type = "claude",
 	.name = "Claude Code",

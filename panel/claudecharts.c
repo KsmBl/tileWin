@@ -7,16 +7,25 @@
 #include "claudecharts.h"
 #include "draw.h"
 
-static void chart_bg(cairo_t *cr, const struct claude_look *st, struct pbox g) {
+void claude_chart_surface(cairo_t *cr, const struct claude_look *st, struct pbox g) {
 	cairo_new_path(cr);
 	pd_rounded(cr, g.x, g.y, g.width, g.height, st->chart_radius);
 	pd_color(cr, st->chart_bg);
 	cairo_fill(cr);
-	for (int i = 1; i < 4; i++) {
-		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st->chart_grid);
-	}
 	if (st->sunken) {
 		pd_bevel(cr, g.x, g.y, g.width, g.height, true);
+	}
+}
+
+uint32_t claude_desktop_chart_bg(const struct gadget_palette *pal) {
+	return pal->mono ? pal->bg : (pal->track & 0xffffff00) | 0x50;
+}
+
+static void chart_bg(cairo_t *cr, const struct claude_look *st, struct pbox g) {
+	claude_chart_surface(cr, st, g);
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x + (st->sunken ? 1 : 0), g.y + g.height * i / 4,
+			g.width - (st->sunken ? 2 : 0), 1, st->chart_grid);
 	}
 }
 

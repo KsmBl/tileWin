@@ -43,6 +43,12 @@ static const struct tw_widget_option opts_codex[] = {
 	{ 0 },
 };
 
+static const struct tw_widget_option opts_agents[] = {
+	{ "codex_poll", "Refresh Codex account quota", "Read account quota through Codex every "
+		"five minutes, including when no terminal is running. Yes by default.", choice_yes_no },
+	{ 0 },
+};
+
 static const char *const choice_labels_taskbar[] = { "short", "none", NULL };
 static const char *const choice_labels_desktop[] = { "long", "short", NULL };
 static const char *const choice_bar_width[] = { "20", "34", "50", "80", "120", NULL };
@@ -399,6 +405,13 @@ static const struct tw_widget_style styles_plain[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_agents[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "list", "One line per agent", 3, 2 },
+	{ "overlay", "Overlaid quota charts", 5, 4 },
+	{ "agy-quotas", "Antigravity quota groups", 7, 6 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_claude[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "list", "A line for each item", 3, 3 },
@@ -501,6 +514,8 @@ const struct tw_widget_info tw_widgets[] = {
 		"account, when they reset and how long they last", STATUS, opts_claude, styles_claude },
 	{ "codex", "Codex usage", "The 5-hour and weekly usage limits of the ChatGPT plan Codex "
 		"works with, when they reset and how long they last", STATUS, opts_codex, styles_claude },
+	{ "agents", "AI agent usage", "Agent quotas, model history and running terminal workers",
+		STATUS, opts_agents, styles_agents },
 	{ "kernel", "Kernel updates", "The automatic kernel updates: fixes applied live, a new "
 		"kernel downloaded and built, ready for the next restart", STATUS, opts_kernel,
 		styles_kernel },
@@ -531,6 +546,7 @@ const char *tw_widget_desktop_style(const char *type) {
 	} own[] = {
 		{ "claude", "list" },
 		{ "codex", "list" },
+		{ "agents", "list" },
 		{ "kernel", "card" },
 		{ "ports", "list" },
 		{ "wifiradar", "radar" },
