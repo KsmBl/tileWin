@@ -7,16 +7,25 @@
 #include "claudecharts.h"
 #include "draw.h"
 
-static void chart_bg(cairo_t *cr, const struct claude_look *st, struct pbox g) {
+void claude_chart_surface(cairo_t *cr, const struct claude_look *st, struct pbox g) {
 	cairo_new_path(cr);
 	pd_rounded(cr, g.x, g.y, g.width, g.height, st->chart_radius);
 	pd_color(cr, st->chart_bg);
 	cairo_fill(cr);
-	for (int i = 1; i < 4; i++) {
-		pd_rect(cr, g.x, g.y + g.height * i / 4, g.width, 1, st->chart_grid);
-	}
 	if (st->sunken) {
 		pd_bevel(cr, g.x, g.y, g.width, g.height, true);
+	}
+}
+
+uint32_t claude_desktop_chart_bg(const struct gadget_palette *pal) {
+	return pal->mono ? pal->bg : (pal->track & 0xffffff00) | 0x50;
+}
+
+static void chart_bg(cairo_t *cr, const struct claude_look *st, struct pbox g) {
+	claude_chart_surface(cr, st, g);
+	for (int i = 1; i < 4; i++) {
+		pd_rect(cr, g.x + (st->sunken ? 1 : 0), g.y + g.height * i / 4,
+			g.width - (st->sunken ? 2 : 0), 1, st->chart_grid);
 	}
 }
 
@@ -290,6 +299,28 @@ static void draw_now(cairo_t *cr, const struct claude_look *st, struct pbox g, d
 	}
 }
 
+static void five_hour_weekly_notice(cairo_t *cr, const struct claude_look *st,
+		struct pbox chart, time_t reset) {
+	if (chart.width <= 8 || chart.height < 18) {
+		return;
+	}
+	char label[64] = "Weekly limit reached";
+	if (reset > 0) {
+		struct tm tm;
+		char when[32];
+		localtime_r(&reset, &tm);
+		strftime(when, sizeof(when), "%a %H:%M", &tm);
+		snprintf(label, sizeof(label), "» Weekly reset %s", when);
+		pd_rect(cr, chart.x + chart.width - 2, chart.y, 2, chart.height, st->chart_line);
+	}
+	int width = 0;
+	pd_text_size(cr, st->font, label, &width, NULL);
+	width = fmin(width + 8, chart.width - 6);
+	int x = chart.x + chart.width - width - 3;
+	pd_rect(cr, x, chart.y + 2, width, 17, st->label_bg);
+	pd_text(cr, st->font, label, x + 3, chart.y + 2, width - 6, 17, st->fg, PD_RIGHT);
+}
+
 /*
  * The last three 5-hour windows in one chart, along the hours from the start
  * of the oldest to the reset of the newest (or now, when none runs): each
@@ -298,6 +329,7 @@ static void draw_now(cairo_t *cr, const struct claude_look *st, struct pbox g, d
  */
 void claude_chart_five_hours(const struct claude_hover *f, const struct claude_charts *c, cairo_t *cr,
 		const struct claude_look *st, struct pbox box) {
+	bool weekly_blocked = tw_claude_window_now(&c->seven_day, c->now) >= 100;
 	// the windows there were: the resets in the history and the one now, newest last
 	time_t resets[64];
 	int nr = 0;
@@ -328,7 +360,7 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		return;
 	}
 	time_t start = resets[first] - TW_CLAUDE_FIVE_HOURS;
-	time_t end = resets[nr - 1] > c->now ? resets[nr - 1] : c->now;
+	time_t end = !weekly_blocked && resets[nr - 1] > c->now ? resets[nr - 1] : c->now;
 	// the hours: a faint line at each, a time under every few
 	long span_h = (long)((end - start) / 3600) + 1;
 	int every = span_h <= 16 ? 3 : span_h <= 30 ? 6 : 12;
@@ -362,11 +394,16 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		time_t reset = resets[i], wstart = reset - TW_CLAUDE_FIVE_HOURS;
 		// (a window reset by hand ends where the next one began)
 		time_t over = window_end(c, false, reset);
+		if (weekly_blocked && wstart >= end) {
+			continue;
+		}
 		double x0 = chart_x(g, start, end, wstart), x1 = chart_x(g, start, end, over);
 		// the window: a band, its edges marked
 		pd_rect(cr, x0, g.y, x1 - x0, g.height, (st->chart_line & 0xffffff00) | 0x10);
 		pd_rect(cr, round(x0), g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
-		pd_rect(cr, round(x1) - 1, g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
+		if (!weekly_blocked || over <= end) {
+			pd_rect(cr, round(x1) - 1, g.y, 1, g.height, (st->chart_line & 0xffffff00) | 0x60);
+		}
 		time_t ts[256];
 		double vs[256];
 		int n = window_series(c, false, reset, TW_CLAUDE_FIVE_HOURS, ts, vs, 256);
@@ -390,6 +427,9 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		}
 	}
 	draw_now(cr, st, g, now_x, now_used, now_color);
+	if (weekly_blocked) {
+		five_hour_weekly_notice(cr, st, g, c->seven_day.resets_at);
+	}
 	// what was used at the time under the pointer
 	if (f->inside && pbox_contains(&g, f->px, f->py)) {
 		time_t t = time_at(g, start, end, f->px);

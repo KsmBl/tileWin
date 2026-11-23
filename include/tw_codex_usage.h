@@ -39,6 +39,8 @@ char *tw_codex_history_path(const char *dir);
  * there already).
  */
 int tw_codex_history_backfill(const char *dir, time_t now);
+/* Quota observations from recent session logs, oldest first. The caller frees *out. */
+int tw_codex_history_points(const char *dir, time_t now, struct tw_claude_point **out);
 
 extern const struct tw_usage_tool tw_codex_tool;
 

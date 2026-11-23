@@ -22,8 +22,8 @@ static void check(bool ok, const char *what, const char *widget) {
 /* The styles the panel draws. */
 static const char *const drawn[] = {
 	"compact", "tile", "chart", "gauge", "ring", "bar", "digital", "analog", "binary",
-	// drawn by the widgets that have them (draw_gadget): Claude's and the kernel's
-	"list", "card", "week", "windows", "radar", NULL,
+	// drawn by the widgets that have them (draw_gadget)
+	"list", "card", "week", "windows", "radar", "overlay", "agy-quotas", NULL,
 };
 
 static bool is_drawn(const char *name) {

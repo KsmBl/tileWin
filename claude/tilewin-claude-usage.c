@@ -27,11 +27,19 @@
 #include <fcntl.h>
 #include <json.h>
 #include <limits.h>
+#include <math.h>
+#include <poll.h>
+#ifdef __FreeBSD__
+#include <libutil.h>
+#else
+#include <pty.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -538,9 +546,643 @@ static int cmd_list(void) {
 	return 0;
 }
 
+/* The Antigravity status line has its own schema and quota buckets. */
+static int agy_pid(void) {
+	int pid = getppid();
+	for (int n = 0; pid > 1 && n < 12; n++) {
+		char path[64], line[1024], name[32], state;
+		snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+		FILE *proc = fopen(path, "r");
+		bool read_ok = proc && fgets(line, sizeof(line), proc);
+		if (proc) {
+			fclose(proc);
+		}
+		if (!read_ok) {
+			break;
+		}
+		if (sscanf(line, "%*d (%31[^)]) %c", name, &state) == 2 && strcmp(name, "agy") == 0) {
+			return pid;
+		}
+		char *end = strrchr(line, ')');
+		if (!end || sscanf(end + 1, " %c %d", &state, &pid) != 2) {
+			break;
+		}
+	}
+	return 0;
+}
+
+static void copy_fields(json_object *out, json_object *source, const char *const *keys) {
+	for (; *keys; keys++) {
+		json_object *value;
+		if (json_object_object_get_ex(source, *keys, &value)) {
+			json_object_object_add(out, *keys, json_object_get(value));
+		}
+	}
+}
+
+static json_object *status_field(json_object *o, const char *name) {
+	json_object *value = NULL;
+	json_object_object_get_ex(o, name, &value);
+	return value;
+}
+
+static const char *status_text(json_object *o, const char *name) {
+	json_object *v = status_field(o, name);
+	return json_object_is_type(v, json_type_string) ? json_object_get_string(v) : NULL;
+}
+
+static bool status_number(json_object *o, const char *name, double *out) {
+	json_object *v = status_field(o, name);
+	if (!json_object_is_type(v, json_type_int) && !json_object_is_type(v, json_type_double)) {
+		return false;
+	}
+	*out = json_object_get_double(v);
+	return isfinite(*out);
+}
+
+struct terminal_status {
+	int column, width;
+	bool color;
+};
+
+static struct terminal_status terminal_status(json_object *root) {
+	double width;
+	return (struct terminal_status){
+		.width = status_number(root, "terminal_width", &width) && width >= 30 && width <= 1000 ?
+			(int)width : 100,
+		.color = !getenv("NO_COLOR"),
+	};
+}
+
+static void status_segment_begin(struct terminal_status *line, int width) {
+	if (line->column && line->column + width + 3 > line->width) {
+		putchar('\n');
+		line->column = 0;
+	}
+	if (line->column) {
+		fputs(" | ", stdout);
+		line->column += 3;
+	}
+	line->column += width;
+}
+
+static void status_write_text(const struct terminal_status *line, const char *text, const char *color) {
+	if (line->color && color) {
+		fputs(color, stdout);
+	}
+	for (const unsigned char *c = (const unsigned char *)text; *c; c++) {
+		if (*c >= 32 && *c != 127) {
+			putchar(*c);
+		}
+	}
+	if (line->color && color) {
+		fputs("\033[0m", stdout);
+	}
+}
+
+static void status_segment(struct terminal_status *line, const char *text, const char *color) {
+	status_segment_begin(line, strlen(text));
+	status_write_text(line, text, color);
+}
+
+static void status_bar(struct terminal_status *line, const char *label, double percent,
+		const char *suffix) {
+	if (!(percent >= 0 && percent <= 100)) {
+		return;
+	}
+	int filled = (int)((percent + 10) / 20);
+	char bar[6], value[128];
+	for (int i = 0; i < 5; i++) {
+		bar[i] = i < filled ? '=' : '-';
+	}
+	bar[5] = '\0';
+	snprintf(value, sizeof(value), "%s [%s] %.1f%%%s", label, bar, percent, suffix ? suffix : "");
+	status_segment(line, value, percent >= 95 ? "\033[91m" : percent >= 80 ? "\033[93m" : "\033[96m");
+}
+
+static void status_model(struct terminal_status *line, json_object *root) {
+	json_object *model = status_field(root, "model");
+	const char *name = status_text(model, "display_name");
+	if (!name) {
+		name = status_text(model, "id");
+	}
+	const char *effort = status_text(model, "effort");
+	if (!effort) {
+		effort = status_text(status_field(root, "effort"), "level");
+	}
+	if (name && *name) {
+		char text[128];
+		snprintf(text, sizeof(text), "%s%s%s", name,
+			effort && !strcasestr(name, effort) ? " " : "",
+			effort && !strcasestr(name, effort) ? effort : "");
+		status_segment(line, text, "\033[1m");
+	}
+}
+
+static int status_label(char *out, size_t size, const char *text, size_t len) {
+	// Match Claude's 20-character middle truncation and keep UTF-8 sequences intact.
+	size_t count = 0, right = len;
+	const char *left = text;
+	for (size_t i = 0; i < len; i++) {
+		if (((unsigned char)text[i] & 0xc0) == 0x80) {
+			continue;
+		}
+		if (count == 10) {
+			left = text + i;
+		}
+		count++;
+	}
+	if (count <= 20) {
+		snprintf(out, size, "%.*s", (int)len, text);
+		return (int)count;
+	}
+	for (int i = 0; i < 9 && right > 0; i++) {
+		do {
+			right--;
+		} while (right && ((unsigned char)text[right] & 0xc0) == 0x80);
+	}
+	snprintf(out, size, "%.*s…%.*s", (int)(left - text), text, (int)(len - right), text + right);
+	return 20;
+}
+
+static bool status_git_read(const char *cwd, const char *command, const char *option,
+		char *out, size_t size) {
+	int ends[2];
+	if (pipe(ends) < 0) {
+		return false;
+	}
+	pid_t pid = fork();
+	if (pid == 0) {
+		close(ends[0]);
+		if (dup2(ends[1], STDOUT_FILENO) < 0) {
+			_exit(126);
+		}
+		close(ends[1]);
+		int quiet = open("/dev/null", O_RDWR | O_CLOEXEC);
+		if (quiet < 0 || dup2(quiet, STDIN_FILENO) < 0 || dup2(quiet, STDERR_FILENO) < 0) {
+			_exit(126);
+		}
+		execlp("git", "git", "-C", cwd, command, option, "HEAD", (char *)NULL);
+		_exit(127);
+	}
+	close(ends[1]);
+	ssize_t count = -1;
+	if (pid > 0) {
+		struct pollfd ready = { .fd = ends[0], .events = POLLIN };
+		if (poll(&ready, 1, 500) > 0 && (ready.revents & POLLIN)) {
+			count = read(ends[0], out, size - 1);
+		} else {
+			kill(pid, SIGKILL);
+		}
+	}
+	close(ends[0]);
+	int status = 0;
+	pid_t waited = -1;
+	if (pid > 0) {
+		do {
+			waited = waitpid(pid, &status, 0);
+		} while (waited < 0 && errno == EINTR);
+	}
+	if (count <= 0 || waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		return false;
+	}
+	while (count > 0 && (out[count - 1] == '\n' || out[count - 1] == '\r')) {
+		count--;
+	}
+	out[count] = '\0';
+	return count > 0;
+}
+
+static void agy_status_workspace(struct terminal_status *line, json_object *root) {
+	const char *cwd = status_text(status_field(root, "workspace"), "current_dir");
+	if (!cwd || !*cwd) {
+		cwd = status_text(root, "cwd");
+	}
+	if (!cwd || !*cwd) {
+		return;
+	}
+	const char *end = cwd + strlen(cwd);
+	while (end > cwd + 1 && end[-1] == '/') {
+		end--;
+	}
+	const char *base = end;
+	while (base > cwd && base[-1] != '/') {
+		base--;
+	}
+	if (base == end) {
+		base = cwd; // a root directory
+	}
+	char directory[96], branch_label[96], local_branch[256] = "";
+	int width = status_label(directory, sizeof(directory), base, end - base);
+	const char *branch = status_text(status_field(root, "worktree"), "branch");
+	if (!branch || !*branch) {
+		branch = status_text(status_field(root, "vcs"), "branch");
+	}
+	if ((!branch || !*branch) && cwd[0] == '/') {
+		if (status_git_read(cwd, "symbolic-ref", "--short", local_branch, sizeof(local_branch))) {
+			branch = local_branch;
+		} else if (status_git_read(cwd, "rev-parse", "--short", local_branch + 9, sizeof(local_branch) - 9)) {
+			memcpy(local_branch, "detached:", 9);
+			branch = local_branch;
+		}
+	}
+	if (branch && *branch) {
+		int branch_width = status_label(branch_label, sizeof(branch_label), branch, strlen(branch));
+		status_segment_begin(line, width);
+		status_write_text(line, directory, "\033[36m");
+		if (line->column + branch_width + 3 > line->width) {
+			putchar('\n');
+			line->column = 0;
+		} else {
+			putchar(' ');
+			line->column++;
+		}
+		status_write_text(line, "⎇ ", "\033[38;5;220m");
+		status_write_text(line, branch_label, "\033[38;5;220m");
+		line->column += branch_width + 2;
+	} else {
+		status_segment_begin(line, width);
+		status_write_text(line, directory, "\033[36m");
+	}
+}
+
+static const char *status_usage_color(double percent) {
+	const char *const colors[] = {
+		"\033[38;5;46m", "\033[38;5;118m", "\033[38;5;154m", "\033[38;5;226m",
+		"\033[38;5;214m", "\033[38;5;202m", "\033[38;5;208m", "\033[38;5;196m",
+	};
+	return colors[(int)fmin(7, floor(percent / 12.5))];
+}
+
+static void status_vertical_bar(const struct terminal_status *line, double percent) {
+	const char *const blocks[] = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+	if (line->color) {
+		fputs(status_usage_color(percent), stdout);
+	}
+	fputs(blocks[(int)fmax(0, ceil(percent / 12.5) - 1)], stdout);
+	if (line->color) {
+		fputs("\033[0m", stdout);
+	}
+}
+
+static void status_compact_tokens(char *out, size_t size, double count) {
+	if (count >= 1e9) {
+		snprintf(out, size, "%.0fG", round(count / 1e9));
+	} else if (count >= 1e6) {
+		snprintf(out, size, "%.0fM", round(count / 1e6));
+	} else if (count >= 1e3) {
+		snprintf(out, size, "%.0fk", round(count / 1e3));
+	} else {
+		snprintf(out, size, "%.0f", round(count));
+	}
+}
+
+static void agy_status_context(struct terminal_status *line, json_object *root) {
+	json_object *context = status_field(root, "context_window");
+	double used, limit, percent;
+	bool have_used = status_number(context, "total_input_tokens", &used) && used >= 0;
+	bool have_limit = status_number(context, "context_window_size", &limit) && limit > 0;
+	if (!status_number(context, "used_percentage", &percent)) {
+		if (!have_used || !have_limit) {
+			return;
+		}
+		percent = used / limit * 100;
+	}
+	percent = fmax(0, fmin(100, percent));
+	char text[128];
+	int width = snprintf(text, sizeof(text), " %.0f%%", round(percent));
+	if (have_limit) {
+		char input[48], capacity[48];
+		status_compact_tokens(input, sizeof(input), have_used ? used : percent / 100 * limit);
+		status_compact_tokens(capacity, sizeof(capacity), limit);
+		width += snprintf(text + width, sizeof(text) - width, " (%s/%s)", input, capacity);
+	}
+	status_segment_begin(line, 5 + width); // "ctx " and the one-cell glyph
+	fputs("ctx ", stdout);
+	status_vertical_bar(line, percent);
+	fputs(text, stdout);
+}
+
+/* Each model family gets one row. Empty periods occupy their column so
+ * weekly-only buckets stay aligned with the other weekly bars. */
+static const struct agy_status_group {
+	const char *name, *short_name, *five, *week, *color;
+} agy_status_groups[] = {
+	{ "Gemini", "Gemini", "gemini-5h", "gemini-weekly", "\033[94m" },
+	{ "Claude/GPT", "C/GPT", "3p-5h", "3p-weekly", "\033[96m" },
+	{ "Argon", "Argon", NULL, "gemini-argon-wtu-weekly", "\033[95m" },
+};
+
+struct agy_status_quota {
+	double used, balance;
+	long reset_in;
+	bool is_percent, is_balance;
+};
+
+static struct agy_status_quota agy_status_quota(json_object *value) {
+	struct agy_status_quota quota = { 0 };
+	double number;
+	if (!value || json_object_get_boolean(status_field(value, "disabled"))) {
+		return quota;
+	}
+	if (status_number(value, "remaining_fraction", &number) && number >= 0 && number <= 1) {
+		quota.is_percent = true;
+		quota.used = 100 * (1 - number);
+		if (quota.used > 0 && status_number(value, "reset_in_seconds", &number) &&
+				number > 0 && number <= TW_CLAUDE_SEVEN_DAYS) {
+			quota.reset_in = (long)number;
+		}
+	} else if (status_number(value, "remaining_amount", &number) && number >= 0) {
+		quota.is_balance = true;
+		quota.balance = number;
+	}
+	return quota;
+}
+
+static bool agy_status_quota_known(struct agy_status_quota quota) {
+	return quota.is_percent || quota.is_balance;
+}
+
+static int agy_status_cell(const struct terminal_status *line, const char *period,
+		struct agy_status_quota quota, bool full) {
+	if (!quota.is_percent) {
+		char text[32];
+		int width = quota.is_balance ?
+			snprintf(text, sizeof(text), "%s %.4g left", period, quota.balance) :
+			snprintf(text, sizeof(text), "%s —", period);
+		fputs(text, stdout);
+		return width - (quota.is_balance ? 0 : 2);
+	}
+	char value[40];
+	int value_width = snprintf(value, sizeof(value), full ? "%.1f%%" : "%.0f%%", quota.used);
+	printf("%s ", period);
+	status_vertical_bar(line, quota.used);
+	printf(" %s", value);
+	int width = (int)strlen(period) + value_width + 3;
+	if (full && quota.reset_in) {
+		char span[24];
+		tw_claude_format_span(quota.reset_in, true, span, sizeof(span));
+		printf(" ↻ %s", span);
+		width += 3 + (int)strlen(span);
+	}
+	return width;
+}
+
+static bool agy_status_known_key(const char *key) {
+	for (size_t i = 0; i < sizeof(agy_status_groups) / sizeof(*agy_status_groups); i++) {
+		const struct agy_status_group *group = &agy_status_groups[i];
+		if ((group->five && strcmp(key, group->five) == 0) || strcmp(key, group->week) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void agy_status_quotas(struct terminal_status *line, json_object *quota) {
+	const bool full = line->width >= 64;
+	const bool narrow = line->width < 34;
+	const int name_width = narrow ? 6 : 10;
+	const int cell_width = full ? 23 : 9;
+	for (size_t i = 0; i < sizeof(agy_status_groups) / sizeof(*agy_status_groups); i++) {
+		const struct agy_status_group *group = &agy_status_groups[i];
+		struct agy_status_quota five = agy_status_quota(group->five ?
+			status_field(quota, group->five) : NULL);
+		struct agy_status_quota week = agy_status_quota(status_field(quota, group->week));
+		if (!agy_status_quota_known(five) && !agy_status_quota_known(week)) {
+			continue;
+		}
+		if (line->column) {
+			putchar('\n');
+			line->column = 0;
+		}
+		if (line->color) {
+			fputs(group->color, stdout);
+		}
+		printf("%-*s", name_width, narrow ? group->short_name : group->name);
+		if (line->color) {
+			fputs("\033[0m", stdout);
+		}
+		fputs("  ", stdout);
+		int width = agy_status_cell(line, "5h", five, full);
+		printf("%*s | ", width < cell_width ? cell_width - width : 0, "");
+		agy_status_cell(line, "7d", week, full);
+		putchar('\n');
+	}
+
+	// Preserve provider-specific buckets that do not belong to a known family.
+	json_object_object_foreach(quota, key, value) {
+		if (agy_status_known_key(key)) {
+			continue;
+		}
+		struct agy_status_quota other = agy_status_quota(value);
+		if (other.is_percent) {
+			status_segment(line, key, NULL);
+			line->column += agy_status_cell(line, "", other, full);
+		} else if (other.is_balance) {
+			char text[120];
+			snprintf(text, sizeof(text), "%s %.4g left", key, other.balance);
+			status_segment(line, text, NULL);
+		}
+	}
+}
+
+static int cmd_copilot_statusline(void) {
+	size_t len;
+	char *input = read_all(STDIN_FILENO, &len);
+	json_object *root = input ? json_tokener_parse(input) : NULL;
+	free(input);
+	if (!json_object_is_type(root, json_type_object)) {
+		json_object_put(root);
+		return 1;
+	}
+	struct terminal_status line = terminal_status(root);
+	status_model(&line, root);
+	double context;
+	if (status_number(status_field(root, "context_window"), "used_percentage", &context)) {
+		status_bar(&line, "Ctx", context, NULL);
+	}
+	if (line.column) {
+		putchar('\n');
+	}
+	json_object_put(root);
+	return 0;
+}
+
+#define AGY_QUOTA_MARKER "tileWin quota sampled"
+
+static int cmd_agy_statusline(bool probe) {
+	size_t len;
+	char *input = read_all(STDIN_FILENO, &len);
+	json_object *root = input ? json_tokener_parse(input) : NULL;
+	free(input);
+	if (!json_object_is_type(root, json_type_object)) {
+		json_object_put(root);
+		return 1;
+	}
+	json_object *model = NULL, *context = NULL, *session = NULL;
+	json_object_object_get_ex(root, "model", &model);
+	json_object_object_get_ex(root, "context_window", &context);
+	json_object_object_get_ex(root, "conversation_id", &session);
+	const char *id = json_object_is_type(session, json_type_string) ?
+		json_object_get_string(session) : "";
+	json_object *out = json_object_new_object();
+	json_object *quota = NULL, *buckets = json_object_new_object();
+	if (json_object_object_get_ex(root, "quota", &quota) &&
+			json_object_is_type(quota, json_type_object)) {
+		json_object_object_foreach(quota, key, value) {
+			json_object *entry = json_object_new_object();
+			copy_fields(entry, value, (const char *const[]){
+				"remaining_fraction", "reset_time", "disabled", NULL
+			});
+			json_object_object_add(buckets, key, entry);
+		}
+	}
+	json_object_object_add(out, "quota", buckets);
+	json_object *details = json_object_new_object();
+	copy_fields(details, model, (const char *const[]){ "id", "effort", NULL });
+	json_object_object_add(out, "model", details);
+	json_object *totals = json_object_new_object();
+	copy_fields(totals, context, (const char *const[]){ "total_input_tokens", "total_output_tokens", NULL });
+	json_object_object_add(out, "totals", totals);
+	json_object_object_add(out, "pid", json_object_new_int(probe ? 0 : agy_pid()));
+	if (!probe) {
+		struct terminal_status line = terminal_status(root);
+		agy_status_workspace(&line, root);
+		status_model(&line, root);
+		agy_status_context(&line, root);
+		if (json_object_is_type(quota, json_type_object)) {
+			agy_status_quotas(&line, quota);
+		}
+		if (line.column) {
+			putchar('\n');
+		}
+	}
+	char *state_dir = tw_state_dir();
+	bool account_only = (probe || !*id) && json_object_object_length(buckets) > 0;
+	bool recorded = false;
+	if (account_only) {
+		id = "account";
+	}
+	if (state_dir && (account_only || (!probe && *id && strlen(id) <= 64 &&
+			strspn(id, "0123456789abcdefABCDEF-") == strlen(id)))) {
+		char *last_path = format_str("%s/agent-usage/agy/%s.json", state_dir, id);
+		char *log_path = format_str("%s/agent-usage/agy/%s.jsonl", state_dir, id);
+		char *dir = format_str("%s/agent-usage/agy", state_dir);
+		tw_mkdir_p(dir);
+		int fd = open(log_path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+		if (fd >= 0 && flock(fd, LOCK_EX) == 0) {
+			json_object *last = json_object_from_file(last_path);
+			if (!json_object_equal(last, out)) {
+				json_object *sample = json_object_new_object();
+				json_object_object_add(sample, "at", json_object_new_int64(time(NULL)));
+				json_object_object_add(sample, "data", json_object_get(out));
+				if (dprintf(fd, "%s\n", json_object_to_json_string_ext(sample,
+						JSON_C_TO_STRING_PLAIN)) >= 0) {
+					recorded = true;
+					write_atomic(last_path, json_object_to_json_string_ext(out,
+						JSON_C_TO_STRING_PLAIN), 0600);
+				}
+				json_object_put(sample);
+			} else {
+				recorded = true;
+			}
+			json_object_put(last);
+		}
+		if (fd >= 0) {
+			close(fd);
+		}
+		free(dir);
+		free(last_path);
+		free(log_path);
+	}
+	free(state_dir);
+	json_object_put(out);
+	json_object_put(root);
+	if (probe && account_only && recorded) {
+		puts(AGY_QUOTA_MARKER);
+	}
+	return 0;
+}
+
+/* Antigravity renders the startup status line only on a terminal. The probe
+ * supplies a private terminal and never writes keystrokes or prompts to it. */
+static int cmd_agy_quota(void) {
+	char workspace[] = "/tmp/tilewin-agy-quota.XXXXXX";
+	if (!mkdtemp(workspace)) {
+		return 1;
+	}
+	struct winsize size = { .ws_row = 28, .ws_col = 110 };
+	int terminal;
+	pid_t pid = forkpty(&terminal, NULL, NULL, &size);
+	if (pid < 0) {
+		rmdir(workspace);
+		return 1;
+	}
+	if (pid == 0) {
+		if (chdir(workspace) != 0) {
+			_exit(1);
+		}
+		setenv("TERM", "xterm-256color", 1);
+		execlp("agy", "agy", "--settings",
+			"{\"statusLine\":{\"type\":\"command\","
+			"\"command\":\"tilewin-claude-usage agy-statusline --probe\"}}", (char *)NULL);
+		_exit(127);
+	}
+	struct timespec start, now;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	struct pollfd watch = { .fd = terminal, .events = POLLIN };
+	char output[4096];
+	size_t offset = 0;
+	bool sampled = false;
+	while (!sampled) {
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if (now.tv_sec - start.tv_sec >= 8) {
+			break;
+		}
+		int ready = poll(&watch, 1, 250);
+		if (ready <= 0) {
+			if (ready < 0 && errno != EINTR) {
+				break;
+			}
+			continue;
+		}
+		ssize_t n = read(terminal, output + offset, sizeof(output) - 1 - offset);
+		if (n <= 0) {
+			break;
+		}
+		offset += n;
+		output[offset] = '\0';
+		sampled = strstr(output, AGY_QUOTA_MARKER) != NULL;
+		size_t keep = strlen(AGY_QUOTA_MARKER) - 1;
+		if (offset > keep) {
+			memmove(output, output + offset - keep, keep);
+			offset = keep;
+		}
+	}
+	kill(-pid, SIGTERM);
+	kill(pid, SIGTERM);
+	close(terminal);
+	struct timespec grace = { .tv_nsec = 100000000 };
+	nanosleep(&grace, NULL);
+	kill(-pid, SIGKILL);
+	if (waitpid(pid, NULL, WNOHANG) == 0) {
+		kill(pid, SIGKILL);
+		while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {
+		}
+	}
+	rmdir(workspace);
+	return sampled ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
 	const char *cmd = argc > 1 ? argv[1] : "";
-	if (strcmp(cmd, "statusline") == 0) {
+	if (strcmp(cmd, "agy-statusline") == 0) {
+		return cmd_agy_statusline(argc == 3 && strcmp(argv[2], "--probe") == 0);
+	} else if (strcmp(cmd, "copilot-statusline") == 0) {
+		return cmd_copilot_statusline();
+	} else if (strcmp(cmd, "agy-quota") == 0) {
+		return cmd_agy_quota();
+	} else if (strcmp(cmd, "statusline") == 0) {
 		return cmd_statusline(argc - 2, argv + 2);
 	} else if (strcmp(cmd, "connect") == 0) {
 		return cmd_connect(argc - 2, argv + 2);
@@ -550,7 +1192,7 @@ int main(int argc, char **argv) {
 		return cmd_list();
 	}
 	fprintf(stderr, "usage: tilewin-claude-usage connect [DIR] | disconnect [DIR] | "
-		"statusline [--dir DIR] | list\n"
+		"statusline [--dir DIR] | agy-statusline | agy-quota | copilot-statusline | list\n"
 		"The usage limits of Claude Code for tileWin's Claude widget, as Claude Code shows "
 		"them to its status line; DIR is a Claude Code folder, ~/.claude by default.\n");
 	return strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0 ? 0 : 2;
