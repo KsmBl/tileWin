@@ -6,6 +6,7 @@
 #include <gio/gfiledescriptorbased.h>
 #include <json.h>
 #include <poll.h>
+#include <stddef.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -830,6 +831,47 @@ static void codex_account(struct collect *c, const char *dir) {
 		live->usage.history = tw_usage_history_path("agent-codex-account-v2", dir);
 		tw_claude_history_add(live->usage.history, &live->usage, polled.updated);
 	}
+}
+
+/* AGY publishes separate records. Pair only buckets with the same model-group ID. */
+static size_t agy_bucket_group_length(const char *name, bool weekly) {
+	const char *end = g_strrstr(name, " · ");
+	if (!end) {
+		return 0;
+	}
+	const char *const weekly_suffixes[] = { "-weekly", "_weekly", "-7d", "_7d", NULL };
+	const char *const five_suffixes[] = {
+		"-5h", "_5h", "-5-hour", "_5-hour", "-five-hour", "_five_hour", "-fivehour", NULL
+	};
+	const char *const *suffix = weekly ? weekly_suffixes : five_suffixes;
+	for (; *suffix; suffix++) {
+		size_t n = strlen(*suffix);
+		if (end - name > (ptrdiff_t)n && g_ascii_strncasecmp(end - n, *suffix, n) == 0) {
+			return end - name - n;
+		}
+	}
+	return 0;
+}
+
+const struct tw_claude_window *agent_five_hour_blocker(const GPtrArray *limits,
+		const struct agent_limit *limit, time_t now) {
+	if (tw_claude_window_now(&limit->usage.seven_day, now) >= 100) {
+		return &limit->usage.seven_day;
+	}
+	if (limit->kind != AGENT_AGY || !limits) {
+		return NULL;
+	}
+	size_t group = agy_bucket_group_length(limit->name, false);
+	for (guint i = 0; group && i < limits->len; i++) {
+		const struct agent_limit *candidate = limits->pdata[i];
+		if (candidate->kind == AGENT_AGY &&
+				tw_claude_window_now(&candidate->usage.seven_day, now) >= 100 &&
+				group == agy_bucket_group_length(candidate->name, true) &&
+				g_ascii_strncasecmp(limit->name, candidate->name, group) == 0) {
+			return &candidate->usage.seven_day;
+		}
+	}
+	return NULL;
 }
 
 static struct agent_limit *agy_limit(struct collect *c, const char *bucket, bool weekly) {

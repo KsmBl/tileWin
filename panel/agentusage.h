@@ -47,5 +47,7 @@ struct agent_usage *agent_usage_collect(bool poll_codex);
 struct agent_usage *agent_usage_ref(const struct agent_usage *usage);
 void agent_usage_free(struct agent_usage *usage);
 const struct agent_usage *agent_widget_usage(struct widget *w);
+const struct tw_claude_window *agent_five_hour_blocker(const GPtrArray *limits,
+	const struct agent_limit *limit, time_t now);
 
 #endif

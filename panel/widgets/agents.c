@@ -220,11 +220,14 @@ static void quota_hover_segment(const struct quota_axis *axis, struct pbox box,
 struct quota_reset {
 	const struct agent_limit *limit;
 	time_t at;
+	bool weekly_recovery, beyond_plot;
+	int edge_offset;
 };
 
 static void quota_add_reset(GArray *resets, const struct quota_axis *axis,
-		const struct agent_limit *limit, time_t when) {
-	if (when < axis->start || when > axis->start + axis->span) {
+		const struct agent_limit *limit, time_t when, bool weekly_recovery) {
+	bool beyond_plot = when > axis->start + axis->span;
+	if (when < axis->start || (beyond_plot && !weekly_recovery)) {
 		return;
 	}
 	for (guint i = 0; i < resets->len; i++) {
@@ -233,7 +236,8 @@ static void quota_add_reset(GArray *resets, const struct quota_axis *axis,
 			return;
 		}
 	}
-	struct quota_reset reset = { limit, when };
+	struct quota_reset reset = { .limit = limit, .at = when,
+		.weekly_recovery = weekly_recovery, .beyond_plot = beyond_plot };
 	g_array_append_val(resets, reset);
 }
 
@@ -284,7 +288,7 @@ static bool quota_trace(cairo_t *cr, struct pbox box, const struct agent_limit *
 			}
 		}
 		if (win.resets_at > p.at && win.resets_at <= now) {
-			quota_add_reset(resets, axis, l, win.resets_at);
+			quota_add_reset(resets, axis, l, win.resets_at, false);
 		}
 		prev = win;
 		previous = p.at;
@@ -369,26 +373,68 @@ static const char *quota_name(const struct agent_limit *limit) {
 		"Codex · shared model quota" : limit->name;
 }
 
+static double quota_reset_x(struct pbox chart, const struct quota_axis *axis,
+		const struct quota_reset *reset) {
+	return reset->beyond_plot ? chart.x + chart.width - reset->edge_offset :
+		quota_x(chart, axis, reset->at);
+}
+
 static void quota_reset_markers(const struct quota_axis *axis, const struct gadget_palette *pal,
 		struct pbox chart, const char *font, GArray *resets) {
 	struct gadget_ctx *ctx = axis->ctx;
 	cairo_t *cr = ctx->cairo;
 	g_array_sort(resets, reset_order);
-	double label_end = chart.x;
+	double label_end = chart.x, label_right = chart.x + chart.width;
+	guint first_beyond = 0, beyond_count = 0;
 	for (guint i = 0; i < resets->len; i++) {
-		const struct quota_reset *reset = &g_array_index(resets, struct quota_reset, i);
-		double x = quota_x(chart, axis, reset->at);
+		if (g_array_index(resets, struct quota_reset, i).beyond_plot) {
+			if (!beyond_count) {
+				first_beyond = i;
+			}
+			beyond_count++;
+		}
+	}
+	if (beyond_count) {
+		const struct quota_reset *next = &g_array_index(resets, struct quota_reset, first_beyond);
+		struct tm tm;
+		localtime_r(&next->at, &tm);
+		char when[32], label[48];
+		strftime(when, sizeof(when), "%a %H:%M", &tm);
+		if (beyond_count > 1) {
+			snprintf(label, sizeof(label), "» %s +%u", when, beyond_count - 1);
+		} else {
+			snprintf(label, sizeof(label), "» %s", when);
+		}
+		int width = 0;
+		pd_text_size(cr, font, label, &width, NULL);
+		width = MIN(width + 1, chart.width);
+		label_right -= width;
+		pd_text(cr, font, label, label_right, chart.y - 19, width, 17, quota_color(next->limit),
+			PD_RIGHT);
+		label_right -= 4;
+	}
+	int edge_offset = 2;
+	for (guint i = 0; i < resets->len; i++) {
+		struct quota_reset *reset = &g_array_index(resets, struct quota_reset, i);
+		if (reset->beyond_plot) {
+			reset->edge_offset = edge_offset;
+			edge_offset = MIN(chart.width / 4, edge_offset + 3);
+		}
+		double x = quota_reset_x(chart, axis, reset);
 		uint32_t color = quota_color(reset->limit);
 		pd_rect(cr, CLAMP(x - 1, chart.x, chart.x + chart.width - 2), chart.y, 2,
 			chart.height, (color & 0xffffff00) | (reset->at > axis->now ? 0xc8 : 0x88));
+		if (reset->beyond_plot) {
+			continue;
+		}
 		struct tm tm;
 		localtime_r(&reset->at, &tm);
 		char label[32];
 		strftime(label, sizeof(label), "%H:%M", &tm);
 		int width = 0;
 		pd_text_size(cr, font, label, &width, NULL);
-		double left = fmax(label_end, fmin(x - width / 2.0, chart.x + chart.width - width));
-		if (left + width <= chart.x + chart.width && fabs(left + width / 2.0 - x) < width) {
+		double left = fmax(label_end, fmin(x - width / 2.0, label_right - width));
+		if (left + width <= label_right && fabs(left + width / 2.0 - x) < width) {
 			pd_text(cr, font, label, left, chart.y - 19, width + 1, 17, color, PD_LEFT);
 			label_end = left + width + 5;
 		}
@@ -401,7 +447,7 @@ static void quota_reset_markers(const struct quota_axis *axis, const struct gadg
 	double distance = 6;
 	for (guint i = 0; i < resets->len; i++) {
 		const struct quota_reset *r = &g_array_index(resets, struct quota_reset, i);
-		double d = fabs(ctx->px - quota_x(chart, axis, r->at));
+		double d = fabs(ctx->px - quota_reset_x(chart, axis, r));
 		if (d < distance) {
 			distance = d;
 			nearest = r;
@@ -417,14 +463,19 @@ static void quota_reset_markers(const struct quota_axis *axis, const struct gadg
 	if (nearest) {
 		for (guint i = 0; i < resets->len && y + 18 <= chart.y + chart.height; i++) {
 			const struct quota_reset *r = &g_array_index(resets, struct quota_reset, i);
-			if (!tw_claude_same_window(r->at, nearest->at)) {
+			if (!(r->beyond_plot && nearest->beyond_plot) &&
+					!tw_claude_same_window(r->at, nearest->at)) {
 				continue;
 			}
 			struct tm tm;
 			localtime_r(&r->at, &tm);
 			char when[48], tip[160];
 			strftime(when, sizeof(when), "%a %d %b %H:%M", &tm);
-			snprintf(tip, sizeof(tip), "%s · reset %s", quota_name(r->limit), when);
+			if (r->weekly_recovery) {
+				snprintf(tip, sizeof(tip), "Weekly reset %s · %s", when, quota_name(r->limit));
+			} else {
+				snprintf(tip, sizeof(tip), "%s · reset %s", quota_name(r->limit), when);
+			}
 			pd_rect(cr, chart.x + 3, y, chart.width - 6, 18, pal->bg);
 			pd_rect(cr, chart.x + 7, y + 4, 3, 10, quota_color(r->limit));
 			pd_text(cr, font, tip, chart.x + 14, y, chart.width - 20, 18, pal->fg, PD_LEFT);
@@ -530,7 +581,8 @@ static void quota_overlay(struct gadget_ctx *ctx, const struct gadget_palette *p
 	for (guint i = 0; limits && i < limits->len; i++) {
 		const struct agent_limit *l = limits->pdata[i];
 		const struct tw_claude_window *win = weekly ? &l->usage.seven_day : &l->usage.five_hour;
-		if (l->kind == AGENT_CODEX && !l->live_account && win->known && win->resets_at > now) {
+		if (l->kind == AGENT_CODEX && !l->live_account && win->known &&
+				(win->resets_at > now || (!weekly && agent_five_hour_blocker(limits, l, now)))) {
 			codex_session_active = true;
 		}
 	}
@@ -541,9 +593,18 @@ static void quota_overlay(struct gadget_ctx *ctx, const struct gadget_palette *p
 			visible |= quota_trace(cr, chart, l, weekly, &timeline, resets);
 		}
 		// A fresh account window can provide a reset after the session window expires.
-		if ((!l->live_account || !codex_session_active) && win->known &&
-				win->resets_at > now && win->resets_at <= now + window) {
-			quota_add_reset(resets, &timeline, l, win->resets_at);
+		if (!win->known || (l->live_account && codex_session_active)) {
+			continue;
+		}
+		const struct tw_claude_window *blocker = weekly ? NULL :
+			agent_five_hour_blocker(limits, l, now);
+		if (blocker) {
+			if (blocker->resets_at > now) {
+				quota_add_reset(resets, &timeline, l, blocker->resets_at, true);
+				visible = true;
+			}
+		} else if (win->resets_at > now && win->resets_at <= now + window) {
+			quota_add_reset(resets, &timeline, l, win->resets_at, false);
 			quota_forecast(cr, chart, l, win, &timeline, window, weekly);
 			visible = true;
 		}
@@ -630,12 +691,22 @@ static GPtrArray *agy_chart_groups(const struct agent_usage *usage) {
 	return groups;
 }
 
-static void agy_chart_title(char *out, size_t size, const struct agent_limit *limit, bool weekly) {
+static void agy_chart_title(char *out, size_t size, const GPtrArray *series,
+		const struct agent_limit *limit, bool weekly) {
 	const char *period = weekly ? "Weekly quota" : "5-hour quota";
 	const struct tw_claude_window *win = weekly ? &limit->usage.seven_day : &limit->usage.five_hour;
 	time_t now = time(NULL);
 	double used = tw_claude_window_now(win, now);
-	if (win->resets_at > now) {
+	const struct tw_claude_window *blocker = weekly ? NULL : agent_five_hour_blocker(series, limit, now);
+	if (blocker) {
+		if (blocker->resets_at > now) {
+			char remaining[32];
+			tw_claude_format_span(blocker->resets_at - now, true, remaining, sizeof(remaining));
+			snprintf(out, size, "%s · weekly limit resets in %s", period, remaining);
+		} else {
+			snprintf(out, size, "%s · weekly limit reached", period);
+		}
+	} else if (win->resets_at > now) {
 		char remaining[32];
 		tw_claude_format_span(win->resets_at - now, true, remaining, sizeof(remaining));
 		snprintf(out, size, "%s · %.1f%% used · resets in %s", period, used, remaining);
@@ -678,8 +749,11 @@ static bool agents_agy_quotas(struct widget *w, struct gadget_ctx *ctx,
 				continue;
 			}
 			char title[112];
-			agy_chart_title(title, sizeof(title), limit, j);
 			g_ptr_array_add(series, (gpointer)limit);
+			if (!j && group->window[1]) {
+				g_ptr_array_add(series, (gpointer)group->window[1]);
+			}
+			agy_chart_title(title, sizeof(title), series, limit, j);
 			quota_overlay(ctx, pal, series, (struct pbox){ x, y + 20, column_width, row_height - 24 },
 				font, j, title);
 			g_ptr_array_set_size(series, 0);

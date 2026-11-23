@@ -81,6 +81,7 @@ struct info_row {
 	char menu_key[96];
 	const struct agent_model *model_history;
 	const struct claude_charts *quota_chart;
+	const struct tw_claude_window *quota_blocker;
 	bool quota_weekly;
 };
 
@@ -1272,15 +1273,23 @@ static void agent_badge(struct info_row *row, bool remote) {
 
 static int agents_charts_height(struct info_flyout *f);
 
-static void agent_quota_row(struct info_flyout *f, const struct agent_limit *l, bool weekly,
-		time_t now) {
+static void agent_quota_row(struct info_flyout *f, const GPtrArray *limits,
+		const struct agent_limit *l, bool weekly, time_t now) {
 	const struct tw_claude_window *win = weekly ? &l->usage.seven_day : &l->usage.five_hour;
 	if (!win->known) {
 		return;
 	}
 	char value[96], span[48];
 	double used = tw_claude_window_now(win, now);
-	if (win->resets_at > now) {
+	const struct tw_claude_window *blocker = weekly ? NULL : agent_five_hour_blocker(limits, l, now);
+	if (blocker) {
+		if (blocker->resets_at > now) {
+			tw_claude_format_span(blocker->resets_at - now, false, span, sizeof(span));
+			snprintf(value, sizeof(value), "Weekly limit resets in %s", span);
+		} else {
+			snprintf(value, sizeof(value), "Weekly limit reached");
+		}
+	} else if (win->resets_at > now) {
 		tw_claude_format_span(win->resets_at - now, false, span, sizeof(span));
 		snprintf(value, sizeof(value), l->kind == AGENT_AGY ? "%.1f%% used · resets in %s" :
 			"%.0f%% used · resets in %s", used, span);
@@ -1298,7 +1307,7 @@ static void agent_quota_row(struct info_flyout *f, const struct agent_limit *l, 
 	bool pace_known;
 	long left = tw_claude_window_left(win, weekly ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS,
 		now, &pace_known);
-	if (pace_known && win->resets_at > now) {
+	if (!blocker && pace_known && win->resets_at > now) {
 		if (left > 0) {
 			tw_claude_format_span(left, false, span, sizeof(span));
 			snprintf(value, sizeof(value), "Used up in about %s", span);
@@ -1311,6 +1320,7 @@ static void agent_quota_row(struct info_flyout *f, const struct agent_limit *l, 
 		row = add_row(f, weekly ? "Weekly quota history" : "Last three 5-hour windows", NULL);
 		if (row) {
 			row->quota_chart = &l->chart;
+			row->quota_blocker = blocker;
 			row->quota_weekly = weekly;
 		}
 	}
@@ -1446,8 +1456,8 @@ static void agents_sample(struct info_flyout *f) {
 				snprintf(period, sizeof(period), "%s–%s", from, to);
 				add_row(f, "Gap in local usage records", period);
 			}
-			agent_quota_row(f, l, false, now);
-			agent_quota_row(f, l, true, now);
+			agent_quota_row(f, usage->limits, l, false, now);
+			agent_quota_row(f, usage->limits, l, true, now);
 		}
 		if (!have_quota) {
 			const char *detail = kind == AGENT_COPILOT ?
@@ -1950,6 +1960,9 @@ static void draw_agent_chart(struct info_flyout *f, const struct info_row *row, 
 	box.height -= 24;
 	struct claude_charts chart = *row->quota_chart;
 	chart.now = time(NULL);
+	if (row->quota_blocker) {
+		chart.seven_day = *row->quota_blocker;
+	}
 	if (row->quota_weekly) {
 		claude_chart_week(&hover, &chart, cr, &look, box);
 	} else {
@@ -1979,10 +1992,20 @@ static void agents_charts_draw(struct info_flyout *f, cairo_t *cr,
 				weekly ? &limit->usage.seven_day : &limit->usage.five_hour;
 			double used = win ? tw_claude_window_now(win, now) : -1;
 			char label[128], span[32] = "";
-			if (used >= 0 && win->resets_at > now) {
+			const struct tw_claude_window *blocker = limit && !weekly ?
+				agent_five_hour_blocker(usage->limits, limit, now) : NULL;
+			if (used >= 0 && !blocker && win->resets_at > now) {
 				tw_claude_format_span(win->resets_at - now, true, span, sizeof(span));
 			}
-			if (used >= 0) {
+			if (blocker) {
+				if (blocker->resets_at > now) {
+					tw_claude_format_span(blocker->resets_at - now, true, span, sizeof(span));
+					snprintf(label, sizeof(label), "%s 5h · weekly reset in %s",
+						agent_names[kind], span);
+				} else {
+					snprintf(label, sizeof(label), "%s 5h · weekly limit reached", agent_names[kind]);
+				}
+			} else if (used >= 0) {
 				snprintf(label, sizeof(label), "%s %s · %.0f%%%s%s",
 					agent_names[kind], weekly ? "week" : "5h", used,
 					*span ? " · resets in " : "", span);
@@ -1996,7 +2019,8 @@ static void agents_charts_draw(struct info_flyout *f, cairo_t *cr,
 					used >= 95 ? st->error : st->bar);
 			}
 			if (win && win->resets_at > 0) {
-				struct info_row row = { .quota_chart = &limit->chart, .quota_weekly = weekly };
+				struct info_row row = { .quota_chart = &limit->chart,
+					.quota_blocker = blocker, .quota_weekly = weekly };
 				draw_agent_chart(f, &row, cr, st,
 					(struct pbox){ x, y + 6, width, height - 8 });
 			} else {
