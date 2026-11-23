@@ -19,6 +19,8 @@ from pathlib import Path
 # Widget options that are deliberately not offered in the settings app.
 WIDGET_OPTIONS_WITHOUT_A_CONTROL = {
     "type": "names the widget itself, not one of its settings",
+    "account": "the one account of the claude and codex widget of older configs; the "
+        "settings offer the accounts of the AI agent usage widget instead",
 }
 
 # Widget types that are not in the widget list.

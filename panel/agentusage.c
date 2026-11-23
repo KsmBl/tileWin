@@ -766,7 +766,8 @@ static void copilot_account(struct agent_usage *usage) {
 				reset = timestamp(item, "reset_date");
 			}
 			// Some runtimes send the fetch timestamp in the reset field.
-			quota = (struct tw_claude_window){ true, 100 - remaining, reset > now ? reset : 0 };
+			quota = (struct tw_claude_window){ .known = true, .used = 100 - remaining,
+				.resets_at = reset > now ? reset : 0 };
 			bucket = json_object_get_boolean(field(item, "tokenBasedBilling")) ?
 				"AI credits" : names[i];
 			break;
@@ -786,7 +787,8 @@ static void codex_poll_window(struct tw_claude_usage *u, json_object *w) {
 			!(share >= 0 && share <= 100)) {
 		return;
 	}
-	struct tw_claude_window win = { true, share, timestamp(w, "resetsAt") };
+	struct tw_claude_window win = { .known = true, .used = share,
+		.resets_at = timestamp(w, "resetsAt") };
 	if (length == TW_CLAUDE_FIVE_HOURS / 60) {
 		u->five_hour = win;
 	} else if (length == TW_CLAUDE_SEVEN_DAYS / 60) {
@@ -869,7 +871,8 @@ static void agy_quotas(struct collect *c, json_object *quota, time_t at) {
 			continue;
 		}
 		struct agent_limit *l = agy_limit(c, bucket, weekly);
-		struct tw_claude_window win = { true, 100 * (1 - left), reset };
+		struct tw_claude_window win = { .known = true, .used = 100 * (1 - left),
+			.resets_at = reset };
 		struct tw_claude_point point = { .at = at };
 		if (weekly) {
 			point.seven_day = win;
@@ -1199,7 +1202,7 @@ static void summarize(struct collect *c) {
 	}
 }
 
-struct agent_usage *agent_usage_collect(bool poll_codex) {
+struct agent_usage *agent_usage_collect(bool account_checks) {
 	static GMutex collector_lock;
 	g_mutex_lock(&collector_lock);
 	struct agent_usage *usage = g_new0(struct agent_usage, 1);
@@ -1272,14 +1275,16 @@ struct agent_usage *agent_usage_collect(bool poll_codex) {
 	g_free(logs);
 	read_account(&c, AGENT_CLAUDE, &tw_claude_tool, claude);
 	read_account(&c, AGENT_CODEX, &tw_codex_tool, codex);
-	if (codex && poll_codex && usage->installed[AGENT_CODEX]) {
+	// asking the signed-in agents themselves (each starts its program, which asks its
+	// account online): only when that is turned on, as it uses their logins
+	if (account_checks && codex && usage->installed[AGENT_CODEX]) {
 		codex_account(&c, codex);
 	}
-	if (usage->installed[AGENT_COPILOT]) {
+	if (account_checks && usage->installed[AGENT_COPILOT]) {
 		copilot_account(usage);
 	}
 	if (state) {
-		if (usage->installed[AGENT_AGY]) {
+		if (account_checks && usage->installed[AGENT_AGY]) {
 			agy_account_poll(state);
 		}
 		usage->now = time(NULL);

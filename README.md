@@ -60,9 +60,9 @@ New lately:
 | An app popup: mail on its shortcut, at the right, over the darkened rest | The Wi-Fi radar, connecting to a saved network, and in the Starship Console |
 |---|---|
 | ![An app popup](docs/screenshots/app-popup.png) | ![The Wi-Fi radar widget](docs/screenshots/wifi-radar.png) |
-| **Claude Code usage**: the last 5-hour windows and the week, with the reading under the pointer | **Kernel updates** making the live fixes of a new release, and how far they are |
+| **AI agent usage**: the last 5-hour windows and the week, with the reading under the pointer | **Kernel updates** making the live fixes of a new release, and how far they are |
 | ![The charts of Claude Code usage](docs/screenshots/claude-charts.png) | ![The kernel updates widget making live fixes](docs/screenshots/kernel-live-fixes.png) |
-| **Workspaces**: a window dragged from one desktop to another, as on KDE | **Codex usage**: the same charts, from the session logs Codex writes itself |
+| **Workspaces**: a window dragged from one desktop to another, as on KDE | **AI agent usage** of Codex: the same charts, from the session logs Codex writes itself |
 | ![A window dragged in the workspaces widget](docs/screenshots/workspaces-drag.png) | ![The charts of Codex usage](docs/screenshots/codex-usage.png) |
 
 ## What it has
@@ -80,11 +80,10 @@ New lately:
 - **Fingerprint** on the lock screen, as Windows Hello does it, the fingers added and removed in the settings.
 - **Message dialogs** of GTK 3 apps ("Save changes?") in the look of the theme.
 - **Brightness and volume up to 130%**, a battery chart of the last 24 hours, and a limit on the clock of each processor core.
-- **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, as Claude Code shows them.
-- **Codex usage** the same way, with the same charts: the 5-hour and weekly limits Codex writes into its session logs, nothing to connect.
+- **AI agent usage** on the taskbar and the desktop: the 5-hour and weekly limits of your accounts of Claude Code, Codex, Copilot and Antigravity, the ones you tick in its settings, with charts of the last windows and the week, what runs on this computer and what was used elsewhere; never from their logins unless you let it ask them.
 - **Quick web:** a shortcut opens a field where a single key types a whole word of a web address you gave it (g for `github.com/`, then k for `ksmbl/`), and Enter opens it.
 - **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running. Made on the App popups page of the settings: [docs/usage.md](docs/usage.md#app-popups).
-- **Charts that answer the pointer** everywhere (CPU, memory, battery, network, Claude Code usage, the desktop's charts), and **windows dragged between desktops** in the workspaces widget, as on KDE.
+- **Charts that answer the pointer** everywhere (CPU, memory, battery, network, AI agent usage, the desktop's charts), and **windows dragged between desktops** in the workspaces widget, as on KDE.
 - **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, with the Bluetooth devices as diamonds; the pointer on one shows its signal, security and band, a click connects to it and a right click opens its menu.
 - **Open ports** on the taskbar and the desktop: every port a program listens on, and whether it is only for this computer, a local network or public; switched on in the network settings, a program that opens a port to the network is asked about first, once.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.

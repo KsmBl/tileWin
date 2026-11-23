@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #include "tw_claude_usage.h"
 #include "claudecharts.h"
-#include "agentusage.h"
 #include "tw_kernel_auto.h"
 #include "tw_ports.h"
 #include "portguard.h"
@@ -76,12 +75,10 @@ struct info_row {
 	bool heading;  // names the rows below it
 	// a word in a pill at the right end, in a color of its kind (the ports' scopes)
 	char badge[16];
-	enum { BADGE_NONE, BADGE_GOOD, BADGE_WARN, BADGE_BAD, BADGE_AGENT_LOCAL, BADGE_AGENT_REMOTE } badge_kind;
+	enum { BADGE_NONE, BADGE_GOOD, BADGE_WARN, BADGE_BAD } badge_kind;
 	// a click opens a menu the source makes from this (source->row_menu), "" for none
 	char menu_key[96];
-	const struct agent_model *model_history;
-	const struct claude_charts *quota_chart;
-	bool quota_weekly;
+	int pick; // above 0: a click hands it to source->row_pick, the flyout stays open
 };
 
 struct info_action {
@@ -102,6 +99,7 @@ struct info_source {
 	int (*extra_height)(struct info_flyout *f);
 	void (*draw_extra)(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
 		struct pbox box);
+	void (*row_pick)(struct info_flyout *f, const struct info_row *row);
 };
 
 struct info_flyout {
@@ -1117,9 +1115,9 @@ static void claude_window(struct info_flyout *f, const struct tw_claude_window *
 	} else {
 		add_row(f, "Resets", "has reset");
 	}
-	bool known;
-	long left = tw_claude_window_left(win, length, now, &known);
-	if (known) {
+	bool known = false;
+	long left = length > 0 ? tw_claude_window_left(win, length, now, &known) : -1;
+	if (known) { // (a length of 0: no window of a known length to tell a pace from)
 		if (left > 0) {
 			tw_claude_format_span(left, false, span, sizeof(span));
 			snprintf(value, sizeof(value), "used up in about %s", span);
@@ -1187,48 +1185,131 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 	claude_chart_week(&hover, c, cr, &look, (struct pbox){ box.x, y, box.width, CHART_WEEK });
 }
 
+/* "12 min ago", "just now". */
+static void ago_text(time_t now, time_t at, char *out, size_t size) {
+	long ago = (long)(now - at);
+	if (ago < 90) {
+		snprintf(out, size, "just now");
+	} else {
+		char span[48];
+		tw_claude_format_span(ago, false, span, sizeof(span));
+		snprintf(out, size, "%s ago", span);
+	}
+}
+
+/* "31% · 74%": an account's windows in short, for its row among the accounts. */
+static void account_summary(const struct agents_view *v, time_t now, char *out, size_t size) {
+	double five = v->usage ? tw_claude_window_now(&v->usage->five_hour, now) : -1;
+	double week = v->usage ? tw_claude_window_now(&v->usage->seven_day, now) : -1;
+	if (v->connect) {
+		snprintf(out, size, "not connected");
+	} else if (five >= 0 && week >= 0) {
+		snprintf(out, size, "%.0f%% · %.0f%% of the week", five, week);
+	} else if (five >= 0 || week >= 0) {
+		snprintf(out, size, "%.0f%%%s", five >= 0 ? five : week, five >= 0 ? "" : " of the week");
+	} else {
+		snprintf(out, size, "nothing known yet");
+	}
+}
+
+/*
+ * The flyout of the AI agent usage widget: the account it shows in full (its
+ * big number, the charts of its windows, a row for each limit), the others
+ * as rows to switch to; what of it runs here and what came from elsewhere.
+ */
 static void claude_sample(struct info_flyout *f) {
-	const struct tw_usage_tool *tool;
-	const struct tw_claude_usage *u = claude_widget_usage(f->widget, &tool);
+	int count = agents_widget_accounts(f->widget);
+	int current = agents_widget_current(f->widget);
+	struct agents_view v = { 0 };
+	bool have = agents_widget_view(f->widget, current, &v);
+	const struct tw_claude_usage *u = have ? v.usage : NULL;
 	time_t now = time(NULL);
 	struct claude_charts *charts = f->state;
 	if (!charts) {
 		charts = f->state = calloc(1, sizeof(*charts));
 	}
 	if (charts) {
-		claude_charts_load(charts, u, now);
+		// Claude Code and Codex keep a history; the others' windows have none here
+		claude_charts_load(charts, v.tool ? u : NULL, now);
 	}
-	snprintf(f->subtitle, sizeof(f->subtitle), "%s%s%s", tool->name, u && u->account ? " · " : "",
+	const char *name = have ? v.name : "AI agents";
+	snprintf(f->subtitle, sizeof(f->subtitle), "%s%s%s", name, u && u->account ? " · " : "",
 		u && u->account ? u->account : "");
-	if (!u || !u->updated) {
-		if (u && (u->connected || !tool->connects)) {
-			snprintf(f->title, sizeof(f->title), "The limits come with the next answer of %s",
-				tool->name);
+	double five = u ? tw_claude_window_now(&u->five_hour, now) : -1;
+	double seven = u ? tw_claude_window_now(&u->seven_day, now) : -1;
+	if (!have) {
+		snprintf(f->title, sizeof(f->title), "No account to show");
+	} else if (v.connect) {
+		snprintf(f->title, sizeof(f->title), "Not connected");
+	} else if (five < 0 && seven < 0) {
+		if (v.allowance && !v.checks) {
+			snprintf(f->title, sizeof(f->title), "Its allowance shows when the accounts are asked");
 		} else {
-			snprintf(f->title, sizeof(f->title), "Not connected");
+			snprintf(f->title, sizeof(f->title), "The limits come with the next answer of %s",
+				name);
 		}
+	} else if (v.allowance) {
+		snprintf(f->big, sizeof(f->big), "%.0f%%", five);
+		snprintf(f->title, sizeof(f->title), "of its %s", v.allowance);
 	} else {
-		double five = tw_claude_window_now(&u->five_hour, now);
-		double seven = tw_claude_window_now(&u->seven_day, now);
 		if (five >= 0) {
 			snprintf(f->big, sizeof(f->big), "%.0f%%", five);
 		}
-		snprintf(f->title, sizeof(f->title), seven >= 0 ? "of the 5-hour limit, %.0f%% of the "
-			"week" : "of the 5-hour limit", seven);
+		snprintf(f->title, sizeof(f->title), five < 0 ? "of the week" : seven >= 0 ?
+			"of the 5-hour limit, %.0f%% of the week" : "of the 5-hour limit", seven);
+	}
+	// the other accounts: a click shows one of them instead
+	if (count > 1) {
+		add_heading(f, "Accounts");
+		for (int i = 0; i < count; i++) {
+			struct agents_view o;
+			if (!agents_widget_view(f->widget, i, &o)) {
+				continue;
+			}
+			char label[128], value[96];
+			snprintf(label, sizeof(label), "%s", o.name);
+			if (o.usage && o.usage->account && *o.usage->account) {
+				snprintf(label, sizeof(label), "%s · %s", o.name, o.usage->account);
+			}
+			account_summary(&o, now, value, sizeof(value));
+			struct info_row *row = add_row(f, label, value);
+			if (row) {
+				row->marked = i == current;
+				row->pick = i + 1;
+			}
+		}
+	}
+	if (u && v.allowance) {
+		claude_window(f, &u->five_hour, 0, v.allowance, now);
+	} else if (u) {
 		claude_window(f, &u->five_hour, TW_CLAUDE_FIVE_HOURS, "5-hour limit", now);
 		claude_window(f, &u->seven_day, TW_CLAUDE_SEVEN_DAYS, "Weekly limit", now);
+	}
+	if (have && (v.running > 0 || v.elsewhere || (u && u->updated))) {
 		add_heading(f, "From");
-		char span[48], value[96];
-		long ago = (long)(now - u->updated);
-		if (ago < 90) {
-			snprintf(value, sizeof(value), "just now");
-		} else {
-			tw_claude_format_span(ago, false, span, sizeof(span));
-			snprintf(value, sizeof(value), "%s ago", span);
+		char value[160];
+		if (v.running > 0) {
+			snprintf(value, sizeof(value), "%d %s%s%s", v.running,
+				v.running == 1 ? "session" : "sessions", v.models[0] ? " · " : "", v.models);
+			add_row(f, "Running here", value);
 		}
-		char shown[64];
-		snprintf(shown, sizeof(shown), "%s showed them", tool->name);
-		add_row(f, shown, value);
+		if (v.elsewhere) {
+			char when[48];
+			ago_text(now, v.elsewhere_at, when, sizeof(when));
+			snprintf(value, sizeof(value), "+%.0f%% while nothing ran here, %s",
+				v.elsewhere_share, when);
+			struct info_row *row = add_row(f, "Used elsewhere", value);
+			if (row) {
+				snprintf(row->badge, sizeof(row->badge), "?");
+				row->badge_kind = BADGE_WARN;
+			}
+		}
+		if (u && u->updated) {
+			char shown[64];
+			ago_text(now, u->updated, value, sizeof(value));
+			snprintf(shown, sizeof(shown), "%s showed them", name);
+			add_row(f, shown, value);
+		}
 	}
 	if (u && u->dir) {
 		const char *home = getenv("HOME");
@@ -1241,11 +1322,13 @@ static void claude_sample(struct info_flyout *f) {
 		}
 		add_row(f, "Folder", folder);
 	}
-	char usage_label[64], *usage_command = format_str("exec xdg-open %s", tool->usage_url);
-	snprintf(usage_label, sizeof(usage_label), "Usage on %s", tool->usage_site);
-	add_action(f, usage_label, usage_command, NULL);
-	free(usage_command);
-	if (u && u->dir && tool->connects) {
+	if (v.tool) {
+		char usage_label[64], *usage_command = format_str("exec xdg-open %s", v.tool->usage_url);
+		snprintf(usage_label, sizeof(usage_label), "Usage on %s", v.tool->usage_site);
+		add_action(f, usage_label, usage_command, NULL);
+		free(usage_command);
+	}
+	if (u && u->dir && v.tool && v.tool->connects) {
 		char *quoted = g_shell_quote(u->dir);
 		char *command = format_str("exec tilewin-claude-usage %s %s",
 			u->connected ? "disconnect" : "connect", quoted);
@@ -1259,232 +1342,9 @@ static void claude_sample(struct info_flyout *f) {
 	free(settings);
 }
 
-static void agents_free(void *data) {
-	agent_usage_free(data);
-}
-
-static void agent_badge(struct info_row *row, bool remote) {
-	if (row) {
-		snprintf(row->badge, sizeof(row->badge), "%s", remote ? "Possible remote" : "Local");
-		row->badge_kind = remote ? BADGE_AGENT_REMOTE : BADGE_AGENT_LOCAL;
-	}
-}
-
-static int agents_charts_height(struct info_flyout *f);
-
-static void agent_quota_row(struct info_flyout *f, const struct agent_limit *l, bool weekly,
-		time_t now) {
-	const struct tw_claude_window *win = weekly ? &l->usage.seven_day : &l->usage.five_hour;
-	if (!win->known) {
-		return;
-	}
-	char value[96], span[48];
-	double used = tw_claude_window_now(win, now);
-	if (win->resets_at > now) {
-		tw_claude_format_span(win->resets_at - now, false, span, sizeof(span));
-		snprintf(value, sizeof(value), l->kind == AGENT_AGY ? "%.1f%% used · resets in %s" :
-			"%.0f%% used · resets in %s", used, span);
-	} else if (win->resets_at > 0) {
-		snprintf(value, sizeof(value), "%.0f%% used · reset passed", used);
-	} else {
-		snprintf(value, sizeof(value), l->kind == AGENT_AGY && used == 0 ?
-			"%.1f%% used · no active reset" : "%.1f%% used · reset time unavailable", used);
-	}
-	struct info_row *row = add_row(f, weekly ? "Weekly quota" : "5-hour quota", value);
-	if (row) {
-		row->bar = used / 100.0;
-		row->full_is_bad = true;
-	}
-	bool pace_known;
-	long left = tw_claude_window_left(win, weekly ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS,
-		now, &pace_known);
-	if (pace_known && win->resets_at > now) {
-		if (left > 0) {
-			tw_claude_format_span(left, false, span, sizeof(span));
-			snprintf(value, sizeof(value), "Used up in about %s", span);
-		} else {
-			snprintf(value, sizeof(value), "%s", left == 0 ? "Used up" : "Lasts until reset");
-		}
-		add_row(f, "At this pace", value);
-	}
-	if (win->resets_at > 0 && (l->kind == AGENT_AGY || l->live_account || !agents_charts_height(f))) {
-		row = add_row(f, weekly ? "Weekly quota history" : "Last three 5-hour windows", NULL);
-		if (row) {
-			row->quota_chart = &l->chart;
-			row->quota_weekly = weekly;
-		}
-	}
-}
-
-static void agent_token_amount(double tokens, char *out, size_t size) {
-	if (tokens >= 1e6) {
-		snprintf(out, size, "%.2fM tokens", tokens / 1e6);
-	} else if (tokens >= 1e3) {
-		snprintf(out, size, "%.1fk tokens", tokens / 1e3);
-	} else {
-		snprintf(out, size, "%.0f tokens", tokens);
-	}
-}
-
-static void agents_overview(struct info_flyout *f, const struct agent_usage *usage, time_t now) {
-	for (enum agent_kind kind = 0; kind < AGENT_COUNT; kind++) {
-		unsigned workers = 0;
-		double five = -1, week = -1;
-		bool remote = false;
-		for (guint i = 0; i < usage->workers->len; i++) {
-			const struct agent_worker *w = usage->workers->pdata[i];
-			workers += w->kind == kind;
-		}
-		for (guint i = 0; i < usage->limits->len; i++) {
-			const struct agent_limit *l = usage->limits->pdata[i];
-			if (l->kind != kind) {
-				continue;
-			}
-			if (!l->live_account) {
-				five = fmax(five, tw_claude_window_now(&l->usage.five_hour, now));
-				week = fmax(week, tw_claude_window_now(&l->usage.seven_day, now));
-			}
-			remote |= l->unattributed_at && now - l->unattributed_at < TW_CLAUDE_FIVE_HOURS;
-		}
-		char quota[40], summary[96];
-		if (kind == AGENT_COPILOT && usage->copilot_billing.known) {
-			snprintf(quota, sizeof(quota), "Billing %.1f%% used", usage->copilot_billing.used);
-		} else if (five >= 0) {
-			snprintf(quota, sizeof(quota), "5h %.0f%% used", five);
-		} else if (week >= 0) {
-			snprintf(quota, sizeof(quota), "Week %.0f%% used", week);
-		} else {
-			snprintf(quota, sizeof(quota), "%s", usage->installed[kind] ?
-				"Quota unavailable" : "CLI missing from PATH");
-		}
-		snprintf(summary, sizeof(summary), "%s · %u local", quota, workers);
-		struct info_row *row = add_row(f, agent_names[kind], summary);
-		if (remote) {
-			agent_badge(row, true);
-		}
-	}
-}
-
-static void agents_sample(struct info_flyout *f) {
-	struct agent_usage *usage = agent_usage_ref(agent_widget_usage(f->widget));
-	agent_usage_free(f->state);
-	f->state = usage;
-	snprintf(f->title, sizeof(f->title), "AI agent usage");
-	snprintf(f->subtitle, sizeof(f->subtitle), "%s", usage ?
-		"Terminal workers, quotas and model history" : "Reading agent usage…");
-	if (!usage) {
-		return;
-	}
-	time_t now = time(NULL);
-	agents_overview(f, usage, now);
-	for (enum agent_kind kind = 0; kind < AGENT_COUNT; kind++) {
-		add_heading(f, agent_names[kind]);
-		unsigned local = 0;
-		for (guint i = 0; i < usage->workers->len; i++) {
-			const struct agent_worker *w = usage->workers->pdata[i];
-			if (w->kind != kind) {
-				continue;
-			}
-			local++;
-			char name[96], details[96];
-			snprintf(name, sizeof(name), "%s%sPID %d", w->tty ? w->tty : "",
-				w->tty ? " · " : "", w->pid);
-			snprintf(details, sizeof(details), "%s · %s", w->model ? w->model : "Model unknown",
-				w->effort ? w->effort : "effort unknown");
-			agent_badge(add_row(f, name, details), false);
-		}
-		if (!local) {
-			add_row(f, "Terminal workers", "None detected");
-		}
-		bool have_quota = kind == AGENT_COPILOT && usage->copilot_billing.known;
-		if (have_quota) {
-			const struct tw_claude_window *billing = &usage->copilot_billing;
-			char value[96], span[48];
-			if (billing->resets_at > now) {
-				tw_claude_format_span(billing->resets_at - now, false, span, sizeof(span));
-				snprintf(value, sizeof(value), "%.1f%% used · resets in %s", billing->used, span);
-			} else {
-				snprintf(value, sizeof(value), "%.1f%% used · reset unavailable", billing->used);
-			}
-			struct info_row *row = add_row(f, usage->copilot_bucket, value);
-			if (row) {
-				row->bar = billing->used / 100.0;
-				row->full_is_bad = true;
-			}
-		}
-		for (guint i = 0; i < usage->limits->len; i++) {
-			const struct agent_limit *l = usage->limits->pdata[i];
-			if (l->kind != kind || !l->usage.updated) {
-				continue;
-			}
-			have_quota = true;
-			if (kind == AGENT_AGY || l->live_account) {
-				add_heading(f, l->name);
-			}
-			char age[48];
-			tw_claude_format_span(MAX(now - l->usage.updated, 0), false, age, sizeof(age));
-			char observed[96];
-			snprintf(observed, sizeof(observed), "%s ago", age);
-			add_row(f, "Quota last reported", observed);
-			if (l->usage.account) {
-				add_row(f, "Account", l->usage.account);
-			}
-			if (l->account_blocked) {
-				add_row(f, "Included usage", "Account reports a limit");
-			}
-			if (l->unattributed_at) {
-				char increase[96], gap[48];
-				tw_claude_format_span(MAX(now - l->unattributed_at, 0), false, gap, sizeof(gap));
-				snprintf(increase, sizeof(increase), "+%.1f pp · observed %s ago", l->unattributed, gap);
-				agent_badge(add_row(f, "Unattributed quota increase", increase), true);
-				char from[24], to[24], period[64];
-				struct tm tm;
-				localtime_r(&l->unattributed_from, &tm);
-				strftime(from, sizeof(from), "%a %H:%M", &tm);
-				localtime_r(&l->unattributed_at, &tm);
-				strftime(to, sizeof(to), "%a %H:%M", &tm);
-				snprintf(period, sizeof(period), "%s–%s", from, to);
-				add_row(f, "Gap in local usage records", period);
-			}
-			agent_quota_row(f, l, false, now);
-			agent_quota_row(f, l, true, now);
-		}
-		if (!have_quota) {
-			const char *detail = kind == AGENT_COPILOT ?
-				(usage->copilot_auth_required ? "Copilot account sign-in required" : "Awaiting account credits") :
-				kind == AGENT_AGY ? "Awaiting Antigravity account quota" :
-				kind == AGENT_CLAUDE ? "Connect the Claude status line" : "Awaiting a Codex quota reading";
-			add_row(f, "Quota unavailable", detail);
-		}
-		bool model_heading = false;
-		for (guint i = 0; i < usage->models->len; i++) {
-			const struct agent_model *m = usage->models->pdata[i];
-			if (m->kind != kind) {
-				continue;
-			}
-			if (!model_heading) {
-				add_heading(f, kind == AGENT_AGY ? "30-day model history · context token changes" :
-					"30-day model history · tokens by day");
-				model_heading = true;
-			}
-			double total = 0;
-			for (int day = 0; day < AGENT_DAYS; day++) {
-				total += m->tokens[day];
-			}
-			char value[48];
-			agent_token_amount(total, value, sizeof(value));
-			struct info_row *row = add_row(f, m->name, value);
-			if (row) {
-				row->model_history = m;
-			}
-		}
-		if (!model_heading) {
-			add_row(f, "Model history", "Awaiting usage records");
-		}
-	}
-	char *settings = widget_settings_command(f->widget);
-	add_action(f, "Settings", settings, NULL);
-	free(settings);
+/* A click on another account's row shows that one. */
+static void claude_pick(struct info_flyout *f, const struct info_row *row) {
+	agents_widget_pick(f->widget, row->pick - 1);
 }
 
 /* ---------- the kernel updates ---------- */
@@ -1707,37 +1567,26 @@ static list_t *ports_row_menu(struct info_flyout *f, const struct info_row *row)
 	return items;
 }
 
-static void agents_charts_draw(struct info_flyout *f, cairo_t *cr,
-		const struct fly_style *st, struct pbox box);
-
-static int agents_charts_height(struct info_flyout *f) {
-	if (!f->state) {
-		return 0;
-	}
-	int room = f->anchor.output ? (f->anchor.above ? f->anchor.y :
-		f->anchor.output->height - f->anchor.y) : 500;
-	return room >= 510 ? 246 : room >= 380 ? 198 : 0;
-}
-
 static const struct info_source sources[] = {
-	{ "disk", 1000, disk_sample, free, 0, NULL, NULL, NULL },
-	{ "gpu", 1000, gpu_sample, gpu_free, 0, NULL, NULL, NULL },
-	{ "net", 1000, net_sample, net_free, 0, NULL, NULL, NULL },
-	{ "storage", 5000, storage_sample, free, 0, NULL, NULL, NULL },
-	{ "power", 1000, power_sample, free, 0, NULL, NULL, NULL },
-	{ "keyboard", 0, keyboard_sample, free, 0, NULL, NULL, NULL },
-	{ "title", 1000, title_sample, free, 0, NULL, NULL, NULL },
-	{ "custom", 1000, custom_sample, free, 0, NULL, NULL, NULL },
-	{ "git", 2000, git_sample, git_free, 0, NULL, NULL, NULL },
-	// the charts want the room
+	{ "disk", 1000, disk_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "gpu", 1000, gpu_sample, gpu_free, 0, NULL, NULL, NULL, NULL },
+	{ "net", 1000, net_sample, net_free, 0, NULL, NULL, NULL, NULL },
+	{ "storage", 5000, storage_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "power", 1000, power_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "keyboard", 0, keyboard_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "title", 1000, title_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "custom", 1000, custom_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "git", 2000, git_sample, git_free, 0, NULL, NULL, NULL, NULL },
+	// the AI agent usage widget, and the claude and codex widget of older configs; the
+	// charts want the room
+	{ "agents", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
+		claude_charts_draw, claude_pick },
 	{ "claude", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
-		claude_charts_draw },
+		claude_charts_draw, claude_pick },
 	{ "codex", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
-		claude_charts_draw },
-	{ "agents", 2000, agents_sample, agents_free, 600, NULL, agents_charts_height,
-		agents_charts_draw },
-	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL },
-	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL }, // the addresses want the room
+		claude_charts_draw, claude_pick },
+	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL, NULL },
+	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL, NULL }, // the addresses want the room
 };
 
 /* ---------- drawing ---------- */
@@ -1747,7 +1596,7 @@ static bool hovered(struct info_flyout *f, struct pbox b) {
 }
 
 static int row_height(const struct info_row *row) {
-	return row->quota_chart ? 118 : row->model_history ? 48 : row->heading ? ROWS_TITLE : row->bar >= 0 ? BAR_ROW : ROW;
+	return row->heading ? ROWS_TITLE : row->bar >= 0 ? BAR_ROW : ROW;
 }
 
 static int rows_height(struct info_flyout *f, int from) {
@@ -1928,122 +1777,10 @@ static void badge_colors(const struct fly_style *st, int kind, uint32_t *text, u
 	switch (kind) {
 	case BADGE_BAD: c = st->dark ? 0xff7b72ff : 0xc42b1cff; break;
 	case BADGE_WARN: c = st->dark ? 0xf2b25cff : 0xb3600aff; break;
-	case BADGE_AGENT_LOCAL: c = st->dark ? 0x73dbaaff : 0x16744bff; break;
-	case BADGE_AGENT_REMOTE: c = st->dark ? 0xd4adffff : 0x7436a9ff; break;
 	default: c = st->dark ? 0x6ccf8aff : 0x1f7a3aff; break;
 	}
 	*text = c;
 	*fill = (c & 0xffffff00) | (st->dark ? 0x2e : 0x24);
-}
-
-static void draw_agent_chart(struct info_flyout *f, const struct info_row *row, cairo_t *cr,
-		const struct fly_style *st, struct pbox box) {
-	const struct claude_look look = {
-		.fg = st->fg, .dim = st->dim, .chart_bg = st->chart_bg, .chart_grid = st->chart_grid,
-		.chart_line = st->chart_line, .label_bg = st->dark ? 0x2b2b2bff : 0xffffffff,
-		.chart_radius = st->chart_radius, .dark = st->dark, .sunken = st->style == PS_CLASSIC,
-		.font = st->font, .bold = st->bold,
-	};
-	struct claude_hover hover = { f->inside, f->px, f->py };
-	pd_text(cr, st->font, row->label, box.x, box.y, box.width, 20, st->dim, PD_LEFT);
-	box.y += 22;
-	box.height -= 24;
-	struct claude_charts chart = *row->quota_chart;
-	chart.now = time(NULL);
-	if (row->quota_weekly) {
-		claude_chart_week(&hover, &chart, cr, &look, box);
-	} else {
-		claude_chart_five_hours(&hover, &chart, cr, &look, box);
-	}
-}
-
-static void agents_charts_draw(struct info_flyout *f, cairo_t *cr,
-		const struct fly_style *st, struct pbox box) {
-	const struct agent_usage *usage = f->state;
-	int width = (box.width - 12) / 2;
-	int height = (box.height - 6) / 2;
-	time_t now = time(NULL);
-	for (enum agent_kind kind = AGENT_CLAUDE; kind <= AGENT_CODEX; kind++) {
-		const struct agent_limit *limit = NULL;
-		for (guint i = 0; i < usage->limits->len; i++) {
-			const struct agent_limit *candidate = usage->limits->pdata[i];
-			if (candidate->kind == kind && !candidate->live_account) {
-				limit = candidate;
-				break;
-			}
-		}
-		for (int weekly = 0; weekly < 2; weekly++) {
-			int x = box.x + weekly * (width + 12);
-			int y = box.y + kind * height;
-			const struct tw_claude_window *win = !limit ? NULL :
-				weekly ? &limit->usage.seven_day : &limit->usage.five_hour;
-			double used = win ? tw_claude_window_now(win, now) : -1;
-			char label[128], span[32] = "";
-			if (used >= 0 && win->resets_at > now) {
-				tw_claude_format_span(win->resets_at - now, true, span, sizeof(span));
-			}
-			if (used >= 0) {
-				snprintf(label, sizeof(label), "%s %s · %.0f%%%s%s",
-					agent_names[kind], weekly ? "week" : "5h", used,
-					*span ? " · resets in " : "", span);
-			} else {
-				snprintf(label, sizeof(label), "%s %s · awaiting quota",
-					agent_names[kind], weekly ? "week" : "5h");
-			}
-			pd_text(cr, st->font, label, x, y, width, 19, st->fg, PD_LEFT);
-			if (used >= 0) {
-				fly_draw_bar(cr, st, x, y + 20, width, 6, CLAMP(used / 100.0, 0, 1),
-					used >= 95 ? st->error : st->bar);
-			}
-			if (win && win->resets_at > 0) {
-				struct info_row row = { .quota_chart = &limit->chart, .quota_weekly = weekly };
-				draw_agent_chart(f, &row, cr, st,
-					(struct pbox){ x, y + 6, width, height - 8 });
-			} else {
-				pd_rect(cr, x, y + 28, width, height - 40, st->chart_bg);
-				pd_text(cr, st->font, "No quota history yet", x, y + 28, width, height - 40,
-					st->dim, PD_CENTER);
-			}
-		}
-	}
-}
-
-static void draw_model_history(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
-		const struct agent_model *m, struct pbox box) {
-	double max = 0;
-	for (int i = 0; i < AGENT_DAYS; i++) {
-		max = fmax(max, m->tokens[i]);
-	}
-	pd_rect(cr, box.x, box.y, box.width, box.height, st->chart_bg);
-	if (max <= 0) {
-		return;
-	}
-	double step = (double)box.width / AGENT_DAYS;
-	for (int i = 0; i < AGENT_DAYS; i++) {
-		double h = box.height * m->tokens[i] / max;
-		if (h > 0) {
-			pd_rect(cr, box.x + (AGENT_DAYS - 1 - i) * step, box.y + box.height - h,
-				fmax(step - 2, 1), h, st->chart_line);
-		}
-	}
-	if (hovered(f, box)) {
-		int column = CLAMP((int)((f->px - box.x) / step), 0, AGENT_DAYS - 1);
-		int days_ago = AGENT_DAYS - 1 - column;
-		const struct agent_usage *usage = f->state;
-		time_t date = usage->now - days_ago * 86400;
-		struct tm tm;
-		gmtime_r(&date, &tm);
-		char day[24], amount[48], label[80];
-		strftime(day, sizeof(day), "%b %d", &tm);
-		agent_token_amount(m->tokens[days_ago], amount, sizeof(amount));
-		snprintf(label, sizeof(label), "%s · %s", day, amount);
-		pd_rect(cr, box.x + column * step, box.y, 1, box.height, st->fg);
-		int width = 0;
-		pd_text_size(cr, st->font, label, &width, NULL);
-		int x = column < AGENT_DAYS / 2 ? box.x + box.width - width - 8 : box.x;
-		pd_rect(cr, x, box.y, width + 8, box.height, st->chart_bg);
-		pd_text(cr, st->font, label, x + 4, box.y, width + 2, box.height, st->fg, PD_LEFT);
-	}
 }
 
 /* A word in a pill, right-aligned at x + w; returns the width it took. */
@@ -2132,11 +1869,6 @@ static void info_render(struct popup *p, cairo_t *cr) {
 		for (int i = f->scroll; i < f->scroll + shown; i++) {
 			struct info_row *row = &f->rows[i];
 			int h = row_height(row);
-			if (row->quota_chart) {
-				draw_agent_chart(f, row, cr, &st, (struct pbox){ x0, y, cw, h });
-				y += h;
-				continue;
-			}
 			if (row->heading) {
 				if (i > f->scroll) {
 					draw_line(cr, &st, p, y + 2);
@@ -2146,7 +1878,7 @@ static void info_render(struct popup *p, cairo_t *cr) {
 				continue;
 			}
 			struct pbox box = { x0 - 6, y, cw + 12, h };
-			if (row->command || row->menu_key[0]) {
+			if (row->command || row->menu_key[0] || row->pick) {
 				if (hovered(f, box)) {
 					fill_hover(cr, &st, box);
 				}
@@ -2159,7 +1891,7 @@ static void info_render(struct popup *p, cairo_t *cr) {
 			int vw = 0, lw = 0;
 			int row_w = cw; // the badge takes the right end
 			if (row->badge[0]) {
-				int text_h = row->bar >= 0 || row->model_history ? 22 : h;
+				int text_h = row->bar >= 0 ? 22 : h;
 				int bw = draw_badge(p->panel, cr, &st, row->badge, row->badge_kind, x0 + cw, y,
 					text_h);
 				row_w = cw - bw - 8;
@@ -2171,14 +1903,11 @@ static void info_render(struct popup *p, cairo_t *cr) {
 				int room = row_w - (lw < row_w / 2 ? lw : row_w / 2) - 12;
 				vw = vw > room ? room : vw;
 			}
-			int text_h = row->bar >= 0 || row->model_history ? 22 : h;
+			int text_h = row->bar >= 0 ? 22 : h;
 			pd_text(cr, row->marked ? st.bold : st.font, row->label, x0, y,
 				row_w - vw - (vw ? 12 : 0), text_h, st.fg, PD_LEFT);
 			if (row->value[0]) {
 				pd_text(cr, st.font, row->value, x0 + row_w - vw, y, vw, text_h, st.dim, PD_RIGHT);
-			}
-			if (row->model_history) {
-				draw_model_history(f, cr, &st, row->model_history, (struct pbox){ x0, y + 24, cw, 20 });
 			}
 			if (row->bar >= 0) {
 				double share = fmin(fmax(row->bar, 0), 1);
@@ -2326,6 +2055,10 @@ static void info_button(struct popup *p, double x, double y, uint32_t button, bo
 			};
 			menu_open(f->panel, items, true, anchor, NULL);
 		}
+	} else if (hs->kind == HS_ROW && hs->id < f->row_count && f->rows[hs->id].pick &&
+			f->source->row_pick) {
+		f->source->row_pick(f, &f->rows[hs->id]);
+		refill(f);
 	} else if (hs->kind == HS_ROW && hs->id < f->row_count && f->rows[hs->id].command) {
 		bar_run_command(f->panel, f->rows[hs->id].command, NULL);
 		popup_close_later(f->panel);

@@ -43,9 +43,13 @@ struct agent_usage {
 };
 
 extern const char *const agent_names[AGENT_COUNT];
-struct agent_usage *agent_usage_collect(bool poll_codex);
+/*
+ * What the agents used, from their logs and running programs; with
+ * account_checks also what their accounts say, each agent's own program asked
+ * (codex app-server, copilot --headless, agy), at most every five minutes.
+ */
+struct agent_usage *agent_usage_collect(bool account_checks);
 struct agent_usage *agent_usage_ref(const struct agent_usage *usage);
 void agent_usage_free(struct agent_usage *usage);
-const struct agent_usage *agent_widget_usage(struct widget *w);
 
 #endif

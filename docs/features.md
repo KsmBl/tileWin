@@ -50,7 +50,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
   - Separate layouts for window mode and tile mode.
   - Widgets:
     - Apps and windows: start button, taskbar, quick launch, workspaces, window title.
-    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, Claude Code usage, Codex usage, open ports, the Wi-Fi radar.
+    - Status: system tray (StatusNotifierItem, with the menus the icons publish over DBusMenu), clock with the clock and calendar flyout, the notification bell, volume, network, Bluetooth, battery, CPU, memory, disk activity, disk space, GPU, network usage, power draw, brightness, keyboard layout, git, AI agent usage, open ports, the Wi-Fi radar.
     - Controls: mode switch, show desktop, search box.
     - Layout and scripts: separator, spacer, **custom script widgets**.
   - Every widget can run commands on click or scroll and have its own right-click menu.
@@ -78,8 +78,7 @@ Everything tileWin has, one feature at a time. The [README](../README.md) is the
 - **Brightness and volume up to 130%:** over 100% the night light lifts the darker tones and PipeWire or PulseAudio amplify the sound, past a mark at 100% on every slider and popup; the brightness goes down to 0%, the backlight still on.
 - **Battery chart** of the last 24 hours in the battery flyout, the times it charged in green.
 - **Login pages of public Wi-Fi** accepted in the background: the terms ticked, the right button pressed, a page that wants your email opened for you.
-- **Claude Code usage** on the taskbar and the desktop: the 5-hour and weekly limits, when they reset and how long they last at this pace, from what Claude Code shows its status line, never from its login.
-- **Codex usage** on the taskbar and the desktop, the same widget with the same charts and flyout: the 5-hour and weekly limits of the ChatGPT plan, read from the session logs Codex writes itself, nothing to connect and never its login; the charts' history starts with the logs of the last eight days.
+- **AI agent usage** on the taskbar and the desktop: the 5-hour and weekly limits of the accounts of Claude Code, Codex, Copilot and Antigravity that are ticked in its settings, when they reset and how long they last at this pace, with the charts of the last 5-hour windows and the week, the sessions running here and usage that came from elsewhere. Claude Code and Antigravity show them to their status line, Codex writes them into its session logs; asking the accounts themselves (Copilot's allowance comes only so) is a setting of its own, off by default.
 - **Charts that answer the pointer:** every chart (the flyouts of CPU, memory, battery, disk, GPU, network and power, the Claude Code charts and the charts on the desktop) shows the reading under the pointer and when it was; the week of Claude Code also where the pace so far leads.
 - **Quick web**: a web address typed a word a key (g for github.com/, then k for ksmbl/), opened in the browser with Enter; the words and the shortcut on a page of their own in the settings.
 - **App popups**: an app that comes and goes with a shortcut, at a place and size of its own over the rest of the screen darkened (Thunderbird on the right, a terminal from the top), started at the first press and kept running while hidden; made on the App popups page of the settings.

@@ -729,11 +729,31 @@ const char *git_widget_repo(struct widget *w);
 struct tw_claude_usage;
 struct tw_usage_tool;
 /*
- * widgets/claude.c: what the Claude or Codex widget shows, for its flyout; NULL
- * for none. *tool (when given) becomes the tool it shows.
+ * widgets/agents.c: one account of the AI agent usage widget, as its flyout
+ * shows it (the widgets agents, and claude and codex of older configs).
  */
-const struct tw_claude_usage *claude_widget_usage(struct widget *w,
-	const struct tw_usage_tool **tool);
+struct agents_view {
+	const char *name;                    // "Claude Code"
+	int agent;                           // enum tw_agent
+	const struct tw_usage_tool *tool;    // Claude Code and Codex, else NULL
+	const struct tw_claude_usage *usage; // NULL when nothing is known yet
+	bool connect;                        // Claude Code that does not show its limits yet
+	int running;                         // sessions of it running on this computer
+	const char *models;                  // what they run with, "" for nothing known
+	// the usage rose while nothing of it ran here: used elsewhere, by this much
+	bool elsewhere;
+	double elsewhere_share;
+	time_t elsewhere_at;
+	const char *allowance;               // Copilot: the name of its allowance, else NULL
+	bool checks;                         // the accounts are asked (account_checks)
+};
+/* How many accounts it shows, their values read again now; 0 for another widget. */
+int agents_widget_accounts(struct widget *w);
+/* Account i; false when there is none. */
+bool agents_widget_view(struct widget *w, int i, struct agents_view *out);
+/* The account its flyout shows, and choosing another. */
+int agents_widget_current(struct widget *w);
+void agents_widget_pick(struct widget *w, int i);
 struct tw_kernel_auto;
 struct tw_kernel_auto_summary;
 /* widgets/kernel.c: the state of the kernel updates, read again now; NULL for another widget. */

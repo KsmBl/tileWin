@@ -3,6 +3,7 @@
 #include "settings.h"
 #include "tw_claude_usage.h"
 #include "tw_codex_usage.h"
+#include "tw_agent_accounts.h"
 #include "tw_desktop.h"
 #include "tw_disks.h"
 #include "tw_widgets.h"
@@ -367,8 +368,9 @@ static bool list_styles(const char *widget, GPtrArray *values, GPtrArray *labels
 static void add_option_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt, bool desktop) {
 	char *row_type = widget_type_of(widget);
-	bool own_editor = (strcmp(row_type, "claude") == 0 || strcmp(row_type, "codex") == 0) &&
-		strcmp(opt->key, "show") == 0;
+	bool own_editor = (strcmp(row_type, "agents") == 0 || strcmp(row_type, "claude") == 0 ||
+		strcmp(row_type, "codex") == 0) && (strcmp(opt->key, "show") == 0 ||
+		strcmp(opt->key, "accounts") == 0);
 	g_free(row_type);
 	if (own_editor) {
 		return; // ticked and sorted in a group of its own
@@ -704,6 +706,182 @@ static void show_editor_attach(struct settings *s, GtkWidget *content, const cha
 	show_rebuild(e);
 }
 
+/* ---------- the accounts of the AI agent usage widget ---------- */
+
+/*
+ * A tick for each account found on this computer (tw_agent_accounts.h) and
+ * each the config names that is not there now: "accounts" of its block for
+ * the taskbar, of its desktop_widgets entry for the desktop (the taskbar's
+ * there by default). All of them ticked is written as nothing, so an
+ * account added later comes along.
+ */
+struct accounts_editor {
+	struct settings *s;
+	char *widget;
+	bool desktop, legacy;
+	GPtrArray *ids;     // all, in the order shown
+	GHashTable *ticked; // id -> id
+	GtkWidget *list;
+	bool updating;
+};
+
+static void accounts_editor_free(gpointer data) {
+	struct accounts_editor *e = data;
+	g_ptr_array_unref(e->ids);
+	g_hash_table_unref(e->ticked);
+	g_free(e->widget);
+	g_free(e);
+}
+
+static void accounts_write(struct accounts_editor *e) {
+	GString *out = g_string_new(NULL);
+	for (guint i = 0; i < e->ids->len; i++) {
+		if (g_hash_table_contains(e->ticked, e->ids->pdata[i])) {
+			g_string_append_printf(out, "%s%s", out->len ? " " : "", (char *)e->ids->pdata[i]);
+		}
+	}
+	// all of them: nothing, so the ones found later come along (an older claude or
+	// codex widget shows its one account by default, so it is written)
+	bool all = g_hash_table_size(e->ticked) == e->ids->len && !e->legacy;
+	if (e->desktop) {
+		write_desktop_option(e->s, e->widget, "accounts", all ? NULL : out->str);
+	} else {
+		write_option(e->s, e->widget, "accounts", all ? NULL : out->str);
+	}
+	g_string_free(out, TRUE);
+}
+
+static void on_account_tick(GtkCheckButton *check, gpointer data) {
+	struct accounts_editor *e = data;
+	if (e->updating) {
+		return;
+	}
+	const char *id = g_object_get_data(G_OBJECT(check), "account");
+	if (gtk_check_button_get_active(check)) {
+		g_hash_table_add(e->ticked, (gpointer)id);
+	} else if (g_hash_table_size(e->ticked) > 1) {
+		g_hash_table_remove(e->ticked, id);
+	} else {
+		// the last one stays: a widget showing nothing helps nobody
+		e->updating = true;
+		gtk_check_button_set_active(check, TRUE);
+		e->updating = false;
+		return;
+	}
+	accounts_write(e);
+}
+
+/* "Claude Code · ~/.claude-work" for the row of an account. */
+static char *account_title(const struct tw_agent_account *a) {
+	if (!a->dir) {
+		return g_strdup(tw_agent_names[a->agent]);
+	}
+	const char *colon = strchr(a->id, ':');
+	return g_strdup_printf("%s · %s", tw_agent_names[a->agent], colon ? colon + 1 : a->dir);
+}
+
+static void accounts_editor_attach(struct settings *s, GtkWidget *content, const char *widget,
+		const char *type, bool desktop) {
+	struct accounts_editor *e = g_new0(struct accounts_editor, 1);
+	e->s = s;
+	e->widget = g_strdup(widget);
+	e->desktop = desktop;
+	e->legacy = strcmp(type, "agents") != 0;
+	e->ids = g_ptr_array_new_with_free_func(g_free);
+	e->ticked = g_hash_table_new(g_str_hash, g_str_equal);
+	struct cstmt *block = desktop ? widget_desktop_entry(s, widget) : NULL;
+	char *value = block ? cstmt_join(confdoc_child(block, "accounts", NULL), 0) : NULL;
+	if (!value || !*value) {
+		g_free(value);
+		block = confdoc_block(s->taskbar, "widget", widget, false);
+		value = cstmt_join(confdoc_child(block, "accounts", NULL), 0);
+	}
+	GPtrArray *titles = g_ptr_array_new_with_free_func(g_free);
+	struct tw_agent_account *found;
+	int n = tw_agent_accounts_found(&found);
+	for (int i = 0; i < n; i++) {
+		g_ptr_array_add(e->ids, g_strdup(found[i].id));
+		g_ptr_array_add(titles, account_title(&found[i]));
+	}
+	tw_agent_accounts_free(found, n);
+	// the ticked ones: of the config, or all of them (the older widgets: their account)
+	char *wanted = value && *value ? g_strdup(value) : NULL;
+	if (!wanted && e->legacy) {
+		char *account = cstmt_join(confdoc_child(block, "account", NULL), 0);
+		bool codex = strcmp(type, "codex") == 0;
+		char *dir = tw_usage_select_dir(codex ? &tw_codex_tool : &tw_claude_tool,
+			account && *account ? account : NULL);
+		char id[300];
+		tw_agent_account_id(codex ? TW_AGENT_CODEX : TW_AGENT_CLAUDE, dir, id, sizeof(id));
+		wanted = g_strdup(id);
+		free(dir);
+		g_free(account);
+	}
+	g_free(value);
+	char **ids = g_strsplit_set(wanted ? wanted : "", " ,\t", -1);
+	g_free(wanted);
+	bool any = false;
+	for (int i = 0; ids[i]; i++) {
+		struct tw_agent_account a;
+		if (!tw_agent_account_parse(ids[i], &a)) {
+			continue;
+		}
+		guint at;
+		if (!g_ptr_array_find_with_equal_func(e->ids, a.id, g_str_equal, &at)) {
+			// named in the config, not found now (a folder of a disk not plugged in)
+			g_ptr_array_add(e->ids, g_strdup(a.id));
+			g_ptr_array_add(titles, account_title(&a));
+			at = e->ids->len - 1;
+		}
+		g_hash_table_add(e->ticked, e->ids->pdata[at]);
+		any = true;
+		tw_agent_account_finish(&a);
+	}
+	g_strfreev(ids);
+	for (guint i = 0; !any && i < e->ids->len; i++) {
+		g_hash_table_add(e->ticked, e->ids->pdata[i]); // by default all of them
+	}
+
+	GtkWidget *group = ui_group(content, desktop ? "Accounts on the desktop" : "Accounts",
+		"Which agents' accounts it shows, one after the other. Claude Code shows its limits "
+		"once its folder is connected; Copilot's allowance comes only when the accounts are "
+		"asked (below).");
+	e->list = gtk_list_box_new();
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(e->list), GTK_SELECTION_NONE);
+	gtk_widget_add_css_class(e->list, "boxed-list");
+	gtk_widget_set_margin_bottom(e->list, 8);
+	e->updating = true;
+	for (guint i = 0; i < e->ids->len; i++) {
+		GtkWidget *check = gtk_check_button_new_with_label(titles->pdata[i]);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
+			g_hash_table_contains(e->ticked, e->ids->pdata[i]));
+		g_object_set_data(G_OBJECT(check), "account", e->ids->pdata[i]);
+		g_signal_connect(check, "toggled", G_CALLBACK(on_account_tick), e);
+		gtk_widget_set_margin_start(check, 12);
+		gtk_widget_set_margin_end(check, 12);
+		gtk_widget_set_margin_top(check, 4);
+		gtk_widget_set_margin_bottom(check, 4);
+		GtkWidget *row = gtk_list_box_row_new();
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), check);
+		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+	}
+	if (e->ids->len == 0) {
+		GtkWidget *none = gtk_label_new("No AI agent found on this computer");
+		gtk_widget_add_css_class(none, "dim-label");
+		gtk_widget_set_margin_top(none, 8);
+		gtk_widget_set_margin_bottom(none, 8);
+		gtk_list_box_append(GTK_LIST_BOX(e->list), none);
+	}
+	e->updating = false;
+	g_ptr_array_unref(titles);
+	GtkWidget *holder = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(holder), e->list);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(holder), FALSE);
+	gtk_list_box_append(GTK_LIST_BOX(group), holder);
+	g_object_set_data_full(G_OBJECT(e->list), "editor", e, accounts_editor_free);
+}
+
 /* ---------- the apps of the quick launch ---------- */
 
 /* The list of the quick launch widget, in its settings: what widget
@@ -905,8 +1083,11 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
-	if (strcmp(type, "claude") == 0 || strcmp(type, "codex") == 0) {
-		show_editor_attach(s, content, name, desktop); // what it shows comes first
+	if (strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
+			strcmp(type, "codex") == 0) {
+		// which accounts and what of them come first
+		accounts_editor_attach(s, content, name, type, desktop);
+		show_editor_attach(s, content, name, desktop);
 	}
 	const struct tw_widget_option *own_look = tw_widget_look(type, desktop);
 	if (own_look) {

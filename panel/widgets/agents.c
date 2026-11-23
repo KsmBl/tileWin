@@ -1,755 +1,1237 @@
+/*
+ * The AI agent usage widget: the usage limits of the accounts of Claude Code,
+ * Codex, GitHub Copilot CLI and Antigravity, the 5-hour and the weekly
+ * window (Copilot: its allowance), on the taskbar and on the desktop.
+ *
+ *   widget agents {
+ *       accounts claude:~/.claude codex:~/.codex   # which, in this order
+ *                                                  # (tw_agent_accounts.h); all
+ *                                                  # found by default
+ *       show usage_5h reset_5h usage_7d            # what of each, in this order
+ *       account_checks no                          # ask the accounts themselves
+ *   }
+ *
+ * The claude and the codex widget of older configs are this widget with the
+ * account of their "account" option, the one used last by default.
+ *
+ * Claude Code shows its limits to tileWin through tilewin-claude-usage, its
+ * status line once the folder is connected: tileWin never touches a login of
+ * Claude's. A folder that is not connected says so, and a click connects it.
+ * Codex writes them into its session logs itself (tw_codex_usage.h). Copilot
+ * and Antigravity, and what runs on this computer, come from agentusage.c, in
+ * a thread of its own once a minute; Copilot's allowance only with
+ * account_checks, which has each agent's own program asked about its account.
+ *
+ * What it shows of each account:
+ *   usage   the share of the window used, with a bar
+ *   reset   the time until the window starts over
+ *   left    the time until it is used up at the pace since it started (or since
+ *           it was reset by hand), or that it lasts until it resets
+ */
+#define _GNU_SOURCE
 #include <linux/input-event-codes.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "agentusage.h"
 #include "draw.h"
+#include "panel.h"
+#include "claudecharts.h"
+#include "tw_agent_accounts.h"
+#include "tw_claude_usage.h"
+#include "tw_codex_usage.h"
+#include "tw_theme.h"
 
-#define POLL_MS 1000
-#define SAMPLE_SECONDS 10
+#define RELOAD_MS 5000
+#define COLLECT_S 60      // what runs here, and Copilot and Antigravity: once a minute
+#define COLLECT_OPEN_S 15 // while the flyout is open, sooner
+#define MAX_ITEMS 12
+#define BAR_W 34
+#define GAP 12
+#define ACCOUNT_GAP 18
+
+static const char *const short_names[TW_AGENT_COUNT] = {
+	"Claude", "Codex", "Copilot", "Antigravity",
+};
+
+struct source {
+	struct tw_agent_account account;
+	const struct tw_usage_tool *tool; // Claude Code and Codex
+	struct tw_claude_usage usage;
+	bool have; // values known
+	// from what runs on this computer (agentusage.c)
+	int running;
+	char models[160];
+	bool elsewhere;
+	double elsewhere_share;
+	time_t elsewhere_at;
+	char allowance[48];
+};
 
 struct agents_state {
-	struct agent_usage *usage;
-	GAsyncQueue *pending;
+	const struct tw_usage_tool *legacy; // the claude or codex widget of an older config
+	struct source *src;
+	int count, current;
+	char *accounts; // the accounts the sources were made for
 	struct loop_timer *timer;
-	time_t sampled;
+	GAsyncQueue *pending;
+	struct agent_usage *collected;
+	time_t collected_at;
 };
 
-struct agents_request {
-	GAsyncQueue *queue;
-	bool poll_codex;
-};
+/* ---------- which accounts ---------- */
+
+static const char *accounts_conf(struct widget *w) {
+	if (w->desk) {
+		struct twconf_node *node = twconf_child(w->desk, "accounts");
+		if (node && node->argc > 0) {
+			static char joined[1024];
+			joined[0] = '\0';
+			for (int i = 0; i < node->argc; i++) {
+				strncat(joined, i ? " " : "", sizeof(joined) - strlen(joined) - 1);
+				strncat(joined, node->argv[i], sizeof(joined) - strlen(joined) - 1);
+			}
+			return joined;
+		}
+	}
+	return widget_conf(w, "accounts", NULL);
+}
+
+/* The ids of the accounts to show, space separated (to free). */
+static char *wanted_accounts(struct widget *w) {
+	struct agents_state *st = w->data;
+	const char *conf = accounts_conf(w);
+	if (conf && *conf) {
+		return strdup(conf);
+	}
+	char id[300];
+	if (st->legacy) {
+		// the claude or codex widget: the account of its "account" option
+		char *dir = tw_usage_select_dir(st->legacy, widget_conf(w, "account", NULL));
+		tw_agent_account_id(st->legacy == &tw_codex_tool ? TW_AGENT_CODEX : TW_AGENT_CLAUDE,
+			dir, id, sizeof(id));
+		free(dir);
+		return strdup(id);
+	}
+	struct tw_agent_account *found;
+	int n = tw_agent_accounts_found(&found);
+	GString *all = g_string_new(NULL);
+	for (int i = 0; i < n; i++) {
+		g_string_append_printf(all, "%s%s", all->len ? " " : "", found[i].id);
+	}
+	tw_agent_accounts_free(found, n);
+	if (!all->len) {
+		g_string_append(all, "claude"); // none at all: the one to connect
+	}
+	return g_string_free(all, FALSE);
+}
+
+static void free_sources(struct agents_state *st) {
+	for (int i = 0; i < st->count; i++) {
+		tw_agent_account_finish(&st->src[i].account);
+		tw_claude_usage_finish(&st->src[i].usage);
+	}
+	free(st->src);
+	st->src = NULL;
+	st->count = 0;
+}
+
+/* The sources, made again when the accounts to show changed. */
+static void resolve(struct widget *w) {
+	struct agents_state *st = w->data;
+	char *wanted = wanted_accounts(w);
+	if (st->accounts && strcmp(st->accounts, wanted) == 0) {
+		free(wanted);
+		return;
+	}
+	free_sources(st);
+	free(st->accounts);
+	st->accounts = wanted;
+	char *copy = strdup(wanted), *save = NULL;
+	for (char *id = strtok_r(copy, " ,\t", &save); id; id = strtok_r(NULL, " ,\t", &save)) {
+		struct tw_agent_account account;
+		if (!tw_agent_account_parse(id, &account)) {
+			continue;
+		}
+		bool twice = false;
+		for (int i = 0; i < st->count && !twice; i++) {
+			twice = strcmp(st->src[i].account.id, account.id) == 0;
+		}
+		struct source *grown = twice ? NULL : realloc(st->src, (st->count + 1) * sizeof(*grown));
+		if (!grown) {
+			tw_agent_account_finish(&account);
+			continue;
+		}
+		st->src = grown;
+		struct source *s = &st->src[st->count++];
+		*s = (struct source){ .account = account };
+		s->tool = account.agent == TW_AGENT_CLAUDE ? &tw_claude_tool :
+			account.agent == TW_AGENT_CODEX ? &tw_codex_tool : NULL;
+	}
+	free(copy);
+	if (st->current >= st->count) {
+		st->current = 0;
+	}
+}
+
+/* ---------- the values ---------- */
+
+static void from_collected(struct agents_state *st, struct source *s) {
+	struct agent_usage *u = st->collected;
+	s->running = 0;
+	s->models[0] = '\0';
+	s->elsewhere = false;
+	if (!u) {
+		return;
+	}
+	int kind = (int)s->account.agent; // enum agent_kind has the same order
+	for (guint i = 0; i < u->workers->len; i++) {
+		const struct agent_worker *worker = u->workers->pdata[i];
+		if ((int)worker->kind != kind) {
+			continue;
+		}
+		s->running++;
+		char what[96] = "";
+		if (worker->model && *worker->model) {
+			snprintf(what, sizeof(what), "%s%s%s", worker->model,
+				worker->effort && *worker->effort ? " " : "",
+				worker->effort && *worker->effort ? worker->effort : "");
+		}
+		if (*what && !strstr(s->models, what)) {
+			size_t len = strlen(s->models);
+			snprintf(s->models + len, sizeof(s->models) - len, "%s%s", len ? ", " : "", what);
+		}
+	}
+	time_t now = time(NULL);
+	struct tw_claude_usage agy = { 0 };
+	for (guint i = 0; i < u->limits->len; i++) {
+		const struct agent_limit *l = u->limits->pdata[i];
+		if ((int)l->kind != kind) {
+			continue;
+		}
+		if (l->unattributed_at && now - l->unattributed_at < TW_CLAUDE_FIVE_HOURS &&
+				(!s->account.dir || !l->usage.dir || strcmp(l->usage.dir, s->account.dir) == 0)) {
+			s->elsewhere = true;
+			s->elsewhere_share = fmax(s->elsewhere_share, l->unattributed);
+			s->elsewhere_at = l->unattributed_at;
+		}
+		if (s->account.agent == TW_AGENT_ANTIGRAVITY) {
+			// a limit for each group of models: the one used most of each window
+			if (l->usage.five_hour.known && (!agy.five_hour.known ||
+					l->usage.five_hour.used > agy.five_hour.used)) {
+				agy.five_hour = l->usage.five_hour;
+			}
+			if (l->usage.seven_day.known && (!agy.seven_day.known ||
+					l->usage.seven_day.used > agy.seven_day.used)) {
+				agy.seven_day = l->usage.seven_day;
+			}
+			agy.updated = MAX(agy.updated, l->usage.updated);
+		}
+	}
+	if (s->account.agent == TW_AGENT_ANTIGRAVITY) {
+		tw_claude_usage_finish(&s->usage);
+		s->usage = agy;
+		s->have = agy.updated && (agy.five_hour.known || agy.seven_day.known);
+	} else if (s->account.agent == TW_AGENT_COPILOT) {
+		tw_claude_usage_finish(&s->usage);
+		s->usage = (struct tw_claude_usage){ .five_hour = u->copilot_billing,
+			.updated = u->copilot_billing.known ? u->now : 0 };
+		s->have = u->copilot_billing.known;
+		snprintf(s->allowance, sizeof(s->allowance), "%s",
+			u->copilot_bucket ? u->copilot_bucket : "Allowance");
+	}
+}
+
+static void reload_source(struct agents_state *st, struct source *s) {
+	if (s->tool) {
+		tw_claude_usage_finish(&s->usage);
+		if (s->tool->backfill) {
+			s->tool->backfill(s->account.dir, time(NULL)); // once: what it kept before tileWin
+		}
+		s->have = s->tool->read(s->account.dir, &s->usage);
+		if (s->have && s->usage.updated) {
+			// into the history too (only what differs from its last line goes in)
+			tw_claude_history_add(s->usage.history, &s->usage, s->usage.updated);
+		}
+		if (!s->usage.dir) {
+			s->usage.dir = strdup(s->account.dir);
+		}
+	}
+	from_collected(st, s);
+}
 
 static gpointer collect_thread(gpointer data) {
-	struct agents_request *request = data;
-	GAsyncQueue *queue = request->queue;
-	g_async_queue_push(queue, agent_usage_collect(request->poll_codex));
-	g_free(request);
+	GAsyncQueue *queue = data;
+	bool checks = GPOINTER_TO_INT(g_async_queue_pop(queue)) == 2;
+	g_async_queue_push(queue, agent_usage_collect(checks));
 	g_async_queue_unref(queue);
 	return NULL;
 }
 
-static void agents_tick(void *data) {
+/* What runs here and the accounts that only agentusage.c reads: in a thread of its own. */
+static void collect(struct widget *w, int every) {
+	struct agents_state *st = w->data;
+	if (st->pending) {
+		struct agent_usage *got = g_async_queue_try_pop(st->pending);
+		if (!got) {
+			return; // still at it
+		}
+		agent_usage_free(st->collected);
+		st->collected = got;
+		g_async_queue_unref(st->pending);
+		st->pending = NULL;
+		widget_set_dirty(w);
+	}
+	time_t now = time(NULL);
+	if (st->collected_at && now >= st->collected_at && now - st->collected_at < every) {
+		return;
+	}
+	st->collected_at = now;
+	GAsyncQueue *queue = g_async_queue_new();
+	g_async_queue_push(queue, GINT_TO_POINTER(widget_conf_bool(w, "account_checks", false) ? 2 : 1));
+	GThread *thread = g_thread_try_new("agent-usage", collect_thread, g_async_queue_ref(queue),
+		NULL);
+	if (thread) {
+		g_thread_unref(thread);
+		st->pending = queue;
+	} else {
+		g_async_queue_unref(queue);
+		g_async_queue_unref(queue);
+	}
+}
+
+static void reload(struct widget *w) {
+	struct agents_state *st = w->data;
+	resolve(w);
+	for (int i = 0; i < st->count; i++) {
+		reload_source(st, &st->src[i]);
+	}
+}
+
+static void tick(void *data) {
 	struct widget *w = data;
-	struct agents_state *s = w->data;
-	s->timer = NULL;
+	struct agents_state *st = w->data;
+	st->timer = NULL;
 	if (!w->active) {
 		return;
 	}
-	if (s->pending) {
-		struct agent_usage *usage = g_async_queue_try_pop(s->pending);
-		if (usage) {
-			agent_usage_free(s->usage);
-			s->usage = usage;
-			g_async_queue_unref(s->pending);
-			s->pending = NULL;
-			widget_set_dirty(w);
+	collect(w, COLLECT_S);
+	reload(w);
+	widget_set_dirty(w); // the times count down also without new values
+	st->timer = loop_add_timer_lazy(w->panel->loop, RELOAD_MS, tick, w);
+}
+
+/* ---------- what to show ---------- */
+
+static int show_list(struct widget *w, const struct tw_claude_item **items) {
+	const char *show = NULL;
+	char joined[512] = "";
+	if (w->desk) {
+		// the desktop has its own list, more by default, apart from the taskbar's
+		struct twconf_node *node = twconf_child(w->desk, "show");
+		for (int i = 0; node && i < node->argc; i++) {
+			strncat(joined, " ", sizeof(joined) - strlen(joined) - 1);
+			strncat(joined, node->argv[i], sizeof(joined) - strlen(joined) - 1);
+		}
+		show = *joined ? joined : TW_CLAUDE_SHOW_DESKTOP;
+	} else {
+		show = widget_conf(w, "show", TW_CLAUDE_SHOW_TASKBAR);
+	}
+	char *copy = strdup(show), *save = NULL;
+	int count = 0;
+	for (char *id = strtok_r(copy, " ,\t", &save); id && count < MAX_ITEMS;
+			id = strtok_r(NULL, " ,\t", &save)) {
+		const struct tw_claude_item *item = tw_claude_item_find(id);
+		if (item) {
+			items[count++] = item;
 		}
 	}
+	free(copy);
+	return count;
+}
+
+/* The items of a source: Copilot has one allowance, not a week. */
+static int source_items(struct widget *w, const struct source *s,
+		const struct tw_claude_item **items) {
+	int count = show_list(w, items);
+	if (s->account.agent != TW_AGENT_COPILOT) {
+		return count;
+	}
+	int kept = 0;
+	for (int i = 0; i < count; i++) {
+		if (!items[i]->seven_day) {
+			items[kept++] = items[i];
+		}
+	}
+	return kept;
+}
+
+static const struct tw_claude_window *window_of(const struct source *s,
+		const struct tw_claude_item *item, long *length) {
+	*length = item->seven_day ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS;
+	return item->seven_day ? &s->usage.seven_day : &s->usage.five_hour;
+}
+
+/* The name of an item on the taskbar: Copilot's allowance has none of its own. */
+static const char *item_label(const struct source *s, const struct tw_claude_item *item) {
+	return s->account.agent == TW_AGENT_COPILOT ? "" : item->label;
+}
+
+/*
+ * The value of an item as text, brief for the taskbar; the share for a bar,
+ * -1 when it has none.
+ */
+static double item_value(const struct source *s, const struct tw_claude_item *item, bool brief,
+		char *out, size_t size) {
+	long length;
+	const struct tw_claude_window *win = window_of(s, item, &length);
 	time_t now = time(NULL);
-	if (!s->pending && (now - s->sampled >= SAMPLE_SECONDS || now < s->sampled)) {
-		s->pending = g_async_queue_new_full((GDestroyNotify)agent_usage_free);
-		struct agents_request *request = g_new(struct agents_request, 1);
-		request->queue = g_async_queue_ref(s->pending);
-		request->poll_codex = widget_conf_bool(w, "codex_poll", true);
-		GThread *thread = g_thread_try_new("agent-usage", collect_thread, request, NULL);
-		if (thread) {
-			g_thread_unref(thread);
+	double used = s->have ? tw_claude_window_now(win, now) : -1;
+	if (used < 0) {
+		snprintf(out, size, "–");
+		return item->kind == TW_CLAUDE_USAGE ? 0 : -1;
+	}
+	char span[48];
+	switch (item->kind) {
+	case TW_CLAUDE_USAGE:
+		snprintf(out, size, "%.0f%%", used);
+		return used;
+	case TW_CLAUDE_RESET:
+		if (win->resets_at <= now) {
+			snprintf(out, size, brief ? "reset" : "has reset");
 		} else {
-			g_async_queue_unref(request->queue);
-			g_free(request);
-			g_clear_pointer(&s->pending, g_async_queue_unref);
+			tw_claude_format_span(win->resets_at - now, brief, span, sizeof(span));
+			snprintf(out, size, brief ? "↻ %s" : "in %s", span);
 		}
-		s->sampled = now;
-	}
-	s->timer = loop_add_timer_lazy(w->panel->loop, POLL_MS, agents_tick, w);
-}
-
-static void agents_active(struct widget *w, bool active) {
-	struct agents_state *s = w->data;
-	if (active && !s->timer) {
-		agents_tick(w);
-	} else if (!active && s->timer) {
-		loop_remove_timer(w->panel->loop, s->timer);
-		s->timer = NULL;
-	}
-}
-
-static void agents_init(struct widget *w) {
-	w->data = g_new0(struct agents_state, 1);
-}
-
-static void agents_destroy(struct widget *w) {
-	struct agents_state *s = w->data;
-	agents_active(w, false);
-	g_clear_pointer(&s->pending, g_async_queue_unref);
-	agent_usage_free(s->usage);
-	g_free(s);
-}
-
-const struct agent_usage *agent_widget_usage(struct widget *w) {
-	struct agents_state *s = w->data;
-	return s->usage;
-}
-
-static void agent_summary(const struct agent_usage *u, enum agent_kind kind, char *out, size_t size,
-		double quota_used[2]) {
-	unsigned local = 0;
-	double used = -1, week = -1;
-	bool remote = false;
-	if (u) {
-		time_t now = time(NULL);
-		for (guint i = 0; i < u->workers->len; i++) {
-			struct agent_worker *worker = u->workers->pdata[i];
-			local += worker->kind == kind;
+		return -1;
+	case TW_CLAUDE_LEFT: {
+		bool known;
+		long left = s->account.agent == TW_AGENT_COPILOT ? -1 :
+			tw_claude_window_left(win, length, now, &known);
+		if (left < 0) {
+			snprintf(out, size, brief ? "lasts" : "until it resets");
+		} else if (left == 0) {
+			snprintf(out, size, "used up");
+		} else {
+			tw_claude_format_span(left, brief, span, sizeof(span));
+			snprintf(out, size, brief ? "≈%s left" : "about %s", span);
 		}
-		for (guint i = 0; i < u->limits->len; i++) {
-			struct agent_limit *l = u->limits->pdata[i];
-			if (l->kind == kind) {
-				if (!l->live_account) {
-					used = MAX(used, tw_claude_window_now(&l->usage.five_hour, now));
-					week = MAX(week, tw_claude_window_now(&l->usage.seven_day, now));
-				}
-				remote |= l->unattributed_at && now - l->unattributed_at < 5 * 3600;
-			}
-		}
+		return -1;
 	}
-	bool billing = kind == AGENT_COPILOT && u && u->copilot_billing.known;
-	if (billing) {
-		used = u->copilot_billing.used;
 	}
-	if (quota_used) {
-		quota_used[0] = used;
-		quota_used[1] = week;
-	}
-	char quota[32] = "–";
-	if (used >= 0 && week >= 0) {
-		snprintf(quota, sizeof(quota), "%.0f%%/%.0f%%", used, week);
-	} else if (used >= 0 || week >= 0) {
-		snprintf(quota, sizeof(quota), "%.0f%%%s", used >= 0 ? used : week,
-			billing ? " billing" : used >= 0 ? "" : " wk");
-	}
-	snprintf(out, size, "%s %s · %u%s", agent_names[kind], quota, local, remote ? " + ?" : "");
+	return -1;
 }
 
-static void agents_bars(cairo_t *cr, double x, double y, double width, double height,
-		const double quota[2], uint32_t track, uint32_t accent) {
-	for (int i = 0; i < 2; i++) {
-		if (quota[i] >= 0) {
-			pd_share_bar(cr, x, y + (height - 9) / 2 + 5 * i, width, 4, quota[i],
-				track, 0.28, quota[i] >= 95 ? 0xe05050ff : quota[i] >= 80 ? 0xd88a28ff : accent,
-				1, PD_BAR_SMOOTH, false);
+static uint32_t level_color(struct widget *w, double used, uint32_t normal) {
+	if (used >= widget_conf_int(w, "critical", 95)) {
+		return widget_conf_color(w, "critical_fg", 0xe04040ff);
+	}
+	if (used >= widget_conf_int(w, "warning", 80)) {
+		return widget_conf_color(w, "warning_fg", 0xf0a030ff);
+	}
+	return normal;
+}
+
+/* ---------- options of each place ---------- */
+
+/*
+ * The look of each place has its own options: on the desktop only those of its
+ * desktop_widgets entry count, so the taskbar's bar width or names do not
+ * change the card, and the other way round.
+ */
+static const char *place_conf(struct widget *w, const char *key, const char *fallback) {
+	if (w->desk) {
+		struct twconf_node *node = twconf_child(w->desk, key);
+		return node && node->argc > 0 ? node->argv[0] : fallback;
+	}
+	return widget_conf(w, key, fallback);
+}
+
+static bool place_bool(struct widget *w, const char *key, bool fallback) {
+	const char *v = place_conf(w, key, NULL);
+	if (!v) {
+		return fallback;
+	}
+	return strcmp(v, "yes") == 0 || strcmp(v, "true") == 0 || strcmp(v, "on") == 0;
+}
+
+static int place_int(struct widget *w, const char *key, int fallback, int low, int high) {
+	const char *v = place_conf(w, key, NULL);
+	int n = v ? atoi(v) : fallback;
+	return n < low ? low : n > high ? high : n;
+}
+
+/* The color of the bars: bar_color, else the accent of the theme. */
+static uint32_t bar_color(struct widget *w, uint32_t accent) {
+	const char *v = place_conf(w, "bar_color", NULL);
+	uint32_t color;
+	if (v && tw_parse_color(v, &color)) {
+		return color;
+	}
+	return accent;
+}
+
+static void fill_rgba(cairo_t *cr, uint32_t c, double alpha) {
+	cairo_set_source_rgba(cr, (c >> 24 & 0xff) / 255.0, (c >> 16 & 0xff) / 255.0,
+		(c >> 8 & 0xff) / 255.0, alpha);
+}
+
+/* The long name of an item, as the desktop and the flyout say it. */
+static const char *long_name(const struct source *s, const struct tw_claude_item *item,
+		bool brief) {
+	if (s->account.agent == TW_AGENT_COPILOT && item->kind == TW_CLAUDE_USAGE) {
+		return s->allowance[0] ? s->allowance : "Allowance";
+	}
+	if (brief) {
+		return item->label;
+	}
+	switch (item->kind) {
+	case TW_CLAUDE_USAGE:
+		return item->seven_day ? "Weekly limit" : "5-hour limit";
+	case TW_CLAUDE_RESET:
+		return item->seven_day ? "Weekly limit resets" : "5-hour limit resets";
+	case TW_CLAUDE_LEFT:
+		return item->seven_day ? "Weekly limit lasts" : "5-hour limit lasts";
+	}
+	return item->label;
+}
+
+/* The name of a source in the flyout and the tooltip: "Claude Code · me@example.org". */
+static void source_title(const struct source *s, char *out, size_t size) {
+	const char *name = tw_agent_names[s->account.agent];
+	if (s->usage.account && *s->usage.account) {
+		snprintf(out, size, "%s · %s", name, s->usage.account);
+	} else if (s->account.dir && s->tool == &tw_claude_tool) {
+		// a portable Claude Code by its folder, the installed one by its name alone
+		char *installed = tw_claude_default_dir();
+		bool own = installed && strcmp(installed, s->account.dir) == 0;
+		free(installed);
+		const char *home = getenv("HOME");
+		size_t hl = home ? strlen(home) : 0;
+		const char *dir = s->account.dir;
+		if (own) {
+			snprintf(out, size, "%s", name);
+		} else if (hl && strncmp(dir, home, hl) == 0 && dir[hl] == '/') {
+			snprintf(out, size, "%s · ~%s", name, dir + hl);
+		} else {
+			snprintf(out, size, "%s · %s", name, dir);
 		}
+	} else {
+		snprintf(out, size, "%s", name);
 	}
 }
 
-static int agents_measure(struct widget *w, struct render_ctx *ctx) {
-	int width = 12;
-	for (enum agent_kind i = 0; i < AGENT_COUNT; i++) {
-		char line[72];
-		double quota[2];
-		agent_summary(agent_widget_usage(w), i, line, sizeof(line), quota);
-		width += render_text_width(ctx, bar_font(ctx->panel), line) + 13 +
-			(quota[0] >= 0 || quota[1] >= 0 ? 28 : 0);
+/* ---------- the taskbar ---------- */
+
+static const char *not_connected_text = "Claude: click to connect";
+
+static bool show_connect(const struct source *s) {
+	return s->tool && s->tool->connects && !s->have && !s->usage.connected;
+}
+
+/* The taskbar look: bars yes|no, bar_width, labels short|none. */
+static int taskbar_bar_width(struct widget *w) {
+	return place_bool(w, "bars", true) ? place_int(w, "bar_width", BAR_W, 8, 200) : 0;
+}
+
+static bool taskbar_labels(struct widget *w) {
+	const char *v = place_conf(w, "labels", "short");
+	return strcmp(v, "none") != 0 && strcmp(v, "no") != 0;
+}
+
+/* Its name before each account, when there are several (or it is not Claude Code's alone). */
+static bool named(const struct agents_state *st) {
+	return st->count > 1 || (st->count == 1 && !st->legacy &&
+		st->src[0].account.agent == TW_AGENT_COPILOT);
+}
+
+/* The width of one item: its name, a bar for a usage, its value. */
+static int item_width(struct widget *w, struct render_ctx *ctx, const struct source *s,
+		const struct tw_claude_item *item) {
+	const char *font = bar_font(ctx->panel);
+	char value[64];
+	double share = item_value(s, item, true, value, sizeof(value));
+	int width = render_text_width(ctx, font, value);
+	const char *label = item_label(s, item);
+	if (taskbar_labels(w) && *label) {
+		width += render_text_width(ctx, font, label) + 4;
+	}
+	int bar = taskbar_bar_width(w);
+	if (share >= 0 && bar > 0) {
+		width += bar + 4;
 	}
 	return width;
 }
 
+static int source_width(struct widget *w, struct render_ctx *ctx, const struct source *s) {
+	struct agents_state *st = w->data;
+	const char *font = bar_font(ctx->panel);
+	if (show_connect(s)) {
+		return render_text_width(ctx, font, not_connected_text);
+	}
+	int width = named(st) ? render_text_width(ctx, bar_bold_font(ctx->panel),
+		short_names[s->account.agent]) + 6 : 0;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = source_items(w, s, items);
+	for (int i = 0; i < count; i++) {
+		width += item_width(w, ctx, s, items[i]) + (i > 0 ? GAP : 0);
+	}
+	return width;
+}
+
+static int agents_measure(struct widget *w, struct render_ctx *ctx) {
+	struct agents_state *st = w->data;
+	int width = 16;
+	for (int i = 0; i < st->count; i++) {
+		width += source_width(w, ctx, &st->src[i]) + (i > 0 ? ACCOUNT_GAP : 0);
+	}
+	return st->count > 0 ? width : 0;
+}
+
 static void agents_render(struct widget *w, struct render_ctx *ctx, struct pbox b) {
-	render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
-	int x = b.x + 6;
-	for (enum agent_kind i = 0; i < AGENT_COUNT; i++) {
-		char line[72];
-		double quota[2];
-		agent_summary(agent_widget_usage(w), i, line, sizeof(line), quota);
-		uint32_t fg = widget_fg(ctx->panel, "agents");
-		if (quota[0] >= 0 || quota[1] >= 0) {
-			agents_bars(ctx->cairo, x, b.y, 23, b.height, quota, fg, 0x3395dcff);
-			x += 28;
-		}
-		const char *font = bar_font(ctx->panel);
-		int width = render_text_width(ctx, font, line);
-		pd_text(ctx->cairo, font, line, x, b.y, width + 1, b.height,
-			widget_fg(ctx->panel, "agents"), PD_LEFT);
-		x += width + 13;
+	struct agents_state *st = w->data;
+	if (ctx->style != PSV_CLASSIC && ctx->style != PSV_LUNA) {
+		render_item_bg(ctx, b, false, render_hover(ctx, b), render_pressed(ctx, b));
 	}
-	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
-}
-
-static const uint32_t agent_chart_colors[] = {
-	0xe78959ff, 0x34b58dff, 0xbd83e8ff, 0x5c9ef0ff,
-};
-
-static uint32_t quota_color(const struct agent_limit *limit) {
-	if (limit->kind == AGENT_AGY) {
-		if (g_str_has_prefix(limit->name, "3p-")) {
-			return 0x45c6e8ff;
-		}
-		if (g_str_has_prefix(limit->name, "gemini-argon-")) {
-			return 0x888cf6ff;
-		}
-	}
-	return agent_chart_colors[limit->kind];
-}
-
-struct quota_axis {
-	time_t start, now;
-	long span;
-	struct gadget_ctx *ctx;
-	GPtrArray *hovered;
-};
-
-static double quota_x(struct pbox box, const struct quota_axis *axis, double at) {
-	return box.x + box.width * (at - axis->start) / axis->span;
-}
-
-static void quota_hover_segment(const struct quota_axis *axis, struct pbox box,
-		const struct agent_limit *limit, double from, double before, double to, double after,
-		bool forecast) {
-	struct gadget_ctx *ctx = axis->ctx;
-	if (!ctx->pointer || ctx->px < from || ctx->px > to || ctx->py < box.y ||
-			ctx->py > box.y + box.height || to <= from) {
-		return;
-	}
-	double y = before + (after - before) * (ctx->px - from) / (to - from);
-	if ((forecast ? fabs(ctx->py - y) <= 7 : ctx->py >= y - 2) &&
-			!g_ptr_array_find(axis->hovered, limit, NULL)) {
-		g_ptr_array_add(axis->hovered, (gpointer)limit);
-	}
-}
-
-struct quota_reset {
-	const struct agent_limit *limit;
-	time_t at;
-};
-
-static void quota_add_reset(GArray *resets, const struct quota_axis *axis,
-		const struct agent_limit *limit, time_t when) {
-	if (when < axis->start || when > axis->start + axis->span) {
-		return;
-	}
-	for (guint i = 0; i < resets->len; i++) {
-		struct quota_reset r = g_array_index(resets, struct quota_reset, i);
-		if (r.limit == limit && tw_claude_same_window(r.at, when)) {
-			return;
-		}
-	}
-	struct quota_reset reset = { limit, when };
-	g_array_append_val(resets, reset);
-}
-
-static void quota_segment(cairo_t *cr, struct pbox box, const struct quota_axis *axis,
-		const struct agent_limit *limit, time_t from, double before, time_t to, double after) {
-	if (before == 0 && after == 0) {
-		return;
-	}
-	double x1 = quota_x(box, axis, from), x2 = quota_x(box, axis, to);
-	uint32_t color = quota_color(limit);
-	double bottom = box.y + box.height;
-	double y1 = bottom - box.height * CLAMP(before, 0, 100) / 100;
-	double y2 = bottom - box.height * CLAMP(after, 0, 100) / 100;
-	quota_hover_segment(axis, box, limit, x1, y1, x2, y2, false);
-	cairo_move_to(cr, x1, bottom);
-	cairo_line_to(cr, x1, y1);
-	cairo_line_to(cr, x2, y2);
-	cairo_line_to(cr, x2, bottom);
-	cairo_close_path(cr);
-	pd_color(cr, (color & 0xffffff00) | 0x32);
-	cairo_fill(cr);
-	cairo_move_to(cr, x1, y1);
-	cairo_line_to(cr, x2, y2);
-	pd_color(cr, color);
-	cairo_stroke(cr);
-}
-
-static bool quota_trace(cairo_t *cr, struct pbox box, const struct agent_limit *l,
-		bool weekly, const struct quota_axis *axis, GArray *resets) {
-	time_t start = axis->start, now = axis->now, previous = 0;
-	struct tw_claude_window prev = { 0 };
-	bool visible = false;
-	uint32_t color = quota_color(l);
-	for (int i = 0; i <= l->chart.count; i++) {
-		struct tw_claude_point p = i < l->chart.count ? l->chart.points[i] :
-			(struct tw_claude_point){ l->usage.updated, l->usage.five_hour, l->usage.seven_day };
-		struct tw_claude_window win = weekly ? p.seven_day : p.five_hour;
-		if (!win.known || !p.at || p.at < previous || p.at > now) {
-			continue;
-		}
-		if (prev.known) {
-			bool same = tw_claude_same_window(prev.resets_at, win.resets_at);
-			time_t end = prev.resets_at ? MIN(prev.resets_at, p.at) : p.at;
-			if (end > MAX(previous, start)) {
-				quota_segment(cr, box, axis, l, previous, prev.used, end,
-					same ? win.used : prev.used);
-				visible = true;
+	const char *font = bar_font(ctx->panel);
+	const char *bold = bar_bold_font(ctx->panel);
+	uint32_t fg = widget_fg(ctx->panel, w->impl->type);
+	uint32_t dim = (fg & 0xffffff00) | 0xa0;
+	// the color of the bars of the flyouts (navy in Windows 95), else the taskbar's accent
+	uint32_t accent = bar_color(w, tw_theme_color(ctx->panel->theme, "flyout.accent",
+		tw_theme_color(ctx->panel->theme, "taskbar.indicator", 0x0078d4ff)) | 0xff);
+	int bar = taskbar_bar_width(w);
+	bool blocks = ctx->style == PSV_CLASSIC || ctx->style == PSV_LUNA;
+	int bar_h = place_int(w, "bar_height", blocks ? 10 : 6, 2, 24); // blocks need room
+	bool labels = taskbar_labels(w);
+	double x = b.x + 8, end = b.x + b.width - 8;
+	for (int k = 0; k < st->count && x < end; k++) {
+		const struct source *s = &st->src[k];
+		double from = x;
+		if (show_connect(s)) {
+			int tw = render_text_width(ctx, font, not_connected_text);
+			pd_text(ctx->cairo, font, not_connected_text, x, b.y, fmin(tw, end - x), b.height,
+				dim, PD_LEFT);
+			x += tw;
+		} else {
+			if (named(st)) {
+				const char *name = short_names[s->account.agent];
+				int nw = render_text_width(ctx, bold, name);
+				pd_text(ctx->cairo, bold, name, x, b.y, nw, b.height, fg, PD_LEFT);
+				x += nw + 6;
+			}
+			const struct tw_claude_item *items[MAX_ITEMS];
+			int count = source_items(w, s, items);
+			for (int i = 0; i < count && x < end; i++) {
+				char value[64];
+				double share = item_value(s, items[i], true, value, sizeof(value));
+				const char *label = item_label(s, items[i]);
+				if (labels && *label) {
+					int lw = render_text_width(ctx, font, label);
+					pd_text(ctx->cairo, font, label, x, b.y, lw, b.height, dim, PD_LEFT);
+					x += lw + 4;
+				}
+				if (share >= 0 && bar > 0) {
+					enum pd_bar_look look = ctx->style == PSV_CLASSIC ? PD_BAR_BLOCKS_SUNKEN :
+						ctx->style == PSV_LUNA ? PD_BAR_BLOCKS : PD_BAR_SMOOTH;
+					pd_share_bar(ctx->cairo, x, b.y + (b.height - bar_h) / 2.0, bar, bar_h, share,
+						fg, 0.22, level_color(w, share, accent), 1, look, false);
+					x += bar + 4;
+				}
+				int vw = render_text_width(ctx, font, value);
+				uint32_t color = share >= 0 ? level_color(w, share, fg) : fg;
+				pd_text(ctx->cairo, font, value, x, b.y, end - x < vw ? end - x : vw, b.height,
+					color, PD_LEFT);
+				x += vw + (i + 1 < count ? GAP : 0);
 			}
 		}
-		if (win.resets_at > p.at && win.resets_at <= now) {
-			quota_add_reset(resets, axis, l, win.resets_at);
-		}
-		prev = win;
-		previous = p.at;
+		// each account its own place to click: its flyout opens at it
+		double to = k + 1 < st->count ? x + ACCOUNT_GAP / 2.0 : b.x + b.width;
+		double left = k == 0 ? b.x : from - ACCOUNT_GAP / 2.0;
+		psurface_add_hotspot(ctx->surface, (int)left, b.y, (int)(to - left), b.height, w, 0, k,
+			NULL);
+		x += ACCOUNT_GAP;
 	}
-	if (prev.known) {
-		time_t end = prev.resets_at ? MIN(now, prev.resets_at) : now;
-		if (end > MAX(previous, start)) {
-			quota_segment(cr, box, axis, l, previous, prev.used, end, prev.used);
-			visible = true;
-		}
-		if (previous >= start) {
-			double x = quota_x(box, axis, previous);
-			double y = box.y + box.height * (1 - CLAMP(prev.used, 0, 100) / 100);
-			pd_rect(cr, CLAMP(x - 2, box.x, box.x + box.width - 4),
-				CLAMP(y - 2, box.y, box.y + box.height - 4), 4, 4, color);
-			visible = true;
-		}
-	}
-	return visible;
 }
 
-static int reset_order(gconstpointer left, gconstpointer right) {
-	const struct quota_reset *a = left, *b = right;
-	return (a->at > b->at) - (a->at < b->at);
+/* ---------- the desktop: list, bars, rings and charts ---------- */
+
+/*
+ * The desktop look, from its desktop_widgets entry: title yes|no (the account
+ * at the top), updated yes|no (how old the values are), bars yes|no,
+ * bar_height (pixels at a cell of 100), bar_color, text_size (pixels at a
+ * cell of 100), labels long|short. Several accounts share the height, each
+ * with its title.
+ */
+struct desk_look {
+	char font[224], bold[224], small[224];
+	double sc, pad, text, bar_h;
+	bool title, updated, bars, brief;
+	uint32_t fill;
+	enum pd_bar_look look;
+};
+
+static void desk_look(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
+		struct desk_look *l) {
+	l->sc = ctx->scale;
+	l->pad = 12 * l->sc;
+	int size = place_int(w, "text_size", 13, 8, 40);
+	l->text = size * l->sc;
+	snprintf(l->font, sizeof(l->font), "%s %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->bold, sizeof(l->bold), "%s Bold %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->small, sizeof(l->small), "%s %dpx", pal->family, (int)(l->text * 0.85 + 0.5));
+	l->title = place_bool(w, "title", true);
+	l->updated = place_bool(w, "updated", true);
+	l->bars = place_bool(w, "bars", true);
+	l->bar_h = place_int(w, "bar_height", 0, 0, 60) * l->sc; // 0: from the room there is
+	l->brief = strcmp(place_conf(w, "labels", "long"), "short") == 0;
+	l->fill = bar_color(w, pal->accent);
+	l->look = pal->look == GADGET_CLASSIC ? PD_BAR_BLOCKS_SUNKEN :
+		pal->look == GADGET_LUNA ? PD_BAR_BLOCKS : PD_BAR_SMOOTH;
 }
 
-static void quota_forecast(cairo_t *cr, struct pbox box, const struct agent_limit *l,
-		const struct tw_claude_window *win, const struct quota_axis *axis, long window, bool weekly) {
-	time_t now = axis->now;
-	time_t since = win->resets_at - window;
-	double base = 0, last = -1;
-	for (int i = 0; i < l->chart.count; i++) {
-		const struct tw_claude_point *point = &l->chart.points[i];
-		const struct tw_claude_window *p = weekly ? &point->seven_day : &point->five_hour;
-		if (!p->known || point->at < since || point->at > now ||
-				!tw_claude_same_window(p->resets_at, win->resets_at)) {
-			continue;
-		}
-		if (last >= 0 && p->used < last - 5) {
-			since = point->at;
-			base = p->used;
-		}
-		last = p->used;
+/* The account at the top of its part; returns where the rest starts. */
+static double desk_title(const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double y) {
+	if (!l->title) {
+		return y;
 	}
-	double used = CLAMP(win->used, 0, 100);
-	double elapsed = difftime(now, since);
-	double pace = elapsed >= 60 ? fmax(used - base, 0) / fmax(elapsed, weekly ? 3600 : 60) : 0;
-	if (used >= 100 || pace <= 0) {
-		return;
-	}
-	double seconds = fmin(difftime(win->resets_at, now), (100 - used) / pace);
-	double end_usage = fmin(100, used + pace * seconds);
-	double x = quota_x(box, axis, now), x2 = quota_x(box, axis, now + seconds);
-	double y = box.y + box.height * (1 - used / 100);
-	double y2 = box.y + box.height * (1 - end_usage / 100);
-	quota_hover_segment(axis, box, l, x, y, x2, y2, true);
-	cairo_save(cr);
-	const double dash[] = { 5, 3 };
-	cairo_set_dash(cr, dash, 2, 0);
-	pd_color(cr, quota_color(l));
-	cairo_move_to(cr, x, y);
-	cairo_line_to(cr, x2, y2);
-	cairo_stroke(cr);
-	cairo_restore(cr);
+	char title[300];
+	source_title(s, title, sizeof(title));
+	pd_text(ctx->cairo, l->bold, title, l->pad, y, ctx->width - 2 * l->pad, l->text * 1.4,
+		pal->fg, PD_LEFT);
+	return y + l->text * 1.8;
 }
 
-static const char *quota_name(const struct agent_limit *limit) {
-	if (limit->kind == AGENT_AGY) {
-		if (g_str_has_prefix(limit->name, "3p-")) {
-			return "Antigravity · Claude and GPT models";
-		}
-		if (g_str_has_prefix(limit->name, "gemini-argon-")) {
-			return "Antigravity · Gemini Argon";
-		}
-		if (g_str_has_prefix(limit->name, "gemini-")) {
-			return "Antigravity · Gemini models";
-		}
-		return limit->name;
+/* "As of ... ago" at the bottom of its part; returns the room it takes. */
+static double desk_foot(const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double bottom) {
+	if (!l->updated || !s->have || !s->usage.updated) {
+		return 0;
 	}
-	return limit->live_account ? limit->name : limit->kind == AGENT_CLAUDE ?
-		"Claude · shared model quota" : limit->kind == AGENT_CODEX ?
-		"Codex · shared model quota" : limit->name;
+	double h = l->text * 1.3;
+	char when[64];
+	long ago = (long)(time(NULL) - s->usage.updated);
+	if (ago < 90) {
+		snprintf(when, sizeof(when), "As of just now");
+	} else {
+		char span[48];
+		tw_claude_format_span(ago, false, span, sizeof(span));
+		snprintf(when, sizeof(when), "As of %s ago", span);
+	}
+	pd_text(ctx->cairo, l->small, when, l->pad, bottom - h, ctx->width - 2 * l->pad, h, pal->dim,
+		PD_LEFT);
+	return h;
 }
 
-static void quota_reset_markers(const struct quota_axis *axis, const struct gadget_palette *pal,
-		struct pbox chart, const char *font, GArray *resets) {
-	struct gadget_ctx *ctx = axis->ctx;
+/* A line for each item, a bar under each usage. */
+static void desk_list(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom) {
 	cairo_t *cr = ctx->cairo;
-	g_array_sort(resets, reset_order);
-	double label_end = chart.x;
-	for (guint i = 0; i < resets->len; i++) {
-		const struct quota_reset *reset = &g_array_index(resets, struct quota_reset, i);
-		double x = quota_x(chart, axis, reset->at);
-		uint32_t color = quota_color(reset->limit);
-		pd_rect(cr, CLAMP(x - 1, chart.x, chart.x + chart.width - 2), chart.y, 2,
-			chart.height, (color & 0xffffff00) | (reset->at > axis->now ? 0xc8 : 0x88));
-		struct tm tm;
-		localtime_r(&reset->at, &tm);
-		char label[32];
-		strftime(label, sizeof(label), "%H:%M", &tm);
-		int width = 0;
-		pd_text_size(cr, font, label, &width, NULL);
-		double left = fmax(label_end, fmin(x - width / 2.0, chart.x + chart.width - width));
-		if (left + width <= chart.x + chart.width && fabs(left + width / 2.0 - x) < width) {
-			pd_text(cr, font, label, left, chart.y - 19, width + 1, 17, color, PD_LEFT);
-			label_end = left + width + 5;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = source_items(w, s, items);
+	double row = count > 0 ? (bottom - y) / count : 0;
+	for (int i = 0; i < count; i++) {
+		char value[64];
+		double share = item_value(s, items[i], l->brief, value, sizeof(value));
+		bool bar = share >= 0 && l->bars;
+		double bh = l->bar_h > 0 ? l->bar_h :
+			fmax(row * 0.18, (l->look == PD_BAR_SMOOTH ? 4 : 15) * l->sc); // blocks need room
+		double line = bar ? fmin(row - bh - 2 * l->sc, row * 0.62) : row;
+		pd_text(cr, l->font, long_name(s, items[i], l->brief), l->pad, y, ctx->width * 0.6, line,
+			pal->dim, PD_LEFT);
+		uint32_t color = share >= 0 ? level_color(w, share, pal->fg) : pal->fg;
+		pd_text(cr, l->bold, value, l->pad, y, ctx->width - 2 * l->pad, line, color, PD_RIGHT);
+		if (bar) {
+			pd_share_bar(cr, l->pad, y + line, ctx->width - 2 * l->pad, bh, share, pal->track,
+				(pal->track & 0xff) / 255.0, level_color(w, share, l->fill), 2 * l->sc, l->look,
+				pal->dark);
+		}
+		y += row;
+	}
+}
+
+/* The windows with a usage ticked, for the bars and the rings: how many, which. */
+static int usage_windows(const struct tw_claude_item **items, int count, bool seven[2]) {
+	int windows = 0;
+	for (int i = 0; i < count && windows < 2; i++) {
+		if (items[i]->kind == TW_CLAUDE_USAGE) {
+			seven[windows++] = items[i]->seven_day;
 		}
 	}
-	if (!ctx->pointer || ctx->px < chart.x || ctx->px > chart.x + chart.width ||
-			ctx->py < chart.y - 19 || ctx->py > chart.y + chart.height) {
+	return windows;
+}
+
+/*
+ * A big bar for each window with a usage ticked, its other ticked items (when
+ * it resets, how long it lasts) in a line under it.
+ */
+static void desk_bars(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom) {
+	cairo_t *cr = ctx->cairo;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = source_items(w, s, items);
+	bool seven[2] = { false, false };
+	int windows = usage_windows(items, count, seven);
+	if (windows == 0) {
+		desk_list(w, s, ctx, pal, l, y, bottom); // nothing to make a bar of: the lines
 		return;
 	}
-	const struct quota_reset *nearest = NULL;
-	double distance = 6;
-	for (guint i = 0; i < resets->len; i++) {
-		const struct quota_reset *r = &g_array_index(resets, struct quota_reset, i);
-		double d = fabs(ctx->px - quota_x(chart, axis, r->at));
-		if (d < distance) {
-			distance = d;
-			nearest = r;
+	double block = (bottom - y) / windows;
+	for (int k = 0; k < windows; k++) {
+		const struct tw_claude_item *usage = tw_claude_item_find(seven[k] ? "usage_7d" : "usage_5h");
+		char value[64];
+		double share = item_value(s, usage, false, value, sizeof(value));
+		double head = l->text * 1.4;
+		pd_text(cr, l->font, long_name(s, usage, l->brief), l->pad, y, ctx->width * 0.6, head,
+			pal->dim, PD_LEFT);
+		pd_text(cr, l->bold, value, l->pad, y, ctx->width - 2 * l->pad, head,
+			level_color(w, share, pal->fg), PD_RIGHT);
+		double bh = l->bar_h > 0 ? l->bar_h : fmax(block * 0.28, 8 * l->sc);
+		if (l->bars) {
+			pd_share_bar(cr, l->pad, y + head + 2 * l->sc, ctx->width - 2 * l->pad, bh, share,
+				pal->track, (pal->track & 0xff) / 255.0, level_color(w, share, l->fill),
+				3 * l->sc, l->look, pal->dark);
 		}
-	}
-	if (!nearest && !axis->hovered->len) {
-		return;
-	}
-	int y = chart.y + 3;
-	cairo_save(cr);
-	cairo_rectangle(cr, chart.x, chart.y, chart.width, chart.height);
-	cairo_clip(cr);
-	if (nearest) {
-		for (guint i = 0; i < resets->len && y + 18 <= chart.y + chart.height; i++) {
-			const struct quota_reset *r = &g_array_index(resets, struct quota_reset, i);
-			if (!tw_claude_same_window(r->at, nearest->at)) {
+		// the window's other items, after one another
+		GString *more = g_string_new(NULL);
+		for (int i = 0; i < count; i++) {
+			if (items[i]->seven_day != seven[k] || items[i]->kind == TW_CLAUDE_USAGE) {
 				continue;
 			}
-			struct tm tm;
-			localtime_r(&r->at, &tm);
-			char when[48], tip[160];
-			strftime(when, sizeof(when), "%a %d %b %H:%M", &tm);
-			snprintf(tip, sizeof(tip), "%s · reset %s", quota_name(r->limit), when);
-			pd_rect(cr, chart.x + 3, y, chart.width - 6, 18, pal->bg);
-			pd_rect(cr, chart.x + 7, y + 4, 3, 10, quota_color(r->limit));
-			pd_text(cr, font, tip, chart.x + 14, y, chart.width - 20, 18, pal->fg, PD_LEFT);
-			y += 18;
+			char v[64];
+			item_value(s, items[i], l->brief, v, sizeof(v));
+			g_string_append_printf(more, "%s%s %s", more->len ? " · " : "",
+				items[i]->kind == TW_CLAUDE_RESET ? "resets" : "lasts", v);
 		}
-	} else {
-		for (guint i = 0; i < axis->hovered->len && y + 18 <= chart.y + chart.height; i++) {
-			const struct agent_limit *l = axis->hovered->pdata[i];
-			pd_rect(cr, chart.x + 3, y, chart.width - 6, 18, pal->bg);
-			pd_rect(cr, chart.x + 7, y + 4, 3, 10, quota_color(l));
-			pd_text(cr, font, quota_name(l), chart.x + 14, y, chart.width - 20, 18, pal->fg, PD_LEFT);
-			y += 18;
+		if (more->len) {
+			pd_text(cr, l->small, more->str, l->pad, y + head + bh + 4 * l->sc,
+				ctx->width - 2 * l->pad, l->text * 1.3, pal->dim, PD_LEFT);
 		}
+		g_string_free(more, TRUE);
+		y += block;
 	}
-	cairo_restore(cr);
 }
 
-static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbox chart,
-		const struct quota_axis *axis, const char *font, bool weekly) {
-	struct tm boundary;
-	localtime_r(&axis->start, &boundary);
-	boundary.tm_sec = boundary.tm_min = 0;
-	boundary.tm_hour = weekly ? 0 : boundary.tm_hour / 4 * 4;
-	for (int i = 0; i < 20; i++) {
-		boundary.tm_isdst = -1;
-		time_t start = mktime(&boundary);
-		if (start >= axis->start + axis->span) {
+/* A ring for each window with a usage ticked, side by side, its other items under it. */
+static void desk_rings(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom) {
+	cairo_t *cr = ctx->cairo;
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = source_items(w, s, items);
+	bool seven[2] = { false, false };
+	int windows = usage_windows(items, count, seven);
+	if (windows == 0) {
+		desk_list(w, s, ctx, pal, l, y, bottom);
+		return;
+	}
+	double col = (ctx->width - 2 * l->pad) / windows;
+	for (int k = 0; k < windows; k++) {
+		const struct tw_claude_item *usage = tw_claude_item_find(seven[k] ? "usage_7d" : "usage_5h");
+		char value[64];
+		double share = item_value(s, usage, false, value, sizeof(value));
+		int extras = 0;
+		for (int i = 0; i < count; i++) {
+			extras += items[i]->seven_day == seven[k] && items[i]->kind != TW_CLAUDE_USAGE;
+		}
+		double below = l->text * 1.3 * (1 + extras);
+		double room = fmin(col - 8 * l->sc, bottom - y - below);
+		double r = room / 2 - 2 * l->sc;
+		if (r < 8 * l->sc) {
+			r = 8 * l->sc;
+		}
+		double cx = l->pad + col * k + col / 2, cy = y + r + 2 * l->sc;
+		double thick = l->bar_h > 0 ? l->bar_h : fmax(r * 0.2, 4 * l->sc);
+		cairo_set_line_width(cr, thick);
+		if (l->look != PD_BAR_SMOOTH) {
+			// in blocks, as the ring of the other widgets in these themes
+			int blocks = 20;
+			double gap = 0.035;
+			for (int b = 0; b < blocks; b++) {
+				cairo_new_path(cr);
+				cairo_arc(cr, cx, cy, r - thick / 2, -M_PI / 2 + 2 * M_PI * b / blocks + gap,
+					-M_PI / 2 + 2 * M_PI * (b + 1) / blocks - gap);
+				bool on = l->bars && (b + 0.5) / blocks <= share / 100.0;
+				fill_rgba(cr, on ? level_color(w, share, l->fill) : pal->track,
+					on ? 1 : (pal->track & 0xff) / 255.0);
+				cairo_stroke(cr);
+			}
+		} else {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx, cy, r - thick / 2, 0, 2 * M_PI);
+			fill_rgba(cr, pal->track, (pal->track & 0xff) / 255.0);
+			cairo_stroke(cr);
+		}
+		if (share > 0 && l->bars && l->look == PD_BAR_SMOOTH) {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx, cy, r - thick / 2, -M_PI / 2, -M_PI / 2 + 2 * M_PI * share / 100.0);
+			fill_rgba(cr, level_color(w, share, l->fill), 1);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+			cairo_stroke(cr);
+			cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+		}
+		pd_text(cr, l->bold, value, cx - r, cy - l->text, 2 * r, 2 * l->text,
+			level_color(w, share, pal->fg), PD_CENTER);
+		double ty = cy + r + 4 * l->sc;
+		pd_text(cr, l->small, long_name(s, usage, true), cx - col / 2, ty, col, l->text * 1.3,
+			pal->dim, PD_CENTER);
+		for (int i = 0; i < count; i++) {
+			if (items[i]->seven_day != seven[k] || items[i]->kind == TW_CLAUDE_USAGE) {
+				continue;
+			}
+			char v[64], line[96];
+			item_value(s, items[i], false, v, sizeof(v)); // "in 2 d 23 h", "about 31 min"
+			snprintf(line, sizeof(line), "%s %s",
+				items[i]->kind == TW_CLAUDE_RESET ? "resets" : "lasts", v);
+			ty += l->text * 1.3;
+			pd_text(cr, l->small, line, cx - col / 2, ty, col, l->text * 1.3, pal->dim, PD_CENTER);
+		}
+	}
+}
+
+/*
+ * The charts of the flyout on the desktop (claudecharts.c): the week ("week")
+ * or the last three 5-hour windows ("windows"), with the reading under the
+ * pointer, in the colors of the desktop's widgets.
+ */
+static void desk_chart(const struct source *s, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom,
+		bool week) {
+	struct claude_charts charts = { 0 };
+	claude_charts_load(&charts, s->have ? &s->usage : NULL, time(NULL));
+	if (!charts.have) {
+		pd_text(ctx->cairo, l->font, "Nothing written down yet", l->pad, y,
+			ctx->width - 2 * l->pad, 30 * l->sc, pal->dim, PD_LEFT);
+		free(charts.points);
+		return;
+	}
+	bool light_text = (pal->fg >> 24 & 0xff) + (pal->fg >> 16 & 0xff) + (pal->fg >> 8 & 0xff) > 384;
+	struct claude_look look = {
+		.fg = pal->fg, .dim = pal->dim,
+		.chart_bg = claude_desktop_chart_bg(pal),
+		.chart_grid = pal->grid,
+		.chart_line = pal->mono ? pal->fg : pal->accent,
+		.label_bg = light_text ? 0x202020ff : 0xffffffff,
+		.chart_radius = pal->radius > 0 ? 4 : 0,
+		.dark = light_text,
+		.sunken = pal->look == GADGET_CLASSIC,
+		.font = l->small, .bold = l->bold,
+	};
+	struct claude_hover hover = { ctx->pointer, ctx->px, ctx->py };
+	struct pbox box = { (int)l->pad, (int)y, (int)(ctx->width - 2 * l->pad),
+		(int)(bottom - y) };
+	if (box.height > 40) {
+		if (week) {
+			claude_chart_week(&hover, &charts, ctx->cairo, &look, box);
+		} else {
+			claude_chart_five_hours(&hover, &charts, ctx->cairo, &look, box);
+		}
+	}
+	free(charts.points);
+}
+
+static bool agents_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal) {
+	const char *style = ctx->style ? ctx->style : "";
+	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0,
+		rings = strcmp(style, "ring") == 0, week = strcmp(style, "week") == 0,
+		windows = strcmp(style, "windows") == 0;
+	if (!list && !bars && !rings && !week && !windows) {
+		return false; // compact and tile: the taskbar look
+	}
+	struct agents_state *st = w->data;
+	struct desk_look l;
+	desk_look(w, ctx, pal, &l);
+	// a chart is of one account: the first that has one; the others share the height
+	int first = 0;
+	for (int i = 0; (week || windows) && i < st->count; i++) {
+		if (st->src[i].have && st->src[i].tool) {
+			first = i;
 			break;
 		}
-		struct tm label_time = boundary;
-		boundary.tm_hour += weekly ? 24 : 4;
-		boundary.tm_isdst = -1;
-		time_t end = mktime(&boundary);
-		double x = fmax(chart.x, quota_x(chart, axis, start));
-		double right = fmin(chart.x + chart.width, quota_x(chart, axis, end));
-		if (right <= x) {
+	}
+	int parts = week || windows ? (st->count > 0) : st->count;
+	double part = parts > 0 ? (ctx->height - l.pad) / parts : 0;
+	for (int k = 0; k < parts; k++) {
+		const struct source *s = &st->src[week || windows ? first : k];
+		double top = l.pad + part * k, bottom = top + part - l.pad;
+		double y = desk_title(s, ctx, pal, &l, top);
+		if (show_connect(s)) {
+			pd_text(ctx->cairo, l.font, "Not connected: click to let Claude Code show its limits "
+				"here", l.pad, y, ctx->width - 2 * l.pad, 40 * l.sc, pal->dim, PD_LEFT);
 			continue;
 		}
-		if (start >= axis->start) {
-			pd_rect(cr, x, chart.y, 1, chart.height, pal->grid);
+		bottom -= desk_foot(s, ctx, pal, &l, bottom);
+		if (week || windows) {
+			desk_chart(s, ctx, pal, &l, y, bottom, week);
+		} else if (list) {
+			desk_list(w, s, ctx, pal, &l, y, bottom);
+		} else if (bars) {
+			desk_bars(w, s, ctx, pal, &l, y, bottom);
+		} else {
+			desk_rings(w, s, ctx, pal, &l, y, bottom);
 		}
-		for (int tick = 0; tick < 3; tick++) {
-			int y = chart.y + tick * (chart.height - 1) / 2;
-			pd_rect(cr, x + 2, y, fmax(right - x - 4, 0), 1, pal->grid);
-		}
-		char label[24];
-		strftime(label, sizeof(label), weekly ? "%a" : "%H:%M", &label_time);
-		int width = 0;
-		pd_text_size(cr, font, label, &width, NULL);
-		if (weekly && right - x < width + 2 && g_utf8_validate(label, -1, NULL) &&
-				g_utf8_strlen(label, -1) > 2) {
-			*g_utf8_offset_to_pointer(label, 2) = '\0';
-			pd_text_size(cr, font, label, &width, NULL);
-		}
-		if (right - x >= width + 2) {
-			pd_text(cr, font, label, x, chart.y + chart.height + 2, right - x, 16, pal->dim,
-				PD_CENTER);
-		}
-	}
-}
-
-static void quota_overlay(struct gadget_ctx *ctx, const struct gadget_palette *pal,
-		const GPtrArray *limits, struct pbox b, const char *font, bool weekly, const char *title) {
-	cairo_t *cr = ctx->cairo;
-	const int axis = 48;
-	char axis_font[192];
-	snprintf(axis_font, sizeof(axis_font), "%s 9", pal->family);
-	pd_text(cr, font, title, b.x, b.y, b.width, 20, pal->fg, PD_LEFT);
-	struct pbox chart = { b.x + axis, b.y + 39, b.width - axis, b.height - 60 };
-	if (chart.width < 12 || chart.height < 12) {
-		return;
-	}
-	time_t now = time(NULL);
-	long window = weekly ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS;
-	long history = weekly ? TW_CLAUDE_SEVEN_DAYS : 24 * 3600;
-	struct quota_axis timeline = { now - history, now, history + window, ctx, g_ptr_array_new() };
-	const struct claude_look surface = {
-		.chart_bg = claude_desktop_chart_bg(pal),
-		.chart_radius = pal->radius > 0 ? 4 : 0,
-		.sunken = pal->look == GADGET_CLASSIC,
-	};
-	claude_chart_surface(cr, &surface, chart);
-	quota_grid(cr, pal, chart, &timeline, axis_font, weekly);
-	for (int tick = 0; tick < 3; tick++) {
-		int y = chart.y + tick * (chart.height - 1) / 2;
-		const char *label = tick == 0 ? "100%" : tick == 1 ? "50%" : "0%";
-		pd_text(cr, font, label, b.x, y - 7, axis - 4, 14, pal->dim, PD_RIGHT);
-	}
-	double now_x = quota_x(chart, &timeline, now);
-	pd_rect(cr, now_x, chart.y, 1, chart.height, pal->dim);
-	int title_width = 0;
-	pd_text_size(cr, font, title, &title_width, NULL);
-	if (b.x + title_width + 22 < now_x) {
-		pd_text(cr, font, "Now", now_x - 22, b.y, 44, 18, pal->dim, PD_CENTER);
-	}
-	cairo_save(cr);
-	cairo_rectangle(cr, chart.x, chart.y, chart.width, chart.height);
-	cairo_clip(cr);
-	cairo_set_line_width(cr, 1.7);
-	bool visible = false;
-	GArray *resets = g_array_new(false, false, sizeof(struct quota_reset));
-	bool codex_session_active = false;
-	for (guint i = 0; limits && i < limits->len; i++) {
-		const struct agent_limit *l = limits->pdata[i];
-		const struct tw_claude_window *win = weekly ? &l->usage.seven_day : &l->usage.five_hour;
-		if (l->kind == AGENT_CODEX && !l->live_account && win->known && win->resets_at > now) {
-			codex_session_active = true;
-		}
-	}
-	for (guint i = 0; limits && i < limits->len; i++) {
-		const struct agent_limit *l = limits->pdata[i];
-		const struct tw_claude_window *win = weekly ? &l->usage.seven_day : &l->usage.five_hour;
-		if (!l->live_account) {
-			visible |= quota_trace(cr, chart, l, weekly, &timeline, resets);
-		}
-		// A fresh account window can provide a reset after the session window expires.
-		if ((!l->live_account || !codex_session_active) && win->known &&
-				win->resets_at > now && win->resets_at <= now + window) {
-			quota_add_reset(resets, &timeline, l, win->resets_at);
-			quota_forecast(cr, chart, l, win, &timeline, window, weekly);
-			visible = true;
-		}
-	}
-	if (!visible) {
-		pd_text(cr, font, "No quota samples in this period", chart.x, chart.y, chart.width,
-			chart.height, pal->dim, PD_CENTER);
-	}
-	cairo_restore(cr);
-	quota_reset_markers(&timeline, pal, chart, axis_font, resets);
-	g_array_unref(resets);
-	g_ptr_array_unref(timeline.hovered);
-}
-
-static bool agents_overlay(struct widget *w, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal) {
-	int inset = 10, width = ctx->width - 2 * inset;
-	char font[192];
-	snprintf(font, sizeof(font), "%s %.1f", pal->family, CLAMP(ctx->height / 23.0, 7, 12));
-	int height = (ctx->height - 44) / 2;
-	const struct agent_usage *usage = agent_widget_usage(w);
-	const GPtrArray *limits = usage ? usage->limits : NULL;
-	quota_overlay(ctx, pal, limits, (struct pbox){ inset, 8, width, height }, font, false,
-		"Five-hour quota");
-	quota_overlay(ctx, pal, limits, (struct pbox){ inset, 12 + height, width, height }, font, true,
-		"Weekly quota");
-
-	int legend_y = ctx->height - 26;
-	int cell = width / AGENT_COUNT;
-	for (enum agent_kind i = 0; i < AGENT_COUNT; i++) {
-		int x = inset + i * cell;
-		pd_rect(ctx->cairo, x, legend_y + 8, 9, 4, agent_chart_colors[i]);
-		pd_text(ctx->cairo, font, agent_names[i], x + 13, legend_y, cell - 13, 20,
-			pal->fg, PD_LEFT);
 	}
 	return true;
 }
 
-struct agy_quota_group {
-	char *name;
-	const struct agent_limit *window[2];
-};
+/* ---------- tooltip, click, sample ---------- */
 
-static void agy_group_free(gpointer data) {
-	struct agy_quota_group *group = data;
-	g_free(group->name);
-	g_free(group);
-}
-
-static char *agy_group_name(const struct agent_limit *limit) {
-	const char *name = quota_name(limit);
-	if (g_str_has_prefix(name, "Antigravity · ")) {
-		return g_strdup(name + strlen("Antigravity · "));
-	}
-	const char *end = strstr(name, " · ");
-	return end ? g_strndup(name, end - name) : g_strdup(name);
-}
-
-static GPtrArray *agy_chart_groups(const struct agent_usage *usage) {
-	GPtrArray *groups = g_ptr_array_new_with_free_func(agy_group_free);
-	for (guint i = 0; usage && i < usage->limits->len; i++) {
-		const struct agent_limit *limit = usage->limits->pdata[i];
-		if (limit->kind != AGENT_AGY) {
-			continue;
-		}
-		char *name = agy_group_name(limit);
-		int window = limit->usage.seven_day.known ? 1 : 0;
-		struct agy_quota_group *group = NULL;
-		for (guint j = 0; j < groups->len; j++) {
-			struct agy_quota_group *candidate = groups->pdata[j];
-			if (!candidate->window[window] && strcmp(candidate->name, name) == 0) {
-				group = candidate;
-				break;
-			}
-		}
-		if (!group) {
-			group = g_new0(struct agy_quota_group, 1);
-			group->name = g_steal_pointer(&name);
-			g_ptr_array_add(groups, group);
-		}
-		g_free(name);
-		group->window[window] = limit;
-	}
-	return groups;
-}
-
-static void agy_chart_title(char *out, size_t size, const struct agent_limit *limit, bool weekly) {
-	const char *period = weekly ? "Weekly quota" : "5-hour quota";
-	const struct tw_claude_window *win = weekly ? &limit->usage.seven_day : &limit->usage.five_hour;
+static void append_window(GString *t, const struct source *s, bool seven_day) {
+	const struct tw_claude_window *win = seven_day ? &s->usage.seven_day : &s->usage.five_hour;
+	long length = seven_day ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS;
 	time_t now = time(NULL);
 	double used = tw_claude_window_now(win, now);
+	if (used < 0) {
+		return;
+	}
+	const char *name = s->account.agent == TW_AGENT_COPILOT ?
+		(s->allowance[0] ? s->allowance : "Allowance") :
+		seven_day ? "Weekly limit" : "5-hour limit";
+	g_string_append_printf(t, "\n%s: %.0f%% used", name, used);
 	if (win->resets_at > now) {
-		char remaining[32];
-		tw_claude_format_span(win->resets_at - now, true, remaining, sizeof(remaining));
-		snprintf(out, size, "%s · %.1f%% used · resets in %s", period, used, remaining);
-	} else if (!win->resets_at && used == 0) {
-		snprintf(out, size, "%s · 0.0%% used · no active reset", period);
+		char span[48], when[48];
+		struct tm tm;
+		localtime_r(&win->resets_at, &tm);
+		strftime(when, sizeof(when), win->resets_at - now < 24 * 3600 ? "%H:%M" : "%a %H:%M", &tm);
+		tw_claude_format_span(win->resets_at - now, false, span, sizeof(span));
+		g_string_append_printf(t, ", resets at %s (in %s)", when, span);
+	}
+	if (s->account.agent == TW_AGENT_COPILOT) {
+		return; // no window of a known length to tell a pace from
+	}
+	bool known;
+	long left = tw_claude_window_left(win, length, now, &known);
+	if (known && left > 0) {
+		char span[48];
+		tw_claude_format_span(left, false, span, sizeof(span));
+		g_string_append_printf(t, "\n    at this pace used up in about %s", span);
+	} else if (known && left < 0) {
+		g_string_append(t, "\n    at this pace it lasts until it resets");
+	}
+}
+
+/* One account in the tooltip: its name, its windows, what runs, what came from elsewhere. */
+static void append_source(GString *t, const struct source *s, bool checks) {
+	char title[300];
+	source_title(s, title, sizeof(title));
+	g_string_append(t, title);
+	const char *name = tw_agent_names[s->account.agent];
+	if (show_connect(s)) {
+		g_string_append_printf(t, "\n%s does not show its usage limits to tileWin yet: "
+			"click to connect it (tileWin goes before its status line).",
+			s->account.dir ? s->account.dir : "This Claude Code");
+	} else if (!s->have) {
+		if (s->account.agent == TW_AGENT_COPILOT && !checks) {
+			g_string_append(t, "\nIts allowance shows when the accounts are asked (its settings).");
+		} else {
+			g_string_append_printf(t, "\nThe limits come with the next answer of %s.", name);
+		}
 	} else {
-		snprintf(out, size, "%s · %.1f%% used", period, used);
+		append_window(t, s, false);
+		if (s->account.agent != TW_AGENT_COPILOT) {
+			append_window(t, s, true);
+		}
+	}
+	if (s->running > 0) {
+		g_string_append_printf(t, "\nRunning here: %d %s%s%s%s", s->running,
+			s->running == 1 ? "session" : "sessions", s->models[0] ? " (" : "", s->models,
+			s->models[0] ? ")" : "");
+	}
+	if (s->elsewhere) {
+		g_string_append_printf(t, "\nUsed elsewhere too: %.0f%% more while nothing of it ran "
+			"here (another computer with the same account?)", s->elsewhere_share);
+	}
+	if (s->have && s->usage.updated) {
+		long ago = (long)(time(NULL) - s->usage.updated);
+		char span[48];
+		tw_claude_format_span(ago, false, span, sizeof(span));
+		g_string_append_printf(t, "\nAs %s showed them %s ago", name, span);
 	}
 }
 
-static bool agents_agy_quotas(struct widget *w, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal) {
-	GPtrArray *groups = agy_chart_groups(agent_widget_usage(w));
-	char font[192], title_font[192];
-	snprintf(font, sizeof(font), "%s 9", pal->family);
-	snprintf(title_font, sizeof(title_font), "%s Bold 11", pal->family);
-	const int pad = 10, gap = 12;
-	if (!groups->len) {
-		pd_text(ctx->cairo, title_font, "Awaiting Antigravity quota readings", pad, pad,
-			ctx->width - 2 * pad, ctx->height - 2 * pad, pal->dim, PD_CENTER);
-		g_ptr_array_unref(groups);
-		return true;
+static char *agents_tooltip(struct widget *w, struct hotspot *hs) {
+	const char *style = NULL;
+	struct twconf_node *node = w->desk ? twconf_child(w->desk, "style") : NULL;
+	if (node && node->argc > 0) {
+		style = node->argv[0];
 	}
-	int row_height = (ctx->height - 2 * pad) / groups->len;
-	int column_width = (ctx->width - 2 * pad - gap) / 2;
-	GPtrArray *series = g_ptr_array_sized_new(1);
-	for (guint i = 0; i < groups->len; i++) {
-		struct agy_quota_group *group = groups->pdata[i];
-		int y = pad + i * row_height;
-		const struct agent_limit *tint = group->window[0] ? group->window[0] : group->window[1];
-		pd_rect(ctx->cairo, pad, y + 6, 8, 4, quota_color(tint));
-		pd_text(ctx->cairo, title_font, group->name, pad + 13, y, ctx->width - 2 * pad - 13,
-			18, pal->fg, PD_LEFT);
-		for (int j = 0; j < 2; j++) {
-			const struct agent_limit *limit = group->window[j];
-			int x = pad + j * (column_width + gap);
-			if (!limit) {
-				pd_text(ctx->cairo, font, j ? "Weekly quota unavailable" : "No five-hour quota reported",
-					x, y + 22, column_width, 20, pal->dim, PD_LEFT);
-				continue;
-			}
-			char title[112];
-			agy_chart_title(title, sizeof(title), limit, j);
-			g_ptr_array_add(series, (gpointer)limit);
-			quota_overlay(ctx, pal, series, (struct pbox){ x, y + 20, column_width, row_height - 24 },
-				font, j, title);
-			g_ptr_array_set_size(series, 0);
+	if (style && (strcmp(style, "week") == 0 || strcmp(style, "windows") == 0)) {
+		return NULL; // the chart shows the reading under the pointer instead
+	}
+	struct agents_state *st = w->data;
+	bool checks = widget_conf_bool(w, "account_checks", false);
+	GString *t = g_string_new(NULL);
+	for (int i = 0; i < st->count; i++) {
+		if (i > 0) {
+			g_string_append(t, "\n\n");
 		}
+		append_source(t, &st->src[i], checks);
 	}
-	g_ptr_array_unref(series);
-	g_ptr_array_unref(groups);
-	return true;
-}
-
-static bool agents_gadget(struct widget *w, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal) {
-	if (strcmp(ctx->style, "overlay") == 0) {
-		return agents_overlay(w, ctx, pal);
-	}
-	if (strcmp(ctx->style, "agy-quotas") == 0) {
-		return agents_agy_quotas(w, ctx, pal);
-	}
-	char font[192];
-	snprintf(font, sizeof(font), "%s %.1f", pal->family, CLAMP(ctx->height / 9.0, 7, 15));
-	for (enum agent_kind i = 0; i < AGENT_COUNT; i++) {
-		char line[72];
-		double quota[2];
-		agent_summary(agent_widget_usage(w), i, line, sizeof(line), quota);
-		double height = ctx->height / AGENT_COUNT;
-		int bar_width = quota[0] >= 0 || quota[1] >= 0 ? 38 : 0;
-		if (bar_width) {
-			agents_bars(ctx->cairo, 8, i * height, bar_width - 6, height, quota, pal->fg, pal->accent);
-		}
-		pd_text(ctx->cairo, font, line, 8 + bar_width, i * height, ctx->width - 16 - bar_width,
-			height, pal->fg, PD_LEFT);
-	}
-	return true;
+	return g_string_free(t, FALSE);
 }
 
 static bool agents_click(struct widget *w, struct psurface *s, struct hotspot *hs,
 		uint32_t button, double x, double y) {
-	if (button != BTN_LEFT) {
+	struct agents_state *st = w->data;
+	if (button != BTN_LEFT || st->count == 0) {
 		return false;
 	}
-	struct popup_anchor a = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
-	a.right_align = true;
-	info_flyout_toggle(w, a);
+	int k = hs && hs->id >= 0 && hs->id < st->count ? hs->id : 0;
+	const struct source *src = &st->src[k];
+	if (show_connect(src) && src->account.dir) {
+		char *quoted = g_shell_quote(src->account.dir);
+		char *cmd = g_strdup_printf("tilewin-claude-usage connect %s", quoted);
+		proc_spawn(cmd);
+		g_free(cmd);
+		g_free(quoted);
+		return true;
+	}
+	// the limits in full, in a flyout in the look of the theme, of the account clicked
+	st->current = k;
+	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
+	anchor.right_align = true;
+	info_flyout_toggle(w, anchor);
 	return true;
 }
 
-/*
- * TODO(KsmBl, before merge): Redesign this tooltip for a quick read.
- * Give each provider a clearly labeled line with its quota windows and local
- * worker count. Spell out possible remote usage wherever the signal appears.
- */
-static char *agents_tooltip(struct widget *w, struct hotspot *hotspot) {
-	GString *text = g_string_new("5-hour / weekly quota used · local terminal workers");
-	for (enum agent_kind i = 0; i < AGENT_COUNT; i++) {
-		char line[72];
-		agent_summary(agent_widget_usage(w), i, line, sizeof(line), NULL);
-		g_string_append_printf(text, "\n%s", line);
+static bool agents_sample(struct widget *w, struct widget_sample *out) {
+	struct agents_state *st = w->data;
+	const struct source *s = st->count > 0 ? &st->src[0] : NULL;
+	if (!s || !s->have) {
+		return false;
 	}
-	g_string_append(text, "\n? indicates possible remote usage");
-	return g_string_free(text, false);
+	time_t now = time(NULL);
+	double five = tw_claude_window_now(&s->usage.five_hour, now);
+	double seven = tw_claude_window_now(&s->usage.seven_day, now);
+	out->percent = (int)(five >= 0 ? five : seven >= 0 ? seven : 0);
+	snprintf(out->value, sizeof(out->value), "%.0f%%", five >= 0 ? five : 0);
+	if (seven >= 0) {
+		snprintf(out->detail, sizeof(out->detail), "Week %.0f%%", seven);
+	}
+	out->warning = out->percent >= widget_conf_int(w, "warning", 80);
+	out->critical = out->percent >= widget_conf_int(w, "critical", 95);
+	return true;
 }
 
-const struct widget_impl widget_agents = {
-	.type = "agents",
-	.init = agents_init,
-	.destroy = agents_destroy,
-	.set_active = agents_active,
-	.measure = agents_measure,
-	.render = agents_render,
-	.draw_gadget = agents_gadget,
-	.click = agents_click,
-	.tooltip = agents_tooltip,
-};
+/* ---------- for the flyout ---------- */
+
+static struct agents_state *state_of(struct widget *w) {
+	return w && (w->impl == &widget_agents || w->impl == &widget_claude ||
+		w->impl == &widget_codex) ? w->data : NULL;
+}
+
+int agents_widget_accounts(struct widget *w) {
+	struct agents_state *st = state_of(w);
+	if (!st) {
+		return 0;
+	}
+	collect(w, COLLECT_OPEN_S); // what runs here, fresher while it is looked at
+	reload(w);                  // the newest, as the flyout opens or reads again
+	return st->count;
+}
+
+bool agents_widget_view(struct widget *w, int i, struct agents_view *out) {
+	struct agents_state *st = state_of(w);
+	if (!st || i < 0 || i >= st->count) {
+		return false;
+	}
+	const struct source *s = &st->src[i];
+	*out = (struct agents_view){
+		.name = tw_agent_names[s->account.agent],
+		.agent = s->account.agent,
+		.tool = s->tool,
+		.usage = s->have || s->usage.dir ? &s->usage : NULL,
+		.connect = show_connect(s),
+		.running = s->running,
+		.models = s->models,
+		.elsewhere = s->elsewhere,
+		.elsewhere_share = s->elsewhere_share,
+		.elsewhere_at = s->elsewhere_at,
+		.allowance = s->account.agent == TW_AGENT_COPILOT ?
+			(s->allowance[0] ? s->allowance : "Allowance") : NULL,
+		.checks = widget_conf_bool(w, "account_checks", false),
+	};
+	if (!s->have && !s->tool) {
+		out->usage = NULL;
+	}
+	return true;
+}
+
+int agents_widget_current(struct widget *w) {
+	struct agents_state *st = state_of(w);
+	return st ? st->current : 0;
+}
+
+void agents_widget_pick(struct widget *w, int i) {
+	struct agents_state *st = state_of(w);
+	if (st && i >= 0 && i < st->count) {
+		st->current = i;
+	}
+}
+
+/* ---------- life ---------- */
+
+static void agents_set_active(struct widget *w, bool active) {
+	struct agents_state *st = w->data;
+	if (active && !st->timer) {
+		tick(w);
+	} else if (!active && st->timer) {
+		loop_remove_timer(w->panel->loop, st->timer);
+		st->timer = NULL;
+	}
+}
+
+static void usage_init(struct widget *w, const struct tw_usage_tool *legacy) {
+	struct agents_state *st = calloc(1, sizeof(struct agents_state));
+	st->legacy = legacy;
+	w->data = st;
+	reload(w);
+}
+
+static void agents_init(struct widget *w) {
+	usage_init(w, NULL);
+}
+
+static void claude_init(struct widget *w) {
+	usage_init(w, &tw_claude_tool);
+}
+
+static void codex_init(struct widget *w) {
+	usage_init(w, &tw_codex_tool);
+}
+
+static void agents_destroy(struct widget *w) {
+	struct agents_state *st = w->data;
+	if (st->timer) {
+		loop_remove_timer(w->panel->loop, st->timer);
+	}
+	if (st->pending) {
+		// the thread pushes into it still; whoever is last frees it
+		g_async_queue_unref(st->pending);
+	}
+	agent_usage_free(st->collected);
+	free_sources(st);
+	free(st->accounts);
+	free(st);
+}
+
+#define AGENTS_IMPL(name, initializer) { \
+	.type = name, \
+	.init = initializer, \
+	.destroy = agents_destroy, \
+	.measure = agents_measure, \
+	.render = agents_render, \
+	.click = agents_click, \
+	.tooltip = agents_tooltip, \
+	.set_active = agents_set_active, \
+	.sample = agents_sample, \
+	.draw_gadget = agents_draw_gadget, \
+}
+
+const struct widget_impl widget_agents = AGENTS_IMPL("agents", agents_init);
+// the widgets of older configs: the same, with the account of their "account" option
+const struct widget_impl widget_claude = AGENTS_IMPL("claude", claude_init);
+const struct widget_impl widget_codex = AGENTS_IMPL("codex", codex_init);

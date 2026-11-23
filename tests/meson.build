@@ -1479,6 +1479,15 @@ test(
 )
 
 test(
+	'agents-usage',
+	find_program('agents_usage.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+test(
 	'claude-usage',
 	find_program('claude_usage.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],

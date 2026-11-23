@@ -19,33 +19,23 @@ static const struct tw_widget_option opts_clock[] = {
 		NULL },
 	{ 0 },
 };
-static const struct tw_widget_option opts_claude[] = {
-	{ "account", "Account", "The Claude Code folder whose limits it shows: ~/.claude for the "
-		"installed one, the folder of a portable one. The one used last by default", NULL },
-	// "show" has an editor of its own in the settings: ticked and in order
-	{ "show", "Shows", "What, in this order: usage_5h usage_7d reset_5h reset_7d left_5h "
-		"left_7d", NULL },
-	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
-		"80 by default", NULL },
-	{ "critical", "Critical above", "Percent; 95 by default", NULL },
-	{ 0 },
-};
-
-static const struct tw_widget_option opts_codex[] = {
-	{ "account", "Account", "The Codex folder whose limits it shows: ~/.codex ($CODEX_HOME) "
-		"for the installed one by default", NULL },
-	// "show" has an editor of its own in the settings, as the Claude widget's
-	{ "show", "Shows", "What, in this order: usage_5h usage_7d reset_5h reset_7d left_5h "
-		"left_7d", NULL },
-	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
-		"80 by default", NULL },
-	{ "critical", "Critical above", "Percent; 95 by default", NULL },
-	{ 0 },
-};
-
+/*
+ * The AI agent usage widget; the claude and codex widget of older configs take
+ * the same options, with "account" for their one account.
+ */
 static const struct tw_widget_option opts_agents[] = {
-	{ "codex_poll", "Refresh Codex account quota", "Read account quota through Codex every "
-		"five minutes, including when no terminal is running. Yes by default.", choice_yes_no },
+	// "accounts" and "show" have editors of their own in the settings
+	{ "accounts", "Accounts", "Which, in this order: claude:~/.claude codex:~/.codex copilot "
+		"antigravity; all found by default", NULL },
+	{ "show", "Shows", "What of each, in this order: usage_5h usage_7d reset_5h reset_7d "
+		"left_5h left_7d", NULL },
+	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
+		"80 by default", NULL },
+	{ "critical", "Critical above", "Percent; 95 by default", NULL },
+	{ "account_checks", "Ask the accounts", "Every five minutes, Codex, Copilot and "
+		"Antigravity are started to ask their accounts how much is used, also while none "
+		"of them runs: with their logins, online. Copilot's allowance comes only so. No by "
+		"default", choice_yes_no },
 	{ 0 },
 };
 
@@ -153,7 +143,8 @@ static const struct tw_widget_option ports_desktop_look[] = {
 };
 
 const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
-	if (type && (strcmp(type, "claude") == 0 || strcmp(type, "codex") == 0)) {
+	if (type && (strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
+			strcmp(type, "codex") == 0)) {
 		return desktop ? tw_claude_desktop_look : tw_claude_taskbar_look;
 	}
 	if (type && strcmp(type, "kernel") == 0) {
@@ -405,13 +396,6 @@ static const struct tw_widget_style styles_plain[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
-static const struct tw_widget_style styles_agents[] = {
-	{ "compact", "Like on the taskbar", 0, 1 },
-	{ "list", "One line per agent", 3, 2 },
-	{ "overlay", "Overlaid quota charts", 5, 4 },
-	{ "agy-quotas", "Antigravity quota groups", 7, 6 },
-	{ 0 },
-};
 static const struct tw_widget_style styles_claude[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "list", "A line for each item", 3, 3 },
@@ -510,12 +494,14 @@ const struct tw_widget_info tw_widgets[] = {
 	{ "power", "Power draw", "Watts the computer is drawing", STATUS, opts_power, styles_meter },
 	{ "git", "Git", "Branch and changed lines of the repository the focused window works in",
 		STATUS, opts_git, styles_plain },
-	{ "claude", "Claude Code usage", "The 5-hour and weekly usage limits of a Claude Code "
-		"account, when they reset and how long they last", STATUS, opts_claude, styles_claude },
-	{ "codex", "Codex usage", "The 5-hour and weekly usage limits of the ChatGPT plan Codex "
-		"works with, when they reset and how long they last", STATUS, opts_codex, styles_claude },
-	{ "agents", "AI agent usage", "Agent quotas, model history and running terminal workers",
-		STATUS, opts_agents, styles_agents },
+	{ "agents", "AI agent usage", "The 5-hour and weekly usage limits of the accounts of "
+		"Claude Code, Codex, Copilot and Antigravity, when they reset and how long they last",
+		STATUS, opts_agents, styles_claude },
+	// the same widget in older configs, for one account each; not offered any more
+	{ "claude", "AI agent usage", "The usage limits of a Claude Code account (the AI agent "
+		"usage widget)", STATUS | TW_WIDGET_UNLISTED, opts_agents, styles_claude },
+	{ "codex", "AI agent usage", "The usage limits of the ChatGPT plan Codex works with (the "
+		"AI agent usage widget)", STATUS | TW_WIDGET_UNLISTED, opts_agents, styles_claude },
 	{ "kernel", "Kernel updates", "The automatic kernel updates: fixes applied live, a new "
 		"kernel downloaded and built, ready for the next restart", STATUS, opts_kernel,
 		styles_kernel },

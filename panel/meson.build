@@ -85,7 +85,6 @@ executable(
 		'widgets/workspaces.c',
 		'widgets/custom.c',
 		'widgets/git.c',
-		'widgets/claude.c',
 		'widgets/agents.c',
 		'widgets/kernel.c',
 		'widgets/ports.c',
