@@ -207,11 +207,17 @@ has Codex || fail "the claude widget of an older config does not show Codex too"
 # Antigravity's from the readings of its status line
 agy=$XDG_STATE_HOME/tileWin/agent-usage/agy
 mkdir -p "$agy"
+{
+# (a reading of the week before, which ended three days ago: the flyout's chart goes back to it)
+printf '{"at":%d,"data":{"quota":{"gemini-5h":{"remaining_fraction":0.9,"reset_time":"%s"},"gemini-weekly":{"remaining_fraction":0.4,"reset_time":"%s"}},"pid":0}}\n' \
+	$((now - 4 * 86400)) "$(date -u -d @$((now - 4 * 86400 + 3600)) +%Y-%m-%dT%H:%M:%SZ)" \
+	"$(date -u -d @$((now - 3 * 86400)) +%Y-%m-%dT%H:%M:%SZ)"
 for ago in 7200 3600 60; do
 	printf '{"at":%d,"data":{"quota":{"gemini-5h":{"remaining_fraction":0.8,"reset_time":"%s"},"gemini-weekly":{"remaining_fraction":0.7,"reset_time":"%s"}},"pid":0}}\n' \
 		$((now - ago)) "$(date -u -d @$((now + 3600)) +%Y-%m-%dT%H:%M:%SZ)" \
 		"$(date -u -d @$((now + 3 * 86400)) +%Y-%m-%dT%H:%M:%SZ)"
-done > "$agy/account.jsonl"
+done
+} > "$agy/account.jsonl"
 # (with the claude widget of an older config before it, which the agents entry replaces)
 printf 'desktop_widgets {\n\tclaude {\n\t\tstyle week\n\t}\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s antigravity\n\t\tsize 3x10\n\t}\n}\n' \
 	"$codex" "$claude" >> "$conf"
@@ -240,6 +246,23 @@ if [ $# -eq 2 ]; then
 	grep -q "^30" "$work/seen" || fail "the flyout of Antigravity does not show its 30% of the week"
 	has Accounts && fail "the flyout of one account of the desktop card lists the others"
 	grep -qE "^(Sat|Sun|Mon|Tue|Wed|Thu|Fri)" "$work/seen" || fail "the flyout of Antigravity has no chart of its week"
+	# the wheel up over the chart of the week: the week before, which its title names
+	# ("This week, until it resets ...": its first "until", read better than "This")
+	set -- $(grep -m1 "^until " "$work/seen" | cut -d' ' -f2,3)
+	if [ $# -eq 2 ]; then
+		"$pointer" 1280 720 scroll "$1" $(($2 + 80)) -1 >/dev/null 2>&1
+		sleep 1
+		words 0 0 900 680 > "$work/seen"
+		# ("The week Sat 14 Nov – Sat 21 Nov", "1 back · scroll")
+		grep -q "^back " "$work/seen" && grep -qE "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) " "$work/seen" ||
+			fail "the wheel over the week did not go back to the week before: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+		"$pointer" 1280 720 scroll "$1" $(($2 + 80)) 1 >/dev/null 2>&1
+		sleep 1
+		words 0 0 900 680 > "$work/seen"
+		grep -q "^back " "$work/seen" && fail "the wheel down did not come back to this week"
+	else
+		fail "no title of the week in the flyout of Antigravity: $(cut -d" " -f1 "$work/seen" | tr "\n" " ")"
+	fi
 	"$pointer" 1280 720 click 100 300 >/dev/null 2>&1
 	sleep 0.5
 else

@@ -1399,6 +1399,10 @@ static void claude_sample(struct info_flyout *f) {
 
 /* A click on another account's row shows that one. */
 static void claude_pick(struct info_flyout *f, const struct info_row *row) {
+	struct claude_charts *c = f->state;
+	if (c) {
+		c->back_five = c->back_week = 0; // another account: its newest windows
+	}
 	agents_widget_pick(f->widget, row->pick - 1);
 }
 
