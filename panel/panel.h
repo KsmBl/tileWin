@@ -56,6 +56,8 @@ struct psurface_impl {
 	void (*pointer_button)(struct psurface *s, double x, double y,
 		uint32_t button, bool pressed);
 	void (*pointer_axis)(struct psurface *s, double x, double y, int direction);
+	// scrolled sideways (a touchpad, a tilting wheel): -1 to the left, 1 to the right
+	void (*pointer_axis_h)(struct psurface *s, double x, double y, int direction);
 	void (*key)(struct psurface *s, xkb_keysym_t sym, const char *utf8,
 		uint32_t modifiers);
 	void (*keyboard_leave)(struct psurface *s);
@@ -132,6 +134,7 @@ struct panel_seat {
 	struct wl_surface *cursor_surface;
 	struct wl_cursor_theme *cursor_theme;
 	double axis_accum;
+	double axis_h_accum; // the same, sideways
 
 	// one finger on the touchscreen, turned into the clicks of a mouse
 	struct wl_touch *touch;

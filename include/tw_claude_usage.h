@@ -86,14 +86,22 @@ double tw_claude_window_now(const struct tw_claude_window *window, time_t now);
 
 /*
  * Each time the values change, tilewin-claude-usage adds a line to
- * ~/.local/state/tileWin/claude-usage/<folder>.history; the last eight days
- * are kept. The flyout of the widget draws its charts from it.
+ * ~/.local/state/tileWin/claude-usage/<folder>.history; the days that
+ * tw_usage_history_days says are kept. The flyout of the widget draws its
+ * charts from it, the older windows too.
  */
 struct tw_claude_point {
 	time_t at;
 	struct tw_claude_window five_hour, seven_day;
 };
 char *tw_claude_history_path(const char *dir);
+/*
+ * How many days of the usage are kept: "history_days" of the AI agent usage
+ * widget in taskbar.conf (its block "widget agents"), 8 by default and at least,
+ * at most 3650. Read again when the file changed.
+ */
+#define TW_USAGE_HISTORY_DAYS 8
+int tw_usage_history_days(void);
 /* The file of a history of a folder in ~/.local/state/tileWin/<kind>/. */
 char *tw_usage_history_path(const char *kind, const char *dir);
 /* Adds the values as of now to that history file, when they differ from the last line. */

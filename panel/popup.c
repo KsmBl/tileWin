@@ -313,6 +313,13 @@ static void ps_axis(struct psurface *s, double x, double y, int direction) {
 	}
 }
 
+static void ps_axis_h(struct psurface *s, double x, double y, int direction) {
+	struct popup *p = popup_from_surface(s);
+	if (p && p->vtable->axis_h) {
+		p->vtable->axis_h(p, x, y, direction);
+	}
+}
+
 static void ps_key(struct psurface *s, xkb_keysym_t sym, const char *utf8, uint32_t mods) {
 	struct popup *p = popup_from_surface(s);
 	if (!p) {
@@ -342,6 +349,7 @@ static const struct psurface_impl popup_surface_impl = {
 	.pointer_leave = ps_leave,
 	.pointer_button = ps_button,
 	.pointer_axis = ps_axis,
+	.pointer_axis_h = ps_axis_h,
 	.key = ps_key,
 	.closed = ps_closed,
 };

@@ -10,6 +10,8 @@ struct popup_vtable {
 	void (*leave)(struct popup *p);
 	void (*button)(struct popup *p, double x, double y, uint32_t button, bool pressed);
 	void (*axis)(struct popup *p, double x, double y, int direction);
+	/* Scrolled sideways: -1 to the left, 1 to the right; NULL takes no notice. */
+	void (*axis_h)(struct popup *p, double x, double y, int direction);
 	void (*key)(struct popup *p, xkb_keysym_t sym, const char *utf8, uint32_t mods);
 	void (*destroy)(struct popup *p);
 	/*

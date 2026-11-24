@@ -18,6 +18,9 @@ struct claude_charts {
 	struct tw_claude_window five_hour, seven_day; // as of now
 	time_t now;
 	bool have;
+	// how many windows back each chart shows (0: the newest), scrolled in the flyout
+	int back_five, back_week;
+	struct pbox box_five, box_week; // where each was drawn last, for the scrolling
 };
 
 struct claude_look {
@@ -40,6 +43,13 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 	cairo_t *cr, const struct claude_look *st, struct pbox box);
 void claude_chart_week(const struct claude_hover *f, const struct claude_charts *c,
 	cairo_t *cr, const struct claude_look *st, struct pbox box);
+/*
+ * How many windows back a chart can go: older 5-hour windows (three are shown)
+ * or older weeks in the history.
+ */
+int claude_charts_back_max(const struct claude_charts *c, bool week);
+/* "Mon 3 Nov – Mon 10 Nov": the time a chart shows, as it is scrolled. */
+void claude_charts_span(const struct claude_charts *c, bool week, char *out, size_t size);
 /* Reads the history and the values of now into c (its points freed first). */
 void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u, time_t now);
 /* The same, of readings in hand (Antigravity's, from agentusage.c), copied. */

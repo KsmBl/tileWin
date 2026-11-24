@@ -23,6 +23,8 @@ static const struct tw_widget_option opts_clock[] = {
  * The AI agent usage widget; the claude and codex widget of older configs, which
  * it replaces (tw_widget_replaced_by_agents), took the same options.
  */
+static const char *const choice_history_days[] = { "8", "14", "30", "60", "90", "180", "365",
+	NULL };
 static const struct tw_widget_option opts_agents[] = {
 	// "accounts" and "show" have editors of their own in the settings
 	{ "accounts", "Accounts", "Which, in this order: claude:~/.claude codex:~/.codex copilot "
@@ -36,6 +38,9 @@ static const struct tw_widget_option opts_agents[] = {
 		"Antigravity are started to ask their accounts how much is used, also while none "
 		"of them runs: with their logins, online. Copilot's allowance comes only so. No by "
 		"default", choice_yes_no },
+	{ "history_days", "Keep the usage", "Days of each account's usage kept for the charts "
+		"of its flyout, which scroll back to the older windows (the wheel over a chart); "
+		"8 by default and at least", choice_history_days },
 	{ 0 },
 };
 

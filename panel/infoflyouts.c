@@ -100,6 +100,8 @@ struct info_source {
 	void (*draw_extra)(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
 		struct pbox box);
 	void (*row_pick)(struct info_flyout *f, const struct info_row *row);
+	// the wheel over its drawings: true when they took it (the charts go back in time)
+	bool (*extra_axis)(struct info_flyout *f, double x, double y, int direction);
 };
 
 struct info_flyout {
@@ -1147,6 +1149,21 @@ static void claude_free(void *state) {
 #define CHART_FIVE 96
 #define CHART_WEEK 132
 
+/* At the right of a chart's title: how far back it is, or that it goes back. */
+static void charts_scroll_hint(cairo_t *cr, const struct fly_style *st, struct pbox box, int y,
+		int back, int max) {
+	if (max <= 0) {
+		return;
+	}
+	char hint[48];
+	if (back > 0) {
+		snprintf(hint, sizeof(hint), "%d back · scroll", back);
+	} else {
+		snprintf(hint, sizeof(hint), "scroll for older");
+	}
+	pd_text(cr, st->font, hint, box.x, y, box.width, 18, st->dim, PD_RIGHT);
+}
+
 static int claude_charts_height(struct info_flyout *f) {
 	struct claude_charts *c = f->state;
 	return c && c->have ? 22 + CHART_FIVE + 8 + 22 + CHART_WEEK + 8 : 0;
@@ -1166,13 +1183,25 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 	};
 	struct claude_hover hover = { f->inside, f->px, f->py };
 	int y = box.y + 4;
-	pd_text(cr, st->bold, "The last three 5-hour windows", box.x, y, box.width, 18, st->fg,
-		PD_LEFT);
+	// scrolled back: the time it shows; else, when there is more, that it scrolls
+	char span[96];
+	if (c->back_five > 0) {
+		claude_charts_span(c, false, span, sizeof(span));
+		pd_text(cr, st->bold, span, box.x, y, box.width, 18, st->fg, PD_LEFT);
+	} else {
+		pd_text(cr, st->bold, "The last three 5-hour windows", box.x, y, box.width, 18, st->fg,
+			PD_LEFT);
+	}
+	charts_scroll_hint(cr, st, box, y, c->back_five, claude_charts_back_max(c, false));
 	y += 22;
-	claude_chart_five_hours(&hover, c, cr, &look, (struct pbox){ box.x, y, box.width, CHART_FIVE });
+	c->box_five = (struct pbox){ box.x, y, box.width, CHART_FIVE };
+	claude_chart_five_hours(&hover, c, cr, &look, c->box_five);
 	y += CHART_FIVE + 8;
 	char title[96] = "This week";
-	if (c->seven_day.resets_at > 0) {
+	if (c->back_week > 0) {
+		claude_charts_span(c, true, span, sizeof(span));
+		snprintf(title, sizeof(title), "The week %s", span);
+	} else if (c->seven_day.resets_at > 0) {
 		char when[32];
 		struct tm tm;
 		time_t r = c->seven_day.resets_at;
@@ -1181,8 +1210,30 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 		snprintf(title, sizeof(title), "This week, until it resets %s", when);
 	}
 	pd_text(cr, st->bold, title, box.x, y, box.width, 18, st->fg, PD_LEFT);
+	charts_scroll_hint(cr, st, box, y, c->back_week, claude_charts_back_max(c, true));
 	y += 22;
-	claude_chart_week(&hover, c, cr, &look, (struct pbox){ box.x, y, box.width, CHART_WEEK });
+	c->box_week = (struct pbox){ box.x, y, box.width, CHART_WEEK };
+	claude_chart_week(&hover, c, cr, &look, c->box_week);
+}
+
+/*
+ * The wheel over a chart: up (or left) to older windows, down (or right) back
+ * to newer ones, as far as the history goes.
+ */
+static bool claude_charts_axis(struct info_flyout *f, double x, double y, int direction) {
+	struct claude_charts *c = f->state;
+	if (!c || !c->have) {
+		return false;
+	}
+	int *back = pbox_contains(&c->box_five, x, y) ? &c->back_five :
+		pbox_contains(&c->box_week, x, y) ? &c->back_week : NULL;
+	if (!back) {
+		return false;
+	}
+	int max = claude_charts_back_max(c, back == &c->back_week);
+	*back -= direction;
+	*back = *back < 0 ? 0 : *back > max ? max : *back;
+	return true;
 }
 
 /* "12 min ago", "just now". */
@@ -1572,25 +1623,25 @@ static list_t *ports_row_menu(struct info_flyout *f, const struct info_row *row)
 }
 
 static const struct info_source sources[] = {
-	{ "disk", 1000, disk_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "gpu", 1000, gpu_sample, gpu_free, 0, NULL, NULL, NULL, NULL },
-	{ "net", 1000, net_sample, net_free, 0, NULL, NULL, NULL, NULL },
-	{ "storage", 5000, storage_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "power", 1000, power_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "keyboard", 0, keyboard_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "title", 1000, title_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "custom", 1000, custom_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "git", 2000, git_sample, git_free, 0, NULL, NULL, NULL, NULL },
+	{ "disk", 1000, disk_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "gpu", 1000, gpu_sample, gpu_free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "net", 1000, net_sample, net_free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "storage", 5000, storage_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "power", 1000, power_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "keyboard", 0, keyboard_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "title", 1000, title_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "custom", 1000, custom_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "git", 2000, git_sample, git_free, 0, NULL, NULL, NULL, NULL, NULL },
 	// the AI agent usage widget, and the claude and codex widget of older configs; the
 	// charts want the room
 	{ "agents", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
-		claude_charts_draw, claude_pick },
+		claude_charts_draw, claude_pick, claude_charts_axis },
 	{ "claude", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
-		claude_charts_draw, claude_pick },
+		claude_charts_draw, claude_pick, claude_charts_axis },
 	{ "codex", 5000, claude_sample, claude_free, 440, NULL, claude_charts_height,
-		claude_charts_draw, claude_pick },
-	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL, NULL },
-	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL, NULL }, // the addresses want the room
+		claude_charts_draw, claude_pick, claude_charts_axis },
+	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
+	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL, NULL, NULL }, // the addresses want the room
 };
 
 /* ---------- drawing ---------- */
@@ -2004,8 +2055,20 @@ static void scroll_to(struct info_flyout *f, double y) {
 	f->scroll = f->scroll > top ? top : f->scroll;
 }
 
+/* Sideways: only its drawings take it (left to the older windows of a chart). */
+static void info_axis_h(struct popup *p, double x, double y, int direction) {
+	struct info_flyout *f = p->data;
+	if (f->source && f->source->extra_axis && f->source->extra_axis(f, x, y, direction)) {
+		popup_set_dirty(p);
+	}
+}
+
 static void info_axis(struct popup *p, double x, double y, int direction) {
 	struct info_flyout *f = p->data;
+	if (f->source && f->source->extra_axis && f->source->extra_axis(f, x, y, direction)) {
+		popup_set_dirty(p);
+		return;
+	}
 	int top = max_scroll(f, rows_area(f));
 	f->scroll += direction;
 	f->scroll = f->scroll < 0 ? 0 : f->scroll > top ? top : f->scroll;
@@ -2120,6 +2183,7 @@ static const struct popup_vtable info_vtable = {
 	.leave = info_leave,
 	.button = info_button,
 	.axis = info_axis,
+	.axis_h = info_axis_h,
 	.key = info_key,
 	.destroy = info_destroy,
 };

@@ -10,6 +10,7 @@
 #include "stringop.h"
 #include "tw_claude_usage.h"
 #include "tw_paths.h"
+#include "twconf.h"
 
 #define STATUS_PROGRAM "tilewin-claude-usage"
 
@@ -407,8 +408,43 @@ void tw_claude_format_span(long seconds, bool brief, char *out, size_t size) {
 
 /* ---------- the history ---------- */
 
-#define HISTORY_DAYS 8
-#define HISTORY_MAX_BYTES (96 * 1024)
+// a history file is written again with only its last days once it is this big
+// for each day it keeps (8 days: 96 KiB)
+#define HISTORY_BYTES_A_DAY (12 * 1024)
+
+int tw_usage_history_days(void) {
+	static int days = TW_USAGE_HISTORY_DAYS;
+	static time_t read_mtime = -1;
+	static char *path;
+	if (!path) {
+		char *dir = tw_config_dir();
+		path = dir ? format_str("%s/taskbar.conf", dir) : NULL;
+		free(dir);
+		if (!path) {
+			return days;
+		}
+	}
+	struct stat st;
+	time_t mtime = stat(path, &st) == 0 ? st.st_mtime : 0;
+	if (mtime == read_mtime) {
+		return days;
+	}
+	read_mtime = mtime;
+	days = TW_USAGE_HISTORY_DAYS;
+	struct twconf_node *root = mtime ? twconf_parse_file(path, NULL) : NULL;
+	for (int i = 0; root && i < twconf_count(root); i++) {
+		struct twconf_node *w = twconf_at(root, i);
+		if (strcmp(w->name, "widget") == 0 && w->argc >= 1 && strcmp(w->argv[0], "agents") == 0) {
+			const char *value = twconf_value(w, "history_days");
+			int n = value ? atoi(value) : 0;
+			if (n > 0) {
+				days = n < TW_USAGE_HISTORY_DAYS ? TW_USAGE_HISTORY_DAYS : n > 3650 ? 3650 : n;
+			}
+		}
+	}
+	twconf_free(root);
+	return days;
+}
 
 char *tw_usage_history_path(const char *kind, const char *dir) {
 	if (!dir) {
@@ -594,12 +630,13 @@ void tw_claude_history_add(const char *history, const struct tw_claude_usage *us
 	format_window(&usage->five_hour, five, sizeof(five));
 	format_window(&usage->seven_day, seven, sizeof(seven));
 	struct stat st;
-	if (stat(path, &st) == 0 && st.st_size > HISTORY_MAX_BYTES) {
+	int days = tw_usage_history_days();
+	if (stat(path, &st) == 0 && st.st_size > (off_t)days * HISTORY_BYTES_A_DAY) {
 		// grown: written again with only the last days
 		char *tmp = format_str("%s.new", path);
 		FILE *f = fopen(tmp, "w");
 		for (int i = 0; f && i < n; i++) {
-			if (points[i].at < now - HISTORY_DAYS * 24 * 3600) {
+			if (points[i].at < now - (time_t)days * 24 * 3600) {
 				continue;
 			}
 			char a[64], b[64];

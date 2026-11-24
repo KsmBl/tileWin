@@ -14,10 +14,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "stringop.h"
+#include "tw_claude_usage.h"
 #include "tw_codex_usage.h"
 #include "tw_paths.h"
 
-#define HISTORY_DAYS 8
 #define FIRST_TAIL (256 * 1024)
 #define MAX_TAIL (64 * 1024 * 1024)
 
@@ -194,7 +194,7 @@ static int newest_file_first(const void *a, const void *b) {
 
 static struct log_list session_logs(const char *dir, time_t now) {
 	struct log_list list = { 0 };
-	time_t from = now - HISTORY_DAYS * 24 * 3600;
+	time_t from = now - (time_t)tw_usage_history_days() * 24 * 3600;
 	struct tm tm;
 	localtime_r(&from, &tm);
 	char cutoff[40];
@@ -361,7 +361,7 @@ int tw_codex_history_points(const char *dir, time_t now, struct tw_claude_point 
 	if (!dir) {
 		return 0;
 	}
-	time_t from = now - HISTORY_DAYS * 24 * 3600;
+	time_t from = now - (time_t)tw_usage_history_days() * 24 * 3600;
 	struct log_list logs = session_logs(dir, now);
 	struct codex_point *points = NULL;
 	int count = 0, cap = 0;

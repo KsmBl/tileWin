@@ -101,11 +101,22 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 static void pointer_axis(void *data, struct wl_pointer *pointer, uint32_t time,
 		uint32_t axis, wl_fixed_t value) {
 	struct panel_seat *seat = data;
+	struct psurface *s = seat->pointer_focus;
+	if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+		seat->axis_h_accum += wl_fixed_to_double(value);
+		while (seat->axis_h_accum >= 10 || seat->axis_h_accum <= -10) {
+			int dir = seat->axis_h_accum > 0 ? 1 : -1;
+			seat->axis_h_accum -= dir * 10;
+			if (s && s->impl && s->impl->pointer_axis_h) {
+				s->impl->pointer_axis_h(s, seat->px, seat->py, dir);
+			}
+		}
+		return;
+	}
 	if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL) {
 		return;
 	}
 	seat->axis_accum += wl_fixed_to_double(value);
-	struct psurface *s = seat->pointer_focus;
 	while (seat->axis_accum >= 10 || seat->axis_accum <= -10) {
 		int dir = seat->axis_accum > 0 ? 1 : -1;
 		seat->axis_accum -= dir * 10;
