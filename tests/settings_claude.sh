@@ -7,7 +7,8 @@
 # until the 5-hour limit resets" adds reset_5h after the two shown by default,
 # its arrow up puts it between them, and taskbar.conf has show "usage_5h
 # reset_5h usage_7d" for the widget; the settings are still running after it
-# (the rows are made again on every change).
+# (the rows are made again on every change). With two accounts the arrow of the
+# second puts it first in "accounts".
 #
 # usage: settings_claude.sh <build dir> <source dir>
 set -u
@@ -96,16 +97,29 @@ click 1166 1119 # the gear of the AI agent usage widget in the right section
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
-click 382 1750 # tick: Time until the 5-hour limit resets (under the accounts)
+click 382 1785 # tick: Time until the 5-hour limit resets (under the accounts)
 wait_until 5 sh -c "[ \"\$(sed -n '/^widget agents {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
 	fail "ticking wrote nothing: $(shows)"
 [ "$(shows)" = "usage_5h usage_7d reset_5h" ] || fail "after the tick it shows '$(shows)'"
 wait_still 5 screen
-click 847 1750 # its arrow up
+click 847 1785 # its arrow up
 wait_until 5 sh -c "sed -n '/^widget agents {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
 	fail "the arrow did not move it up: '$(shows)'"
 "$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"' ||
 	fail "the settings are gone after the changes"
+
+# ---- the order of the accounts: with a Codex named too, its arrow puts it before Claude Code
+ipc '[title="AI agent usage settings"] kill' >/dev/null 2>&1
+mkdir -p "$work/codex"
+sed -i "/^widget agents {/a\\\taccounts claude:$work/claude codex:$work/codex" "$conf"
+wait_still 5 screen
+click 1166 1119 # the gear again
+wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
+	fail "the settings of the widget did not open again"
+wait_still 5 screen
+click 847 1481 # the arrow up of Codex, the second account
+wait_until 5 sh -c "grep -q 'accounts codex:$work/codex claude:$work/claude' '$conf'" ||
+	fail "the arrow did not put Codex first: $(grep accounts "$conf")"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

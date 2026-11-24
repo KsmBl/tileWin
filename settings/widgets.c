@@ -793,8 +793,9 @@ static void show_editor_attach(struct settings *s, GtkWidget *content, const cha
  * A tick for each account found on this computer (tw_agent_accounts.h) and
  * each the config names that is not there now: "accounts" of its block for
  * the taskbar, of its desktop_widgets entry for the desktop (the taskbar's
- * there by default). All of them ticked is written as nothing, so an
- * account added later comes along.
+ * there by default). The arrows put an account earlier or later, the order
+ * the widget shows them in. All of them ticked, in the order they are found,
+ * is written as nothing, so an account added later comes along.
  */
 struct accounts_editor {
 	struct settings *s;
@@ -803,12 +804,19 @@ struct accounts_editor {
 	GPtrArray *ids;     // all, in the order shown
 	GPtrArray *titles;  // of each, "Claude Code · ~/.claude"
 	GHashTable *ticked; // id -> id
+	guint found;        // how many of ids were found here, in the order found at first
+	char *found_order;  // their ids as found, space separated
 	GtkWidget *list;
+	guint rebuild_idle;
 	bool updating;
 };
 
 static void accounts_editor_free(gpointer data) {
 	struct accounts_editor *e = data;
+	if (e->rebuild_idle) {
+		g_source_remove(e->rebuild_idle);
+	}
+	g_free(e->found_order);
 	g_hash_table_unref(e->ticked); // (its keys are in ids)
 	g_ptr_array_unref(e->ids);
 	g_ptr_array_unref(e->titles);
@@ -823,9 +831,10 @@ static void accounts_write(struct accounts_editor *e) {
 			g_string_append_printf(out, "%s%s", out->len ? " " : "", (char *)e->ids->pdata[i]);
 		}
 	}
-	// all of them: nothing, so the ones found later come along (an older claude or
-	// codex widget shows its one account by default, so it is written)
-	bool all = g_hash_table_size(e->ticked) == e->ids->len && !e->legacy;
+	// all of them as found: nothing, so the ones found later come along (an older
+	// claude or codex widget shows its one account by default, so it is written)
+	bool all = g_hash_table_size(e->ticked) == e->ids->len && !e->legacy &&
+		g_strcmp0(out->str, e->found_order) == 0;
 	if (e->desktop) {
 		write_desktop_option(e->s, e->widget, "accounts", all ? NULL : out->str);
 	} else {
@@ -910,7 +919,44 @@ static void on_account_add(GtkButton *button, gpointer data) {
 	g_object_unref(dialog);
 }
 
-/* A tick for each account, then the button that adds a folder. */
+static gboolean accounts_rebuild_idle(gpointer data) {
+	struct accounts_editor *e = data;
+	e->rebuild_idle = 0;
+	accounts_rebuild(e);
+	return G_SOURCE_REMOVE;
+}
+
+/* An account one place earlier (-1) or later (1): the order the widget shows them in. */
+static void accounts_move(GtkButton *button, struct accounts_editor *e, int by) {
+	const char *id = g_object_get_data(G_OBJECT(button), "account");
+	guint at;
+	if (!g_ptr_array_find_with_equal_func(e->ids, id, g_str_equal, &at) ||
+			(by < 0 && at == 0) || (by > 0 && at + 1 >= e->ids->len)) {
+		return;
+	}
+	guint to = at + by;
+	gpointer swap = e->ids->pdata[at];
+	e->ids->pdata[at] = e->ids->pdata[to];
+	e->ids->pdata[to] = swap;
+	swap = e->titles->pdata[at];
+	e->titles->pdata[at] = e->titles->pdata[to];
+	e->titles->pdata[to] = swap;
+	accounts_write(e);
+	// made again once the click is over: the button clicked is one of the rows
+	if (!e->rebuild_idle) {
+		e->rebuild_idle = g_idle_add(accounts_rebuild_idle, e);
+	}
+}
+
+static void on_account_up(GtkButton *button, gpointer data) {
+	accounts_move(button, data, -1);
+}
+
+static void on_account_down(GtkButton *button, gpointer data) {
+	accounts_move(button, data, 1);
+}
+
+/* A tick for each account with its arrows, then the button that adds a folder. */
 static void accounts_rebuild(struct accounts_editor *e) {
 	e->updating = true;
 	GtkWidget *child;
@@ -923,12 +969,29 @@ static void accounts_rebuild(struct accounts_editor *e) {
 			g_hash_table_contains(e->ticked, e->ids->pdata[i]));
 		g_object_set_data(G_OBJECT(check), "account", e->ids->pdata[i]);
 		g_signal_connect(check, "toggled", G_CALLBACK(on_account_tick), e);
-		gtk_widget_set_margin_start(check, 12);
-		gtk_widget_set_margin_end(check, 12);
-		gtk_widget_set_margin_top(check, 4);
-		gtk_widget_set_margin_bottom(check, 4);
+		gtk_widget_set_hexpand(check, TRUE);
+		GtkWidget *line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		gtk_widget_set_margin_start(line, 12);
+		gtk_widget_set_margin_end(line, 12);
+		gtk_widget_set_margin_top(line, 4);
+		gtk_widget_set_margin_bottom(line, 4);
+		gtk_box_append(GTK_BOX(line), check);
+		GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
+		gtk_widget_set_tooltip_text(up, "Earlier");
+		gtk_widget_add_css_class(up, "flat");
+		gtk_widget_set_sensitive(up, i > 0);
+		g_object_set_data(G_OBJECT(up), "account", e->ids->pdata[i]);
+		g_signal_connect(up, "clicked", G_CALLBACK(on_account_up), e);
+		gtk_box_append(GTK_BOX(line), up);
+		GtkWidget *down = gtk_button_new_from_icon_name("go-down-symbolic");
+		gtk_widget_set_tooltip_text(down, "Later");
+		gtk_widget_add_css_class(down, "flat");
+		gtk_widget_set_sensitive(down, i + 1 < e->ids->len);
+		g_object_set_data(G_OBJECT(down), "account", e->ids->pdata[i]);
+		g_signal_connect(down, "clicked", G_CALLBACK(on_account_down), e);
+		gtk_box_append(GTK_BOX(line), down);
 		GtkWidget *row = gtk_list_box_row_new();
-		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), check);
+		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), line);
 		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
 		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
 	}
@@ -981,6 +1044,11 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 		g_ptr_array_add(titles, account_title(&found[i]));
 	}
 	tw_agent_accounts_free(found, n);
+	GString *order = g_string_new(NULL);
+	for (guint i = 0; i < e->ids->len; i++) {
+		g_string_append_printf(order, "%s%s", order->len ? " " : "", (char *)e->ids->pdata[i]);
+	}
+	e->found_order = g_string_free(order, FALSE);
 	// the ticked ones: of the config, or all of them (the older widgets: their account)
 	char *wanted = value && *value ? g_strdup(value) : NULL;
 	if (!wanted && e->legacy) {
@@ -1009,6 +1077,19 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 			g_ptr_array_add(e->ids, g_strdup(a.id));
 			g_ptr_array_add(titles, account_title(&a));
 			at = e->ids->len - 1;
+		}
+		if (g_hash_table_contains(e->ticked, e->ids->pdata[at])) {
+			tw_agent_account_finish(&a); // named twice: its first place counts
+			continue;
+		}
+		// in the order of the config: the ticked ones first, as named
+		guint place = g_hash_table_size(e->ticked);
+		if (at != place) {
+			gpointer id = g_ptr_array_steal_index(e->ids, at);
+			gpointer title = g_ptr_array_steal_index(e->titles, at);
+			g_ptr_array_insert(e->ids, place, id);
+			g_ptr_array_insert(e->titles, place, title);
+			at = place;
 		}
 		g_hash_table_add(e->ticked, e->ids->pdata[at]);
 		any = true;
