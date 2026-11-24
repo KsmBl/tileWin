@@ -48,6 +48,11 @@
 #                                          "Update now")
 #   tilewin-kernel-root auto-boot          what tilewin-kernel-auto-boot.service
 #                                          does at every start
+#   tilewin-kernel-root sleep pre|post ACTION
+#                                          before and after systemd-sleep's
+#                                          ACTION: a hibernation comes back in
+#                                          the kernel that made it (see
+#                                          "hibernation" below)
 #   tilewin-kernel-root scheduler-default SCHEDULER MODE
 #                                          the sched_ext scheduler scx_loader
 #                                          starts with the computer, or "none"
@@ -717,6 +722,8 @@ auto_conf=$root/etc/tilewin/kernel-auto.conf
 auto_state=$root/var/lib/tilewin/kernel-auto
 auto_user=tilewin-kernel
 auto_dropin=$root/etc/systemd/system/tilewin-kernel-auto-build@.service.d
+# while a hibernation is pending: what was set for the next start before it
+hib_dir=$root/run/tilewin-kernel/hibernate
 tool=${TILEWIN_KERNEL_TOOL:-@bindir@/tilewin-kernel}
 
 auto_get() { sed -n "s/^$1=//p" "$auto_conf" 2>/dev/null | tail -n 1; }
@@ -1001,6 +1008,9 @@ arm_once() { # kver
 # count of starts it missed is kept.
 auto_arm() {
 	local target misses=0 k="" b="" m="" out
+	# a hibernation keeps the next start for the kernel it is made by; arming
+	# waits until the computer is back (sleep_post)
+	[[ -d $hib_dir ]] && return 0
 	target=$(auto_target)
 	if [[ -z $target ]]; then
 		auto_disarm
@@ -1028,18 +1038,24 @@ auto_arm() {
 }
 
 auto_disarm() {
-	local k="" b="" m="" num
+	local k="" b="" m=""
 	{ read -r k b m < "$auto_state/armed"; } 2>/dev/null || return 0
-	if [[ -n $k ]] && ours "$k"; then
-		case $(marker_get "$k" boot) in
-		oneshot) bootctl set-oneshot "" >/dev/null 2>&1 ;;
-		bootnext)
-			num=$(efi_entry "$k")
-			[[ -n $num ]] && efibootmgr 2>/dev/null | grep -qx "BootNext: $num" && efibootmgr -N >/dev/null 2>&1 ;;
-		grub-reboot) grub-editenv - unset next_entry >/dev/null 2>&1 ;;
-		esac
-	fi
+	[[ -n $k ]] && disarm_once "$k"
 	rm -f "$auto_state/armed"
+}
+
+# A kernel set to start once at the next restart is not any more.
+disarm_once() { # kver
+	local num
+	ours "$1" || return 0
+	case $(marker_get "$1" boot) in
+	oneshot) bootctl set-oneshot "" >/dev/null 2>&1 ;;
+	bootnext)
+		num=$(efi_entry "$1")
+		[[ -n $num ]] && efibootmgr 2>/dev/null | grep -qx "BootNext: $num" && efibootmgr -N >/dev/null 2>&1 ;;
+	grub-reboot) grub-editenv - unset next_entry >/dev/null 2>&1 ;;
+	esac
+	return 0
 }
 
 # How the start went that the last arming was for: the kernel came up, or the
@@ -1186,6 +1202,60 @@ auto_boot() {
 	st running_auto "$([[ -d $(auto_kernels)/$running ]] && echo yes || echo no)"
 	auto_verdict
 	auto_arm
+}
+
+# ---------- hibernation ----------
+#
+# A computer coming back from hibernation has to start the kernel that wrote
+# the image: another one cannot take the memory back. So before a hibernation
+# the next start is the running kernel: ours is set to start once (also when
+# the updates are off, as a kernel started once from the Kernel page is not
+# started again by itself), and for the distribution's kernel a kernel of ours
+# set to start once is not any more. Until the computer is back the updates
+# set nothing; then what was set before is set again. systemd-sleep runs this
+# (system-sleep/tilewin-kernel-sleep) with pre|post and what it does; suspending
+# alone needs nothing. Hibernation is never held up: what fails is only said.
+
+hibernates() { [[ $1 == hibernate || $1 == hybrid-sleep || $1 == suspend-then-hibernate ]]; }
+
+sleep_pre() { # action
+	hibernates "$1" || return 0
+	rm -rf "$hib_dir"
+	mkdir -p "$hib_dir"
+	local k="" b="" m="" out
+	if [[ -f $auto_state/armed ]]; then
+		cp "$auto_state/armed" "$hib_dir/armed"
+		{ read -r k b m < "$auto_state/armed"; } 2>/dev/null
+	fi
+	[[ -n $k && $k != "$running" ]] && disarm_once "$k"
+	if ours "$running"; then
+		if out=$(arm_once "$running"); then
+			echo "$running" > "$hib_dir/set"
+		else
+			echo "$running could not be set for the start after the hibernation: ${out:0:200}" >&2
+		fi
+		# should the image not be taken back, the start into it counts as
+		# the start of the running kernel, not as a missed start of another
+		[[ -n $k ]] && echo "$running $(boot_id) 0" > "$auto_state/armed"
+	else
+		rm -f "$auto_state/armed"
+	fi
+	return 0
+}
+
+sleep_post() { # action
+	hibernates "$1" || return 0
+	[[ -d $hib_dir ]] || return 0
+	local set
+	set=$(cat "$hib_dir/set" 2>/dev/null)
+	[[ -n $set ]] && disarm_once "$set"
+	if [[ -f $hib_dir/armed ]]; then
+		mkdir -p "$auto_state"
+		cp "$hib_dir/armed" "$auto_state/armed"
+	fi
+	rm -rf "$hib_dir"
+	auto_on && auto_arm
+	return 0
 }
 
 # Where the store goes: below /var/lib, or /home when that is another file
@@ -1484,5 +1554,7 @@ auto-schedule) [[ $# -eq 4 ]] || die "usage: tilewin-kernel-root auto-schedule d
 	auto_schedule "$2" "$3" "$4" ;;
 auto-run) auto_run ;;
 auto-boot) auto_boot ;;
-*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|livepatch-start|livepatch-boot|scheduler-default|auto-enable|auto-disable|auto-set|auto-config|auto-schedule|auto-run|auto-boot" ;;
+sleep) [[ $# -eq 3 && ($2 == pre || $2 == post) ]] || die "usage: tilewin-kernel-root sleep pre|post ACTION"
+	if [[ $2 == pre ]]; then sleep_pre "$3"; else sleep_post "$3"; fi ;;
+*) die "usage: tilewin-kernel-root info|install|remove|load|boot|tools|livepatch-apply|livepatch-undo|livepatch-start|livepatch-boot|scheduler-default|auto-enable|auto-disable|auto-set|auto-config|auto-schedule|auto-run|auto-boot|sleep" ;;
 esac

@@ -76,6 +76,15 @@ foreach unit : ['tilewin-kernel-auto.service', 'tilewin-kernel-auto-now.service'
 		install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),
 	)
 endforeach
+# a hibernation comes back in the kernel that made it: before it, the next
+# start is set to the running kernel, after it what was set before
+configure_file(
+	input: 'tilewin-kernel-sleep.in',
+	output: 'tilewin-kernel-sleep',
+	configuration: kernel_conf,
+	install_dir: join_paths(prefix, 'lib', 'systemd', 'system-sleep'),
+	install_mode: 'rwxr-xr-x',
+)
 install_data(
 	'tilewin-kernel-auto.timer',
 	install_dir: join_paths(prefix, 'lib', 'systemd', 'system'),

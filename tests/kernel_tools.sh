@@ -908,6 +908,15 @@ check "  and the user is told" bash -c "grep -q 'New kernel ready' '$work/notes'
 check "  the distribution's kernel runs on without fixes" test -z "$(status fixes)"
 check "  done: idle, with the time it looked" bash -c "[ '$(status state)' = idle ] && [ -n '$(status checked)' ]"
 
+# a hibernation of the distribution's kernel: no kernel of ours starts after it
+: > "$calls"
+R sleep pre hibernate > "$work/out" 2>&1
+check "before a hibernation of the distribution's kernel ours is not set any more" grep -qx 'bootctl set-oneshot ' "$calls"
+check "  nor counted as missed, should the image not come back" test ! -e "$auto/armed"
+R sleep post hibernate > "$work/out" 2>&1
+check "  after it, it is set again" test "$(grep bootctl "$calls" | tail -n 1)" = "bootctl set-oneshot tilewin-$a1.efi"
+check "  as before" test "$(cut -d' ' -f1 "$auto/armed")" = "$a1"
+
 # a run stopped half way (Stop) leaves a build cancelled: the next run builds it again
 echo cancelled > "$akernels/$a1/state"
 TILEWIN_KERNEL_AUTO_MANUAL=1 R auto-run > "$work/out" 2>&1
@@ -1032,6 +1041,24 @@ EOF
 rm -f "$astore/cache/tileWin/kernel/releases.json"
 TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
 check "at the end of the series the newest series is built" test "$(status next)" = 9.10.2-tilewin1
+
+# a hibernation with a newer kernel set for the next start: it comes back in the running one
+armed_before=$(cat "$auto/armed")
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$a3 R sleep pre suspend > "$work/out" 2>&1
+check "suspending sets nothing" test ! -s "$calls"
+TILEWIN_KERNEL_RUNNING=$a3 R sleep pre hibernate > "$work/out" 2>&1
+check "before a hibernation the running kernel is set for the next start" \
+	test "$(grep bootctl "$calls" | tail -n 1)" = "bootctl set-oneshot tilewin-$a3.efi"
+check "  and counts as the kernel set, should the image not come back" test "$(cut -d' ' -f1 "$auto/armed")" = "$a3"
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$a3 R auto-run > "$work/out" 2>&1
+check "  a run of the updates meanwhile sets no other" bash -c "! grep -q bootctl '$calls'"
+TILEWIN_KERNEL_RUNNING=$a3 R sleep post hibernate > "$work/out" 2>&1
+check "after it the new kernel is set again" \
+	test "$(grep bootctl "$calls" | tail -n 1)" = "bootctl set-oneshot tilewin-9.10.2-tilewin1.efi"
+check "  with what was known of its starts" test "$(cut -d' ' -f1,3 "$auto/armed")" = "$(cut -d' ' -f1,3 <<<"$armed_before")"
+check "  and nothing is left of the hibernation" test ! -e "$sb/run/tilewin-kernel/hibernate"
 
 # Stop while a kernel builds: the run and its build end, and say so
 mk_tree 9.10.4 "$work/trees"

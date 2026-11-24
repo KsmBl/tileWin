@@ -1,0 +1,6 @@
+#!/bin/sh
+# systemd-sleep runs this before (pre) and after (post) suspending or
+# hibernating, with what it does: a hibernation comes back in the kernel that
+# made it, not in one tileWin set for the next start (tilewin-kernel-root).
+[ -x @libexecdir@/tilewin-kernel-root ] || exit 0
+exec @libexecdir@/tilewin-kernel-root sleep "$1" "$2"
