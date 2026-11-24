@@ -351,6 +351,7 @@ struct dialog_state {
 	char *widget, *type;
 	GPtrArray *rules; // struct shown_rule
 	struct accounts_editor *accounts;
+	GtkWidget *colors; // the group the color options go to, folded at the end
 };
 
 struct shown_rule {
@@ -808,6 +809,9 @@ static GtkWidget *add_option_row(struct settings *s, GtkWidget *list, const char
 	}
 	if (desktop && strcmp(opt->key, "size") == 0) {
 		return add_size_row(s, list, widget, opt);
+	}
+	if (shown_dialog && shown_dialog->colors && color_key(opt->key)) {
+		list = shown_dialog->colors; // all the colors together, folded
 	}
 	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
 	bool styles = desktop && strcmp(opt->key, "style") == 0;
@@ -1821,6 +1825,32 @@ static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool deskt
 	}
 }
 
+/* A section folded under its heading, at the end of content; the fold. */
+static GtkWidget *folded(GtkWidget *content, const char *title, GtkWidget *child) {
+	GtkWidget *expander = gtk_expander_new(NULL);
+	GtkWidget *heading = gtk_label_new(title);
+	gtk_widget_add_css_class(heading, "tw-heading");
+	gtk_expander_set_label_widget(GTK_EXPANDER(expander), heading);
+	gtk_expander_set_child(GTK_EXPANDER(expander), child);
+	gtk_widget_set_margin_top(expander, 14);
+	gtk_box_append(GTK_BOX(content), expander);
+	return expander;
+}
+
+static bool rule_colors_any(struct dialog_state *d) {
+	GtkWidget *fold = NULL;
+	for (guint i = 0; i < d->rules->len; i++) {
+		struct shown_rule *r = d->rules->pdata[i];
+		if (r->holds == rule_colors_any) {
+			fold = r->widget;
+		}
+	}
+	GtkWidget *box = fold ? gtk_expander_get_child(GTK_EXPANDER(fold)) : NULL;
+	GtkWidget *group = box ? gtk_widget_get_first_child(box) : NULL; // (ui_group's box)
+	GtkWidget *list = group ? gtk_widget_get_last_child(group) : NULL;
+	return list && group_any(list);
+}
+
 static void dialog_gone(GtkWidget *window, gpointer data) {
 	struct dialog_state *d = data;
 	if (shown_dialog == d) {
@@ -1861,6 +1891,9 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	shown_dialog = d;
 	look_list = NULL;
 	g_signal_connect(window, "destroy", G_CALLBACK(dialog_gone), d);
+	// (kept until the end, where it goes in its fold)
+	GtkWidget *colors_box = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+	d->colors = ui_group(colors_box, NULL, "Empty for the default, mostly the theme's.");
 
 	bool agents = strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
 		strcmp(type, "codex") == 0;
@@ -1901,11 +1934,20 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 		}
 		if (!any) {
 			ui_row(list, NULL, "This widget has no settings of its own.", NULL);
+		} else if (!gtk_widget_get_first_child(list)) {
+			gtk_widget_set_visible(group_box(list), false); // (its colors are folded below)
 		}
 	}
 	if (quick) {
 		quick_editor_attach(s, content);
 	}
+
+	// the colors, folded: hidden when none of them counts with the settings as they are
+	if (gtk_widget_get_first_child(d->colors)) {
+		shown_when(d, folded(content, "Colors", colors_box), rule_colors_any);
+	}
+	g_object_unref(colors_box);
+	d->colors = NULL;
 
 	// the mouse actions, folded: a command for a click replaces what the widget does
 	GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1914,13 +1956,7 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	for (const struct tw_widget_option *opt = tw_widget_events; opt->key; opt++) {
 		add_option_row(s, events, name, opt, false);
 	}
-	GtkWidget *expander = gtk_expander_new(NULL);
-	GtkWidget *heading = gtk_label_new("Mouse actions");
-	gtk_widget_add_css_class(heading, "tw-heading");
-	gtk_expander_set_label_widget(GTK_EXPANDER(expander), heading);
-	gtk_expander_set_child(GTK_EXPANDER(expander), actions);
-	gtk_widget_set_margin_top(expander, 14);
-	gtk_box_append(GTK_BOX(content), expander);
+	folded(content, "Mouse actions", actions);
 	dialog_refresh();
 
 	if (strcmp(type, "custom") == 0) {
