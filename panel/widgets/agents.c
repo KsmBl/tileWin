@@ -751,15 +751,39 @@ struct desk_look {
 	enum pd_bar_look look;
 };
 
+static void desk_fonts(struct desk_look *l, const struct gadget_palette *pal) {
+	snprintf(l->font, sizeof(l->font), "%s %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->bold, sizeof(l->bold), "%s Bold %dpx", pal->family, (int)(l->text + 0.5));
+	snprintf(l->small, sizeof(l->small), "%s %dpx", pal->family, (int)(l->text * 0.85 + 0.5));
+}
+
+/* The text smaller than this is not made, in pixels: it could not be read. */
+#define DESK_TEXT_MIN 7.0
+
+/*
+ * Too little room for what is to be shown: its text and bars f times as big (the
+ * margins stay), not below DESK_TEXT_MIN; returns the factor it took. The lines
+ * keep the room their text needs, so they never run into each other.
+ */
+static double desk_shrink(struct desk_look *l, const struct gadget_palette *pal, double f) {
+	if (f >= 1 || l->text <= DESK_TEXT_MIN) {
+		return 1;
+	}
+	f = fmax(f, DESK_TEXT_MIN / l->text);
+	l->text *= f;
+	l->sc *= f;
+	l->bar_h *= f;
+	desk_fonts(l, pal);
+	return f;
+}
+
 static void desk_look(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal,
 		struct desk_look *l) {
 	l->sc = ctx->scale;
 	l->pad = 12 * l->sc;
 	int size = place_int(w, "text_size", 13, 8, 40);
 	l->text = size * l->sc;
-	snprintf(l->font, sizeof(l->font), "%s %dpx", pal->family, (int)(l->text + 0.5));
-	snprintf(l->bold, sizeof(l->bold), "%s Bold %dpx", pal->family, (int)(l->text + 0.5));
-	snprintf(l->small, sizeof(l->small), "%s %dpx", pal->family, (int)(l->text * 0.85 + 0.5));
+	desk_fonts(l, pal);
 	l->title = place_bool(w, "title", true);
 	l->updated = place_bool(w, "updated", true);
 	l->bars = place_bool(w, "bars", true);
@@ -833,17 +857,25 @@ static double list_height(struct widget *w, const struct source *s, const struct
  * as it needs, the room between y and bottom shared out in that measure.
  */
 static void desk_list(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom) {
+		const struct gadget_palette *pal, const struct desk_look *look, double y, double bottom) {
 	cairo_t *cr = ctx->cairo;
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = source_items(w, s, items);
+	struct desk_look smaller = *look, *l = &smaller;
 	double need = list_height(w, s, l);
-	double k = need > 0 ? (bottom - y) / need : 1;
+	// too little room: smaller lines, not lines over each other
+	for (int i = 0; i < 4 && need > bottom - y && desk_shrink(l, pal, (bottom - y) / need) < 1; i++) {
+		need = list_height(w, s, l);
+	}
+	double k = need > 0 ? fmax((bottom - y) / need, 1) : 1;
 	for (int i = 0; i < count; i++) {
 		char value[64];
 		double share = item_value(s, items[i], l->brief, value, sizeof(value));
 		bool bar = share >= 0 && l->bars;
 		double row = list_line_h(l, bar) * k;
+		if (y + row > bottom + 0.5) {
+			break; // no room for it even with the smallest text: left out, not drawn over
+		}
 		// a bar grows with the room, the text above it keeps most of the rest
 		double bh = bar ? (l->bar_h > 0 ? l->bar_h : fmax(list_bar_h(l), row * 0.18)) : 0;
 		double line = bar ? (row - bh) * 0.8 : row;
@@ -1102,15 +1134,14 @@ static void desk_whole(struct widget *w, const struct source *s, struct gadget_c
  * the room; in the list the room left over goes to a chart of the week under
  * each account that has one.
  */
-static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
-		const struct gadget_palette *pal, struct desk_look *l, const char *style) {
+/* How high each account's part is (need) and how many have a chart; the total. */
+static double accounts_need(struct widget *w, const struct desk_look *l, bool charts, bool list,
+		bool bars, double need[32], int *with_chart) {
 	struct agents_state *st = w->data;
-	bool charts = strcmp(style, "week") == 0 || strcmp(style, "windows") == 0;
-	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0;
 	double title = l->title ? l->text * 1.8 : 0, gap = l->text * 1.1;
-	double line = l->text * 1.6, foot = l->updated ? l->text * 1.3 : 0;
-	double need[32] = { 0 }, total = 0;
-	int count = st->count < 32 ? st->count : 32, with_chart = 0;
+	double line = l->text * 1.6, foot = l->updated ? l->text * 1.3 : 0, total = 0;
+	int count = st->count < 32 ? st->count : 32;
+	*with_chart = 0;
 	for (int k = 0; k < count; k++) {
 		const struct source *s = &st->src[k];
 		const struct tw_claude_item *items[MAX_ITEMS];
@@ -1128,10 +1159,30 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 				l->text * (8 + 1.3 * (n - windows));
 			need[k] += s->usage.updated ? foot : 0;
 		}
-		with_chart += (charts || list) && !desk_missing(w, s) && desk_has_chart(s);
+		*with_chart += (charts || list) && !desk_missing(w, s) && desk_has_chart(s);
 		total += need[k] + (k > 0 ? gap : 0);
 	}
+	return total;
+}
+
+static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, struct desk_look *l, const char *style) {
+	struct agents_state *st = w->data;
+	bool charts = strcmp(style, "week") == 0 || strcmp(style, "windows") == 0;
+	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0;
+	double need[32] = { 0 };
+	int count = st->count < 32 ? st->count : 32, with_chart = 0;
 	double room = ctx->height - 2 * l->pad;
+	double total = accounts_need(w, l, charts, list, bars, need, &with_chart);
+	// too little room for it all: smaller text, measured again (lines over each
+	// other would be what squeezing them gave)
+	for (int i = 0; i < 4 && total > room && desk_shrink(l, pal, room / total) < 1; i++) {
+		total = accounts_need(w, l, charts, list, bars, need, &with_chart);
+	}
+	// still too little with the smallest text: each account its share, its title
+	// kept and of its lines those that fit (desk_list leaves the others out)
+	double scale = total > room && total > 0 ? room / total : 1;
+	double gap = l->text * 1.1, line = l->text * 1.6;
 	// what is left: the charts (the chart styles need room for them at all)
 	double spare = room - total, chart = 0;
 	if (with_chart > 0 && spare > 0) {
@@ -1143,8 +1194,6 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 			}
 		}
 	}
-	// too little room for it all: everything a little smaller
-	double scale = spare < 0 && total > 0 ? room / total : 1;
 	double y = l->pad;
 	for (int k = 0; k < count; k++) {
 		const struct source *s = &st->src[k];

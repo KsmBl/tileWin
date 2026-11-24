@@ -246,6 +246,21 @@ else
 	fail "no Antigravity on the desktop to click"
 fi
 
+# ---- the card too small for its lines (3 by 3 cells): smaller text, and of the lines
+# those that fit, not lines over each other
+sed -i 's/size 3x10/size 3x3/' "$conf"
+ipc panel reload >/dev/null 2>&1
+for _ in $(seq 1 15); do
+	words 880 0 400 500 > "$work/seen"
+	has Codex && has Claude && has Antigravity && break
+	sleep 1
+done
+has Codex && has Claude && has Antigravity ||
+	fail "in a card too small for them the accounts cannot be read: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+# (each account's "in 59 min" of its 5-hour limit, read only where nothing lies over it)
+[ "$(grep -c "^min " "$work/seen")" -ge 3 ] ||
+	fail "in a card too small for them the lines run into each other: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed"
