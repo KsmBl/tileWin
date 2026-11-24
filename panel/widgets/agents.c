@@ -1076,6 +1076,120 @@ static void desk_chart(const struct source *s, struct gadget_ctx *ctx,
 	free(charts.points);
 }
 
+/* The readings of an account for its charts: its history, or Antigravity's. */
+static void desk_charts_of(const struct source *s, struct claude_charts *charts) {
+	if (!s->tool && s->point_count > 0) {
+		claude_charts_set(charts, s->points, s->point_count, &s->chart_usage, time(NULL));
+	} else {
+		claude_charts_load(charts, s->have ? &s->usage : NULL, time(NULL));
+	}
+}
+
+/* The charts in the colors of the desktop's widgets. */
+static void desk_chart_look(const struct gadget_palette *pal, const struct desk_look *l,
+		struct claude_look *look) {
+	bool light_text = (pal->fg >> 24 & 0xff) + (pal->fg >> 16 & 0xff) + (pal->fg >> 8 & 0xff) > 384;
+	*look = (struct claude_look){
+		.fg = pal->fg, .dim = pal->dim,
+		.chart_bg = claude_desktop_chart_bg(pal),
+		.chart_grid = pal->grid,
+		.chart_line = pal->mono ? pal->fg : pal->accent,
+		.label_bg = light_text ? 0x202020ff : 0xffffffff,
+		.chart_radius = pal->radius > 0 ? 4 : 0,
+		.dark = light_text,
+		.sunken = pal->look == GADGET_CLASSIC,
+		.font = l->small, .bold = l->bold,
+	};
+}
+
+/* The time along the chart of all agents (chart_scale): relative by default. */
+static enum claude_scale desk_scale(struct widget *w) {
+	const char *v = place_conf(w, "chart_scale", NULL);
+	return v && strcmp(v, "absolute") == 0 ? CLAUDE_SCALE_ABSOLUTE : CLAUDE_SCALE_RELATIVE;
+}
+
+static bool desk_has_chart(const struct source *s);
+static const char *desk_missing(struct widget *w, const struct source *s);
+
+/*
+ * The style "together": every agent a line of its color, a legend of them at
+ * the top; the 5-hour limits, the weekly ones or both (charts), below each
+ * other or next to each other (arrange), each line along the clock or from the
+ * start of its window to its reset (chart_scale).
+ */
+static void desk_together(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal, const struct desk_look *l) {
+	struct agents_state *st = w->data;
+	struct claude_charts charts[8];
+	struct claude_line lines[8];
+	char names[8][64];
+	int seen[TW_AGENT_COUNT] = { 0 }, n = 0;
+	for (int k = 0; k < st->count && n < 8; k++) {
+		const struct source *s = &st->src[k];
+		if (desk_missing(w, s) || !desk_has_chart(s)) {
+			continue;
+		}
+		charts[n] = (struct claude_charts){ 0 };
+		desk_charts_of(s, &charts[n]);
+		if (!charts[n].have) {
+			free(charts[n].points);
+			continue;
+		}
+		int agent = s->account.agent;
+		int nth = agent >= 0 && agent < TW_AGENT_COUNT ? seen[agent]++ : 0;
+		if (nth > 0) {
+			snprintf(names[n], sizeof(names[n]), "%s %d", tw_agent_names[agent], nth + 1);
+		} else {
+			snprintf(names[n], sizeof(names[n]), "%s", tw_agent_names[agent]);
+		}
+		lines[n] = (struct claude_line){ &charts[n], names[n], claude_agent_color(agent, nth) };
+		n++;
+	}
+	if (n == 0) {
+		pd_text(ctx->cairo, l->font, "Nothing written down yet", l->pad, l->pad,
+			ctx->width - 2 * l->pad, 30 * l->sc, pal->dim, PD_LEFT);
+		return;
+	}
+	struct claude_look look;
+	desk_chart_look(pal, l, &look);
+	struct claude_hover hover = { ctx->pointer, ctx->px, ctx->py };
+	double x = l->pad, y = l->pad, width = ctx->width - 2 * l->pad;
+	y += claude_lines_legend(ctx->cairo, &look, lines, n, charts[0].now, x, y, width, true) +
+		4 * l->sc;
+	const char *which = place_conf(w, "charts", "both");
+	bool five = strcmp(which, "week") != 0, week = strcmp(which, "5h") != 0;
+	bool side = five && week && strcmp(place_conf(w, "arrange", "below"), "next") == 0;
+	enum claude_scale scale = desk_scale(w);
+	double bottom = ctx->height - l->pad, gap = 8 * l->sc, label = l->text * 1.4;
+	for (int i = 0; i < 2; i++) {
+		bool weekly = i == 1;
+		if ((weekly && !week) || (!weekly && !five)) {
+			continue;
+		}
+		// its part of the card: all of it, or the top (left) half and the bottom (right)
+		double cx = x, cy = y, cw = width, ch = bottom - y;
+		if (five && week) {
+			if (side) {
+				cw = (width - gap) / 2;
+				cx = weekly ? x + cw + gap : x;
+			} else {
+				ch = (bottom - y - gap) / 2;
+				cy = weekly ? y + ch + gap : y;
+			}
+		}
+		pd_text(ctx->cairo, l->bold, weekly ? "Weekly limits" : "5-hour limits", cx, cy, cw,
+			label, pal->fg, PD_LEFT);
+		struct pbox box = { (int)cx, (int)(cy + label), (int)cw, (int)(ch - label) };
+		if (box.height > 40 && box.width > 60) {
+			claude_chart_lines(&hover, lines, n, weekly, scale, 0, charts[0].now, ctx->cairo,
+				&look, box);
+		}
+	}
+	for (int i = 0; i < n; i++) {
+		free(charts[i].points);
+	}
+}
+
 /* Why an account shows no values yet, in a line; NULL when it has them. */
 static const char *desk_missing(struct widget *w, const struct source *s) {
 	if (show_connect(s)) {
@@ -1243,13 +1357,16 @@ static bool agents_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal) {
 	const char *style = ctx->style ? ctx->style : "";
 	if (strcmp(style, "list") != 0 && strcmp(style, "bar") != 0 && strcmp(style, "ring") != 0 &&
-			strcmp(style, "week") != 0 && strcmp(style, "windows") != 0) {
+			strcmp(style, "week") != 0 && strcmp(style, "windows") != 0 &&
+			strcmp(style, "together") != 0) {
 		return false; // compact and tile: the taskbar look
 	}
 	struct agents_state *st = w->data;
 	struct desk_look l;
 	desk_look(w, ctx, pal, &l);
-	if (st->count == 1) {
+	if (strcmp(style, "together") == 0) {
+		desk_together(w, ctx, pal, &l);
+	} else if (st->count == 1) {
 		desk_whole(w, &st->src[0], ctx, pal, &l, style);
 	} else if (st->count > 1) {
 		desk_accounts(w, ctx, pal, &l, style);
@@ -1338,7 +1455,8 @@ static char *agents_tooltip(struct widget *w, struct hotspot *hs) {
 	if (node && node->argc > 0) {
 		style = node->argv[0];
 	}
-	if (style && (strcmp(style, "week") == 0 || strcmp(style, "windows") == 0)) {
+	if (style && (strcmp(style, "week") == 0 || strcmp(style, "windows") == 0 ||
+			strcmp(style, "together") == 0)) {
 		return NULL; // the chart shows the reading under the pointer instead
 	}
 	struct agents_state *st = w->data;

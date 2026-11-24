@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include "tw_widgets.h"
 
@@ -25,30 +26,22 @@ static const struct tw_widget_option opts_clock[] = {
  */
 static const char *const choice_history_days[] = { "8", "14", "30", "60", "90", "180", "365",
 	NULL };
-static const char *const choice_charts[] = { "each", "together", NULL };
-static const char *const choice_chart_scale[] = { "windows", "absolute", "relative", NULL };
+static const char *const choice_charts[] = { "both", "5h", "week", NULL };
+static const char *const choice_arrange[] = { "below", "next", NULL };
+static const char *const choice_chart_scale[] = { "relative", "absolute", NULL };
 static const struct tw_widget_option opts_agents[] = {
 	// "accounts" and "show" have editors of their own in the settings
 	{ "accounts", "Accounts", "Which, in this order: claude:~/.claude codex:~/.codex copilot "
 		"antigravity; all found by default", NULL },
 	{ "show", "Shows", "What of each, in this order: usage_5h usage_7d reset_5h reset_7d "
 		"left_5h left_7d", NULL },
-	{ "warning", "Warning above", "Percent; the bar and the value turn to the warning color, "
-		"80 by default", NULL },
-	{ "critical", "Critical above", "Percent; 95 by default", NULL },
-	{ "account_checks", "Ask the accounts", "Every five minutes, Codex, Copilot and "
-		"Antigravity are started to ask their accounts how much is used, also while none "
-		"of them runs: with their logins, online. Copilot's allowance comes only so. No by "
-		"default", choice_yes_no },
-	{ "charts", "Charts", "One chart of the account picked in the flyout, or one of all "
-		"accounts, each a line in its own color", choice_charts },
-	{ "chart_scale", "Time in the charts", "As the limits run: the last three 5-hour "
-		"windows, the week up to its reset. Absolute: the day from midnight, the week from "
-		"Monday to Sunday. Relative: each line from the start of its window to its reset, "
-		"one on day 2 of its week, another on day 6. All accounts in one chart run "
-		"relative by default", choice_chart_scale },
-	{ "history_days", "Keep the usage", "How far back the charts go: the wheel over one "
-		"shows the older windows. 8 days by default and at least", choice_history_days },
+	{ "warning", "Warning above", "Percent used from which a value turns orange, 80 by "
+		"default", NULL },
+	{ "critical", "Critical above", "Percent used from which it turns red, 95 by default",
+		NULL },
+	{ "account_checks", "Ask the accounts", "Every five minutes, online with their logins, "
+		"also while none of them runs; Copilot tells its allowance only so", choice_yes_no },
+	{ "history_days", "Keep the usage", "How far back the charts scroll", choice_history_days },
 	{ 0 },
 };
 
@@ -61,26 +54,32 @@ static const char *const choice_text_size[] = { "10", "11", "13", "15", "18", "2
 
 /* How the Claude and the Codex widget look on the taskbar: in their widget block. */
 const struct tw_widget_option tw_claude_taskbar_look[] = {
-	{ "bars", "Bars", "A bar beside each usage", choice_yes_no },
-	{ "bar_width", "Bar width", "Pixels, 34 by default", choice_bar_width },
-	{ "bar_height", "Bar height", "Pixels, 6 by default", choice_bar_height },
-	{ "bar_color", "Bar color", "e.g. #d97757; the accent of the theme by default", NULL },
-	{ "labels", "Names", "short: 5h and 7d before each value; none: the values alone",
+	{ "bars", "Bars", "A bar beside each value", choice_yes_no },
+	{ "bar_width", "Bar width", "34 px by default", choice_bar_width },
+	{ "bar_height", "Bar height", "6 px by default", choice_bar_height },
+	{ "bar_color", "Bar color", "The theme's accent by default", NULL },
+	{ "labels", "Names", "5h and 7d before the values, or the values alone",
 		choice_labels_taskbar },
 	{ 0 },
 };
 
 /* How it looks on the desktop: in its desktop_widgets entry, apart from the taskbar. */
 const struct tw_widget_option tw_claude_desktop_look[] = {
-	{ "title", "Title", "Claude Code or Codex and the account at the top", choice_yes_no },
-	{ "updated", "How old", "\"As of ... ago\" at the bottom", choice_yes_no },
-	{ "bars", "Bars and rings", "The bar under each usage, the ring of the Ring style",
-		choice_yes_no },
-	{ "bar_height", "Bar thickness", "Pixels at a cell of 100; from the room there is by default",
-		choice_desk_bar },
-	{ "bar_color", "Bar color", "e.g. #d97757; the accent of the theme by default", NULL },
-	{ "text_size", "Text size", "Pixels at a cell of 100, 13 by default", choice_text_size },
-	{ "labels", "Names", "long: 5-hour limit, Weekly limit; short: 5h, 7d", choice_labels_desktop },
+	{ "title", "Title", "The agent and its account above its values", choice_yes_no },
+	{ "updated", "How old", "\"As of … ago\" under them", choice_yes_no },
+	{ "bars", "Bars and rings", NULL, choice_yes_no },
+	{ "bar_height", "Bar thickness", "At a cell of 100 pixels; from the room there is by "
+		"default", choice_desk_bar },
+	{ "bar_color", "Bar color", "The theme's accent by default", NULL },
+	{ "text_size", "Text size", "At a cell of 100 pixels", choice_text_size },
+	{ "labels", "Names", "5-hour limit and Weekly limit, or 5h and 7d", choice_labels_desktop },
+	// the style "together", all agents in one chart
+	{ "charts", "Charts", "The 5-hour limits, the weekly ones or both", choice_charts },
+	{ "arrange", "Arranged", "The two charts one above the other, or side by side",
+		choice_arrange },
+	{ "chart_scale", "Time", "Relative: each line from the start of its window to its reset, "
+		"where it is in its own. Absolute: all along the same day, and Monday to Sunday",
+		choice_chart_scale },
 	{ 0 },
 };
 
@@ -417,6 +416,7 @@ static const struct tw_widget_style styles_claude[] = {
 	{ "bar", "Bar of the 5-hour limit", 3, 1 },
 	{ "week", "Chart of the week", 4, 2 },
 	{ "windows", "Chart of the last three 5-hour windows", 4, 2 },
+	{ "together", "All agents in one chart", 4, 3 },
 	{ 0 },
 };
 static const struct tw_widget_style styles_kernel[] = {
@@ -589,13 +589,20 @@ const char *tw_widget_choice_label(const char *key, const char *choice) {
 		const char *key, *choice, *label;
 	} labels[] = {
 		// NULL: the default
-		{ "charts", NULL, "The account shown" },
-		{ "charts", "each", "The account shown" },
-		{ "charts", "together", "All accounts in one chart" },
-		{ "chart_scale", NULL, "As the limits run" },
-		{ "chart_scale", "windows", "As the limits run" },
-		{ "chart_scale", "absolute", "Absolute: a day, Monday to Sunday" },
-		{ "chart_scale", "relative", "Relative: each from start to reset" },
+		{ "charts", NULL, "Both" },
+		{ "charts", "both", "Both" },
+		{ "charts", "5h", "5-hour limits" },
+		{ "charts", "week", "Weekly limits" },
+		{ "arrange", NULL, "Below each other" },
+		{ "arrange", "below", "Below each other" },
+		{ "arrange", "next", "Next to each other" },
+		{ "chart_scale", NULL, "Relative" },
+		{ "chart_scale", "relative", "Relative: each from its start to its reset" },
+		{ "chart_scale", "absolute", "Absolute: the day, Monday to Sunday" },
+		{ "labels", "long", "Long" },
+		{ "labels", "short", "Short" },
+		{ "labels", "none", "None" },
+		{ "text_size", NULL, "13 px" },
 		{ "history_days", NULL, "8 days" },
 		{ "history_days", "8", "8 days" },
 		{ "history_days", "14", "2 weeks" },
@@ -605,6 +612,13 @@ const char *tw_widget_choice_label(const char *key, const char *choice) {
 		{ "history_days", "180", "Half a year" },
 		{ "history_days", "365", "A year" },
 	};
+	// sizes in pixels
+	static char px[32];
+	if (key && choice && (strcmp(key, "bar_width") == 0 || strcmp(key, "bar_height") == 0 ||
+			strcmp(key, "text_size") == 0) && choice[0] >= '0' && choice[0] <= '9') {
+		snprintf(px, sizeof(px), "%s px", choice);
+		return px;
+	}
 	for (size_t i = 0; key && i < sizeof(labels) / sizeof(labels[0]); i++) {
 		if (strcmp(labels[i].key, key) == 0 && (choice ? labels[i].choice &&
 				strcmp(labels[i].choice, choice) == 0 : !labels[i].choice)) {

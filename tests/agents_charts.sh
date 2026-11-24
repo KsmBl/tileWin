@@ -1,14 +1,15 @@
 #!/bin/bash
-# The charts of the AI agent usage widget's flyout with all accounts in one chart
-# (charts together), a Claude Code folder and a Codex folder with a history (no
-# real agent is run or touched):
-#  - a legend names both accounts, each a line in the chart of the 5-hour and of
-#    the weekly limits;
+# The AI agent usage widget on the desktop in the style "together", all agents in
+# one chart, with a Claude Code folder and a Codex folder with a history (no real
+# agent is run or touched):
+#  - a legend names both, each a line in the chart of the 5-hour limits at the
+#    top of the card and in the one of the weekly limits below it;
 #  - relative by default: each line from the start of its window to its reset,
 #    the weeks along "day 1" to "day 7" (Claude Code on day 6, Codex on day 2);
-#  - chart_scale absolute: along the clock, the day from midnight ("today") and
-#    the week from Monday to Sunday, the wheel back to the week before;
-#  - the account shown alone (no charts setting) keeps its last three 5-hour windows.
+#  - arrange next and chart_scale absolute: the two side by side, along the clock,
+#    the week from Monday to Sunday;
+#  - charts week: the weekly chart alone;
+#  - the flyout stays the one of an account, its last three 5-hour windows.
 # What is shown is read with tesseract.
 #
 # usage: agents_charts.sh <build dir> <source dir>
@@ -108,7 +109,7 @@ printf '{"rate_limits":{"five_hour":{"used_percentage":37,"resets_at":%d},"seven
 
 sed -e 's/^\tright tray keyboard volume/\tright agents tray keyboard volume/' \
 	"$source_dir/config/taskbar.conf" > "$conf"
-printf 'widget agents {\n\tcharts together\n}\n' >> "$conf"
+printf 'desktop_widgets {\n\tagents {\n\t\tstyle together\n\t\tsize 5x4\n\t}\n}\n' >> "$conf"
 cat > "$work/tilewin.conf" <<EOF
 wallpaper solid #204070
 session_restore no
@@ -171,43 +172,52 @@ close_flyout() {
 	sleep 0.5
 }
 
-# ---- together, relative by default: a legend of both, the weeks in their days
-if open_flyout; then
-	# (the legend over the charts, under the headline)
-	legend_y=$(grep -m1 "^Codex " "$work/seen" | cut -d' ' -f3)
-	[ -n "$legend_y" ] && [ "$legend_y" -lt 130 ] && has Claude ||
-		fail "no legend of both accounts over the charts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	[ "$(count day)" -ge 5 ] ||
-		fail "the weekly chart of all accounts is not from start to reset in days: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	has reset || fail "the titles do not say from start to reset"
-	close_flyout
-fi
-
-# ---- absolute: the day from midnight, the week Monday to Sunday; the wheel goes a week back
-sed -i 's/^\tcharts together/&\n\tchart_scale absolute/' "$conf"
-ipc panel reload >/dev/null 2>&1
-sleep 2
-if open_flyout; then
-	has Mon && has Sun || fail "the absolute week is not Monday to Sunday: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	has today || fail "the absolute 5-hour chart is not of today"
-	[ "$(count day)" -ge 5 ] && fail "the absolute charts still count the days of the windows"
-	set -- $(grep -m1 "^Mon " "$work/seen" | cut -d' ' -f2,3)
-	if [ $# -eq 2 ]; then
-		"$pointer" 1280 900 scroll $(($1 + 100)) $(($2 - 40)) -1 >/dev/null 2>&1
+# the card in the top right corner (x y w h of it alone: tesseract reads the small
+# labels of the charts only without the wallpaper around), read until it shows both agents
+card() {
+	for _ in $(seq 1 20); do
+		words "$@" > "$work/seen"
+		has Codex && has Claude && return 0
 		sleep 1
-		words 300 0 980 430 > "$work/seen"
-		has back || fail "the wheel over the week did not go back: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	fi
-	close_flyout
-fi
+	done
+	return 1
+}
+at() { grep -m1 "^$1 " "$work/seen" | cut -d' ' -f"$2"; }
 
-# ---- the account shown alone, as before
-sed -i -e '/^\tcharts together/d' -e '/^\tchart_scale absolute/d' "$conf"
+# ---- by default: both charts, one below the other, each line in its own window
+card 715 15 490 390 || fail "the card does not name both agents: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+has 5-hour && has Weekly || fail "the card has not both charts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+five_y=$(at 5-hour 3)
+week_y=$(at Weekly 3)
+[ -n "$five_y" ] && [ -n "$week_y" ] && [ "$week_y" -gt $((five_y + 60)) ] ||
+	fail "the weekly chart is not below the 5-hour one ($five_y, $week_y)"
+[ "$(count day)" -ge 5 ] ||
+	fail "the weekly chart is not from start to reset in days: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+
+# ---- next to each other, along the clock
+sed -i 's/^\t\tstyle together/&\n\t\tarrange next\n\t\tchart_scale absolute/' "$conf"
+sed -i 's/^\t\tsize 5x4/\t\tsize 7x3/' "$conf"
 ipc panel reload >/dev/null 2>&1
 sleep 2
+card 520 15 685 290 || fail "after the reload the card does not name both agents"
+has Mon && has Sun || fail "the absolute week is not Monday to Sunday: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+[ "$(count day)" -ge 5 ] && fail "the absolute charts still count the days of the windows"
+five_x=$(at 5-hour 2)
+week_x=$(at Weekly 2)
+[ -n "$five_x" ] && [ -n "$week_x" ] && [ "$week_x" -gt $((five_x + 150)) ] ||
+	fail "the two charts are not next to each other ($five_x, $week_x)"
+
+# ---- the weekly chart alone
+sed -i 's/^\t\tarrange next/\t\tcharts week/' "$conf"
+ipc panel reload >/dev/null 2>&1
+sleep 2
+card 520 15 685 290 || fail "after the reload the card does not name both agents"
+has Weekly || fail "no weekly chart"
+has 5-hour && fail "with charts week the 5-hour chart is still there"
+
+# ---- the flyout stays the one of the account clicked
 if open_flyout; then
-	has three || fail "the account alone has not its last three 5-hour windows: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-	[ "$(count day)" -ge 5 ] && fail "the account alone is drawn in days of its window"
+	has three || fail "the flyout has not the account's last three 5-hour windows: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 	close_flyout
 fi
 

@@ -8,7 +8,8 @@
 # its arrow up puts it between them, and taskbar.conf has show "usage_5h
 # reset_5h usage_7d" for the widget; the settings are still running after it
 # (the rows are made again on every change). With two accounts the arrow of the
-# second puts it first in "accounts".
+# second puts it first in "accounts"; asking the accounts is offered then (not
+# with Claude Code alone); bars off hide their width.
 #
 # usage: settings_claude.sh <build dir> <source dir>
 set -u
@@ -98,12 +99,12 @@ click 1166 1119 # the gear of the AI agent usage widget in the right section
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
-click 350 984 # tick: Time until the 5-hour limit resets (under the accounts)
+click 350 822 # tick: Time until the 5-hour limit resets (under the accounts)
 wait_until 5 sh -c "[ \"\$(sed -n '/^widget agents {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
 	fail "ticking wrote nothing: $(shows)"
 [ "$(shows)" = "usage_5h usage_7d reset_5h" ] || fail "after the tick it shows '$(shows)'"
 wait_still 5 screen
-click 886 984 # its arrow up
+click 886 822 # its arrow up
 wait_until 5 sh -c "sed -n '/^widget agents {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
 	fail "the arrow did not move it up: '$(shows)'"
 "$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"' ||
@@ -118,9 +119,29 @@ click 1166 1119 # the gear again
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open again"
 wait_still 5 screen
-click 887 608 # the arrow up of Codex, the second account
+click 886 590 # the arrow up of Codex, the second account
 wait_until 5 sh -c "grep -q 'accounts codex:$work/codex claude:$work/claude' '$conf'" ||
 	fail "the arrow did not put Codex first: $(grep accounts "$conf")"
+
+# ---- only what counts: asking the accounts with Codex among them (Claude Code is
+# never asked); bars off hide their width (the words of the dialog read with
+# tesseract, when there is one)
+said() { grim -g "290,300 700x1700" "$work/dialog.png" 2>/dev/null &&
+	tesseract "$work/dialog.png" - 2>/dev/null | tr -s ' \n' '\n\n'; }
+if command -v tesseract >/dev/null 2>&1; then
+	wait_still 5 screen
+	said > "$work/said"
+	grep -qi '^width$' "$work/said" || fail "the bar width is not shown with bars"
+	grep -q '^Ask$' "$work/said" || fail "with Codex there is no asking the accounts"
+fi
+click 916 1102 # Bars off
+wait_until 5 sh -c "sed -n '/^widget agents {/,/^}/p' '$conf' | grep -q 'bars no'" ||
+	fail "the switch did not turn the bars off"
+if command -v tesseract >/dev/null 2>&1; then
+	wait_still 5 screen
+	said > "$work/said"
+	grep -qi '^width$' "$work/said" && fail "without bars their width is still shown"
+fi
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

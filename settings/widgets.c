@@ -339,6 +339,85 @@ struct cstmt *widget_desktop_entry(struct settings *s, const char *widget) {
 	return entry && entry->children ? entry : NULL;
 }
 
+/* ---------- what the dialog shows, as the settings are ---------- */
+
+/*
+ * A widget's dialog shows only what counts with the settings as they are: the
+ * bar width only with bars, on the desktop only what its style draws. Each
+ * such row or group has a rule, checked again after every change.
+ */
+struct dialog_state {
+	struct settings *s;
+	char *widget, *type;
+	GPtrArray *rules; // struct shown_rule
+	struct accounts_editor *accounts;
+};
+
+struct shown_rule {
+	GtkWidget *widget;
+	bool (*holds)(struct dialog_state *d);
+};
+
+static struct dialog_state *shown_dialog; // the dialog open (it is modal: one at a time)
+
+static void dialog_refresh(void) {
+	struct dialog_state *d = shown_dialog;
+	for (guint i = 0; d && i < d->rules->len; i++) {
+		struct shown_rule *r = d->rules->pdata[i];
+		gtk_widget_set_visible(r->widget, r->holds(d));
+	}
+}
+
+static void shown_when(struct dialog_state *d, GtkWidget *widget,
+		bool (*holds)(struct dialog_state *d)) {
+	if (!d || !widget || !holds) {
+		return;
+	}
+	struct shown_rule *r = g_new0(struct shown_rule, 1);
+	r->widget = widget;
+	r->holds = holds;
+	g_ptr_array_add(d->rules, r);
+	gtk_widget_set_visible(widget, holds(d));
+}
+
+/* A group of ui_group: the box of its heading and its rows. */
+static GtkWidget *group_box(GtkWidget *list) {
+	return gtk_widget_get_parent(list);
+}
+
+/* An option as written: of the desktop entry, or of the widget block (g_free). */
+static char *dialog_value(struct dialog_state *d, const char *key, bool desktop) {
+	struct cstmt *block = desktop ? widget_desktop_entry(d->s, d->widget) :
+		confdoc_block(d->s->taskbar, "widget", d->widget, false);
+	char *value = cstmt_join(confdoc_child(block, key, NULL), 0);
+	if (value && !*value) {
+		g_free(value);
+		value = NULL;
+	}
+	return value;
+}
+
+static bool dialog_is(struct dialog_state *d, const char *key, bool desktop, const char *want) {
+	char *value = dialog_value(d, key, desktop);
+	bool is = value && g_ascii_strcasecmp(value, want) == 0;
+	g_free(value);
+	return is;
+}
+
+/* Whether its desktop style is one of a list ("list bar ring"). */
+static bool style_in(struct dialog_state *d, const char *styles) {
+	char *style = dialog_value(d, "style", true);
+	if (!style) {
+		const struct tw_widget_info *info = tw_widget_find(d->type);
+		style = g_strdup(info && info->styles ? info->styles[0].name : "");
+	}
+	char **names = g_strsplit(styles, " ", -1);
+	bool in = g_strv_contains((const char *const *)names, style);
+	g_strfreev(names);
+	g_free(style);
+	return in;
+}
+
 /* ---------- one option, one row ---------- */
 
 struct opt_binding {
@@ -373,6 +452,7 @@ static void write_option(struct settings *s, const char *widget, const char *key
 		confdoc_set(d, block, key, NULL, NULL);
 	}
 	settings_taskbar_changed(s);
+	dialog_refresh();
 }
 
 static void write_desktop_option(struct settings *s, const char *widget, const char *key,
@@ -386,6 +466,7 @@ static void write_desktop_option(struct settings *s, const char *widget, const c
 	g_free(quoted);
 	settings_taskbar_changed(s);
 	desktop_page_refresh(s);
+	dialog_refresh();
 }
 
 static void write_bound(struct opt_binding *b, const char *value) {
@@ -605,7 +686,7 @@ static void on_size_click(GtkGestureClick *click, int n, double x, double y, gpo
 	size_set(e, c, r);
 }
 
-static void add_size_row(struct settings *s, GtkWidget *list, const char *widget,
+static GtkWidget *add_size_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt) {
 	struct size_editor *e = g_new0(struct size_editor, 1);
 	e->s = s;
@@ -658,11 +739,64 @@ static void add_size_row(struct settings *s, GtkWidget *list, const char *widget
 	g_signal_connect(e->rows, "value-changed", G_CALLBACK(on_size_spin), e);
 	g_object_set_data_full(G_OBJECT(box), "editor", e, size_editor_free);
 	size_show(e);
-	ui_row(list, opt->title, "Cells of the icon grid it takes, columns × rows: click the grid, "
-		"or Default for what its style takes", box);
+	return ui_row(list, opt->title, "Cells of the icon grid it takes, columns × rows: click "
+		"the grid, or Default for what its style takes", box);
 }
 
-static void add_option_row(struct settings *s, GtkWidget *list, const char *widget,
+/* A yes or no option with a default known here: a switch. */
+static const struct {
+	const char *key;
+	bool on;
+} switches[] = {
+	{ "bars", true }, { "title", true }, { "updated", true }, { "account_checks", false },
+};
+
+struct switch_binding {
+	struct opt_binding b;
+	bool on;             // its default
+	const char *yes, *no; // what is written for each
+};
+
+static gboolean on_option_switch(GtkSwitch *sw, gboolean state, gpointer data) {
+	struct switch_binding *w = data;
+	write_bound(&w->b, (bool)state == w->on ? NULL : state ? w->yes : w->no);
+	gtk_switch_set_state(sw, state);
+	return TRUE;
+}
+
+static void switch_binding_free(gpointer data, GClosure *closure) {
+	struct switch_binding *w = data;
+	g_free(w->b.widget);
+	g_free(w);
+}
+
+/* A switch writing yes for on and no for off, nothing for its default (on). */
+static GtkWidget *add_switch_row_words(struct settings *s, GtkWidget *list, const char *widget,
+		const struct tw_widget_option *opt, bool desktop, bool on, const char *value,
+		const char *yes, const char *no) {
+	struct switch_binding *w = g_new0(struct switch_binding, 1);
+	w->yes = yes;
+	w->no = no;
+	w->b.s = s;
+	w->b.widget = g_strdup(widget);
+	w->b.desktop = desktop;
+	w->b.opt = opt;
+	w->on = on;
+	bool active = value ? g_ascii_strcasecmp(value, yes) == 0 ||
+		g_ascii_strcasecmp(value, "true") == 0 || g_ascii_strcasecmp(value, "on") == 0 : on;
+	GtkWidget *sw = gtk_switch_new();
+	gtk_switch_set_active(GTK_SWITCH(sw), active);
+	g_signal_connect_data(sw, "state-set", G_CALLBACK(on_option_switch), w,
+		switch_binding_free, 0);
+	return ui_row(list, opt->title, opt->hint, sw);
+}
+
+static GtkWidget *add_switch_row(struct settings *s, GtkWidget *list, const char *widget,
+		const struct tw_widget_option *opt, bool desktop, bool on, const char *value) {
+	return add_switch_row_words(s, list, widget, opt, desktop, on, value, "yes", "no");
+}
+
+static GtkWidget *add_option_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt, bool desktop) {
 	char *row_type = widget_type_of(widget);
 	bool own_editor = (strcmp(row_type, "agents") == 0 || strcmp(row_type, "claude") == 0 ||
@@ -670,17 +804,24 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 		strcmp(opt->key, "accounts") == 0);
 	g_free(row_type);
 	if (own_editor) {
-		return; // ticked and sorted in a group of its own
+		return NULL; // ticked and sorted in a group of its own
 	}
 	if (desktop && strcmp(opt->key, "size") == 0) {
-		add_size_row(s, list, widget, opt);
-		return;
+		return add_size_row(s, list, widget, opt);
 	}
 	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
 	bool styles = desktop && strcmp(opt->key, "style") == 0;
 	struct cstmt *block = desktop ? widget_desktop_entry(s, widget) :
 		confdoc_block(s->taskbar, "widget", widget, false);
 	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
+	for (size_t i = 0; opt->choices && i < G_N_ELEMENTS(switches); i++) {
+		if (strcmp(switches[i].key, opt->key) == 0) {
+			GtkWidget *row = add_switch_row(s, list, widget, opt, desktop, switches[i].on,
+				value && *value ? value : NULL);
+			g_free(value);
+			return row;
+		}
+	}
 	struct opt_binding *b = g_new0(struct opt_binding, 1);
 	b->s = s;
 	b->widget = g_strdup(widget);
@@ -738,8 +879,9 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 			opt_binding_free, 0);
 		control = text_option_control(widget, opt->key, control);
 	}
-	ui_row(list, opt->title, opt->hint, control);
+	GtkWidget *row = ui_row(list, opt->title, opt->hint, control);
 	g_free(value);
+	return row;
 }
 
 static void remove_own_rows(GtkWidget *list);
@@ -751,7 +893,7 @@ static GtkWidget *own_row(GtkWidget *content);
 
 /*
  * The items of the Claude widget, ticked and in order: "show" of its block for
- * the taskbar, of its desktop_widgets entry for the desktop, each with presets
+ * the taskbar, of its desktop_widgets entry for the desktop, each with defaults
  * of its own. Ticked items come first, in their order; the arrows move them.
  */
 struct show_editor {
@@ -760,17 +902,13 @@ struct show_editor {
 	bool desktop;
 	GPtrArray *order;   // item ids, all of them: the ticked ones first
 	GHashTable *ticked; // id -> id
-	GtkWidget *list, *presets;
+	GtkWidget *list;
 	bool updating;
 	guint rebuild_idle;
 };
 
 static const char *show_default(struct show_editor *e) {
 	return e->desktop ? TW_CLAUDE_SHOW_DESKTOP : TW_CLAUDE_SHOW_TASKBAR;
-}
-
-static const struct tw_claude_preset *show_presets(struct show_editor *e) {
-	return e->desktop ? tw_claude_desktop_presets : tw_claude_taskbar_presets;
 }
 
 static char *show_current(struct show_editor *e) {
@@ -884,46 +1022,9 @@ static void on_show_down(GtkButton *button, gpointer data) {
 	show_move(data, g_object_get_data(G_OBJECT(button), "item"), 1);
 }
 
-static void on_show_preset(GObject *dropdown, GParamSpec *pspec, gpointer data) {
-	struct show_editor *e = data;
-	if (e->updating) {
-		return;
-	}
-	guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
-	const struct tw_claude_preset *presets = show_presets(e);
-	for (guint n = 0; presets[n].title; n++) {
-		if (n == i) {
-			show_load(e, presets[n].show);
-			show_write(e);
-			return;
-		}
-	}
-}
-
 static void show_rebuild(struct show_editor *e) {
 	e->updating = true;
 	remove_own_rows(e->list);
-	char *current = show_current(e);
-	const struct tw_claude_preset *presets = show_presets(e);
-	guint selected = GTK_INVALID_LIST_POSITION, n = 0;
-	for (; presets[n].title; n++) {
-		if (strcmp(presets[n].show, current) == 0) {
-			selected = n;
-		}
-	}
-	// a list of one's own shows as such in the presets
-	GtkStringList *model = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(e->presets)));
-	guint items = g_list_model_get_n_items(G_LIST_MODEL(model));
-	if (items > n) {
-		gtk_string_list_remove(model, n);
-	}
-	if (selected == GTK_INVALID_LIST_POSITION) {
-		gtk_string_list_append(model, "Your own");
-		selected = n;
-	}
-	gtk_drop_down_set_selected(GTK_DROP_DOWN(e->presets), selected);
-	g_free(current);
-
 	guint ticked = g_hash_table_size(e->ticked);
 	for (guint i = 0; i < e->order->len; i++) {
 		const char *id = e->order->pdata[i];
@@ -941,7 +1042,7 @@ static void show_rebuild(struct show_editor *e) {
 			G_CALLBACK(on_show_up), e));
 		gtk_box_append(GTK_BOX(box), order_arrow(false, on && i + 1 < ticked, on, "item",
 			(gpointer)id, G_CALLBACK(on_show_down), e));
-		gtk_list_box_insert(GTK_LIST_BOX(e->list), own_row(box), (int)i + 1); // (under the preset)
+		gtk_list_box_insert(GTK_LIST_BOX(e->list), own_row(box), (int)i);
 	}
 	e->updating = false;
 }
@@ -957,8 +1058,8 @@ static void show_editor_free(gpointer data) {
 	g_free(e);
 }
 
-static void show_editor_attach(struct settings *s, GtkWidget *content, const char *widget,
-		bool desktop) {
+static GtkWidget *show_editor_attach(struct settings *s, GtkWidget *content,
+		const char *widget, bool desktop) {
 	struct show_editor *e = g_new0(struct show_editor, 1);
 	e->s = s;
 	e->widget = g_strdup(widget);
@@ -972,20 +1073,12 @@ static void show_editor_attach(struct settings *s, GtkWidget *content, const cha
 	g_free(value);
 
 	GtkWidget *group = ui_group(content, desktop ? "What it shows on the desktop" :
-		"What it shows on the taskbar", "Tick what to show; the arrows put it earlier or "
-		"later. The time left is how long the limit lasts at the pace it was used at since "
-		"it started.");
-	GtkStringList *names = gtk_string_list_new(NULL);
-	const struct tw_claude_preset *presets = show_presets(e);
-	for (guint n = 0; presets[n].title; n++) {
-		gtk_string_list_append(names, presets[n].title);
-	}
-	e->presets = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
-	g_signal_connect(e->presets, "notify::selected", G_CALLBACK(on_show_preset), e);
-	ui_row(group, "Preset", NULL, e->presets);
+		"What it shows on the taskbar", "Ticked ones are shown, in this order. The time "
+		"left is how long a limit lasts at the pace it is used at.");
 	e->list = group;
 	g_object_set_data_full(G_OBJECT(e->list), "editor", e, show_editor_free);
 	show_rebuild(e);
+	return group;
 }
 
 /* ---------- the accounts of the AI agent usage widget ---------- */
@@ -1264,8 +1357,8 @@ static void accounts_rebuild(struct accounts_editor *e) {
 	e->updating = false;
 }
 
-static void accounts_editor_attach(struct settings *s, GtkWidget *content, const char *widget,
-		const char *type, bool desktop) {
+static struct accounts_editor *accounts_editor_attach(struct settings *s, GtkWidget *content,
+		const char *widget, const char *type, bool desktop) {
 	struct accounts_editor *e = g_new0(struct accounts_editor, 1);
 	e->s = s;
 	e->widget = g_strdup(widget);
@@ -1346,18 +1439,16 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 	}
 
 	e->list = ui_group(content, desktop ? "Accounts on the desktop" : "Accounts",
-		"Which agents' accounts it shows, in this order: the arrows put one earlier or later. "
-		"Claude Code shows its limits once its folder is connected.");
+		"Ticked ones are shown, in this order.");
 	accounts_rebuild(e);
 	// a Claude Code or Codex somewhere else (portable, another folder)
 	GtkWidget *add = gtk_button_new_with_label("Add a folder…");
 	gtk_widget_set_tooltip_text(add, "A Claude Code folder (its .claude, or the one "
 		"$CLAUDE_CONFIG_DIR names) or a Codex folder ($CODEX_HOME)");
 	g_signal_connect(add, "clicked", G_CALLBACK(on_account_add), e);
-	ui_row(e->list, "Installed somewhere else", "A portable Claude Code or Codex, or one with "
-		"a folder of its own", add);
+	ui_row(e->list, "Another folder", "A Claude Code or Codex installed elsewhere", add);
 	g_object_set_data_full(G_OBJECT(e->list), "editor", e, accounts_editor_free);
-	g_object_set_data(G_OBJECT(content), "accounts-group", e->list); // (asking them goes here)
+	return e;
 }
 
 /* ---------- the apps of the quick launch ---------- */
@@ -1541,42 +1632,205 @@ static const struct tw_widget_option *option_of(const struct tw_widget_info *inf
 	return NULL;
 }
 
-/*
- * The AI agent usage widget's settings in groups of their own: asking the
- * accounts under them, then the charts of the flyout (one chart for all, how
- * time runs along them, how long the usage is kept).
- */
-static void agents_groups(struct settings *s, GtkWidget *content, const char *name,
-		const struct tw_widget_info *info, bool desktop) {
-	GtkWidget *accounts = g_object_get_data(G_OBJECT(content), "accounts-group");
-	const struct tw_widget_option *checks = option_of(info, "account_checks");
-	if (accounts && checks) {
-		add_option_row(s, accounts, name, checks, false);
+/* ---------- the rules of the AI agent usage widget's dialog ---------- */
+
+/* The accounts it shows: the ticked ones of its editor. */
+static bool accounts_any(struct dialog_state *d, bool (*fits)(const char *id), int *count) {
+	struct accounts_editor *e = d->accounts;
+	bool any = false;
+	*count = 0;
+	for (guint i = 0; e && i < e->ids->len; i++) {
+		if (g_hash_table_contains(e->ticked, e->ids->pdata[i])) {
+			(*count)++;
+			any = any || fits(e->ids->pdata[i]);
+		}
 	}
-	GtkWidget *charts = ui_group(content, "Charts in the flyout", desktop ?
-		"Of the flyout a click on it opens; shared with the widget on the taskbar." :
-		"Of the flyout a click on the widget opens. The wheel over a chart goes back in time.");
-	static const char *const keys[] = { "charts", "chart_scale", "history_days", NULL };
+	return any;
+}
+
+static bool not_claude(const char *id) {
+	return !g_str_has_prefix(id, "claude:") && strcmp(id, "claude") != 0;
+}
+
+/* Asking the accounts: only Codex, Copilot and Antigravity are asked. */
+static bool rule_asks(struct dialog_state *d) {
+	int n;
+	return accounts_any(d, not_claude, &n);
+}
+
+/* On the taskbar: the bar's size and color only with bars. */
+static bool rule_taskbar_bars(struct dialog_state *d) {
+	return !dialog_is(d, "bars", false, "no");
+}
+
+/* On the desktop: what the style draws (the chart styles no items, no bars). */
+static bool rule_desk_items(struct dialog_state *d) {
+	return !style_in(d, "week windows together");
+}
+
+static bool rule_desk_bars(struct dialog_state *d) {
+	return style_in(d, "list bar ring compact tile");
+}
+
+static bool rule_desk_bar_look(struct dialog_state *d) {
+	return rule_desk_bars(d) && !dialog_is(d, "bars", true, "no");
+}
+
+static bool rule_desk_names(struct dialog_state *d) {
+	return style_in(d, "list bar ring");
+}
+
+static bool rule_desk_title(struct dialog_state *d) {
+	return style_in(d, "list bar ring week windows");
+}
+
+static bool rule_desk_text(struct dialog_state *d) {
+	return style_in(d, "list bar ring week windows together");
+}
+
+/* All agents in one chart: its charts, and how two of them are arranged. */
+static bool rule_together(struct dialog_state *d) {
+	return style_in(d, "together");
+}
+
+static bool rule_together_both(struct dialog_state *d) {
+	char *which = dialog_value(d, "charts", true);
+	bool both = !which || strcmp(which, "both") == 0;
+	g_free(which);
+	return rule_together(d) && both;
+}
+
+/* The rule of a row of its look, by its key; NULL: always there. */
+static bool (*look_rule(const char *key, bool desktop))(struct dialog_state *) {
+	if (!desktop) {
+		return strcmp(key, "bar_width") == 0 || strcmp(key, "bar_height") == 0 ||
+			strcmp(key, "bar_color") == 0 ? rule_taskbar_bars : NULL;
+	}
+	if (strcmp(key, "bars") == 0) {
+		return rule_desk_bars;
+	}
+	if (strcmp(key, "bar_height") == 0 || strcmp(key, "bar_color") == 0) {
+		return rule_desk_bar_look;
+	}
+	if (strcmp(key, "labels") == 0) {
+		return rule_desk_names;
+	}
+	if (strcmp(key, "title") == 0 || strcmp(key, "updated") == 0) {
+		return rule_desk_title;
+	}
+	if (strcmp(key, "text_size") == 0) {
+		return rule_desk_text;
+	}
+	return NULL;
+}
+
+/* Whether any row of a group is shown: a group of none is hidden too. */
+static bool group_any(GtkWidget *list) {
+	for (GtkWidget *row = gtk_widget_get_first_child(list); row;
+			row = gtk_widget_get_next_sibling(row)) {
+		if (gtk_widget_get_visible(row)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static GtkWidget *look_list; // (of the dialog open)
+
+static bool rule_look_any(struct dialog_state *d) {
+	return look_list && group_any(look_list);
+}
+
+/* An option of a list by its key. */
+static const struct tw_widget_option *option_in(const struct tw_widget_option *opts,
+		const char *key) {
+	for (const struct tw_widget_option *opt = opts; opt && opt->key; opt++) {
+		if (strcmp(opt->key, key) == 0) {
+			return opt;
+		}
+	}
+	return NULL;
+}
+
+static bool chart_key(const char *key) {
+	return strcmp(key, "charts") == 0 || strcmp(key, "arrange") == 0 ||
+		strcmp(key, "chart_scale") == 0;
+}
+
+/*
+ * The AI agent usage widget's dialog, in the order it is thought about: which
+ * accounts; on the desktop its style (with the chart of all agents' own
+ * settings); what it shows and how that looks; where it sits on the desktop;
+ * the general settings; the mouse actions folded below.
+ */
+static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool desktop) {
+	struct settings *s = d->s;
+	const char *name = d->widget;
+	const struct tw_widget_info *info = tw_widget_find(d->type);
+	const struct tw_widget_option *look = tw_widget_look(d->type, desktop);
+	d->accounts = accounts_editor_attach(s, content, name, d->type, desktop);
+	if (desktop) {
+		GtkWidget *style = ui_group(content, "Style", NULL);
+		add_option_row(s, style, name, option_in(tw_widget_desktop_options, "style"), true);
+		static const char *const keys[] = { "charts", "arrange", "chart_scale", NULL };
+		for (int i = 0; keys[i]; i++) {
+			shown_when(d, add_option_row(s, style, name, option_in(look, keys[i]), true),
+				strcmp(keys[i], "arrange") == 0 ? rule_together_both : rule_together);
+		}
+	}
+	GtkWidget *items = show_editor_attach(s, content, name, desktop);
+	if (desktop) {
+		shown_when(d, group_box(items), rule_desk_items);
+	}
+	if (look) {
+		look_list = ui_group(content, desktop ? "Look on the desktop" : "Look on the taskbar",
+			NULL);
+		for (const struct tw_widget_option *opt = look; opt->key; opt++) {
+			if (desktop && chart_key(opt->key)) {
+				continue; // (with the style)
+			}
+			shown_when(d, add_option_row(s, look_list, name, opt, desktop),
+				look_rule(opt->key, desktop));
+		}
+	}
+	if (desktop) {
+		GtkWidget *place = ui_group(content, "Place on the desktop",
+			"Dragging it on the desktop moves it too.");
+		for (const struct tw_widget_option *opt = tw_widget_desktop_options; opt->key; opt++) {
+			if (strcmp(opt->key, "style") != 0 && strcmp(opt->key, "seconds") != 0) {
+				add_option_row(s, place, name, opt, true);
+			}
+		}
+	}
+	GtkWidget *general = ui_group(content, "General", desktop ?
+		"Shared with the widget on the taskbar." : NULL);
+	static const char *const keys[] = { "account_checks", "warning", "critical",
+		"history_days", NULL };
 	for (int i = 0; keys[i]; i++) {
 		const struct tw_widget_option *opt = option_of(info, keys[i]);
 		if (opt) {
-			add_option_row(s, charts, name, opt, false);
+			GtkWidget *row = add_option_row(s, general, name, opt, false);
+			if (strcmp(keys[i], "account_checks") == 0) {
+				shown_when(d, row, rule_asks);
+			}
 		}
+	}
+	// (after its rows: hidden when the style shows none of them)
+	if (look_list) {
+		shown_when(d, group_box(look_list), rule_look_any);
 	}
 }
 
-/* When its values turn to the warning colors. */
-static void agents_limits(struct settings *s, GtkWidget *content, const char *name,
-		const struct tw_widget_info *info) {
-	GtkWidget *list = ui_group(content, "Warnings", "When a bar and its value turn to the "
-		"warning and to the critical color; shared by the taskbar and the desktop.");
-	static const char *const keys[] = { "warning", "critical", NULL };
-	for (int i = 0; keys[i]; i++) {
-		const struct tw_widget_option *opt = option_of(info, keys[i]);
-		if (opt) {
-			add_option_row(s, list, name, opt, false);
-		}
+static void dialog_gone(GtkWidget *window, gpointer data) {
+	struct dialog_state *d = data;
+	if (shown_dialog == d) {
+		shown_dialog = NULL;
+		look_list = NULL;
 	}
+	g_ptr_array_unref(d->rules);
+	g_free(d->widget);
+	g_free(d->type);
+	g_free(d);
 }
 
 void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
@@ -1599,10 +1853,20 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	g_free(subtitle);
 	gtk_widget_set_vexpand(page, TRUE);
 
-	if (desktop) {
+	struct dialog_state *d = g_new0(struct dialog_state, 1);
+	d->s = s;
+	d->widget = g_strdup(name);
+	d->type = g_strdup(type);
+	d->rules = g_ptr_array_new_with_free_func(g_free);
+	shown_dialog = d;
+	look_list = NULL;
+	g_signal_connect(window, "destroy", G_CALLBACK(dialog_gone), d);
+
+	bool agents = strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
+		strcmp(type, "codex") == 0;
+	if (desktop && !agents) {
 		GtkWidget *place = ui_group(content, "On the desktop",
-			"How it looks and which cells of the icon grid it takes. Dragging it on the "
-			"desktop moves it too.");
+			"Dragging it on the desktop moves it too.");
 		for (const struct tw_widget_option *opt = tw_widget_desktop_options; opt->key; opt++) {
 			if (strcmp(opt->key, "seconds") == 0 && strcmp(type, "clock") != 0) {
 				continue; // only clocks have seconds
@@ -1610,15 +1874,11 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
-	bool agents = strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
-		strcmp(type, "codex") == 0;
 	const struct tw_widget_info *info = tw_widget_find(type);
+	const struct tw_widget_option *own_look = agents ? NULL : tw_widget_look(type, desktop);
 	if (agents) {
-		// which accounts, asked how, and the charts of its flyout
-		accounts_editor_attach(s, content, name, type, desktop);
-		show_editor_attach(s, content, name, desktop);
+		agents_dialog(d, content, desktop);
 	}
-	const struct tw_widget_option *own_look = tw_widget_look(type, desktop);
 	if (own_look) {
 		// how it looks there, apart for each place
 		GtkWidget *look = ui_group(content, desktop ? "Look on the desktop" :
@@ -1631,10 +1891,7 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	bool quick = strcmp(type, "quicklaunch") == 0;
 	bool any = !agents && info && info->options && info->options->key;
 	// the quick launch's settings are its apps, in a group of their own below
-	if (agents) {
-		agents_groups(s, content, name, info, desktop);
-		agents_limits(s, content, name, info);
-	} else if (any || !quick) {
+	if (!agents && (any || !quick)) {
 		GtkWidget *list = ui_group(content, "Settings", desktop ?
 			"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
 			"Leave a field empty to use the default.");
@@ -1650,13 +1907,21 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 		quick_editor_attach(s, content);
 	}
 
-
-	GtkWidget *events = ui_group(content, "Mouse actions",
-		"Commands run when the widget is clicked or scrolled, e.g. exec pavucontrol. "
-		"On right click replaces the widget's menu.");
+	// the mouse actions, folded: a command for a click replaces what the widget does
+	GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	GtkWidget *events = ui_group(actions, NULL, "Commands run when the widget is clicked or "
+		"scrolled, e.g. exec pavucontrol. On right click replaces the widget's menu.");
 	for (const struct tw_widget_option *opt = tw_widget_events; opt->key; opt++) {
 		add_option_row(s, events, name, opt, false);
 	}
+	GtkWidget *expander = gtk_expander_new(NULL);
+	GtkWidget *heading = gtk_label_new("Mouse actions");
+	gtk_widget_add_css_class(heading, "tw-heading");
+	gtk_expander_set_label_widget(GTK_EXPANDER(expander), heading);
+	gtk_expander_set_child(GTK_EXPANDER(expander), actions);
+	gtk_widget_set_margin_top(expander, 14);
+	gtk_box_append(GTK_BOX(content), expander);
+	dialog_refresh();
 
 	if (strcmp(type, "custom") == 0) {
 		GtkWidget *danger = ui_group(content, "Script widget", NULL);
