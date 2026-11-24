@@ -651,6 +651,8 @@ struct gadget_ctx {
 	bool hover, pressed;
 	bool pointer;         // the pointer is over the card, at px, py
 	double px, py;
+	// the card's surface: hotspots of parts of the card (added over the whole card's)
+	struct psurface *surface;
 };
 /* The colors the desktop styles are drawn in, from the theme and its scheme. */
 struct gadget_palette {
@@ -746,6 +748,10 @@ struct agents_view {
 	time_t elsewhere_at;
 	const char *allowance;               // Copilot: the name of its allowance, else NULL
 	bool checks;                         // the accounts are asked (account_checks)
+	// Antigravity: the readings of its limit used most, for the charts (no history file)
+	const struct tw_claude_point *points;
+	int point_count;
+	const struct tw_claude_usage *chart_usage; // and the windows its charts draw
 };
 /* How many accounts it shows, their values read again now; 0 for another widget. */
 int agents_widget_accounts(struct widget *w);
@@ -754,6 +760,8 @@ bool agents_widget_view(struct widget *w, int i, struct agents_view *out);
 /* The account its flyout shows, and choosing another. */
 int agents_widget_current(struct widget *w);
 void agents_widget_pick(struct widget *w, int i);
+/* Whether the flyout is of one account alone (opened from its part of a desktop card). */
+bool agents_widget_alone(struct widget *w);
 struct tw_kernel_auto;
 struct tw_kernel_auto_summary;
 /* widgets/kernel.c: the state of the kernel updates, read again now; NULL for another widget. */

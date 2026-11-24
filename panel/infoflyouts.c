@@ -1230,7 +1230,11 @@ static void claude_sample(struct info_flyout *f) {
 	}
 	if (charts) {
 		// Claude Code and Codex keep a history; the others' windows have none here
-		claude_charts_load(charts, v.tool ? u : NULL, now);
+		if (!v.tool && v.points) {
+			claude_charts_set(charts, v.points, v.point_count, v.chart_usage, now); // Antigravity's
+		} else {
+			claude_charts_load(charts, v.tool ? u : NULL, now);
+		}
 	}
 	const char *name = have ? v.name : "AI agents";
 	snprintf(f->subtitle, sizeof(f->subtitle), "%s%s%s", name, u && u->account ? " · " : "",
@@ -1258,8 +1262,8 @@ static void claude_sample(struct info_flyout *f) {
 		snprintf(f->title, sizeof(f->title), five < 0 ? "of the week" : seven >= 0 ?
 			"of the 5-hour limit, %.0f%% of the week" : "of the 5-hour limit", seven);
 	}
-	// the other accounts: a click shows one of them instead
-	if (count > 1) {
+	// the other accounts: a click shows one of them instead (not in the flyout of one alone)
+	if (count > 1 && !agents_widget_alone(f->widget)) {
 		add_heading(f, "Accounts");
 		for (int i = 0; i < count; i++) {
 			struct agents_view o;

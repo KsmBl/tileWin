@@ -39,6 +39,21 @@ void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u
 	c->have = u && u->updated && u->seven_day.resets_at > 0;
 }
 
+void claude_charts_set(struct claude_charts *c, const struct tw_claude_point *points, int count,
+		const struct tw_claude_usage *u, time_t now) {
+	claude_charts_load(c, NULL, now);
+	if (count > 0 && points) {
+		c->points = malloc(count * sizeof(*points));
+		if (c->points) {
+			memcpy(c->points, points, count * sizeof(*points));
+			c->count = count;
+		}
+	}
+	c->five_hour = u ? u->five_hour : (struct tw_claude_window){ 0 };
+	c->seven_day = u ? u->seven_day : (struct tw_claude_window){ 0 };
+	c->have = u && u->updated && u->seven_day.resets_at > 0;
+}
+
 static double chart_x(struct pbox g, time_t start, time_t end, time_t t) {
 	double share = end > start ? (double)(t - start) / (double)(end - start) : 0;
 	return g.x + g.width * fmin(fmax(share, 0), 1);
@@ -506,9 +521,13 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	int tw = 0;
 	pd_text_size(cr, st->font, label, &tw, NULL);
 	double lx = now_x + 6 + tw > g.x + g.width - 4 ? now_x - 6 - tw : now_x + 6;
+	// over the "100%" of the scale (a week that only starts now): a line lower
+	int scale_w = 0;
+	pd_text_size(cr, st->font, "100%", &scale_w, NULL);
+	double ly = lx < g.x + 4 + scale_w + 4 ? g.y + 18 : g.y + 2;
 	bool hovering = f->inside && pbox_contains(&g, f->px, f->py);
 	if (!hovering) { // (the reading under the pointer says it then)
-		pd_text(cr, st->font, label, lx, g.y + 2, tw + 2, 16, st->fg, PD_LEFT);
+		pd_text(cr, st->font, label, lx, ly, tw + 2, 16, st->fg, PD_LEFT);
 	}
 	// at the time under the pointer: what was used, or where this pace leads
 	if (f->inside && pbox_contains(&g, f->px, f->py)) {

@@ -5,7 +5,9 @@
 #  - a click on one opens the flyout of that account, listing the others,
 #    and a click on another's row shows that one instead;
 #  - "accounts" leaves out the accounts not named;
-#  - the claude widget of an older config is the same widget, of its account.
+#  - the claude widget of an older config is the same widget, of its account;
+#  - on the desktop each account with a chart of its week, Antigravity's too, and a
+#    click on one the flyout of that account alone.
 # What is shown is read with tesseract, which the snipping tool uses as well.
 #
 # usage: agents_usage.sh <build dir> <source dir>
@@ -198,20 +200,44 @@ bar_until "37" 10 || # (tesseract reads the % sign as 9 at times)
 	fail "the claude widget of an older config does not show Claude Code's 37%: $(tr '\n' ' ' < "$work/seen")"
 has Codex && fail "the claude widget of an older config shows Codex too"
 
-# ---- on the desktop, two accounts in lines: each as high as its lines need, a chart
-# of the week under each, as there is room (in the top right corner, 3 by 8 cells)
-printf 'desktop_widgets {\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s\n\t\tsize 3x8\n\t}\n}\n' \
+# ---- on the desktop, three accounts in lines: each as high as its lines need, a chart
+# of the week under each, as there is room (in the top right corner, 3 by 10 cells);
+# Antigravity's from the readings of its status line
+agy=$XDG_STATE_HOME/tileWin/agent-usage/agy
+mkdir -p "$agy"
+for ago in 7200 3600 60; do
+	printf '{"at":%d,"data":{"quota":{"gemini-5h":{"remaining_fraction":0.8,"reset_time":"%s"},"gemini-weekly":{"remaining_fraction":0.7,"reset_time":"%s"}},"pid":0}}\n' \
+		$((now - ago)) "$(date -u -d @$((now + 3600)) +%Y-%m-%dT%H:%M:%SZ)" \
+		"$(date -u -d @$((now + 3 * 86400)) +%Y-%m-%dT%H:%M:%SZ)"
+done > "$agy/account.jsonl"
+printf 'desktop_widgets {\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s antigravity\n\t\tsize 3x10\n\t}\n}\n' \
 	"$codex" "$claude" >> "$conf"
 ipc panel reload >/dev/null 2>&1
-for _ in $(seq 1 15); do
+for _ in $(seq 1 20); do
 	words 880 0 400 680 > "$work/seen"
-	grep -q "^Claude " "$work/seen" && [ "$(grep -c "^now" "$work/seen")" -ge 2 ] && break
+	has Antigravity && [ "$(grep -c "^now" "$work/seen")" -ge 3 ] && break
 	sleep 1
 done
-has Codex && has Claude ||
-	fail "the desktop widget does not show both accounts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-[ "$(grep -c "^now" "$work/seen")" -ge 2 ] ||
+has Codex && has Claude && has Antigravity ||
+	fail "the desktop widget does not show the three accounts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+[ "$(grep -c "^now" "$work/seen")" -ge 3 ] ||
 	fail "the desktop widget has no chart of the week under each account: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+
+# ---- a click on an account's part of the card: the flyout of it alone, beside the card
+set -- $(grep -m1 "^Antigravity " "$work/seen" | cut -d' ' -f2,3)
+if [ $# -eq 2 ]; then
+	"$pointer" 1280 720 click "$1" $(($2 + 30)) >/dev/null 2>&1
+	sleep 1.5
+	words 0 0 900 680 > "$work/seen"
+	has Antigravity || fail "a click on Antigravity on the desktop opened no flyout of it: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+	grep -q "^30" "$work/seen" || fail "the flyout of Antigravity does not show its 30% of the week"
+	has Accounts && fail "the flyout of one account of the desktop card lists the others"
+	grep -qE "^(Sat|Sun|Mon|Tue|Wed|Thu|Fri)" "$work/seen" || fail "the flyout of Antigravity has no chart of its week"
+	"$pointer" 1280 720 click 100 300 >/dev/null 2>&1
+	sleep 0.5
+else
+	fail "no Antigravity on the desktop to click"
+fi
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

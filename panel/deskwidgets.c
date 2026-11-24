@@ -414,10 +414,18 @@ static void desk_render(struct psurface *s, cairo_t *cr) {
 		.pointer = ds->inside && !ds->dragging,
 		.px = ds->px,
 		.py = ds->py,
+		.surface = s,
 	};
 	if (gadget_draw(&gadget)) {
-		// the whole card is the widget: clicks and tooltips as on the taskbar
+		// the whole card is the widget: clicks and tooltips as on the taskbar (under the
+		// hotspots of its parts the widget drew, which come first)
 		psurface_add_hotspot(s, 0, 0, s->width, s->height, w, 0, 0, NULL);
+		list_t *spots = s->hotspots;
+		if (spots->length > 1) {
+			void *card = spots->items[spots->length - 1];
+			memmove(&spots->items[1], &spots->items[0], (spots->length - 1) * sizeof(void *));
+			spots->items[0] = card;
+		}
 		return;
 	}
 	struct gadget_palette pal;

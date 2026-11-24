@@ -30,6 +30,7 @@ struct agent_limit {
 	time_t unattributed_at, unattributed_from;
 	double unattributed;
 	bool live_account, account_blocked;
+	time_t idle_resets_at; // nothing used of it: the reset it tells (each reading a new one)
 };
 
 struct agent_usage {

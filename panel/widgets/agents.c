@@ -46,6 +46,7 @@
 
 #define RELOAD_MS 5000
 #define COLLECT_S 60      // what runs here, and Copilot and Antigravity: once a minute
+#define HOTSPOT_ACCOUNT 1 // the part of a desktop card of one account (its id the account)
 #define COLLECT_OPEN_S 15 // while the flyout is open, sooner
 #define MAX_ITEMS 12
 #define BAR_W 34
@@ -69,6 +70,11 @@ struct source {
 	time_t elsewhere_at;
 	char allowance[48];
 	const char *why; // why there are no values, when known
+	// Antigravity: the readings of its group of models used most (its 5-hour and its weekly
+	// limit), for the charts (it has no history file), and their windows as charts draw them
+	struct tw_claude_point *points;
+	int point_count;
+	struct tw_claude_usage chart_usage; // (only windows: nothing in it to free)
 };
 
 struct agents_state {
@@ -82,6 +88,7 @@ struct agents_state {
 	time_t collected_at;
 	char *found;      // the ids of all accounts found, when none are named
 	time_t found_at;  // looked for once a minute: it reads the running programs
+	bool alone;       // the flyout of one account alone: opened from its part of a desktop card
 };
 
 /* ---------- which accounts ---------- */
@@ -141,6 +148,7 @@ static void free_sources(struct agents_state *st) {
 	for (int i = 0; i < st->count; i++) {
 		tw_agent_account_finish(&st->src[i].account);
 		tw_claude_usage_finish(&st->src[i].usage);
+		free(st->src[i].points);
 	}
 	free(st->src);
 	st->src = NULL;
@@ -187,6 +195,11 @@ static void resolve(struct widget *w) {
 
 /* ---------- the values ---------- */
 
+static int point_by_time(const void *a, const void *b) {
+	const struct tw_claude_point *pa = a, *pb = b;
+	return (pa->at > pb->at) - (pa->at < pb->at);
+}
+
 static void from_collected(struct agents_state *st, struct source *s) {
 	struct agent_usage *u = st->collected;
 	s->running = 0;
@@ -215,6 +228,7 @@ static void from_collected(struct agents_state *st, struct source *s) {
 	}
 	time_t now = time(NULL);
 	struct tw_claude_usage agy = { 0 };
+	const struct agent_limit *fullest = NULL, *fullest_five = NULL; // Antigravity: of its charts
 	for (guint i = 0; i < u->limits->len; i++) {
 		const struct agent_limit *l = u->limits->pdata[i];
 		if ((int)l->kind != kind) {
@@ -237,12 +251,60 @@ static void from_collected(struct agents_state *st, struct source *s) {
 				agy.seven_day = l->usage.seven_day;
 			}
 			agy.updated = MAX(agy.updated, l->usage.updated);
+			// the weekly limit used most (of those used alike, the one read most)
+			if (l->chart.count > 0 && l->usage.seven_day.known && (!fullest ||
+					l->usage.seven_day.used > fullest->usage.seven_day.used ||
+					(l->usage.seven_day.used == fullest->usage.seven_day.used &&
+					l->chart.count > fullest->chart.count))) {
+				fullest = l;
+			}
 		}
 	}
 	if (s->account.agent == TW_AGENT_ANTIGRAVITY) {
 		tw_claude_usage_finish(&s->usage);
 		s->usage = agy;
 		s->have = agy.updated && (agy.five_hour.known || agy.seven_day.known);
+		free(s->points);
+		s->points = NULL;
+		s->point_count = 0;
+		s->chart_usage = (struct tw_claude_usage){ 0 };
+		if (fullest) {
+			// the 5-hour limit of the same group of models: "gemini-5h" of "gemini-weekly"
+			const char *dash = strrchr(fullest->name, '-');
+			size_t group = dash ? (size_t)(dash - fullest->name) : strlen(fullest->name);
+			for (guint i = 0; i < u->limits->len && !fullest_five; i++) {
+				const struct agent_limit *l = u->limits->pdata[i];
+				if ((int)l->kind == kind && l->usage.five_hour.known &&
+						strncmp(l->name, fullest->name, group) == 0 &&
+						(l->name[group] == '-' || !l->name[group])) {
+					fullest_five = l;
+				}
+			}
+			int n = fullest->chart.count + (fullest_five ? fullest_five->chart.count : 0);
+			s->points = malloc(n * sizeof(*s->points));
+			if (s->points) {
+				memcpy(s->points, fullest->chart.points, fullest->chart.count * sizeof(*s->points));
+				if (fullest_five) {
+					memcpy(s->points + fullest->chart.count, fullest_five->chart.points,
+						fullest_five->chart.count * sizeof(*s->points));
+				}
+				qsort(s->points, n, sizeof(*s->points), point_by_time);
+				s->point_count = n;
+			}
+			// the windows the charts draw: those of that group, one with nothing used yet
+			// from now to the reset it tells
+			s->chart_usage.updated = agy.updated;
+			s->chart_usage.seven_day = fullest->usage.seven_day;
+			if (!s->chart_usage.seven_day.resets_at) {
+				s->chart_usage.seven_day.resets_at = fullest->idle_resets_at;
+			}
+			if (fullest_five) {
+				s->chart_usage.five_hour = fullest_five->usage.five_hour;
+				if (!s->chart_usage.five_hour.resets_at) {
+					s->chart_usage.five_hour.resets_at = fullest_five->idle_resets_at;
+				}
+			}
+		}
 	} else if (s->account.agent == TW_AGENT_COPILOT) {
 		tw_claude_usage_finish(&s->usage);
 		s->usage = (struct tw_claude_usage){ .five_hour = u->copilot_billing,
@@ -944,7 +1006,12 @@ static void desk_chart(const struct source *s, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom,
 		bool week) {
 	struct claude_charts charts = { 0 };
-	claude_charts_load(&charts, s->have ? &s->usage : NULL, time(NULL));
+	if (!s->tool && s->point_count > 0) {
+		claude_charts_set(&charts, s->points, s->point_count, &s->chart_usage,
+			time(NULL)); // Antigravity's
+	} else {
+		claude_charts_load(&charts, s->have ? &s->usage : NULL, time(NULL));
+	}
 	if (!charts.have) {
 		pd_text(ctx->cairo, l->font, "Nothing written down yet", l->pad, y,
 			ctx->width - 2 * l->pad, 30 * l->sc, pal->dim, PD_LEFT);
@@ -996,9 +1063,12 @@ static const char *desk_missing(struct widget *w, const struct source *s) {
 	return "The limits come with its next answer";
 }
 
-/* Whether an account has a history to draw a chart of (Claude Code and Codex). */
+/* Whether an account has a history to draw a chart of (Claude Code, Codex, Antigravity). */
 static bool desk_has_chart(const struct source *s) {
-	return s->tool && s->have && s->usage.history && s->usage.seven_day.resets_at > 0;
+	if (!s->tool) {
+		return s->point_count > 0 && s->chart_usage.seven_day.resets_at > 0;
+	}
+	return s->usage.history && s->have && s->usage.seven_day.resets_at > 0;
 }
 
 /* One account the old way: the whole card, as with one account. */
@@ -1109,6 +1179,11 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 					desk_chart(s, ctx, pal, l, lines + l->text * 0.4, end, true);
 				}
 			}
+		}
+		// a click on its part of the card: the flyout of this account alone
+		if (ctx->surface) {
+			psurface_add_hotspot(ctx->surface, 0, (int)(top - gap * scale / 2), (int)ctx->width,
+				(int)(bottom - top + gap * scale), w, HOTSPOT_ACCOUNT, k, NULL);
 		}
 		y = bottom + gap * scale;
 	}
@@ -1235,6 +1310,7 @@ static bool agents_click(struct widget *w, struct psurface *s, struct hotspot *h
 		return false;
 	}
 	int k = hs && hs->id >= 0 && hs->id < st->count ? hs->id : 0;
+	bool alone = hs && hs->kind == HOTSPOT_ACCOUNT; // a desktop card's part of one account
 	const struct source *src = &st->src[k];
 	if (show_connect(src) && src->account.dir) {
 		char *quoted = g_shell_quote(src->account.dir);
@@ -1246,8 +1322,24 @@ static bool agents_click(struct widget *w, struct psurface *s, struct hotspot *h
 	}
 	// the limits in full, in a flyout in the look of the theme, of the account clicked
 	st->current = k;
+	st->alone = alone;
 	struct popup_anchor anchor = popup_anchor_for_bar(s, hs->box.x + hs->box.width, 0);
 	anchor.right_align = true;
+	struct pbox card, part;
+	if (alone && deskwidget_place(s, (struct pbox){ 0, 0, s->width, s->height }, &card) &&
+			deskwidget_place(s, hs->box, &part) && s->output) {
+		// beside the card, at the height of the account clicked, on the side with room
+		// (from its bottom upwards in the lower half of the screen)
+		bool left = card.x + card.width / 2 > s->output->width / 2;
+		bool above = part.y + part.height / 2 > s->output->height / 2;
+		anchor = (struct popup_anchor){
+			.output = s->output,
+			.x = left ? card.x - 8 : card.x + card.width + 8,
+			.y = above ? part.y + part.height : part.y,
+			.above = above,
+			.right_align = left,
+		};
+	}
 	info_flyout_toggle(w, anchor);
 	return true;
 }
@@ -1308,11 +1400,19 @@ bool agents_widget_view(struct widget *w, int i, struct agents_view *out) {
 		.allowance = s->account.agent == TW_AGENT_COPILOT ?
 			(s->allowance[0] ? s->allowance : "Allowance") : NULL,
 		.checks = widget_conf_bool(w, "account_checks", false),
+		.points = s->tool ? NULL : s->points,
+		.point_count = s->tool ? 0 : s->point_count,
+		.chart_usage = s->tool ? NULL : &s->chart_usage,
 	};
 	if (!s->have && !s->tool) {
 		out->usage = NULL;
 	}
 	return true;
+}
+
+bool agents_widget_alone(struct widget *w) {
+	struct agents_state *st = state_of(w);
+	return st && st->alone;
 }
 
 int agents_widget_current(struct widget *w) {

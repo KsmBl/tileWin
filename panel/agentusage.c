@@ -982,7 +982,9 @@ static void agy_normalize_deadlines(struct agent_limit *limit) {
 			win->resets_at = 0;
 		}
 	}
+	limit->idle_resets_at = 0;
 	if (current->used == 0 && (!active || !tw_claude_same_window(active, current->resets_at))) {
+		limit->idle_resets_at = current->resets_at; // (for a chart of the window to come)
 		current->resets_at = 0;
 	}
 }

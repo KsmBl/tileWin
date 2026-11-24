@@ -42,5 +42,8 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	cairo_t *cr, const struct claude_look *st, struct pbox box);
 /* Reads the history and the values of now into c (its points freed first). */
 void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u, time_t now);
+/* The same, of readings in hand (Antigravity's, from agentusage.c), copied. */
+void claude_charts_set(struct claude_charts *c, const struct tw_claude_point *points, int count,
+	const struct tw_claude_usage *u, time_t now);
 
 #endif
