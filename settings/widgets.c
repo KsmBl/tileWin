@@ -252,6 +252,87 @@ char *widget_title(const char *name, const char **description) {
 	return title ? title : g_strdup(name);
 }
 
+/*
+ * One change of the old widgets, if there is any left; false when none is. The
+ * document is parsed anew after each, so the search starts again every time.
+ */
+static bool replace_one_old(struct confdoc *d) {
+	struct cstmt *root = d->root;
+	static const char *const sections[] = { "left", "center", "right" };
+	for (guint i = 0; i < root->children->len; i++) {
+		struct cstmt *c = root->children->pdata[i];
+		// the taskbar of a mode: each becomes "agents", once in the layout
+		if (strcmp(c->name, "layout") == 0 && c->children) {
+			bool agents = false;
+			for (size_t k = 0; k < G_N_ELEMENTS(sections); k++) {
+				struct cstmt *line = confdoc_child(c, sections[k], NULL);
+				if (!line) {
+					continue;
+				}
+				GString *words = g_string_new(NULL);
+				bool changed = false;
+				for (int a = 0; a < cstmt_argc(line); a++) {
+					const char *name = cstmt_arg(line, a);
+					if (tw_widget_replaced_by_agents(name)) {
+						name = "agents";
+						changed = true;
+					}
+					if (strcmp(name, "agents") == 0) {
+						if (agents) {
+							changed = true;
+							continue;
+						}
+						agents = true;
+					}
+					char *quoted = conf_quote(name);
+					g_string_append_printf(words, "%s%s", words->len ? " " : "", quoted);
+					g_free(quoted);
+				}
+				if (changed) {
+					confdoc_set(d, c, sections[k], NULL, words->len ? words->str : NULL);
+					g_string_free(words, TRUE);
+					return true;
+				}
+				g_string_free(words, TRUE);
+			}
+		}
+		// their own settings
+		if (strcmp(c->name, "widget") == 0 && tw_widget_replaced_by_agents(cstmt_arg(c, 0))) {
+			confdoc_remove(d, c);
+			return true;
+		}
+	}
+	// the desktop: the entry of "agents" stays, else the first of theirs becomes it
+	struct cstmt *block = confdoc_child(root, "desktop_widgets", NULL);
+	if (block && block->children) {
+		bool agents = confdoc_child(block, "agents", NULL) != NULL;
+		for (guint i = 0; i < block->children->len; i++) {
+			struct cstmt *e = block->children->pdata[i];
+			if (tw_widget_replaced_by_agents(e->name)) {
+				if (agents) {
+					confdoc_remove(d, e);
+				} else {
+					confdoc_rename(d, e, "agents");
+				}
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool widgets_replace_old(struct confdoc *d) {
+	if (!d || d->error) {
+		return false;
+	}
+	bool changed = false;
+	// each change takes one away, so this ends; the bound only guards against a bug
+	for (int n = 0; n < 1000 && replace_one_old(d); n++) {
+		changed = true;
+	}
+	return changed;
+}
+
 struct cstmt *widget_desktop_entry(struct settings *s, const char *widget) {
 	struct cstmt *block = confdoc_block(s->taskbar, "desktop_widgets", NULL, false);
 	struct cstmt *entry = block ? confdoc_child(block, widget, NULL) : NULL;

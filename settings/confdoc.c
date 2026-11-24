@@ -485,6 +485,12 @@ void confdoc_replace(struct confdoc *doc, struct cstmt *stmt, const char *text) 
 	reparse(doc);
 }
 
+void confdoc_rename(struct confdoc *doc, struct cstmt *stmt, const char *name) {
+	g_string_erase(doc->text, stmt->start, stmt->name_end - stmt->start);
+	g_string_insert(doc->text, stmt->start, name);
+	reparse(doc);
+}
+
 void confdoc_append(struct confdoc *doc, struct cstmt *parent, const char *text) {
 	insert_at_end(doc, parent, text);
 	reparse(doc);

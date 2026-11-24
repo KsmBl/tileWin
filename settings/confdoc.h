@@ -67,6 +67,8 @@ void confdoc_set(struct confdoc *doc, struct cstmt *parent, const char *name,
 void confdoc_remove(struct confdoc *doc, struct cstmt *stmt);
 /* Replaces a whole statement (including its block) with text. */
 void confdoc_replace(struct confdoc *doc, struct cstmt *stmt, const char *text);
+/* Gives a statement another name, its arguments and block kept as they are. */
+void confdoc_rename(struct confdoc *doc, struct cstmt *stmt, const char *name);
 /* Appends a statement at the end of parent. */
 void confdoc_append(struct confdoc *doc, struct cstmt *parent, const char *text);
 

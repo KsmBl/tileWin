@@ -1,10 +1,13 @@
 #!/bin/sh
-# The settings of the claude widget: what it shows, ticked and in order. On
-# the Taskbar page its gear opens the dialog; ticking "Time until the 5-hour
-# limit resets" adds reset_5h after the two shown by default, its arrow up puts
-# it between them, and taskbar.conf has show "usage_5h reset_5h usage_7d" for
-# the widget; the settings are still running after it (the rows are made again
-# on every change).
+# The settings of the AI agent usage widget: what it shows, ticked and in
+# order. A config from before it, with the claude and codex widget on the
+# taskbar and the desktop, has them replaced when the settings open: "agents"
+# once in the layout, on the desktop its entry and none of theirs, their widget
+# blocks gone. On the Taskbar page its gear opens the dialog; ticking "Time
+# until the 5-hour limit resets" adds reset_5h after the two shown by default,
+# its arrow up puts it between them, and taskbar.conf has show "usage_5h
+# reset_5h usage_7d" for the widget; the settings are still running after it
+# (the rows are made again on every change).
 #
 # usage: settings_claude.sh <build dir> <source dir>
 set -u
@@ -37,8 +40,10 @@ export GIO_USE_VFS=local CLAUDE_CONFIG_DIR=$work/claude CODEX_HOME=$work/no-code
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" \
 	"$work/claude"
 conf=$XDG_CONFIG_HOME/tileWin/taskbar.conf
-sed -e 's/^\tright tray keyboard volume/\tright claude tray keyboard volume/' \
+sed -e 's/^\tright tray keyboard volume/\tright claude codex:2 tray keyboard volume/' \
 	"$source_dir/config/taskbar.conf" > "$conf"
+printf 'widget claude {\n\taccount ~/.claude\n}\nwidget codex:2 {\n\taccount ~/.codex\n}\n' >> "$conf"
+printf 'desktop_widgets {\n\tclaude {\n\t\tstyle list\n\t}\n\tcodex {\n\t\tstyle week\n\t}\n}\n' >> "$conf"
 
 failures=0
 fail() {
@@ -77,19 +82,27 @@ wait_until 20 sh -c "'$msg' -s '$sock' -t get_tree | grep -q '\"app_id\": \"org.
 screen() { grim "$work/shot.png" 2>/dev/null && md5sum < "$work/shot.png"; }
 wait_still 15 screen
 click() { "$pointer" 1280 3000 click "$1" "$2" >/dev/null 2>&1; }
-shows() { sed -n '/^widget claude {/,/^}/p' "$conf" | sed -n 's/^[[:space:]]*show //p' | tr -d '"'; }
+shows() { sed -n '/^widget agents {/,/^}/p' "$conf" | sed -n 's/^[[:space:]]*show //p' | tr -d '"'; }
 
-click 1166 1119 # the gear of the AI agent usage widget (claude in its config) in the right section
+grep -q '^	right agents tray keyboard volume' "$conf" ||
+	fail "the claude and codex widget on the taskbar did not become one agents: $(grep -m1 '^	right' "$conf")"
+grep -qE '^widget (claude|codex)' "$conf" && fail "the widget blocks of claude and codex are still there"
+desk=$(sed -n '/^desktop_widgets {/,/^}/p' "$conf")
+[ "$(printf '%s\n' "$desk" | grep -cE '^	(agents|claude|codex)')" = 1 ] &&
+	printf '%s\n' "$desk" | grep -q '^	agents {' && printf '%s\n' "$desk" | grep -q 'style list' ||
+	fail "the desktop has not one agents with the looks of the first: $(printf '%s' "$desk" | tr '\n' ' ')"
+
+click 1166 1119 # the gear of the AI agent usage widget in the right section
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
 click 382 1750 # tick: Time until the 5-hour limit resets (under the accounts)
-wait_until 5 sh -c "[ \"\$(sed -n '/^widget claude {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
+wait_until 5 sh -c "[ \"\$(sed -n '/^widget agents {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
 	fail "ticking wrote nothing: $(shows)"
 [ "$(shows)" = "usage_5h usage_7d reset_5h" ] || fail "after the tick it shows '$(shows)'"
 wait_still 5 screen
 click 847 1750 # its arrow up
-wait_until 5 sh -c "sed -n '/^widget claude {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
+wait_until 5 sh -c "sed -n '/^widget agents {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
 	fail "the arrow did not move it up: '$(shows)'"
 "$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"' ||
 	fail "the settings are gone after the changes"

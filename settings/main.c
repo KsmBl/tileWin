@@ -1079,6 +1079,14 @@ int main(int argc, char **argv) {
 	struct settings *s = &settings;
 	s->common = confdoc_open("common.conf");
 	s->taskbar = confdoc_open("taskbar.conf");
+	// a config from before the AI agent usage widget: the widgets it replaced go
+	if (widgets_replace_old(s->taskbar)) {
+		char *error = NULL;
+		if (!confdoc_save(s->taskbar, &error)) {
+			fprintf(stderr, "tilewin-settings: %s\n", error);
+			g_free(error);
+		}
+	}
 	s->windowmode = confdoc_open("windowmode.conf");
 	s->tilemode = confdoc_open("tilemode.conf");
 
@@ -1089,7 +1097,7 @@ int main(int argc, char **argv) {
 	g_application_add_main_option(G_APPLICATION(s->app), "page", 'p', 0, G_OPTION_ARG_STRING,
 		page_option_help(), "PAGE");
 	g_application_add_main_option(G_APPLICATION(s->app), "widget", 0, 0, G_OPTION_ARG_STRING,
-		"Open the settings of this widget of the taskbar, e.g. claude or custom:weather", "NAME");
+		"Open the settings of this widget of the taskbar, e.g. agents or custom:weather", "NAME");
 	g_application_add_main_option(G_APPLICATION(s->app), "desktop", 0, 0, G_OPTION_ARG_NONE,
 		"With --widget: the widget on the desktop, its desktop look and place", NULL);
 	g_application_add_main_option(G_APPLICATION(s->app), "welcome", 0, 0, G_OPTION_ARG_NONE,

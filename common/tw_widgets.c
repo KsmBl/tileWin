@@ -20,8 +20,8 @@ static const struct tw_widget_option opts_clock[] = {
 	{ 0 },
 };
 /*
- * The AI agent usage widget; the claude and codex widget of older configs take
- * the same options, with "account" for their one account.
+ * The AI agent usage widget; the claude and codex widget of older configs, which
+ * it replaces (tw_widget_replaced_by_agents), took the same options.
  */
 static const struct tw_widget_option opts_agents[] = {
 	// "accounts" and "show" have editors of their own in the settings
@@ -570,6 +570,11 @@ const struct tw_widget_option tw_widget_desktop_options[] = {
 	{ "background", "Background", "A translucent card behind the widget", choice_yes_no },
 	{ 0 },
 };
+
+bool tw_widget_replaced_by_agents(const char *name) {
+	const struct tw_widget_info *info = tw_widget_find(name);
+	return info && (strcmp(info->type, "claude") == 0 || strcmp(info->type, "codex") == 0);
+}
 
 const struct tw_widget_info *tw_widget_find(const char *type_or_name) {
 	if (!type_or_name) {

@@ -316,6 +316,14 @@ void desktop_page_refresh(struct settings *s);
 char *widget_type_of(const char *name);
 /* "CPU usage", "Clock (analog)"; description may be NULL. */
 char *widget_title(const char *name, const char **description);
+/*
+ * The Claude Code and Codex widget of older configs (claude, codex:2) are the
+ * AI agent usage widget now, one for all accounts: in each layout of the
+ * taskbar they become "agents", once; on the desktop the entry of "agents"
+ * stays, else the first of theirs becomes it; their widget blocks go. True when
+ * taskbar.conf changed.
+ */
+bool widgets_replace_old(struct confdoc *taskbar);
 /* The entry of a widget in desktop_widgets, NULL if it has none. */
 struct cstmt *widget_desktop_entry(struct settings *s, const char *widget);
 /* desktop: also the options of its place on the desktop. */

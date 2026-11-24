@@ -7,6 +7,7 @@
 #include "panel.h"
 #include "stringop.h"
 #include "tw_paths.h"
+#include "tw_widgets.h"
 
 /*
  * Built-in taskbar layout used when ~/.config/tileWin/taskbar.conf is missing
@@ -297,13 +298,35 @@ list_t *menu_items_parse(struct twconf_node *node) {
 	return items;
 }
 
+// whether a section of the layout has the widget of that name already
+static bool layout_has(struct layout_config *layout, const char *name) {
+	list_t *sections[] = { layout->left, layout->center, layout->right };
+	for (size_t s = 0; s < sizeof(sections) / sizeof(sections[0]); s++) {
+		for (int i = 0; i < sections[s]->length; i++) {
+			struct widget *w = sections[s]->items[i];
+			if (strcmp(w->name, name) == 0) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 static void add_widget_names(struct panel *panel, struct panel_config *config,
-		list_t *target, struct twconf_node *node) {
+		struct layout_config *layout, list_t *target, struct twconf_node *node) {
 	if (!node) {
 		return;
 	}
 	for (int i = 0; i < node->argc; i++) {
 		const char *name = node->argv[i];
+		// the Claude Code and Codex widget of an older config are the AI agent
+		// usage widget now, which shows all accounts: one of it in a layout
+		if (tw_widget_replaced_by_agents(name)) {
+			name = "agents";
+		}
+		if (strcmp(name, "agents") == 0 && layout_has(layout, name)) {
+			continue;
+		}
 		struct widget *found = NULL;
 		for (int j = 0; j < config->widgets->length; j++) {
 			struct widget *w = config->widgets->items[j];
@@ -380,9 +403,9 @@ static void parse_layout(struct panel *panel, struct panel_config *config,
 	if (height) {
 		layout->height = atoi(height);
 	}
-	add_widget_names(panel, config, layout->left, twconf_child(node, "left"));
-	add_widget_names(panel, config, layout->center, twconf_child(node, "center"));
-	add_widget_names(panel, config, layout->right, twconf_child(node, "right"));
+	add_widget_names(panel, config, layout, layout->left, twconf_child(node, "left"));
+	add_widget_names(panel, config, layout, layout->center, twconf_child(node, "center"));
+	add_widget_names(panel, config, layout, layout->right, twconf_child(node, "right"));
 }
 
 /*

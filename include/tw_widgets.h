@@ -71,4 +71,10 @@ const char *tw_widget_desktop_style(const char *type);
 /* The widget of that type, or of the type in "type:name" (custom:weather). */
 const struct tw_widget_info *tw_widget_find(const char *type_or_name);
 
+/*
+ * A Claude Code or Codex widget of an older config (claude, codex:2): the AI
+ * agent usage widget ("agents") replaces them, one for all accounts.
+ */
+bool tw_widget_replaced_by_agents(const char *name);
+
 #endif

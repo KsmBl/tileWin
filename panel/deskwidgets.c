@@ -995,11 +995,26 @@ void deskwidgets_handle_command(struct panel *panel, int argc, char **argv) {
 void deskwidgets_load(struct panel *panel, struct panel_config *config) {
 	struct twconf_node *block = twconf_child(config->root, "desktop_widgets");
 	config->desk_widgets = create_list();
+	// the Claude Code and Codex widget of an older config are the AI agent usage
+	// widget now, which shows all accounts: only one card of it, its own entry
+	// when there is one, else the first of theirs with its looks
+	bool agents = false;
+	for (int i = 0; block && i < twconf_count(block); i++) {
+		agents = agents || strcmp(twconf_at(block, i)->name, "agents") == 0;
+	}
 	for (int i = 0; block && i < twconf_count(block); i++) {
 		struct twconf_node *entry = twconf_at(block, i);
-		const struct tw_widget_info *info = tw_widget_find(entry->name);
+		const char *name = entry->name;
+		if (tw_widget_replaced_by_agents(name)) {
+			if (agents) {
+				continue;
+			}
+			name = "agents";
+			agents = true;
+		}
+		const struct tw_widget_info *info = tw_widget_find(name);
 		if (!info || !(info->flags & TW_WIDGET_DESKTOP)) {
-			sway_log(SWAY_ERROR, "'%s' cannot go on the desktop", entry->name);
+			sway_log(SWAY_ERROR, "'%s' cannot go on the desktop", name);
 			continue;
 		}
 		// set up the way the taskbar sets it up, with the desktop's own words on top
@@ -1007,13 +1022,13 @@ void deskwidgets_load(struct panel *panel, struct panel_config *config) {
 		for (int j = 0; j < twconf_count(config->root); j++) {
 			struct twconf_node *child = twconf_at(config->root, j);
 			if (strcmp(child->name, "widget") == 0 && child->argc >= 1 &&
-					strcmp(child->argv[0], entry->name) == 0) {
+					strcmp(child->argv[0], name) == 0) {
 				def = child;
 			}
 		}
-		struct widget *w = widget_create_with(panel, entry->name, def, entry);
+		struct widget *w = widget_create_with(panel, name, def, entry);
 		if (!w) {
-			sway_log(SWAY_ERROR, "Unknown desktop widget '%s'", entry->name);
+			sway_log(SWAY_ERROR, "Unknown desktop widget '%s'", name);
 			continue;
 		}
 		struct deskwidget *dw = calloc(1, sizeof(*dw));

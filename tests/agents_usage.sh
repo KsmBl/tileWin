@@ -193,12 +193,14 @@ has Claude && fail "with accounts $codex_id the taskbar still shows Claude"
 grep -qE "^(23|41)" "$work/seen" ||
 	fail "with accounts $codex_id Codex is gone too: $(tr '\n' ' ' < "$work/seen")"
 
-# ---- the claude widget of an older config: the same widget, of its account alone
-sed -i -e 's/\tright agents tray/\tright claude tray/' -e '/^widget agents {/,/^}/d' "$conf"
+# ---- the claude and codex widget of an older config: the AI agent usage widget, once
+sed -i -e 's/\tright agents tray/\tright claude agents codex:2 tray/' -e '/^widget agents {/,/^}/d' "$conf"
 ipc panel reload >/dev/null 2>&1
 bar_until "37" 10 || # (tesseract reads the % sign as 9 at times)
 	fail "the claude widget of an older config does not show Claude Code's 37%: $(tr '\n' ' ' < "$work/seen")"
-has Codex && fail "the claude widget of an older config shows Codex too"
+has Codex || fail "the claude widget of an older config does not show Codex too"
+[ "$(grep -c "^Claude " "$work/seen")" = 1 ] ||
+	fail "claude, agents and codex:2 of an older config are not one widget: $(tr '\n' ' ' < "$work/seen")"
 
 # ---- on the desktop, three accounts in lines: each as high as its lines need, a chart
 # of the week under each, as there is room (in the top right corner, 3 by 10 cells);
@@ -210,7 +212,8 @@ for ago in 7200 3600 60; do
 		$((now - ago)) "$(date -u -d @$((now + 3600)) +%Y-%m-%dT%H:%M:%SZ)" \
 		"$(date -u -d @$((now + 3 * 86400)) +%Y-%m-%dT%H:%M:%SZ)"
 done > "$agy/account.jsonl"
-printf 'desktop_widgets {\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s antigravity\n\t\tsize 3x10\n\t}\n}\n' \
+# (with the claude widget of an older config before it, which the agents entry replaces)
+printf 'desktop_widgets {\n\tclaude {\n\t\tstyle week\n\t}\n\tagents {\n\t\tstyle list\n\t\taccounts codex:%s claude:%s antigravity\n\t\tsize 3x10\n\t}\n}\n' \
 	"$codex" "$claude" >> "$conf"
 ipc panel reload >/dev/null 2>&1
 for _ in $(seq 1 20); do
@@ -222,6 +225,10 @@ has Codex && has Claude && has Antigravity ||
 	fail "the desktop widget does not show the three accounts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 [ "$(grep -c "^now" "$work/seen")" -ge 3 ] ||
 	fail "the desktop widget has no chart of the week under each account: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+words 0 0 1280 720 > "$work/all"
+[ "$(grep -c "^Antigravity " "$work/all")" = 1 ] ||
+	fail "the claude widget of an older config is a card of its own next to the agents one"
+
 
 # ---- a click on an account's part of the card: the flyout of it alone, beside the card
 set -- $(grep -m1 "^Antigravity " "$work/seen" | cut -d' ' -f2,3)

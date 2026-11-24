@@ -11,8 +11,9 @@
  *       account_checks no                          # ask the accounts themselves
  *   }
  *
- * The claude and the codex widget of older configs are this widget with the
- * account of their "account" option, the one used last by default.
+ * It replaces the claude and the codex widget of older configs: their names in a
+ * layout or on the desktop make this widget, once (config.c, deskwidgets.c), and
+ * the settings take them out of taskbar.conf (widgets_replace_old).
  *
  * Claude Code shows its limits to tileWin through tilewin-claude-usage, its
  * status line once the folder is connected: tileWin never touches a login of
