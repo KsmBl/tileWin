@@ -56,4 +56,47 @@ void claude_charts_load(struct claude_charts *c, const struct tw_claude_usage *u
 void claude_charts_set(struct claude_charts *c, const struct tw_claude_point *points, int count,
 	const struct tw_claude_usage *u, time_t now);
 
+/*
+ * How the charts lay out time: as the limits run (the last three 5-hour windows
+ * along the hours, the week from its start to its reset), along the clock (a
+ * day from midnight, a week from Monday, wherever the limits reset), or each
+ * line from the start of its window to its reset (one account at day 2 of its
+ * week, another at day 6).
+ */
+enum claude_scale {
+	CLAUDE_SCALE_WINDOWS,
+	CLAUDE_SCALE_ABSOLUTE,
+	CLAUDE_SCALE_RELATIVE,
+};
+
+/* An account in a chart of several: its readings, its name and its color. */
+struct claude_line {
+	const struct claude_charts *c;
+	const char *name;
+	uint32_t color;
+};
+
+/* The color of an agent (enum tw_agent), for its nth account of that agent. */
+uint32_t claude_agent_color(int agent, int nth);
+/*
+ * The 5-hour (week false) or the weekly limits of the lines in one chart, along
+ * the clock or each in its window (scale not CLAUDE_SCALE_WINDOWS); back days
+ * or weeks before now along the clock, windows before the newest else.
+ */
+void claude_chart_lines(const struct claude_hover *f, const struct claude_line *lines, int n,
+	bool week, enum claude_scale scale, int back, time_t now, cairo_t *cr,
+	const struct claude_look *st, struct pbox box);
+int claude_lines_back_max(const struct claude_line *lines, int n, bool week,
+	enum claude_scale scale, time_t now);
+/* "Weekly limits this week, Mon 23 Nov – Sun 29 Nov": the title of such a chart. */
+void claude_lines_span(bool week, enum claude_scale scale, int back, time_t now, char *out,
+	size_t size);
+/*
+ * A dot of each line's color with its name and its two limits used now, in
+ * rows of width; how high. With draw false it is only measured.
+ */
+double claude_lines_legend(cairo_t *cr, const struct claude_look *st,
+	const struct claude_line *lines, int n, time_t now, double x, double y, double width,
+	bool draw);
+
 #endif

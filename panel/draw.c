@@ -630,19 +630,21 @@ void pd_chart_hover(cairo_t *cr, const char *font, double x, double y, double w,
 		cairo_stroke(cr);
 	}
 	if (text && *text) {
-		// one or two lines, in a box beside the line: right of it, or left near the end
-		const char *nl = strchr(text, '\n');
-		char first[160], second[160] = "";
-		snprintf(first, sizeof(first), "%.*s", nl ? (int)(nl - text) : (int)strlen(text), text);
-		if (nl) {
-			snprintf(second, sizeof(second), "%s", nl + 1);
+		// its lines, in a box beside the line: right of it, or left near the end
+		char lines[8][160];
+		int count = 0, widths[8], heights[8], bw = 0, bh = 0;
+		for (const char *p = text; p && count < 8; count++) {
+			const char *nl = strchr(p, '\n');
+			snprintf(lines[count], sizeof(lines[count]), "%.*s",
+				nl ? (int)(nl - p) : (int)strlen(p), p);
+			widths[count] = heights[count] = 0;
+			pd_text_size(cr, font, lines[count], &widths[count], &heights[count]);
+			bw = widths[count] > bw ? widths[count] : bw;
+			bh += heights[count];
+			p = nl ? nl + 1 : NULL;
 		}
-		int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
-		pd_text_size(cr, font, first, &w1, &h1);
-		if (second[0]) {
-			pd_text_size(cr, font, second, &w2, &h2);
-		}
-		double bw = (w1 > w2 ? w1 : w2) + 12, bh = h1 + (second[0] ? h2 : 0) + 8;
+		bw += 12;
+		bh += 8;
 		double bx = px + 8, by = y + 4;
 		if (bx + bw > x + w) {
 			bx = px - 8 - bw;
@@ -656,9 +658,10 @@ void pd_chart_hover(cairo_t *cr, const char *font, double x, double y, double w,
 		pd_color(cr, (fg & 0xffffff00) | 0x40);
 		cairo_set_line_width(cr, 1);
 		cairo_stroke(cr);
-		pd_text(cr, font, first, bx + 6, by + 4, bw - 12, h1, fg, PD_LEFT);
-		if (second[0]) {
-			pd_text(cr, font, second, bx + 6, by + 4 + h1, bw - 12, h2, fg, PD_LEFT);
+		double ty = by + 4;
+		for (int i = 0; i < count; i++) {
+			pd_text(cr, font, lines[i], bx + 6, ty, bw - 12, heights[i], fg, PD_LEFT);
+			ty += heights[i];
 		}
 	}
 	cairo_restore(cr);

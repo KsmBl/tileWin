@@ -25,6 +25,8 @@ static const struct tw_widget_option opts_clock[] = {
  */
 static const char *const choice_history_days[] = { "8", "14", "30", "60", "90", "180", "365",
 	NULL };
+static const char *const choice_charts[] = { "each", "together", NULL };
+static const char *const choice_chart_scale[] = { "windows", "absolute", "relative", NULL };
 static const struct tw_widget_option opts_agents[] = {
 	// "accounts" and "show" have editors of their own in the settings
 	{ "accounts", "Accounts", "Which, in this order: claude:~/.claude codex:~/.codex copilot "
@@ -38,9 +40,15 @@ static const struct tw_widget_option opts_agents[] = {
 		"Antigravity are started to ask their accounts how much is used, also while none "
 		"of them runs: with their logins, online. Copilot's allowance comes only so. No by "
 		"default", choice_yes_no },
-	{ "history_days", "Keep the usage", "Days of each account's usage kept for the charts "
-		"of its flyout, which scroll back to the older windows (the wheel over a chart); "
-		"8 by default and at least", choice_history_days },
+	{ "charts", "Charts", "One chart of the account picked in the flyout, or one of all "
+		"accounts, each a line in its own color", choice_charts },
+	{ "chart_scale", "Time in the charts", "As the limits run: the last three 5-hour "
+		"windows, the week up to its reset. Absolute: the day from midnight, the week from "
+		"Monday to Sunday. Relative: each line from the start of its window to its reset, "
+		"one on day 2 of its week, another on day 6. All accounts in one chart run "
+		"relative by default", choice_chart_scale },
+	{ "history_days", "Keep the usage", "How far back the charts go: the wheel over one "
+		"shows the older windows. 8 days by default and at least", choice_history_days },
 	{ 0 },
 };
 
@@ -575,6 +583,36 @@ const struct tw_widget_option tw_widget_desktop_options[] = {
 	{ "background", "Background", "A translucent card behind the widget", choice_yes_no },
 	{ 0 },
 };
+
+const char *tw_widget_choice_label(const char *key, const char *choice) {
+	static const struct {
+		const char *key, *choice, *label;
+	} labels[] = {
+		// NULL: the default
+		{ "charts", NULL, "The account shown" },
+		{ "charts", "each", "The account shown" },
+		{ "charts", "together", "All accounts in one chart" },
+		{ "chart_scale", NULL, "As the limits run" },
+		{ "chart_scale", "windows", "As the limits run" },
+		{ "chart_scale", "absolute", "Absolute: a day, Monday to Sunday" },
+		{ "chart_scale", "relative", "Relative: each from start to reset" },
+		{ "history_days", NULL, "8 days" },
+		{ "history_days", "8", "8 days" },
+		{ "history_days", "14", "2 weeks" },
+		{ "history_days", "30", "30 days" },
+		{ "history_days", "60", "60 days" },
+		{ "history_days", "90", "90 days" },
+		{ "history_days", "180", "Half a year" },
+		{ "history_days", "365", "A year" },
+	};
+	for (size_t i = 0; key && i < sizeof(labels) / sizeof(labels[0]); i++) {
+		if (strcmp(labels[i].key, key) == 0 && (choice ? labels[i].choice &&
+				strcmp(labels[i].choice, choice) == 0 : !labels[i].choice)) {
+			return labels[i].label;
+		}
+	}
+	return choice;
+}
 
 bool tw_widget_replaced_by_agents(const char *name) {
 	const struct tw_widget_info *info = tw_widget_find(name);

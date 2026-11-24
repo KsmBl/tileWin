@@ -57,7 +57,7 @@ void pd_chart_axis(cairo_t *cr, const char *font, double x, double y, double w, 
 /*
  * Where the pointer is over a chart (x, y, w, h): a line across at px, a dot on
  * each curve (ys[i] in pixels, below 0 for none, in colors[i]) and a label of
- * one or two lines beside them, kept inside the chart. fg and bg are those of
+ * its lines (up to eight, split at \n) beside them, kept inside the chart. fg and bg are those of
  * the label, line the color of the line across.
  */
 void pd_chart_hover(cairo_t *cr, const char *font, double x, double y, double w, double h,

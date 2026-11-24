@@ -696,10 +696,13 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 		} else if (lister) {
 			lister(b->values, labels);
 		} else {
-			g_ptr_array_add(labels, g_strdup("Default"));
+			const char *fallback = tw_widget_choice_label(opt->key, NULL);
+			g_ptr_array_add(labels, fallback ? g_strdup_printf("Default (%s)", fallback) :
+				g_strdup("Default"));
 			for (guint i = 0; opt->choices[i]; i++) {
 				g_ptr_array_add(b->values, g_strdup(opt->choices[i]));
-				g_ptr_array_add(labels, g_strdup(opt->choices[i]));
+				g_ptr_array_add(labels, g_strdup(tw_widget_choice_label(opt->key,
+					opt->choices[i])));
 			}
 		}
 		guint sel = 0;
@@ -738,6 +741,11 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 	ui_row(list, opt->title, opt->hint, control);
 	g_free(value);
 }
+
+static void remove_own_rows(GtkWidget *list);
+static GtkWidget *order_arrow(bool up, bool sensitive, bool shown, const char *key,
+	gpointer id, GCallback callback, gpointer data);
+static GtkWidget *own_row(GtkWidget *content);
 
 /* ---------- what the Claude widget shows ---------- */
 
@@ -894,10 +902,7 @@ static void on_show_preset(GObject *dropdown, GParamSpec *pspec, gpointer data) 
 
 static void show_rebuild(struct show_editor *e) {
 	e->updating = true;
-	GtkWidget *child;
-	while ((child = gtk_widget_get_first_child(e->list))) {
-		gtk_list_box_remove(GTK_LIST_BOX(e->list), child);
-	}
+	remove_own_rows(e->list);
 	char *current = show_current(e);
 	const struct tw_claude_preset *presets = show_presets(e);
 	guint selected = GTK_INVALID_LIST_POSITION, n = 0;
@@ -924,36 +929,19 @@ static void show_rebuild(struct show_editor *e) {
 		const char *id = e->order->pdata[i];
 		const struct tw_claude_item *item = tw_claude_item_find(id);
 		bool on = g_hash_table_contains(e->ticked, id);
-		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-		gtk_widget_set_margin_start(box, 12);
-		gtk_widget_set_margin_end(box, 12);
-		gtk_widget_set_margin_top(box, 4);
-		gtk_widget_set_margin_bottom(box, 4);
 		GtkWidget *check = gtk_check_button_new_with_label(item->title);
 		gtk_check_button_set_active(GTK_CHECK_BUTTON(check), on);
 		gtk_widget_set_hexpand(check, TRUE);
 		g_object_set_data(G_OBJECT(check), "item", (gpointer)id);
 		g_signal_connect(check, "toggled", G_CALLBACK(on_show_tick), e);
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 		gtk_box_append(GTK_BOX(box), check);
-		// buttons of their own: ui_icon_button frees its data with the button
-		GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
-		gtk_widget_set_tooltip_text(up, "Earlier");
-		gtk_widget_add_css_class(up, "flat");
-		gtk_widget_set_sensitive(up, on && i > 0);
-		g_signal_connect(up, "clicked", G_CALLBACK(on_show_up), e);
-		g_object_set_data(G_OBJECT(up), "item", (gpointer)id);
-		gtk_box_append(GTK_BOX(box), up);
-		GtkWidget *down = gtk_button_new_from_icon_name("go-down-symbolic");
-		gtk_widget_set_tooltip_text(down, "Later");
-		gtk_widget_add_css_class(down, "flat");
-		gtk_widget_set_sensitive(down, on && i + 1 < ticked);
-		g_signal_connect(down, "clicked", G_CALLBACK(on_show_down), e);
-		g_object_set_data(G_OBJECT(down), "item", (gpointer)id);
-		gtk_box_append(GTK_BOX(box), down);
-		GtkWidget *row = gtk_list_box_row_new();
-		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+		// the arrows of what is shown; the others only take their room
+		gtk_box_append(GTK_BOX(box), order_arrow(true, on && i > 0, on, "item", (gpointer)id,
+			G_CALLBACK(on_show_up), e));
+		gtk_box_append(GTK_BOX(box), order_arrow(false, on && i + 1 < ticked, on, "item",
+			(gpointer)id, G_CALLBACK(on_show_down), e));
+		gtk_list_box_insert(GTK_LIST_BOX(e->list), own_row(box), (int)i + 1); // (under the preset)
 	}
 	e->updating = false;
 }
@@ -995,14 +983,7 @@ static void show_editor_attach(struct settings *s, GtkWidget *content, const cha
 	e->presets = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
 	g_signal_connect(e->presets, "notify::selected", G_CALLBACK(on_show_preset), e);
 	ui_row(group, "Preset", NULL, e->presets);
-	e->list = gtk_list_box_new();
-	gtk_list_box_set_selection_mode(GTK_LIST_BOX(e->list), GTK_SELECTION_NONE);
-	gtk_widget_add_css_class(e->list, "boxed-list");
-	gtk_widget_set_margin_bottom(e->list, 8);
-	GtkWidget *holder = gtk_list_box_row_new();
-	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(holder), e->list);
-	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(holder), FALSE);
-	gtk_list_box_append(GTK_LIST_BOX(group), holder);
+	e->list = group;
 	g_object_set_data_full(G_OBJECT(e->list), "editor", e, show_editor_free);
 	show_rebuild(e);
 }
@@ -1177,65 +1158,109 @@ static void on_account_down(GtkButton *button, gpointer data) {
 }
 
 /* A tick for each account with its arrows, then the button that adds a folder. */
+/* Removes the rows of an editor (tagged "own"), keeping the others of its group. */
+static void remove_own_rows(GtkWidget *list) {
+	GtkWidget *child = gtk_widget_get_first_child(list);
+	while (child) {
+		GtkWidget *next = gtk_widget_get_next_sibling(child);
+		if (g_object_get_data(G_OBJECT(child), "own")) {
+			gtk_list_box_remove(GTK_LIST_BOX(list), child);
+		}
+		child = next;
+	}
+}
+
+/* An arrow that puts a row earlier or later, in the column at the right of it. */
+static GtkWidget *order_arrow(bool up, bool sensitive, bool shown, const char *key,
+		gpointer id, GCallback callback, gpointer data) {
+	GtkWidget *b = gtk_button_new_from_icon_name(up ? "go-up-symbolic" : "go-down-symbolic");
+	gtk_widget_set_tooltip_text(b, up ? "Earlier" : "Later");
+	gtk_widget_add_css_class(b, "flat");
+	gtk_widget_set_valign(b, GTK_ALIGN_CENTER);
+	gtk_widget_set_sensitive(b, sensitive);
+	gtk_widget_set_opacity(b, shown ? 1 : 0); // (still taking its room: the rows line up)
+	g_object_set_data(G_OBJECT(b), key, id);
+	g_signal_connect(b, "clicked", callback, data);
+	return b;
+}
+
+/* A check with a title and under it a dim line, e.g. an account's folder. */
+static GtkWidget *two_line_check(const char *title, const char *detail) {
+	GtkWidget *check = gtk_check_button_new();
+	GtkWidget *labels = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	gtk_widget_set_margin_start(labels, 6);
+	GtkWidget *label = gtk_label_new(title);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_box_append(GTK_BOX(labels), label);
+	if (detail && *detail) {
+		GtkWidget *more = gtk_label_new(detail);
+		gtk_label_set_xalign(GTK_LABEL(more), 0);
+		gtk_label_set_ellipsize(GTK_LABEL(more), PANGO_ELLIPSIZE_MIDDLE);
+		gtk_widget_add_css_class(more, "dim-label");
+		gtk_widget_add_css_class(more, "tw-caption");
+		gtk_box_append(GTK_BOX(labels), more);
+	}
+	gtk_check_button_set_child(GTK_CHECK_BUTTON(check), labels);
+	return check;
+}
+
+/* A row of an editor's own: inside the margins of the others, tagged to be made again. */
+static GtkWidget *own_row(GtkWidget *content) {
+	gtk_widget_set_margin_start(content, 12);
+	gtk_widget_set_margin_end(content, 8);
+	gtk_widget_set_margin_top(content, 4);
+	gtk_widget_set_margin_bottom(content, 4);
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), content);
+	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+	g_object_set_data(G_OBJECT(row), "own", GINT_TO_POINTER(1));
+	return row;
+}
+
+/* "~/.claude-work" for a folder in the home. */
+static char *home_short(const char *path) {
+	const char *home = g_get_home_dir();
+	size_t hl = home ? strlen(home) : 0;
+	if (path && hl && strncmp(path, home, hl) == 0 && (path[hl] == '/' || !path[hl])) {
+		return g_strdup_printf("~%s", path + hl);
+	}
+	return g_strdup(path ? path : "");
+}
+
+/* A row for each account, ticked and with its arrows, at the top of the group. */
 static void accounts_rebuild(struct accounts_editor *e) {
 	e->updating = true;
-	GtkWidget *child;
-	while ((child = gtk_widget_get_first_child(e->list))) {
-		gtk_list_box_remove(GTK_LIST_BOX(e->list), child);
-	}
+	remove_own_rows(e->list);
 	for (guint i = 0; i < e->ids->len; i++) {
-		GtkWidget *check = gtk_check_button_new_with_label(e->titles->pdata[i]);
+		// "Claude Code · /a/folder": the agent, the folder under it
+		const char *title = e->titles->pdata[i];
+		const char *dot = strstr(title, " · ");
+		char *name = dot ? g_strndup(title, dot - title) : g_strdup(title);
+		char *folder = dot ? home_short(dot + strlen(" · ")) : NULL;
+		GtkWidget *check = two_line_check(name, folder);
+		g_free(name);
+		g_free(folder);
 		gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
 			g_hash_table_contains(e->ticked, e->ids->pdata[i]));
 		g_object_set_data(G_OBJECT(check), "account", e->ids->pdata[i]);
 		g_signal_connect(check, "toggled", G_CALLBACK(on_account_tick), e);
 		gtk_widget_set_hexpand(check, TRUE);
-		GtkWidget *line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-		gtk_widget_set_margin_start(line, 12);
-		gtk_widget_set_margin_end(line, 12);
-		gtk_widget_set_margin_top(line, 4);
-		gtk_widget_set_margin_bottom(line, 4);
+		GtkWidget *line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 		gtk_box_append(GTK_BOX(line), check);
-		GtkWidget *up = gtk_button_new_from_icon_name("go-up-symbolic");
-		gtk_widget_set_tooltip_text(up, "Earlier");
-		gtk_widget_add_css_class(up, "flat");
-		gtk_widget_set_sensitive(up, i > 0);
-		g_object_set_data(G_OBJECT(up), "account", e->ids->pdata[i]);
-		g_signal_connect(up, "clicked", G_CALLBACK(on_account_up), e);
-		gtk_box_append(GTK_BOX(line), up);
-		GtkWidget *down = gtk_button_new_from_icon_name("go-down-symbolic");
-		gtk_widget_set_tooltip_text(down, "Later");
-		gtk_widget_add_css_class(down, "flat");
-		gtk_widget_set_sensitive(down, i + 1 < e->ids->len);
-		g_object_set_data(G_OBJECT(down), "account", e->ids->pdata[i]);
-		g_signal_connect(down, "clicked", G_CALLBACK(on_account_down), e);
-		gtk_box_append(GTK_BOX(line), down);
-		GtkWidget *row = gtk_list_box_row_new();
-		gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), line);
-		gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-		gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+		gtk_box_append(GTK_BOX(line), order_arrow(true, i > 0, e->ids->len > 1, "account",
+			e->ids->pdata[i], G_CALLBACK(on_account_up), e));
+		gtk_box_append(GTK_BOX(line), order_arrow(false, i + 1 < e->ids->len, e->ids->len > 1,
+			"account", e->ids->pdata[i], G_CALLBACK(on_account_down), e));
+		gtk_list_box_insert(GTK_LIST_BOX(e->list), own_row(line), (int)i);
 	}
-	// a Claude Code or Codex somewhere else (portable, another folder)
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-	gtk_widget_set_margin_start(box, 12);
-	gtk_widget_set_margin_end(box, 12);
-	gtk_widget_set_margin_top(box, 6);
-	gtk_widget_set_margin_bottom(box, 6);
-	GtkWidget *hint = gtk_label_new(e->ids->len ? "Installed somewhere else?" :
-		"No AI agent found on this computer");
-	gtk_widget_add_css_class(hint, "dim-label");
-	gtk_widget_set_hexpand(hint, TRUE);
-	gtk_label_set_xalign(GTK_LABEL(hint), 0);
-	gtk_box_append(GTK_BOX(box), hint);
-	GtkWidget *add = gtk_button_new_with_label("Add a folder…");
-	gtk_widget_set_tooltip_text(add, "A Claude Code folder (its .claude, or the one "
-		"$CLAUDE_CONFIG_DIR names) or a Codex folder ($CODEX_HOME)");
-	g_signal_connect(add, "clicked", G_CALLBACK(on_account_add), e);
-	gtk_box_append(GTK_BOX(box), add);
-	GtkWidget *row = gtk_list_box_row_new();
-	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-	gtk_list_box_append(GTK_LIST_BOX(e->list), row);
+	if (!e->ids->len) {
+		GtkWidget *none = gtk_label_new("No AI agent found on this computer");
+		gtk_label_set_xalign(GTK_LABEL(none), 0);
+		gtk_widget_add_css_class(none, "dim-label");
+		gtk_widget_set_margin_top(none, 6);
+		gtk_widget_set_margin_bottom(none, 6);
+		gtk_list_box_insert(GTK_LIST_BOX(e->list), own_row(none), 0);
+	}
 	e->updating = false;
 }
 
@@ -1320,20 +1345,19 @@ static void accounts_editor_attach(struct settings *s, GtkWidget *content, const
 		g_hash_table_add(e->ticked, e->ids->pdata[i]); // by default all of them
 	}
 
-	GtkWidget *group = ui_group(content, desktop ? "Accounts on the desktop" : "Accounts",
-		"Which agents' accounts it shows, one after the other. Claude Code shows its limits "
-		"once its folder is connected; Copilot's allowance comes only when the accounts are "
-		"asked (below).");
-	e->list = gtk_list_box_new();
-	gtk_list_box_set_selection_mode(GTK_LIST_BOX(e->list), GTK_SELECTION_NONE);
-	gtk_widget_add_css_class(e->list, "boxed-list");
-	gtk_widget_set_margin_bottom(e->list, 8);
+	e->list = ui_group(content, desktop ? "Accounts on the desktop" : "Accounts",
+		"Which agents' accounts it shows, in this order: the arrows put one earlier or later. "
+		"Claude Code shows its limits once its folder is connected.");
 	accounts_rebuild(e);
-	GtkWidget *holder = gtk_list_box_row_new();
-	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(holder), e->list);
-	gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(holder), FALSE);
-	gtk_list_box_append(GTK_LIST_BOX(group), holder);
+	// a Claude Code or Codex somewhere else (portable, another folder)
+	GtkWidget *add = gtk_button_new_with_label("Add a folder…");
+	gtk_widget_set_tooltip_text(add, "A Claude Code folder (its .claude, or the one "
+		"$CLAUDE_CONFIG_DIR names) or a Codex folder ($CODEX_HOME)");
+	g_signal_connect(add, "clicked", G_CALLBACK(on_account_add), e);
+	ui_row(e->list, "Installed somewhere else", "A portable Claude Code or Codex, or one with "
+		"a folder of its own", add);
 	g_object_set_data_full(G_OBJECT(e->list), "editor", e, accounts_editor_free);
+	g_object_set_data(G_OBJECT(content), "accounts-group", e->list); // (asking them goes here)
 }
 
 /* ---------- the apps of the quick launch ---------- */
@@ -1506,6 +1530,55 @@ static void on_dialog_close(GtkButton *button, gpointer data) {
 	gtk_window_destroy(GTK_WINDOW(data));
 }
 
+static const struct tw_widget_option *option_of(const struct tw_widget_info *info,
+		const char *key) {
+	for (const struct tw_widget_option *opt = info ? info->options : NULL; opt && opt->key;
+			opt++) {
+		if (strcmp(opt->key, key) == 0) {
+			return opt;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * The AI agent usage widget's settings in groups of their own: asking the
+ * accounts under them, then the charts of the flyout (one chart for all, how
+ * time runs along them, how long the usage is kept).
+ */
+static void agents_groups(struct settings *s, GtkWidget *content, const char *name,
+		const struct tw_widget_info *info, bool desktop) {
+	GtkWidget *accounts = g_object_get_data(G_OBJECT(content), "accounts-group");
+	const struct tw_widget_option *checks = option_of(info, "account_checks");
+	if (accounts && checks) {
+		add_option_row(s, accounts, name, checks, false);
+	}
+	GtkWidget *charts = ui_group(content, "Charts in the flyout", desktop ?
+		"Of the flyout a click on it opens; shared with the widget on the taskbar." :
+		"Of the flyout a click on the widget opens. The wheel over a chart goes back in time.");
+	static const char *const keys[] = { "charts", "chart_scale", "history_days", NULL };
+	for (int i = 0; keys[i]; i++) {
+		const struct tw_widget_option *opt = option_of(info, keys[i]);
+		if (opt) {
+			add_option_row(s, charts, name, opt, false);
+		}
+	}
+}
+
+/* When its values turn to the warning colors. */
+static void agents_limits(struct settings *s, GtkWidget *content, const char *name,
+		const struct tw_widget_info *info) {
+	GtkWidget *list = ui_group(content, "Warnings", "When a bar and its value turn to the "
+		"warning and to the critical color; shared by the taskbar and the desktop.");
+	static const char *const keys[] = { "warning", "critical", NULL };
+	for (int i = 0; keys[i]; i++) {
+		const struct tw_widget_option *opt = option_of(info, keys[i]);
+		if (opt) {
+			add_option_row(s, list, name, opt, false);
+		}
+	}
+}
+
 void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 	const char *description;
 	char *title = widget_title(name, &description);
@@ -1537,9 +1610,11 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, place, name, opt, true);
 		}
 	}
-	if (strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
-			strcmp(type, "codex") == 0) {
-		// which accounts and what of them come first
+	bool agents = strcmp(type, "agents") == 0 || strcmp(type, "claude") == 0 ||
+		strcmp(type, "codex") == 0;
+	const struct tw_widget_info *info = tw_widget_find(type);
+	if (agents) {
+		// which accounts, asked how, and the charts of its flyout
 		accounts_editor_attach(s, content, name, type, desktop);
 		show_editor_attach(s, content, name, desktop);
 	}
@@ -1553,11 +1628,13 @@ void widget_dialog_open(struct settings *s, const char *name, bool desktop) {
 			add_option_row(s, look, name, opt, desktop);
 		}
 	}
-	const struct tw_widget_info *info = tw_widget_find(type);
 	bool quick = strcmp(type, "quicklaunch") == 0;
-	bool any = info && info->options && info->options->key;
+	bool any = !agents && info && info->options && info->options->key;
 	// the quick launch's settings are its apps, in a group of their own below
-	if (any || !quick) {
+	if (agents) {
+		agents_groups(s, content, name, info, desktop);
+		agents_limits(s, content, name, info);
+	} else if (any || !quick) {
 		GtkWidget *list = ui_group(content, "Settings", desktop ?
 			"Shared with the same widget on the taskbar. Leave a field empty to use the default." :
 			"Leave a field empty to use the default.");

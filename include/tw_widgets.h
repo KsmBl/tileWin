@@ -53,6 +53,13 @@ extern const struct tw_widget_option tw_claude_desktop_look[];
  */
 const struct tw_widget_option *tw_widget_look(const char *type, bool desktop);
 
+/*
+ * What the settings call a choice of an option ("together": "All accounts in one
+ * chart"), the choice itself when it has no name; of choice NULL, the default
+ * when it has a name, else NULL.
+ */
+const char *tw_widget_choice_label(const char *key, const char *choice);
+
 /* The mouse actions every widget takes. */
 extern const struct tw_widget_option tw_widget_events[];
 /* Where a widget on the desktop sits, in its block of "desktop_widgets". */

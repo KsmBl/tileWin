@@ -54,9 +54,15 @@ void claude_charts_set(struct claude_charts *c, const struct tw_claude_point *po
 	c->have = u && u->updated && u->seven_day.resets_at > 0;
 }
 
+/*
+ * How far past its edges a chart draws: none, but the chart of all accounts lets
+ * its lines go on beyond and clips them (-1: as far again on either side).
+ */
+static double chart_reach = 0;
+
 static double chart_x(struct pbox g, time_t start, time_t end, time_t t) {
 	double share = end > start ? (double)(t - start) / (double)(end - start) : 0;
-	return g.x + g.width * fmin(fmax(share, 0), 1);
+	return g.x + g.width * fmin(fmax(share, chart_reach), 1 - chart_reach);
 }
 
 static double chart_y(struct pbox g, double used) {
@@ -258,10 +264,10 @@ static uint32_t usage_color(const struct claude_look *st, double used) {
 
 /*
  * On from now at a pace (percent a second): dashed, to the end of the window or
- * to where it runs out.
+ * to where it runs out; in color, or 0 for the warning colors of where it leads.
  */
 static void draw_pace(cairo_t *cr, const struct claude_look *st, struct pbox g, time_t start,
-		time_t end, time_t now, time_t over, double used, double pace) {
+		time_t end, time_t now, time_t over, double used, double pace, uint32_t color) {
 	if (pace <= 0 || now >= over) {
 		return;
 	}
@@ -276,15 +282,16 @@ static void draw_pace(cairo_t *cr, const struct claude_look *st, struct pbox g, 
 	cairo_move_to(cr, chart_x(g, start, end, now), chart_y(g, used));
 	cairo_line_to(cr, chart_x(g, start, end, until), chart_y(g, at_end));
 	cairo_set_dash(cr, dash, 2, 0);
-	pd_color(cr, usage_color(st, at_end)); // (see-through it is lost on a dark chart)
+	// (see-through it is lost on a dark chart)
+	pd_color(cr, color ? color : usage_color(st, at_end));
 	cairo_set_line_width(cr, 1.25);
 	cairo_stroke(cr);
 	cairo_set_dash(cr, NULL, 0, 0);
 }
 
-/* The line and the area under it, through the points of the series. */
+/* The line and the area under it (fill its alpha), through the points of the series. */
 static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
-		const time_t *ts, const double *vs, int n, uint32_t color) {
+		const time_t *ts, const double *vs, int n, uint32_t color, uint32_t fill) {
 	if (n < 1) {
 		return;
 	}
@@ -315,7 +322,7 @@ static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
 	}
 	cairo_line_to(cr, chart_x(g, start, end, ts[n - 1]), g.y + g.height);
 	cairo_close_path(cr);
-	pd_color(cr, (color & 0xffffff00) | 0x48);
+	pd_color(cr, (color & 0xffffff00) | fill);
 	cairo_fill(cr);
 	// a gap: hatched between the two readings, "used somewhere in here"
 	for (int i = 1; i < n; i++) {
@@ -465,7 +472,7 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 			peak = fmax(peak, vs[k]);
 		}
 		uint32_t color = usage_color(st, peak);
-		draw_series(cr, g, start, end, ts, vs, n, color);
+		draw_series(cr, g, start, end, ts, vs, n, color, 0x48);
 		bool running = c->now >= wstart && c->now < over;
 		if (running && n > 0) {
 			now_used = vs[n - 1];
@@ -474,7 +481,7 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 			if (c->five_hour.known && tw_claude_same_window(c->five_hour.resets_at, reset)) {
 				draw_pace(cr, st, g, start, end, c->now, over, now_used,
 					tw_claude_window_pace(&c->five_hour, TW_CLAUDE_FIVE_HOURS, c->now,
-						now_used));
+						now_used), 0);
 			}
 		}
 		// what it came to, at its top
@@ -593,13 +600,13 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	if (back == 0) {
 		draw_behind(cr, st, g, now_x);
 	}
-	draw_series(cr, g, start, end, ts, vs, n, color);
+	draw_series(cr, g, start, end, ts, vs, n, color, 0x48);
 	// on at the pace of the week so far: dashed, to its end or to where it runs out
 	// (since the week began, or since it was reset by hand: as the flyout's text says)
 	double pace = back == 0 && c->seven_day.known ? tw_claude_window_pace(&c->seven_day,
 		TW_CLAUDE_SEVEN_DAYS, c->now, used) : 0;
 	if (back == 0 && c->now > start) {
-		draw_pace(cr, st, g, start, end, c->now, end, used, pace);
+		draw_pace(cr, st, g, start, end, c->now, end, used, pace, 0);
 	}
 	if (back == 0) {
 		draw_now(cr, st, g, now_x, used, color);
@@ -651,3 +658,376 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 	}
 }
 
+
+/* ---------- every account in one chart, or one along the clock ---------- */
+
+uint32_t claude_agent_color(int agent, int nth) {
+	// each agent its color, a second account of it a lighter or darker one
+	static const uint32_t base[][3] = {
+		{ 0xd97757ff, 0xf0a283ff, 0xa8492eff }, // Claude Code
+		{ 0x10a37fff, 0x5fd3b0ff, 0x0b6e56ff }, // Codex
+		{ 0x8957e5ff, 0xb894f5ff, 0x5f33b0ff }, // Copilot
+		{ 0x4285f4ff, 0x8ab4f8ff, 0x1a5bc4ff }, // Antigravity
+	};
+	int n = (int)(sizeof(base) / sizeof(base[0]));
+	int a = agent >= 0 && agent < n ? agent : (agent < 0 ? 0 : agent % n);
+	return base[a][(nth < 0 ? 0 : nth) % 3];
+}
+
+static time_t length_of(bool week) {
+	return week ? TW_CLAUDE_SEVEN_DAYS : TW_CLAUDE_FIVE_HOURS;
+}
+
+/* Along the clock: the day (5-hour limits) or the week from Monday, back as many before now. */
+static void clock_span(bool week, int back, time_t now, time_t *start, time_t *end) {
+	struct tm tm;
+	localtime_r(&now, &tm);
+	tm.tm_hour = tm.tm_min = tm.tm_sec = 0;
+	tm.tm_isdst = -1;
+	if (week) {
+		tm.tm_mday -= (tm.tm_wday + 6) % 7; // back to Monday
+	}
+	tm.tm_mday -= back * (week ? 7 : 1);
+	struct tm a = tm, b = tm;
+	*start = mktime(&a);
+	b.tm_mday += week ? 7 : 1;
+	b.tm_isdst = -1;
+	*end = mktime(&b);
+}
+
+/* The reset of the window of a line, back windows before its newest; 0 for none. */
+static time_t line_window(const struct claude_charts *c, bool week, int back) {
+	time_t *resets;
+	int all = windows_of(c, week, &resets);
+	time_t reset = back >= 0 && back < all ? resets[all - 1 - back] : 0;
+	free(resets);
+	return reset;
+}
+
+static time_t oldest_of(const struct claude_line *lines, int n) {
+	time_t oldest = 0;
+	for (int i = 0; i < n; i++) {
+		for (int k = 0; k < lines[i].c->count; k++) {
+			time_t at = lines[i].c->points[k].at;
+			if (at > 0 && (oldest == 0 || at < oldest)) {
+				oldest = at;
+			}
+		}
+	}
+	return oldest;
+}
+
+int claude_lines_back_max(const struct claude_line *lines, int n, bool week,
+		enum claude_scale scale, time_t now) {
+	int most = 0;
+	if (scale == CLAUDE_SCALE_RELATIVE) {
+		for (int i = 0; i < n; i++) {
+			time_t *resets;
+			int all = windows_of(lines[i].c, week, &resets);
+			free(resets);
+			most = all - 1 > most ? all - 1 : most;
+		}
+		return most;
+	}
+	time_t oldest = oldest_of(lines, n);
+	for (int back = 1; oldest > 0 && back < 4000; back++) {
+		time_t start, end;
+		clock_span(week, back, now, &start, &end);
+		if (end <= oldest) {
+			break;
+		}
+		most = back;
+	}
+	return most;
+}
+
+void claude_lines_span(bool week, enum claude_scale scale, int back, time_t now, char *out,
+		size_t size) {
+	const char *what = week ? "Weekly limits" : "5-hour limits";
+	if (scale == CLAUDE_SCALE_RELATIVE) {
+		if (back <= 0) {
+			snprintf(out, size, "%s, from start to reset", what);
+		} else {
+			snprintf(out, size, "%s, %d %s before", what, back, week ? (back == 1 ? "week" :
+				"weeks") : (back == 1 ? "window" : "windows"));
+		}
+		return;
+	}
+	time_t start, end;
+	clock_span(week, back, now, &start, &end);
+	char a[32], b[32];
+	struct tm tm;
+	localtime_r(&start, &tm);
+	strftime(a, sizeof(a), "%a %e %b", &tm);
+	if (!week) {
+		snprintf(out, size, back == 0 ? "%s today" : back == 1 ? "%s yesterday" : "%s, %s",
+			what, a);
+		return;
+	}
+	time_t last = end - 12 * 3600; // (Sunday, whatever a change of the clock did)
+	localtime_r(&last, &tm);
+	strftime(b, sizeof(b), "%a %e %b", &tm);
+	snprintf(out, size, back == 0 ? "%s this week, %s – %s" : "%s, %s – %s", what, a, b);
+}
+
+/* What a line had used at a time, or where its pace leads; below 0 when nothing. */
+static double line_value(const struct claude_charts *c, bool week, time_t t, bool *ahead) {
+	time_t length = length_of(week);
+	time_t *resets;
+	int all = windows_of(c, week, &resets);
+	double value = -1;
+	*ahead = false;
+	for (int i = all - 1; i >= 0 && value < 0; i--) {
+		time_t reset = resets[i];
+		if (t < reset - length || t > reset) {
+			continue;
+		}
+		time_t ts[512];
+		double vs[512];
+		int n = window_series(c, week, reset, length, ts, vs, 512);
+		double lo, hi;
+		if (t <= c->now && range_at(ts, vs, n, t, &lo, &hi)) {
+			value = hi;
+		} else if (t > c->now && n > 0) {
+			const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
+			double pace = cur->known && tw_claude_same_window(cur->resets_at, reset) ?
+				tw_claude_window_pace(cur, length, c->now, vs[n - 1]) : 0;
+			if (pace > 0) {
+				value = fmin(vs[n - 1] + pace * (double)(t - c->now), 100);
+				*ahead = true;
+			}
+		}
+	}
+	free(resets);
+	return value;
+}
+
+/* A window of a line, from start to end of the chart: its usage, now and the pace on. */
+static void draw_line_window(cairo_t *cr, const struct claude_look *st, struct pbox g,
+		const struct claude_line *line, bool week, time_t reset, time_t start, time_t end,
+		uint32_t fill, double *now_x, double *now_y) {
+	const struct claude_charts *c = line->c;
+	time_t length = length_of(week);
+	time_t ts[512];
+	double vs[512];
+	int n = window_series(c, week, reset, length, ts, vs, 512);
+	draw_series(cr, g, start, end, ts, vs, n, line->color, fill);
+	time_t over = window_end(c, week, reset);
+	const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
+	if (n > 0 && c->now >= reset - length && c->now < over) {
+		double used = vs[n - 1];
+		if (cur->known && tw_claude_same_window(cur->resets_at, reset)) {
+			draw_pace(cr, st, g, start, end, c->now, over, used,
+				tw_claude_window_pace(cur, length, c->now, used), line->color);
+		}
+		*now_x = chart_x(g, start, end, c->now);
+		*now_y = chart_y(g, used);
+	}
+}
+
+void claude_chart_lines(const struct claude_hover *f, const struct claude_line *lines, int n,
+		bool week, enum claude_scale scale, int back, time_t now, cairo_t *cr,
+		const struct claude_look *st, struct pbox box) {
+	struct pbox g = { box.x, box.y, box.width, box.height - 20 };
+	chart_bg(cr, st, g);
+	bool relative = scale == CLAUDE_SCALE_RELATIVE;
+	time_t length = length_of(week), start = 0, end = length;
+	if (!relative) {
+		clock_span(week, back, now, &start, &end);
+	}
+	// the scale: the days of the week or the hours of the day; else the share of each window
+	if (relative) {
+		int steps = week ? 7 : 5;
+		for (int i = 0; i < steps; i++) {
+			double x0 = g.x + g.width * i / steps, x1 = g.x + g.width * (i + 1) / steps;
+			if (i > 0) {
+				pd_rect(cr, round(x0), g.y, 1, g.height, st->chart_grid);
+			}
+			char label[24];
+			snprintf(label, sizeof(label), week ? "day %d" : "hour %d", i + 1);
+			if (x1 - x0 > 30) {
+				pd_text(cr, st->font, label, x0, g.y + g.height + 2, x1 - x0, 18, st->dim,
+					PD_CENTER);
+			}
+		}
+	} else if (week) {
+		struct tm tm;
+		localtime_r(&start, &tm);
+		tm.tm_isdst = -1;
+		for (int d = 0; d < 7; d++) {
+			struct tm day = tm, next = tm;
+			day.tm_mday += d;
+			next.tm_mday += d + 1;
+			time_t t0 = mktime(&day), t1 = mktime(&next);
+			double x0 = chart_x(g, start, end, t0), x1 = chart_x(g, start, end, t1);
+			if (d > 0) {
+				pd_rect(cr, round(x0), g.y, 1, g.height, st->chart_grid);
+			}
+			char name[16];
+			strftime(name, sizeof(name), x1 - x0 > 60 ? "%a %e" : "%a", &day);
+			if (x1 - x0 > 18) {
+				pd_text(cr, st->font, name, x0, g.y + g.height + 2, x1 - x0, 18, st->dim,
+					PD_CENTER);
+			}
+		}
+	} else {
+		struct tm tm;
+		localtime_r(&start, &tm);
+		tm.tm_isdst = -1;
+		int every = g.width >= 360 ? 3 : 6;
+		for (int h = 1; h < 24; h++) {
+			struct tm at = tm;
+			at.tm_hour += h;
+			time_t t = mktime(&at);
+			double x = chart_x(g, start, end, t);
+			bool labelled = h % every == 0;
+			pd_rect(cr, round(x), g.y, 1, g.height, labelled ? st->chart_grid :
+				(st->chart_grid & 0xffffff00) | ((st->chart_grid & 0xff) / 2));
+			if (labelled) {
+				char label[16];
+				strftime(label, sizeof(label), "%H:%M", &at);
+				pd_text(cr, st->font, label, x - 30, g.y + g.height + 2, 60, 18, st->dim,
+					PD_CENTER);
+			}
+		}
+	}
+	pd_rect(cr, g.x, g.y + g.height / 2, g.width, 1, st->chart_grid);
+	pd_text(cr, st->font, "100%", g.x + 4, g.y + 1, 60, 16, st->dim, PD_LEFT);
+	pd_text(cr, st->font, "50%", g.x + 4, g.y + g.height / 2 + 1, 60, 16, st->dim, PD_LEFT);
+	bool now_in = !relative && now >= start && now < end;
+	if (now_in) {
+		draw_behind(cr, st, g, chart_x(g, start, end, now));
+	}
+	// the lines, clipped to the chart: windows that began before it or go on after it
+	double xs[16], ys[16];
+	int dots = 0;
+	uint32_t fill = n > 1 ? 0x1c : 0x48;
+	cairo_save(cr);
+	cairo_rectangle(cr, g.x, g.y, g.width, g.height);
+	cairo_clip(cr);
+	chart_reach = -1;
+	for (int i = 0; i < n && i < 16; i++) {
+		const struct claude_charts *c = lines[i].c;
+		double nx = -1, ny = -1;
+		if (relative) {
+			time_t reset = line_window(c, week, back);
+			if (reset > 0) {
+				draw_line_window(cr, st, g, &lines[i], week, reset, reset - length, reset,
+					fill, &nx, &ny);
+			}
+		} else {
+			time_t *resets;
+			int all = windows_of(c, week, &resets);
+			for (int k = 0; k < all; k++) {
+				if (resets[k] - length < end && window_end(c, week, resets[k]) > start) {
+					draw_line_window(cr, st, g, &lines[i], week, resets[k], start, end, fill,
+						&nx, &ny);
+				}
+			}
+			free(resets);
+		}
+		xs[i] = nx;
+		ys[i] = ny;
+		dots = i + 1;
+	}
+	chart_reach = 0;
+	cairo_restore(cr);
+	// now: across the chart along the clock; else where each line is in its window
+	if (now_in) {
+		pd_rect(cr, round(chart_x(g, start, end, now)) - 0.5, g.y, 1, g.height, st->fg);
+	}
+	for (int i = 0; i < dots; i++) {
+		if (xs[i] < g.x || xs[i] > g.x + g.width || ys[i] < 0) {
+			continue;
+		}
+		if (relative) {
+			pd_rect(cr, round(xs[i]) - 0.5, g.y, 1, g.height, (lines[i].color & 0xffffff00) | 0x90);
+		}
+		cairo_new_path(cr);
+		cairo_arc(cr, xs[i], ys[i], 3.5, 0, 2 * M_PI);
+		pd_color(cr, lines[i].color);
+		cairo_fill_preserve(cr);
+		pd_color(cr, st->fg);
+		cairo_set_line_width(cr, 1);
+		cairo_stroke(cr);
+	}
+	// under the pointer: the time, and of each line what it had used (or where it goes)
+	if (f->inside && pbox_contains(&g, f->px, f->py)) {
+		double share = g.width > 0 ? (f->px - g.x) / g.width : 0;
+		share = share < 0 ? 0 : share > 1 ? 1 : share;
+		char text[600];
+		int len;
+		if (relative) {
+			long into = (long)((double)length * share);
+			char span[48];
+			tw_claude_format_span(into, false, span, sizeof(span));
+			len = snprintf(text, sizeof(text), "%s into the window", into < 60 ? "0 min" : span);
+		} else {
+			time_t t = time_at(g, start, end, f->px);
+			char when[32];
+			when_words(t, week, when, sizeof(when));
+			len = snprintf(text, sizeof(text), "%s", when);
+		}
+		double hy[16];
+		uint32_t hc[16];
+		int k = 0;
+		for (int i = 0; i < n && i < 16 && len < (int)sizeof(text) - 1; i++) {
+			const struct claude_charts *c = lines[i].c;
+			time_t t;
+			if (relative) {
+				time_t reset = line_window(c, week, back);
+				if (reset <= 0) {
+					continue;
+				}
+				t = reset - length + (time_t)((double)length * share);
+			} else {
+				t = time_at(g, start, end, f->px);
+			}
+			bool ahead;
+			double v = line_value(c, week, t, &ahead);
+			hy[k] = v >= 0 ? chart_y(g, v) : -1;
+			hc[k++] = lines[i].color;
+			if (v >= 0) {
+				len += snprintf(text + len, sizeof(text) - len, "\n%s %s%.0f%%", lines[i].name,
+					ahead ? "at this pace " : "", v);
+			} else {
+				len += snprintf(text + len, sizeof(text) - len, "\n%s –", lines[i].name);
+			}
+		}
+		pd_chart_hover(cr, st->font, g.x, g.y, g.width, g.height, f->px, hy, hc, k, text,
+			st->fg, st->label_bg, st->dim);
+	}
+}
+
+double claude_lines_legend(cairo_t *cr, const struct claude_look *st,
+		const struct claude_line *lines, int n, time_t now, double x, double y, double width,
+		bool draw) {
+	double cx = x, row = 18, height = 0;
+	for (int i = 0; i < n; i++) {
+		const struct claude_charts *c = lines[i].c;
+		char text[128];
+		double five = tw_claude_window_now(&c->five_hour, now);
+		double week = tw_claude_window_now(&c->seven_day, now);
+		if (five >= 0 && week >= 0) {
+			snprintf(text, sizeof(text), "%s %.0f%% · %.0f%%", lines[i].name, five, week);
+		} else {
+			snprintf(text, sizeof(text), "%s", lines[i].name);
+		}
+		int tw = 0;
+		pd_text_size(cr, st->font, text, &tw, NULL);
+		double w = 14 + tw + 14;
+		if (cx > x && cx + w > x + width) {
+			cx = x;
+			height += row;
+		}
+		if (draw) {
+			cairo_new_path(cr);
+			cairo_arc(cr, cx + 5, y + height + row / 2, 4, 0, 2 * M_PI);
+			pd_color(cr, lines[i].color);
+			cairo_fill(cr);
+			pd_text(cr, st->font, text, cx + 14, y + height, tw + 2, row, st->fg, PD_LEFT);
+		}
+		cx += w;
+	}
+	return n > 0 ? height + row : 0;
+}

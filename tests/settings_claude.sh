@@ -66,6 +66,7 @@ session_restore no
 panel_command true
 output * mode --custom 1280x3000
 for_window [app_id="org.tilewin.Settings"] fullscreen enable
+for_window [title="AI agent usage settings"] resize set width 700 px height 2400 px, move position 290 300
 exec sh -c 'printf %s "\$WAYLAND_DISPLAY" > $work/display'
 exec "$settings" --page=taskbar
 EOF
@@ -97,12 +98,12 @@ click 1166 1119 # the gear of the AI agent usage widget in the right section
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open"
 wait_still 5 screen
-click 382 1785 # tick: Time until the 5-hour limit resets (under the accounts)
+click 350 984 # tick: Time until the 5-hour limit resets (under the accounts)
 wait_until 5 sh -c "[ \"\$(sed -n '/^widget agents {/,/^}/p' '$conf' | grep -c reset_5h)\" -gt 0 ]" ||
 	fail "ticking wrote nothing: $(shows)"
 [ "$(shows)" = "usage_5h usage_7d reset_5h" ] || fail "after the tick it shows '$(shows)'"
 wait_still 5 screen
-click 847 1785 # its arrow up
+click 886 984 # its arrow up
 wait_until 5 sh -c "sed -n '/^widget agents {/,/^}/p' '$conf' | grep -q 'usage_5h reset_5h usage_7d'" ||
 	fail "the arrow did not move it up: '$(shows)'"
 "$msg" -s "$sock" -t get_tree | grep -q '"app_id": "org.tilewin.Settings"' ||
@@ -117,7 +118,7 @@ click 1166 1119 # the gear again
 wait_until 10 sh -c "'$msg' -s '$sock' -t get_tree | grep -q 'AI agent usage settings'" ||
 	fail "the settings of the widget did not open again"
 wait_still 5 screen
-click 847 1481 # the arrow up of Codex, the second account
+click 887 608 # the arrow up of Codex, the second account
 wait_until 5 sh -c "grep -q 'accounts codex:$work/codex claude:$work/claude' '$conf'" ||
 	fail "the arrow did not put Codex first: $(grep accounts "$conf")"
 
