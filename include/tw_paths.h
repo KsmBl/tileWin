@@ -14,6 +14,13 @@ char *tw_state_dir(void);
 /* $XDG_CACHE_HOME/tileWin (default ~/.cache/tileWin). Newly allocated. */
 char *tw_cache_dir(void);
 
+/*
+ * From now on the three above default to the login home of this user (from
+ * the password database) instead of $HOME: for what a program started by an
+ * agent writes for tileWin, the agent run portable with a $HOME of its own.
+ */
+void tw_paths_use_login_home(void);
+
 /* Installed data directory, overridable with $TILEWIN_DATADIR. */
 const char *tw_data_dir(void);
 

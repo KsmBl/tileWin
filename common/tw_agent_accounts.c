@@ -274,6 +274,34 @@ static int agent_of(const char *cmd, size_t len) {
 
 static void add(struct tw_agent_account **all, int *count, enum tw_agent agent, const char *dir);
 
+/* The names of their programs. */
+static const char *const programs[TW_AGENT_COUNT] = { "claude", "codex", "copilot", "agy" };
+
+/* Keeps "<what> <agent> <path>": where an agent's program or home is, for asking its account. */
+static void keep_path(const char *what, enum tw_agent agent, const char *path) {
+	char line[600], prefix[64];
+	snprintf(prefix, sizeof(prefix), "%s %s ", what, prefixes[agent]);
+	snprintf(line, sizeof(line), "%s%s", prefix, path);
+	keep_line(line, prefix);
+}
+
+/* The path of a "<what> <agent> <path>" line kept, NULL for none. */
+static char *kept_path(const char *what, enum tw_agent agent) {
+	int count;
+	char **lines = known_lines(&count);
+	char prefix[64];
+	snprintf(prefix, sizeof(prefix), "%s %s ", what, prefixes[agent]);
+	char *found = NULL;
+	for (int i = 0; i < count && !found; i++) {
+		if (strncmp(lines[i], prefix, strlen(prefix)) == 0 &&
+				access(lines[i] + strlen(prefix), strcmp(what, "command") == 0 ? X_OK : F_OK) == 0) {
+			found = strdup(lines[i] + strlen(prefix));
+		}
+	}
+	free_lines(lines, count);
+	return found;
+}
+
 /*
  * The agents running now, of this user: their accounts, kept for later, and
  * where their programs are.
@@ -332,12 +360,13 @@ static void running_agents(struct tw_agent_account **all, int *count) {
 		// where its program is, for asking its account (codex, copilot, agy)
 		const char *first = cmd;
 		const char *base = strrchr(first, '/');
-		if (agent != TW_AGENT_CLAUDE && base && strcmp(base + 1, prefixes[agent]) == 0 &&
+		if (agent != TW_AGENT_CLAUDE && base && strcmp(base + 1, programs[agent]) == 0 &&
 				access(first, X_OK) == 0 && first[0] == '/') {
-			char line[400], prefix[64];
-			snprintf(prefix, sizeof(prefix), "command %s ", prefixes[agent]);
-			snprintf(line, sizeof(line), "%s%s", prefix, first);
-			keep_line(line, prefix);
+			keep_path("command", agent, first);
+		}
+		// a portable Copilot or Antigravity: its login is in the home it runs with
+		if ((agent == TW_AGENT_COPILOT || agent == TW_AGENT_ANTIGRAVITY) && home && *home) {
+			keep_path("home", agent, home);
 		}
 		free(dir);
 		free(env);
@@ -349,7 +378,6 @@ static void running_agents(struct tw_agent_account **all, int *count) {
 }
 
 char *tw_agent_command(enum tw_agent agent) {
-	static const char *const names[TW_AGENT_COUNT] = { "claude", "codex", "copilot", "agy" };
 	if (agent >= TW_AGENT_COUNT) {
 		return NULL;
 	}
@@ -358,7 +386,7 @@ char *tw_agent_command(enum tw_agent agent) {
 	for (char *dir = copy ? strtok_r(copy, ":", &save) : NULL; dir;
 			dir = strtok_r(NULL, ":", &save)) {
 		char *file;
-		if (asprintf(&file, "%s/%s", *dir ? dir : ".", names[agent]) >= 0) {
+		if (asprintf(&file, "%s/%s", *dir ? dir : ".", programs[agent]) >= 0) {
 			if (access(file, X_OK) == 0) {
 				free(copy);
 				return file;
@@ -367,19 +395,8 @@ char *tw_agent_command(enum tw_agent agent) {
 		}
 	}
 	free(copy);
-	// where it was found running before
-	int count;
-	char **lines = known_lines(&count);
-	char prefix[64];
-	snprintf(prefix, sizeof(prefix), "command %s ", prefixes[agent]);
-	char *found = NULL;
-	for (int i = 0; i < count && !found; i++) {
-		if (strncmp(lines[i], prefix, strlen(prefix)) == 0 &&
-				access(lines[i] + strlen(prefix), X_OK) == 0) {
-			found = strdup(lines[i] + strlen(prefix));
-		}
-	}
-	free_lines(lines, count);
+	// where it was found running or installed before
+	char *found = kept_path("command", agent);
 	// Copilot comes with VS Code
 	const char *shims[] = { "/usr/share/code/bin/copilot-shim/copilot",
 		"/opt/visual-studio-code/bin/copilot-shim/copilot", "/usr/lib/code/bin/copilot-shim/copilot" };
@@ -389,6 +406,100 @@ char *tw_agent_command(enum tw_agent agent) {
 		}
 	}
 	return found;
+}
+
+char *tw_agent_home(enum tw_agent agent) {
+	if (agent != TW_AGENT_COPILOT && agent != TW_AGENT_ANTIGRAVITY) {
+		return NULL;
+	}
+	char *home = kept_path("home", agent);
+	const char *mine = getenv("HOME");
+	if (home && mine && strcmp(home, mine) == 0) {
+		free(home);
+		return NULL;
+	}
+	return home;
+}
+
+static bool is_dir(const char *dir, const char *sub) {
+	char *path;
+	if (asprintf(&path, "%s/%s", dir, sub) < 0) {
+		return false;
+	}
+	struct stat st;
+	bool there = stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+	free(path);
+	return there;
+}
+
+/*
+ * Agents installed portable side by side, each in a home of its own
+ * (~/Portable/profiles/<name>): next to the home of a Claude Code or Codex
+ * found, the homes with an Antigravity or a Copilot login, also when these do
+ * not run.
+ */
+static void beside_portable(struct tw_agent_account **all, int *count) {
+	const char *home = getenv("HOME");
+	size_t hl = home ? strlen(home) : 0;
+	int n = *count;
+	char **seen = calloc(n + 1, sizeof(char *));
+	int seen_count = 0;
+	for (int i = 0; seen && hl > 1 && i < n; i++) {
+		struct tw_agent_account *a = &(*all)[i];
+		if (!a->dir || (a->agent != TW_AGENT_CLAUDE && a->agent != TW_AGENT_CODEX)) {
+			continue;
+		}
+		// the folder of the agent, in its home, in the folder of the homes
+		char *profiles = strdup(a->dir);
+		for (int up = 0; profiles && up < 2; up++) {
+			char *slash = strrchr(profiles, '/');
+			if (slash) {
+				*slash = '\0';
+			}
+		}
+		bool inside = profiles && strncmp(profiles, home, hl) == 0 && profiles[hl] == '/';
+		for (int j = 0; inside && j < seen_count; j++) {
+			inside = strcmp(seen[j], profiles) != 0;
+		}
+		if (!inside) {
+			free(profiles);
+			continue;
+		}
+		seen[seen_count++] = profiles;
+		DIR *d = opendir(profiles);
+		struct dirent *de;
+		for (int entries = 0; d && (de = readdir(d)) && entries < 64; entries++) {
+			char *other;
+			if (de->d_name[0] == '.' || asprintf(&other, "%s/%s", profiles, de->d_name) < 0) {
+				continue;
+			}
+			if (is_dir(other, ".gemini/antigravity-cli")) {
+				add(all, count, TW_AGENT_ANTIGRAVITY, NULL);
+				keep_line("antigravity", NULL);
+				keep_path("home", TW_AGENT_ANTIGRAVITY, other);
+				char *agy;
+				if (asprintf(&agy, "%s/.local/bin/agy", other) >= 0) {
+					if (access(agy, X_OK) == 0) {
+						keep_path("command", TW_AGENT_ANTIGRAVITY, agy);
+					}
+					free(agy);
+				}
+			}
+			if (is_dir(other, ".copilot")) {
+				add(all, count, TW_AGENT_COPILOT, NULL);
+				keep_line("copilot", NULL);
+				keep_path("home", TW_AGENT_COPILOT, other);
+			}
+			free(other);
+		}
+		if (d) {
+			closedir(d);
+		}
+	}
+	for (int j = 0; j < seen_count; j++) {
+		free(seen[j]);
+	}
+	free(seen);
 }
 
 /* A folder of the home that is there: "~/.copilot". */
@@ -445,6 +556,7 @@ int tw_agent_accounts_found(struct tw_agent_account **out) {
 		}
 	}
 	free_lines(lines, kept);
+	beside_portable(&all, &count);
 	*out = all;
 	return count;
 }

@@ -668,15 +668,23 @@ static json_object *codex_rpc(void) {
 	return result;
 }
 
-static json_object *copilot_quota_query(void) {
+static json_object *copilot_quota_query(bool *missing) {
+	*missing = false;
 	static const char request[] =
 		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"account.getQuota\",\"params\":{}}";
 	// (also the Copilot that comes with VS Code, tw_agent_command)
 	char *program = tw_agent_command(TW_AGENT_COPILOT);
-	GSubprocess *proc = g_subprocess_new(G_SUBPROCESS_FLAGS_STDIN_PIPE |
-		G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE, NULL,
+	char *home = tw_agent_home(TW_AGENT_COPILOT); // a portable one: its login in its home
+	GSubprocessLauncher *launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_STDIN_PIPE |
+		G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE);
+	if (home) {
+		g_subprocess_launcher_setenv(launcher, "HOME", home, TRUE);
+	}
+	GSubprocess *proc = g_subprocess_launcher_spawn(launcher, NULL,
 		program ? program : "copilot", "--headless", "--stdio", "--no-auto-update", NULL);
+	g_object_unref(launcher);
 	free(program);
+	free(home);
 	if (!proc) {
 		return NULL;
 	}
@@ -728,6 +736,15 @@ static json_object *copilot_quota_query(void) {
 	g_string_free(response, true);
 	g_subprocess_force_exit(proc);
 	g_subprocess_wait(proc, NULL, NULL);
+	// VS Code's Copilot with no Copilot CLI installed only says so, on stderr
+	char said[1024] = "";
+	if (!message) {
+		gsize got = 0;
+		g_input_stream_read_all(g_subprocess_get_stderr_pipe(proc), said, sizeof(said) - 1,
+			&got, NULL, NULL);
+		said[got] = '\0';
+	}
+	*missing = !message && strstr(said, "Copilot CLI was not found");
 	g_object_unref(proc);
 	return message;
 }
@@ -736,11 +753,11 @@ static void copilot_account(struct agent_usage *usage) {
 	static time_t last_try;
 	static struct tw_claude_window quota;
 	static const char *bucket;
-	static bool auth_required;
+	static bool auth_required, missing;
 	time_t now = time(NULL);
 	if (!last_try || now < last_try || now - last_try >= 300) {
 		last_try = now;
-		json_object *answer = copilot_quota_query();
+		json_object *answer = copilot_quota_query(&missing);
 		const char *error = str(field(answer, "error"), "message");
 		auth_required = error && strstr(error, "Not authenticated");
 		json_object *result = field(answer, "result");
@@ -784,6 +801,7 @@ static void copilot_account(struct agent_usage *usage) {
 	usage->copilot_billing = quota;
 	usage->copilot_bucket = g_strdup(bucket);
 	usage->copilot_auth_required = auth_required;
+	usage->copilot_cli_missing = missing;
 }
 
 static void codex_poll_window(struct tw_claude_usage *u, json_object *w) {
@@ -934,9 +952,15 @@ static void agy_account_poll(const char *state) {
 	g_free(dir);
 	if (!fresh) {
 		last_attempt = now;
-		char *argv[] = { "tilewin-claude-usage", "agy-quota", NULL };
+		// (a portable Antigravity: its program, and its home with its login)
+		char *program = tw_agent_command(TW_AGENT_ANTIGRAVITY);
+		char *home = tw_agent_home(TW_AGENT_ANTIGRAVITY);
+		char *argv[] = { "tilewin-claude-usage", "agy-quota", program ? program : "agy",
+			home, NULL };
 		g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL |
 			G_SPAWN_STDERR_TO_DEV_NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+		free(program);
+		free(home);
 	}
 }
 

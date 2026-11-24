@@ -3,7 +3,10 @@
  * home of its own with no agent on $PATH, as on a computer whose agents are
  * portable: a Claude Code and a Codex found while they run, by the folders
  * their environment names, and kept once they are gone; Copilot by its folder;
- * a folder added by hand; the ids written with ~ for the home.
+ * a folder added by hand; the ids written with ~ for the home. An Antigravity
+ * installed portable beside them, with its program and its home, also when it
+ * does not run; what tileWin's own tool writes kept in the login home, whatever
+ * $HOME an agent gives it.
  */
 #define _GNU_SOURCE
 #include <signal.h>
@@ -15,7 +18,9 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <pwd.h>
 #include "tw_agent_accounts.h"
+#include "tw_paths.h"
 
 static int failures;
 
@@ -61,10 +66,13 @@ int main(void) {
 	}
 	char *cmd;
 	if (asprintf(&cmd, "mkdir -p %s/home/bin %s/state %s/home/Portable/profiles/default/"
-			"claude-config %s/home/Portable/codex-config/sessions && "
+			"claude-config %s/home/Portable/codex-config/sessions "
+			"%s/home/Portable/profiles/Gemini/.gemini/antigravity-cli "
+			"%s/home/Portable/profiles/Gemini/.local/bin && "
 			"cp \"$(command -v sleep)\" %s/home/bin/claude && "
-			"cp \"$(command -v sleep)\" %s/home/bin/codex", root, root, root, root, root,
-			root) < 0) {
+			"cp \"$(command -v sleep)\" %s/home/bin/codex && "
+			"cp \"$(command -v sleep)\" %s/home/Portable/profiles/Gemini/.local/bin/agy",
+			root, root, root, root, root, root, root, root, root) < 0) {
 		return 1;
 	}
 	run(cmd);
@@ -82,6 +90,7 @@ int main(void) {
 	unsetenv("COPILOT_HOME");
 
 	check(!listed("copilot"), "Copilot listed with no program and no folder of it");
+	check(!listed("antigravity"), "Antigravity listed with no program and no folder of it");
 
 	// ---- portable agents found while they run, by the folders of their environment
 	char claude_prog[400], codex_prog[400], claude_dir[400], codex_dir[400];
@@ -108,6 +117,19 @@ int main(void) {
 	check(listed("claude:~/Portable/profiles/default/claude-config") &&
 		listed("codex:~/Portable/codex-config"), "the accounts are gone once their agents stop");
 
+	// ---- an Antigravity in a home beside the portable Claude Code's, not running
+	check(listed("antigravity"), "a portable Antigravity beside Claude Code is not found");
+	char gemini[400], agy[460];
+	snprintf(gemini, sizeof(gemini), "%s/Portable/profiles/Gemini", home);
+	snprintf(agy, sizeof(agy), "%s/.local/bin/agy", gemini);
+	char *agy_home = tw_agent_home(TW_AGENT_ANTIGRAVITY);
+	check(agy_home && strcmp(agy_home, gemini) == 0,
+		"the home of a portable Antigravity, with its login, is not known");
+	free(agy_home);
+	program = tw_agent_command(TW_AGENT_ANTIGRAVITY);
+	check(program && strcmp(program, agy) == 0, "the program of a portable Antigravity is not known");
+	free(program);
+
 	// ---- Copilot by its folder
 	if (asprintf(&cmd, "/usr/bin/mkdir -p %s/.copilot", home) >= 0) {
 		run(cmd);
@@ -133,6 +155,19 @@ int main(void) {
 	check(tw_agent_account_parse(id, &a) && a.agent == TW_AGENT_CLAUDE && a.dir &&
 		strcmp(a.dir, other) == 0, "the id of a folder does not lead back to it");
 	tw_agent_account_finish(&a);
+
+	// ---- tileWin's tool writes into the login home, not an agent's $HOME of its own
+	unsetenv("XDG_CACHE_HOME");
+	unsetenv("XDG_STATE_HOME");
+	tw_paths_use_login_home();
+	struct passwd *pw = getpwuid(getuid());
+	char *cache = tw_cache_dir(), *state_dir = tw_state_dir();
+	check(pw && cache && strncmp(cache, pw->pw_dir, strlen(pw->pw_dir)) == 0 &&
+		strstr(cache, "/.cache/tileWin") && state_dir &&
+		strncmp(state_dir, pw->pw_dir, strlen(pw->pw_dir)) == 0,
+		"the tool's folders follow the $HOME an agent gives it");
+	free(cache);
+	free(state_dir);
 
 	if (asprintf(&cmd, "/usr/bin/rm -rf %s", root) >= 0) {
 		run(cmd);

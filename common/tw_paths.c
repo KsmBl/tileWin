@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <pwd.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,12 +26,22 @@ char *tw_expand_home(const char *path) {
 	return strdup(path);
 }
 
+static bool login_home;
+
+void tw_paths_use_login_home(void) {
+	login_home = true;
+}
+
 static char *xdg_dir(const char *env, const char *fallback) {
 	const char *base = getenv(env);
 	if (base && base[0] == '/') {
 		return format_str("%s/tileWin", base);
 	}
 	const char *home = getenv("HOME");
+	struct passwd *pw = login_home ? getpwuid(getuid()) : NULL;
+	if (pw && pw->pw_dir && pw->pw_dir[0] == '/') {
+		home = pw->pw_dir;
+	}
 	if (!home) {
 		return NULL;
 	}

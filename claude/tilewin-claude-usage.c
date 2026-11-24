@@ -1115,7 +1115,7 @@ static int cmd_agy_statusline(bool probe) {
 
 /* Antigravity renders the startup status line only on a terminal. The probe
  * supplies a private terminal and never writes keystrokes or prompts to it. */
-static int cmd_agy_quota(void) {
+static int cmd_agy_quota(const char *program, const char *home) {
 	char workspace[] = "/tmp/tilewin-agy-quota.XXXXXX";
 	if (!mkdtemp(workspace)) {
 		return 1;
@@ -1132,7 +1132,10 @@ static int cmd_agy_quota(void) {
 			_exit(1);
 		}
 		setenv("TERM", "xterm-256color", 1);
-		execlp("agy", "agy", "--settings",
+		if (home && *home) {
+			setenv("HOME", home, 1); // a portable one: its login is in its own home
+		}
+		execlp(program && *program ? program : "agy", "agy", "--settings",
 			"{\"statusLine\":{\"type\":\"command\","
 			"\"command\":\"tilewin-claude-usage agy-statusline --probe\"}}", (char *)NULL);
 		_exit(127);
@@ -1185,12 +1188,14 @@ static int cmd_agy_quota(void) {
 
 int main(int argc, char **argv) {
 	const char *cmd = argc > 1 ? argv[1] : "";
+	// what the status lines write is the user's, also of an agent with a $HOME of its own
+	tw_paths_use_login_home();
 	if (strcmp(cmd, "agy-statusline") == 0) {
 		return cmd_agy_statusline(argc == 3 && strcmp(argv[2], "--probe") == 0);
 	} else if (strcmp(cmd, "copilot-statusline") == 0) {
 		return cmd_copilot_statusline();
 	} else if (strcmp(cmd, "agy-quota") == 0) {
-		return cmd_agy_quota();
+		return cmd_agy_quota(argc > 2 ? argv[2] : NULL, argc > 3 ? argv[3] : NULL);
 	} else if (strcmp(cmd, "statusline") == 0) {
 		return cmd_statusline(argc - 2, argv + 2);
 	} else if (strcmp(cmd, "connect") == 0) {
@@ -1201,7 +1206,7 @@ int main(int argc, char **argv) {
 		return cmd_list();
 	}
 	fprintf(stderr, "usage: tilewin-claude-usage connect [DIR] | disconnect [DIR] | "
-		"statusline [--dir DIR] | agy-statusline | agy-quota | copilot-statusline | list\n"
+		"statusline [--dir DIR] | agy-statusline | agy-quota [PROGRAM [HOME]] | copilot-statusline | list\n"
 		"The usage limits of Claude Code for tileWin's Claude widget, as Claude Code shows "
 		"them to its status line; DIR is a Claude Code folder, ~/.claude by default.\n");
 	return strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0 ? 0 : 2;

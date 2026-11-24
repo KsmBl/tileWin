@@ -66,5 +66,11 @@ bool tw_agent_command_installed(const char *command);
  * comes with another program (Copilot with VS Code); NULL when none is known.
  */
 char *tw_agent_command(enum tw_agent agent);
+/*
+ * The home a portable Copilot or Antigravity runs with, its login in it
+ * (where it was found running, or next to a portable Claude Code or Codex);
+ * NULL for the user's own home.
+ */
+char *tw_agent_home(enum tw_agent agent);
 
 #endif

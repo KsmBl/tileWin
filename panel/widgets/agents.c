@@ -68,6 +68,7 @@ struct source {
 	double elsewhere_share;
 	time_t elsewhere_at;
 	char allowance[48];
+	const char *why; // why there are no values, when known
 };
 
 struct agents_state {
@@ -249,6 +250,8 @@ static void from_collected(struct agents_state *st, struct source *s) {
 		s->have = u->copilot_billing.known;
 		snprintf(s->allowance, sizeof(s->allowance), "%s",
 			u->copilot_bucket ? u->copilot_bucket : "Allowance");
+		s->why = u->copilot_cli_missing ? "Copilot CLI is not installed: run copilot once" :
+			u->copilot_auth_required ? "Not signed in: run copilot and /login" : NULL;
 	}
 }
 
@@ -739,19 +742,48 @@ static double desk_foot(const struct source *s, struct gadget_ctx *ctx,
 }
 
 /* A line for each item, a bar under each usage. */
+/* The height of a bar in the lines, at least (the blocks need room to be told apart). */
+static double list_bar_h(const struct desk_look *l) {
+	return l->bar_h > 0 ? l->bar_h : (l->look == PD_BAR_SMOOTH ? 5 : 13) * l->sc;
+}
+
+/* The height a line needs: its text, and its bar under it with room after. */
+static double list_line_h(const struct desk_look *l, bool bar) {
+	return bar ? l->text * 1.9 + list_bar_h(l) : l->text * 1.6;
+}
+
+/* The height the lines of an account need. */
+static double list_height(struct widget *w, const struct source *s, const struct desk_look *l) {
+	const struct tw_claude_item *items[MAX_ITEMS];
+	int count = source_items(w, s, items);
+	double total = 0;
+	for (int i = 0; i < count; i++) {
+		char value[64];
+		total += list_line_h(l, item_value(s, items[i], l->brief, value, sizeof(value)) >= 0 &&
+			l->bars);
+	}
+	return total;
+}
+
+/*
+ * A line for each item, those with a share with a bar under them; each as high
+ * as it needs, the room between y and bottom shared out in that measure.
+ */
 static void desk_list(struct widget *w, const struct source *s, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal, const struct desk_look *l, double y, double bottom) {
 	cairo_t *cr = ctx->cairo;
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = source_items(w, s, items);
-	double row = count > 0 ? (bottom - y) / count : 0;
+	double need = list_height(w, s, l);
+	double k = need > 0 ? (bottom - y) / need : 1;
 	for (int i = 0; i < count; i++) {
 		char value[64];
 		double share = item_value(s, items[i], l->brief, value, sizeof(value));
 		bool bar = share >= 0 && l->bars;
-		double bh = l->bar_h > 0 ? l->bar_h :
-			fmax(row * 0.18, (l->look == PD_BAR_SMOOTH ? 4 : 15) * l->sc); // blocks need room
-		double line = bar ? fmin(row - bh - 2 * l->sc, row * 0.62) : row;
+		double row = list_line_h(l, bar) * k;
+		// a bar grows with the room, the text above it keeps most of the rest
+		double bh = bar ? (l->bar_h > 0 ? l->bar_h : fmax(list_bar_h(l), row * 0.18)) : 0;
+		double line = bar ? (row - bh) * 0.8 : row;
 		pd_text(cr, l->font, long_name(s, items[i], l->brief), l->pad, y, ctx->width * 0.6, line,
 			pal->dim, PD_LEFT);
 		uint32_t color = share >= 0 ? level_color(w, share, pal->fg) : pal->fg;
@@ -952,8 +984,14 @@ static const char *desk_missing(struct widget *w, const struct source *s) {
 	if (s->have) {
 		return NULL;
 	}
+	if (s->why) {
+		return s->why;
+	}
 	if (s->account.agent == TW_AGENT_COPILOT && !widget_conf_bool(w, "account_checks", false)) {
 		return "Allowance: turn on Ask the accounts"; // (in its settings)
+	}
+	if (s->account.agent == TW_AGENT_ANTIGRAVITY && !widget_conf_bool(w, "account_checks", false)) {
+		return "Limits: turn on Ask the accounts"; // (or its status line, docs/usage.md)
 	}
 	return "The limits come with its next answer";
 }
@@ -999,7 +1037,7 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 	bool charts = strcmp(style, "week") == 0 || strcmp(style, "windows") == 0;
 	bool list = strcmp(style, "list") == 0, bars = strcmp(style, "bar") == 0;
 	double title = l->title ? l->text * 1.8 : 0, gap = l->text * 1.1;
-	double row = l->text * 2.3, line = l->text * 1.6, foot = l->updated ? l->text * 1.3 : 0;
+	double line = l->text * 1.6, foot = l->updated ? l->text * 1.3 : 0;
 	double need[32] = { 0 }, total = 0;
 	int count = st->count < 32 ? st->count : 32, with_chart = 0;
 	for (int k = 0; k < count; k++) {
@@ -1015,7 +1053,7 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 			need[k] += desk_has_chart(s) ? 0 : line;
 			need[k] += desk_has_chart(s) && s->usage.updated ? foot : 0;
 		} else {
-			need[k] += list ? n * row : bars ? windows * l->text * 4.4 :
+			need[k] += list ? list_height(w, s, l) : bars ? windows * l->text * 4.4 :
 				l->text * (8 + 1.3 * (n - windows));
 			need[k] += s->usage.updated ? foot : 0;
 		}

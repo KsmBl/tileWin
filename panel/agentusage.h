@@ -37,6 +37,7 @@ struct agent_usage {
 	time_t now;
 	bool installed[AGENT_COUNT];
 	bool copilot_auth_required;
+	bool copilot_cli_missing; // only the one of VS Code, which starts a Copilot CLI not there
 	struct tw_claude_window copilot_billing;
 	char *copilot_bucket;
 	GPtrArray *workers, *models, *limits;
