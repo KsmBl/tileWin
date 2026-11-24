@@ -446,6 +446,222 @@ static bool list_styles(const char *widget, GPtrArray *values, GPtrArray *labels
 	return true;
 }
 
+/* ---------- the size on the desktop ---------- */
+
+/*
+ * The cells a widget takes on the desktop: "Default" leaves it to the style,
+ * else columns x rows, picked on a little grid (hovering shows what a click
+ * makes) or set in the two fields. Written as "size CxR" of its desktop entry.
+ */
+#define SIZE_GRID_COLS 8
+#define SIZE_GRID_ROWS 6
+#define SIZE_CELL 18
+#define SIZE_MOST 20
+
+struct size_editor {
+	struct settings *s;
+	char *widget;
+	GtkWidget *deflt, *cols, *rows, *grid, *shown;
+	int hover_c, hover_r; // the cell under the pointer, 0 for none
+	bool updating;
+};
+
+static void size_editor_free(gpointer data) {
+	struct size_editor *e = data;
+	g_free(e->widget);
+	g_free(e);
+}
+
+/* What the style it has makes, when the size is left to it; 0 when it measures itself. */
+static void size_of_style(struct size_editor *e, int *c, int *r) {
+	char *type = widget_type_of(e->widget);
+	const struct tw_widget_info *info = tw_widget_find(type);
+	g_free(type);
+	struct cstmt *entry = widget_desktop_entry(e->s, e->widget);
+	const char *name = cstmt_arg(confdoc_child(entry, "style", NULL), 0);
+	const struct tw_widget_style *style = info ? tw_widget_style_find(info, name) : NULL;
+	*c = style ? style->columns : 0;
+	*r = style ? style->rows : 0;
+}
+
+static void size_show(struct size_editor *e) {
+	bool deflt = gtk_check_button_get_active(GTK_CHECK_BUTTON(e->deflt));
+	int c = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->cols));
+	int r = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->rows));
+	char text[96];
+	if (e->hover_c > 0) {
+		snprintf(text, sizeof(text), "%d × %d cells", e->hover_c, e->hover_r);
+	} else if (deflt && c == 0) {
+		snprintf(text, sizeof(text), "As wide as it needs");
+	} else {
+		snprintf(text, sizeof(text), "%d × %d cells%s", c, r, deflt ? " (the style's)" : "");
+	}
+	gtk_label_set_text(GTK_LABEL(e->shown), text);
+	gtk_widget_set_sensitive(e->cols, !deflt);
+	gtk_widget_set_sensitive(e->rows, !deflt);
+	gtk_widget_queue_draw(e->grid);
+}
+
+static void size_write(struct size_editor *e) {
+	if (gtk_check_button_get_active(GTK_CHECK_BUTTON(e->deflt))) {
+		write_desktop_option(e->s, e->widget, "size", NULL);
+	} else {
+		char value[32];
+		snprintf(value, sizeof(value), "%dx%d",
+			gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->cols)),
+			gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->rows)));
+		write_desktop_option(e->s, e->widget, "size", value);
+	}
+	size_show(e);
+}
+
+/* A size of its own, from the fields or the grid: no longer the default. */
+static void size_set(struct size_editor *e, int c, int r) {
+	e->updating = true;
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(e->deflt), FALSE);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->cols), c);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->rows), r);
+	e->updating = false;
+	size_write(e);
+}
+
+static void on_size_spin(GtkSpinButton *spin, gpointer data) {
+	struct size_editor *e = data;
+	if (!e->updating) {
+		size_write(e);
+	}
+}
+
+static void on_size_default(GtkCheckButton *check, gpointer data) {
+	struct size_editor *e = data;
+	if (e->updating) {
+		return;
+	}
+	if (gtk_check_button_get_active(check)) {
+		int c, r;
+		size_of_style(e, &c, &r);
+		e->updating = true;
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->cols), c);
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->rows), r);
+		e->updating = false;
+	} else if (gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->cols)) == 0) {
+		// a style that measures itself: a size to start from
+		e->updating = true;
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->cols), 2);
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->rows), 1);
+		e->updating = false;
+	}
+	size_write(e);
+}
+
+static void size_grid_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
+		gpointer data) {
+	struct size_editor *e = data;
+	int c = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->cols));
+	int r = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(e->rows));
+	bool hovering = e->hover_c > 0;
+	GdkRGBA fg;
+	gtk_widget_get_color(GTK_WIDGET(area), &fg);
+	for (int y = 0; y < SIZE_GRID_ROWS; y++) {
+		for (int x = 0; x < SIZE_GRID_COLS; x++) {
+			bool taken = hovering ? x < e->hover_c && y < e->hover_r : x < c && y < r;
+			cairo_rectangle(cr, x * SIZE_CELL + 1.5, y * SIZE_CELL + 1.5, SIZE_CELL - 3,
+				SIZE_CELL - 3);
+			if (taken) {
+				// the accent, lighter while it only shows what a click makes
+				cairo_set_source_rgba(cr, 0.21, 0.52, 0.89, hovering ? 0.55 : 0.9);
+				cairo_fill_preserve(cr);
+			}
+			cairo_set_source_rgba(cr, fg.red, fg.green, fg.blue, 0.35);
+			cairo_set_line_width(cr, 1);
+			cairo_stroke(cr);
+		}
+	}
+}
+
+static void size_cell_at(double x, double y, int *c, int *r) {
+	*c = (int)(x / SIZE_CELL) + 1;
+	*r = (int)(y / SIZE_CELL) + 1;
+	*c = *c < 1 ? 1 : *c > SIZE_GRID_COLS ? SIZE_GRID_COLS : *c;
+	*r = *r < 1 ? 1 : *r > SIZE_GRID_ROWS ? SIZE_GRID_ROWS : *r;
+}
+
+static void on_size_motion(GtkEventControllerMotion *motion, double x, double y, gpointer data) {
+	struct size_editor *e = data;
+	size_cell_at(x, y, &e->hover_c, &e->hover_r);
+	size_show(e);
+}
+
+static void on_size_leave(GtkEventControllerMotion *motion, gpointer data) {
+	struct size_editor *e = data;
+	e->hover_c = e->hover_r = 0;
+	size_show(e);
+}
+
+static void on_size_click(GtkGestureClick *click, int n, double x, double y, gpointer data) {
+	struct size_editor *e = data;
+	int c, r;
+	size_cell_at(x, y, &c, &r);
+	size_set(e, c, r);
+}
+
+static void add_size_row(struct settings *s, GtkWidget *list, const char *widget,
+		const struct tw_widget_option *opt) {
+	struct size_editor *e = g_new0(struct size_editor, 1);
+	e->s = s;
+	e->widget = g_strdup(widget);
+	int c = 0, r = 0;
+	struct cstmt *entry = widget_desktop_entry(s, widget);
+	const char *value = cstmt_arg(confdoc_child(entry, "size", NULL), 0);
+	bool own = value && sscanf(value, "%dx%d", &c, &r) == 2 && c > 0 && r > 0;
+	if (!own) {
+		size_of_style(e, &c, &r);
+	}
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+	GtkWidget *line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	e->deflt = gtk_check_button_new_with_label("Default");
+	gtk_widget_set_tooltip_text(e->deflt, "The style decides how many cells it takes");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(e->deflt), !own);
+	gtk_box_append(GTK_BOX(line), e->deflt);
+	e->cols = gtk_spin_button_new_with_range(0, SIZE_MOST, 1);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->cols), c);
+	gtk_widget_set_tooltip_text(e->cols, "Columns");
+	gtk_box_append(GTK_BOX(line), e->cols);
+	gtk_box_append(GTK_BOX(line), gtk_label_new("×"));
+	e->rows = gtk_spin_button_new_with_range(0, SIZE_MOST, 1);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(e->rows), r);
+	gtk_widget_set_tooltip_text(e->rows, "Rows");
+	gtk_box_append(GTK_BOX(line), e->rows);
+	gtk_box_append(GTK_BOX(box), line);
+	GtkWidget *below = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+	e->grid = gtk_drawing_area_new();
+	gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(e->grid), SIZE_GRID_COLS * SIZE_CELL);
+	gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(e->grid), SIZE_GRID_ROWS * SIZE_CELL);
+	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(e->grid), size_grid_draw, e, NULL);
+	gtk_widget_set_tooltip_text(e->grid, "Click the cell of its lower right corner");
+	gtk_widget_set_cursor_from_name(e->grid, "pointer");
+	GtkEventController *motion = gtk_event_controller_motion_new();
+	g_signal_connect(motion, "motion", G_CALLBACK(on_size_motion), e);
+	g_signal_connect(motion, "leave", G_CALLBACK(on_size_leave), e);
+	gtk_widget_add_controller(e->grid, motion);
+	GtkGesture *click = gtk_gesture_click_new();
+	g_signal_connect(click, "pressed", G_CALLBACK(on_size_click), e);
+	gtk_widget_add_controller(e->grid, GTK_EVENT_CONTROLLER(click));
+	gtk_box_append(GTK_BOX(below), e->grid);
+	e->shown = gtk_label_new(NULL);
+	gtk_widget_add_css_class(e->shown, "dim-label");
+	gtk_widget_set_valign(e->shown, GTK_ALIGN_START);
+	gtk_box_append(GTK_BOX(below), e->shown);
+	gtk_box_append(GTK_BOX(box), below);
+	g_signal_connect(e->deflt, "toggled", G_CALLBACK(on_size_default), e);
+	g_signal_connect(e->cols, "value-changed", G_CALLBACK(on_size_spin), e);
+	g_signal_connect(e->rows, "value-changed", G_CALLBACK(on_size_spin), e);
+	g_object_set_data_full(G_OBJECT(box), "editor", e, size_editor_free);
+	size_show(e);
+	ui_row(list, opt->title, "Cells of the icon grid it takes, columns × rows: click the grid, "
+		"or Default for what its style takes", box);
+}
+
 static void add_option_row(struct settings *s, GtkWidget *list, const char *widget,
 		const struct tw_widget_option *opt, bool desktop) {
 	char *row_type = widget_type_of(widget);
@@ -455,6 +671,10 @@ static void add_option_row(struct settings *s, GtkWidget *list, const char *widg
 	g_free(row_type);
 	if (own_editor) {
 		return; // ticked and sorted in a group of its own
+	}
+	if (desktop && strcmp(opt->key, "size") == 0) {
+		add_size_row(s, list, widget, opt);
+		return;
 	}
 	void (*lister)(GPtrArray *, GPtrArray *) = opt_lister(widget, opt, desktop);
 	bool styles = desktop && strcmp(opt->key, "style") == 0;

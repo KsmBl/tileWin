@@ -1393,6 +1393,15 @@ test(
 )
 
 test(
+	'settings-widget-size',
+	find_program('settings_widget_size.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 90,
+)
+
+test(
 	'settings-claude',
 	find_program('settings_claude.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
