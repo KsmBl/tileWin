@@ -5,6 +5,15 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.12
+
+- **AI agent usage widget:** one widget for the accounts of Claude Code, Codex, Copilot and Antigravity in place of the Claude Code and the Codex widget, which older configs turn into it (contributed by Hawkynt). Accounts of agents installed elsewhere or portable are found too, their order is set with arrows in its settings, and Copilot's allowance comes with **Ask the accounts**.
+- **All agents in one chart** on the desktop: every account a line of its color, the 5-hour limits, the weekly ones or both, below or next to each other, each line from the start of its window to its reset or all along the clock from Monday to Sunday.
+- **The charts go back in time:** the wheel over a chart of the flyout shows the older 5-hour windows and weeks, as far as **Keep the usage** keeps them. Antigravity has charts too, and the 5-hour window goes on dashed at its pace so far.
+- **Widget settings show only what counts:** the bar's size only with bars, on the desktop only what the style draws; switches for yes or no, the colors and the mouse actions folded, and the **size on the desktop** picked on a grid of cells.
+- **Kernel updates:** a hibernation comes back in the kernel that made it, also when the next start is set to another one.
+- **Fixes:** a desktop card too small for its lines makes their text smaller instead of drawing them over each other; an older session of Claude Code no longer lowers the usage shown.
+
 ## 1.11
 
 - **Windows over a full screen one:** a window chosen with Alt+Tab, the taskbar or a click comes over a window that is full screen, as on Windows, instead of nothing happening; the full screen window stays so behind it and is on top again when it is clicked or chosen.
