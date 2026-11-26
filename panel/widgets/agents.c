@@ -1272,14 +1272,24 @@ static void desk_together(struct widget *w, struct gadget_ctx *ctx,
 	int seen[TW_AGENT_COUNT] = { 0 }, n = 0;
 	for (int k = 0; k < st->count && n < 8; k++) {
 		const struct source *s = &st->src[k];
-		if (desk_missing(w, s) || !desk_has_chart(s)) {
+		if (desk_missing(w, s)) {
 			continue;
 		}
 		charts[n] = (struct claude_charts){ 0 };
-		desk_charts_of(s, &charts[n]);
+		if (desk_has_chart(s)) {
+			desk_charts_of(s, &charts[n]);
+		}
 		if (!charts[n].have) {
 			free(charts[n].points);
-			continue;
+			charts[n].points = NULL;
+			charts[n].count = 0;
+			if (!s->group || !s->have) {
+				continue;
+			}
+			// a group of Antigravity's never used: in the legend at what it has, no line
+			charts[n].five_hour = s->usage.five_hour;
+			charts[n].seven_day = s->usage.seven_day;
+			charts[n].now = time(NULL);
 		}
 		int agent = s->account.agent;
 		int nth = agent >= 0 && agent < TW_AGENT_COUNT ? seen[agent]++ : 0;

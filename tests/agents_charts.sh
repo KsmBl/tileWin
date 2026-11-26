@@ -233,7 +233,7 @@ if open_flyout; then
 fi
 
 # ---- Antigravity's three groups of models, each with its limits: on the taskbar each of
-# its own (Argon has only a weekly one)
+# its own (Argon has only a weekly one), also Claude/GPT, never used, at 0%
 agy=$XDG_STATE_HOME/tileWin/agent-usage/agy
 mkdir -p "$agy"
 python3 - "$agy/account.jsonl" "$now" <<'PY'
@@ -245,8 +245,9 @@ with open(path, "w") as f:
         k = 1 - ago / 86400
         q = {"gemini-5h": {"remaining_fraction": 0.8, "reset_time": iso(now + 3600)},
              "gemini-weekly": {"remaining_fraction": 1 - 0.4 * k, "reset_time": iso(now + 2 * 86400)},
-             "3p-5h": {"remaining_fraction": 0.7, "reset_time": iso(now + 7200)},
-             "3p-weekly": {"remaining_fraction": 1 - 0.2 * k, "reset_time": iso(now + 4 * 86400)},
+             # (Claude/GPT never used: all of it left, no reset)
+             "3p-5h": {"remaining_fraction": 1, "reset_time": "1970-01-01T00:00:00Z"},
+             "3p-weekly": {"remaining_fraction": 1, "reset_time": "1970-01-01T00:00:00Z"},
              "gemini-argon-wtu-weekly": {"remaining_fraction": 1 - 0.6 * k, "reset_time": iso(now + 86400)}}
         f.write(json.dumps({"at": now - ago, "data": {"quota": q, "pid": 0}}) + "\n")
 PY

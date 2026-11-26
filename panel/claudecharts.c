@@ -378,18 +378,21 @@ static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
 
 /*
  * Where a limit resets next: a dashed line across the chart in color, with
- * label ("resets 19:00") at its top, beside it on the side with room.
+ * label ("resets 19:00") at its top, beside it on the side with room. Of k
+ * lines at the same place this is the i-th: their dashes take turns, so each
+ * color shows.
  */
-static void draw_reset(cairo_t *cr, const struct claude_look *st, struct pbox g, double x,
-		uint32_t color, const char *label) {
+static void draw_reset_shared(cairo_t *cr, const struct claude_look *st, struct pbox g,
+		double x, uint32_t color, const char *label, int i, int k) {
 	if (x < g.x + 1 || x > g.x + g.width - 1) {
 		return;
 	}
-	double dash[] = { 3, 3 };
+	k = k < 1 ? 1 : k;
+	double dash[] = { 4, k > 1 ? 4.0 * (k - 1) : 3 };
 	cairo_new_path(cr);
 	cairo_move_to(cr, round(x) + 0.5, g.y);
 	cairo_line_to(cr, round(x) + 0.5, g.y + g.height);
-	cairo_set_dash(cr, dash, 2, 0);
+	cairo_set_dash(cr, dash, 2, k > 1 ? -4.0 * i : 0);
 	pd_color(cr, color);
 	cairo_set_line_width(cr, 1.5);
 	cairo_stroke(cr);
@@ -407,6 +410,42 @@ static void draw_reset(cairo_t *cr, const struct claude_look *st, struct pbox g,
 			pd_text(cr, st->font, label, lx, g.y + g.height - 18, tw + 2, 16, st->fg, PD_LEFT);
 		}
 	}
+}
+
+static void draw_reset(cairo_t *cr, const struct claude_look *st, struct pbox g, double x,
+		uint32_t color, const char *label) {
+	draw_reset_shared(cr, st, g, x, color, label, 0, 1);
+}
+
+/*
+ * A reset after the end of the chart: at its right edge a small arrow in color
+ * with when ("Tue", "01:30"), the k-th of them one under the other.
+ */
+static void draw_reset_later(cairo_t *cr, const struct claude_look *st, struct pbox g,
+		time_t reset, bool week, uint32_t color, int k) {
+	char when[24];
+	struct tm tm;
+	localtime_r(&reset, &tm);
+	strftime(when, sizeof(when), week ? "%a" : "%H:%M", &tm);
+	int tw = 0;
+	pd_text_size(cr, st->font, when, &tw, NULL);
+	double y = g.y + 4 + 18 * k, right = g.x + g.width - 3;
+	if (y + 16 > g.y + g.height) {
+		return;
+	}
+	double lx = right - 9 - tw - 3;
+	cairo_new_path(cr);
+	pd_rounded(cr, lx - 3, y, tw + 18, 16, 3);
+	pd_color(cr, (st->label_bg & 0xffffff00) | 0xd8);
+	cairo_fill(cr);
+	pd_text(cr, st->font, when, lx, y, tw + 2, 16, st->fg, PD_LEFT);
+	cairo_new_path(cr);
+	cairo_move_to(cr, right - 9, y + 3);
+	cairo_line_to(cr, right - 1, y + 8);
+	cairo_line_to(cr, right - 9, y + 13);
+	cairo_close_path(cr);
+	pd_color(cr, color);
+	cairo_fill(cr);
 }
 
 /* "resets 19:00", "resets Wed 14:00" further off. */
@@ -993,13 +1032,31 @@ void claude_chart_lines(const struct claude_hover *f, const struct claude_line *
 	}
 	chart_reach = 0;
 	cairo_restore(cr);
-	// along the clock: where each line's limit resets next, dashed in its color
+	// along the clock: where each line's limit resets next, dashed in its color (lines
+	// at the same place taking turns in their dashes); after the chart, at its edge
+	int later = 0;
 	for (int i = 0; !relative && i < n && i < 16; i++) {
 		const struct claude_charts *c = lines[i].c;
 		const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
-		if (cur->resets_at > c->now && cur->resets_at > start && cur->resets_at < end) {
-			draw_reset(cr, st, g, chart_x(g, start, end, cur->resets_at), lines[i].color, NULL);
+		if (cur->resets_at <= c->now || cur->resets_at <= start) {
+			continue;
 		}
+		if (cur->resets_at >= end) {
+			draw_reset_later(cr, st, g, cur->resets_at, week, lines[i].color, later++);
+			continue;
+		}
+		double x = round(chart_x(g, start, end, cur->resets_at));
+		int at = 0, same = 0;
+		for (int k = 0; k < n && k < 16; k++) {
+			const struct claude_charts *o = lines[k].c;
+			const struct tw_claude_window *w = week ? &o->seven_day : &o->five_hour;
+			if (w->resets_at > o->now && w->resets_at > start && w->resets_at < end &&
+					fabs(round(chart_x(g, start, end, w->resets_at)) - x) < 2) {
+				at += k < i;
+				same++;
+			}
+		}
+		draw_reset_shared(cr, st, g, x, lines[i].color, NULL, at, same);
 	}
 	// now: across the chart along the clock; else where each line is in its window
 	if (now_in) {

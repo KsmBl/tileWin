@@ -881,11 +881,15 @@ static void agy_quotas(struct collect *c, json_object *quota, time_t at) {
 		json_object *fraction = field(values, "remaining_fraction");
 		double left = number(values, "remaining_fraction");
 		time_t reset = timestamp(values, "reset_time");
+		// (a group never used tells no reset, "1970-01-01": all of it left, 0% used)
 		if ((!json_object_is_type(fraction, json_type_int) &&
 				!json_object_is_type(fraction, json_type_double)) ||
-				!(left >= 0 && left <= 1) || !reset ||
+				!(left >= 0 && left <= 1) || (reset <= 0 && left < 1) ||
 				json_object_get_boolean(field(values, "disabled"))) {
 			continue;
+		}
+		if (reset < 0) {
+			reset = 0;
 		}
 		char *lower = g_ascii_strdown(bucket, -1);
 		bool weekly = strstr(lower, "weekly") || strstr(lower, "7d");
