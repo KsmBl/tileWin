@@ -28,6 +28,7 @@ struct claude_look {
 	double chart_radius;
 	bool dark;    // a dark background: the warning colors lighter
 	bool sunken;  // the chart in a sunken edge (Windows 95)
+	bool resets;  // a dashed line where a limit resets next (the charts on the desktop)
 	const char *font, *bold;
 };
 

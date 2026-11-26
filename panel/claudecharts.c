@@ -376,6 +376,48 @@ static void draw_series(cairo_t *cr, struct pbox g, time_t start, time_t end,
 	cairo_stroke(cr);
 }
 
+/*
+ * Where a limit resets next: a dashed line across the chart in color, with
+ * label ("resets 19:00") at its top, beside it on the side with room.
+ */
+static void draw_reset(cairo_t *cr, const struct claude_look *st, struct pbox g, double x,
+		uint32_t color, const char *label) {
+	if (x < g.x + 1 || x > g.x + g.width - 1) {
+		return;
+	}
+	double dash[] = { 3, 3 };
+	cairo_new_path(cr);
+	cairo_move_to(cr, round(x) + 0.5, g.y);
+	cairo_line_to(cr, round(x) + 0.5, g.y + g.height);
+	cairo_set_dash(cr, dash, 2, 0);
+	pd_color(cr, color);
+	cairo_set_line_width(cr, 1.5);
+	cairo_stroke(cr);
+	cairo_set_dash(cr, NULL, 0, 0);
+	if (label) {
+		int tw = 0;
+		pd_text_size(cr, st->font, label, &tw, NULL);
+		double lx = x + 4 + tw > g.x + g.width - 2 ? x - 4 - tw : x + 4;
+		if (lx >= g.x + 2) {
+			// on a patch of the label color: readable over the lines and the shading
+			cairo_new_path(cr);
+			pd_rounded(cr, lx - 3, g.y + g.height - 19, tw + 6, 17, 3);
+			pd_color(cr, (st->label_bg & 0xffffff00) | 0xd8);
+			cairo_fill(cr);
+			pd_text(cr, st->font, label, lx, g.y + g.height - 18, tw + 2, 16, st->fg, PD_LEFT);
+		}
+	}
+}
+
+/* "resets 19:00", "resets Wed 14:00" further off. */
+static void reset_words(time_t reset, time_t now, const char *what, char *out, size_t size) {
+	char when[32];
+	struct tm tm;
+	localtime_r(&reset, &tm);
+	strftime(when, sizeof(when), reset - now < 20 * 3600 ? "%H:%M" : "%a %H:%M", &tm);
+	snprintf(out, size, "%s%s%s", what ? what : "", what ? " resets " : "resets ", when);
+}
+
 /* What is behind now, shaded, as a copy shows how far it is. */
 static void draw_behind(cairo_t *cr, const struct claude_look *st, struct pbox g, double x) {
 	pd_rect(cr, g.x, g.y, x - g.x, g.height, (st->chart_line & 0xffffff00) | 0x14);
@@ -490,6 +532,19 @@ void claude_chart_five_hours(const struct claude_hover *f, const struct claude_c
 		if (x1 - x0 > 30) {
 			pd_text(cr, running ? st->bold : st->font, label, x0, g.y + 2, x1 - x0 - 4, 16,
 				running ? st->fg : st->dim, PD_RIGHT);
+		}
+	}
+	if (back == 0 && st->resets) {
+		char label[48];
+		if (c->five_hour.resets_at > c->now && c->five_hour.resets_at <= end) {
+			reset_words(c->five_hour.resets_at, c->now, NULL, label, sizeof(label));
+			draw_reset(cr, st, g, chart_x(g, start, end, c->five_hour.resets_at), now_color,
+				label);
+		}
+		if (c->seven_day.resets_at > c->now && c->seven_day.resets_at < end) {
+			reset_words(c->seven_day.resets_at, c->now, "week", label, sizeof(label));
+			draw_reset(cr, st, g, chart_x(g, start, end, c->seven_day.resets_at), st->fg,
+				label);
 		}
 	}
 	if (back == 0) {
@@ -607,6 +662,12 @@ void claude_chart_week(const struct claude_hover *f, const struct claude_charts 
 		TW_CLAUDE_SEVEN_DAYS, c->now, used) : 0;
 	if (back == 0 && c->now > start) {
 		draw_pace(cr, st, g, start, end, c->now, end, used, pace, 0);
+	}
+	if (back == 0 && st->resets && c->five_hour.resets_at > c->now &&
+			c->five_hour.resets_at < end) {
+		char label[48];
+		reset_words(c->five_hour.resets_at, c->now, "5h", label, sizeof(label));
+		draw_reset(cr, st, g, chart_x(g, start, end, c->five_hour.resets_at), color, label);
 	}
 	if (back == 0) {
 		draw_now(cr, st, g, now_x, used, color);
@@ -932,6 +993,14 @@ void claude_chart_lines(const struct claude_hover *f, const struct claude_line *
 	}
 	chart_reach = 0;
 	cairo_restore(cr);
+	// along the clock: where each line's limit resets next, dashed in its color
+	for (int i = 0; !relative && i < n && i < 16; i++) {
+		const struct claude_charts *c = lines[i].c;
+		const struct tw_claude_window *cur = week ? &c->seven_day : &c->five_hour;
+		if (cur->resets_at > c->now && cur->resets_at > start && cur->resets_at < end) {
+			draw_reset(cr, st, g, chart_x(g, start, end, cur->resets_at), lines[i].color, NULL);
+		}
+	}
 	// now: across the chart along the clock; else where each line is in its window
 	if (now_in) {
 		pd_rect(cr, round(chart_x(g, start, end, now)) - 0.5, g.y, 1, g.height, st->fg);
@@ -1008,8 +1077,15 @@ double claude_lines_legend(cairo_t *cr, const struct claude_look *st,
 		char text[128];
 		double five = tw_claude_window_now(&c->five_hour, now);
 		double week = tw_claude_window_now(&c->seven_day, now);
-		if (five >= 0 && week >= 0) {
-			snprintf(text, sizeof(text), "%s %.0f%% · %.0f%%", lines[i].name, five, week);
+		char a[16] = "–", b[16] = "–"; // (a limit it does not have: Argon's 5 hours)
+		if (five >= 0) {
+			snprintf(a, sizeof(a), "%.0f%%", five);
+		}
+		if (week >= 0) {
+			snprintf(b, sizeof(b), "%.0f%%", week);
+		}
+		if (five >= 0 || week >= 0) {
+			snprintf(text, sizeof(text), "%s %s · %s", lines[i].name, a, b);
 		} else {
 			snprintf(text, sizeof(text), "%s", lines[i].name);
 		}

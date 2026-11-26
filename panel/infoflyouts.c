@@ -1138,12 +1138,56 @@ static void claude_window(struct info_flyout *f, const struct tw_claude_window *
  * there at the pace it was used at, to where the week ends or runs out.
  */
 
+/*
+ * What the flyout keeps: the charts of the account it shows and, for a group
+ * of Antigravity's models, those of all its groups, a line each.
+ */
+#define AGY_LINES 6
+struct agents_flyout {
+	struct claude_charts one; // its back_* and box_* are the flyout's
+	struct claude_charts groups[AGY_LINES];
+	struct claude_line lines[AGY_LINES];
+	char names[AGY_LINES][48];
+	int count;
+};
+
 static void claude_free(void *state) {
-	struct claude_charts *c = state;
-	if (c) {
-		free(c->points);
-		free(c);
+	struct agents_flyout *a = state;
+	if (a) {
+		free(a->one.points);
+		for (int i = 0; i < AGY_LINES; i++) {
+			free(a->groups[i].points);
+		}
+		free(a);
 	}
+}
+
+/* Antigravity's groups of models, each with readings: the lines of its charts. */
+static void load_groups(struct info_flyout *f, struct agents_flyout *a, time_t now) {
+	int count = agents_widget_accounts(f->widget);
+	a->count = 0;
+	for (int i = 0; i < count && a->count < AGY_LINES; i++) {
+		struct agents_view o;
+		if (!agents_widget_view(f->widget, i, &o) || !o.group || !o.points) {
+			continue;
+		}
+		struct claude_charts *c = &a->groups[a->count];
+		claude_charts_set(c, o.points, o.point_count, o.chart_usage, now);
+		if (!c->have) {
+			continue;
+		}
+		const char *agent = "Antigravity ";
+		snprintf(a->names[a->count], sizeof(a->names[0]), "%s",
+			strncmp(o.name, agent, strlen(agent)) == 0 ? o.name + strlen(agent) : o.name);
+		a->lines[a->count] = (struct claude_line){ c, a->names[a->count],
+			claude_agent_color(o.agent, a->count) };
+		a->count++;
+	}
+}
+
+/* Whether the charts are those of Antigravity's groups, a line each. */
+static bool by_groups(const struct agents_flyout *a) {
+	return a && a->count > 1;
 }
 
 #define CHART_FIVE 96
@@ -1165,14 +1209,18 @@ static void charts_scroll_hint(cairo_t *cr, const struct fly_style *st, struct p
 }
 
 static int claude_charts_height(struct info_flyout *f) {
-	struct claude_charts *c = f->state;
-	return c && c->have ? 22 + CHART_FIVE + 8 + 22 + CHART_WEEK + 8 : 0;
+	struct agents_flyout *a = f->state;
+	if (by_groups(a)) {
+		return 22 + 22 + CHART_FIVE + 8 + 22 + CHART_WEEK + 8; // (a legend of one row)
+	}
+	return a && a->one.have ? 22 + CHART_FIVE + 8 + 22 + CHART_WEEK + 8 : 0;
 }
 
 static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct fly_style *st,
 		struct pbox box) {
-	struct claude_charts *c = f->state;
-	if (!c || !c->have) {
+	struct agents_flyout *a = f->state;
+	struct claude_charts *c = a ? &a->one : NULL;
+	if (!c || (!c->have && !by_groups(a))) {
 		return;
 	}
 	struct claude_look look = {
@@ -1185,6 +1233,26 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
 	int y = box.y + 4;
 	// scrolled back: the time it shows; else, when there is more, that it scrolls
 	char span[96];
+	if (by_groups(a)) {
+		// Antigravity's groups of models: a line each, from the start of its window to its reset
+		claude_lines_legend(cr, &look, a->lines, a->count, c->now, box.x, y, box.width, true);
+		y += 22;
+		for (int week = 0; week < 2; week++) {
+			int back = week ? c->back_week : c->back_five;
+			claude_lines_span(week, CLAUDE_SCALE_RELATIVE, back, c->now, span, sizeof(span));
+			pd_text(cr, st->bold, span, box.x, y, box.width, 18, st->fg, PD_LEFT);
+			charts_scroll_hint(cr, st, box, y, back, claude_lines_back_max(a->lines, a->count,
+				week, CLAUDE_SCALE_RELATIVE, c->now));
+			y += 22;
+			int height = week ? CHART_WEEK : CHART_FIVE;
+			struct pbox *at = week ? &c->box_week : &c->box_five;
+			*at = (struct pbox){ box.x, y, box.width, height };
+			claude_chart_lines(&hover, a->lines, a->count, week, CLAUDE_SCALE_RELATIVE, back,
+				c->now, cr, &look, *at);
+			y += height + 8;
+		}
+		return;
+	}
 	if (c->back_five > 0) {
 		claude_charts_span(c, false, span, sizeof(span));
 		pd_text(cr, st->bold, span, box.x, y, box.width, 18, st->fg, PD_LEFT);
@@ -1221,8 +1289,9 @@ static void claude_charts_draw(struct info_flyout *f, cairo_t *cr, const struct 
  * to newer ones, as far as the history goes.
  */
 static bool claude_charts_axis(struct info_flyout *f, double x, double y, int direction) {
-	struct claude_charts *c = f->state;
-	if (!c || !c->have) {
+	struct agents_flyout *a = f->state;
+	struct claude_charts *c = a ? &a->one : NULL;
+	if (!c || (!c->have && !by_groups(a))) {
 		return false;
 	}
 	int *back = pbox_contains(&c->box_five, x, y) ? &c->back_five :
@@ -1230,7 +1299,9 @@ static bool claude_charts_axis(struct info_flyout *f, double x, double y, int di
 	if (!back) {
 		return false;
 	}
-	int max = claude_charts_back_max(c, back == &c->back_week);
+	bool week = back == &c->back_week;
+	int max = by_groups(a) ? claude_lines_back_max(a->lines, a->count, week,
+		CLAUDE_SCALE_RELATIVE, c->now) : claude_charts_back_max(c, week);
 	*back -= direction;
 	*back = *back < 0 ? 0 : *back > max ? max : *back;
 	return true;
@@ -1275,16 +1346,21 @@ static void claude_sample(struct info_flyout *f) {
 	bool have = agents_widget_view(f->widget, current, &v);
 	const struct tw_claude_usage *u = have ? v.usage : NULL;
 	time_t now = time(NULL);
-	struct claude_charts *charts = f->state;
-	if (!charts) {
-		charts = f->state = calloc(1, sizeof(*charts));
+	struct agents_flyout *flyout = f->state;
+	if (!flyout) {
+		flyout = f->state = calloc(1, sizeof(*flyout));
 	}
-	if (charts) {
+	if (flyout) {
+		struct claude_charts *charts = &flyout->one;
 		// Claude Code and Codex keep a history; the others' windows have none here
 		if (!v.tool && v.points) {
 			claude_charts_set(charts, v.points, v.point_count, v.chart_usage, now); // Antigravity's
 		} else {
 			claude_charts_load(charts, v.tool ? u : NULL, now);
+		}
+		flyout->count = 0;
+		if (have && v.group) {
+			load_groups(f, flyout, now); // (all its groups, a line each)
 		}
 	}
 	const char *name = have ? v.name : "AI agents";
@@ -1399,9 +1475,9 @@ static void claude_sample(struct info_flyout *f) {
 
 /* A click on another account's row shows that one. */
 static void claude_pick(struct info_flyout *f, const struct info_row *row) {
-	struct claude_charts *c = f->state;
-	if (c) {
-		c->back_five = c->back_week = 0; // another account: its newest windows
+	struct agents_flyout *a = f->state;
+	if (a) {
+		a->one.back_five = a->one.back_week = 0; // another account: its newest windows
 	}
 	agents_widget_pick(f->widget, row->pick - 1);
 }

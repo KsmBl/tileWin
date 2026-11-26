@@ -76,6 +76,10 @@ struct source {
 	struct tw_claude_point *points;
 	int point_count;
 	struct tw_claude_usage chart_usage; // (only windows: nothing in it to free)
+	// Antigravity: the group of models it shows ("gemini", "3p"), NULL for all of them,
+	// and its names ("Antigravity Gemini", "AG Gemini")
+	char *group;
+	char name[64], short_name[32];
 };
 
 struct agents_state {
@@ -91,6 +95,94 @@ struct agents_state {
 	time_t found_at;  // looked for once a minute: it reads the running programs
 	bool alone;       // the flyout of one account alone: opened from its part of a desktop card
 };
+
+/* ---------- the groups of Antigravity's models ---------- */
+
+/*
+ * Antigravity has a limit for each group of its models: Gemini and Claude/GPT
+ * a 5-hour and a weekly one each, Argon a weekly one. Its readings name them by
+ * bucket, "gemini-5h", "3p-weekly", "gemini-argon-wtu-weekly": the group is
+ * what comes before the last dash. Each group the readings have is a source of
+ * its own, with its values and its charts.
+ */
+static const struct {
+	const char *group, *name, *short_name;
+} agy_groups[] = {
+	{ "gemini", "Gemini", "Gemini" },
+	{ "3p", "Claude/GPT", "C/GPT" },
+	{ "gemini-argon-wtu", "Argon", "Argon" },
+};
+
+/* The group of a limit of Antigravity, "gemini" of "gemini-weekly · weekly". */
+static void limit_group(const char *name, char *out, size_t size) {
+	const char *dot = strstr(name, " · ");
+	size_t len = dot ? (size_t)(dot - name) : strlen(name);
+	const char *dash = NULL;
+	for (const char *p = name; p < name + len; p++) {
+		if (*p == '-') {
+			dash = p;
+		}
+	}
+	if (dash) {
+		len = (size_t)(dash - name);
+	}
+	snprintf(out, size, "%.*s", (int)(len < size ? len : size - 1), name);
+}
+
+/* The groups the readings of Antigravity have, in the order above: "gemini,3p" (to free). */
+static char *agy_groups_known(const struct agent_usage *u) {
+	GString *out = g_string_new(NULL);
+	char found[16][48];
+	int n = 0;
+	for (guint i = 0; u && i < u->limits->len && n < 16; i++) {
+		const struct agent_limit *l = u->limits->pdata[i];
+		if (l->kind != AGENT_AGY || !l->name ||
+				!(l->usage.five_hour.known || l->usage.seven_day.known)) {
+			continue;
+		}
+		char group[48];
+		limit_group(l->name, group, sizeof(group));
+		bool seen = false;
+		for (int k = 0; k < n && !seen; k++) {
+			seen = strcmp(found[k], group) == 0;
+		}
+		if (!seen) {
+			snprintf(found[n++], sizeof(found[0]), "%s", group);
+		}
+	}
+	// the known ones first, in their order, then the others as they came
+	for (size_t g = 0; g <= G_N_ELEMENTS(agy_groups); g++) {
+		for (int k = 0; k < n; k++) {
+			bool known = false;
+			for (size_t j = 0; j < G_N_ELEMENTS(agy_groups) && !known; j++) {
+				known = strcmp(found[k], agy_groups[j].group) == 0;
+			}
+			if (g < G_N_ELEMENTS(agy_groups) ? strcmp(found[k], agy_groups[g].group) == 0 :
+					!known) {
+				g_string_append_printf(out, "%s%s", out->len ? "," : "", found[k]);
+			}
+		}
+	}
+	return g_string_free(out, FALSE);
+}
+
+static void name_source(struct source *s) {
+	const char *agent = tw_agent_names[s->account.agent];
+	if (!s->group) {
+		snprintf(s->name, sizeof(s->name), "%s", agent);
+		snprintf(s->short_name, sizeof(s->short_name), "%s", short_names[s->account.agent]);
+		return;
+	}
+	const char *name = s->group, *brief = s->group;
+	for (size_t j = 0; j < G_N_ELEMENTS(agy_groups); j++) {
+		if (strcmp(agy_groups[j].group, s->group) == 0) {
+			name = agy_groups[j].name;
+			brief = agy_groups[j].short_name;
+		}
+	}
+	snprintf(s->name, sizeof(s->name), "%s %s", agent, name);
+	snprintf(s->short_name, sizeof(s->short_name), "AG %s", brief);
+}
 
 /* ---------- which accounts ---------- */
 
@@ -150,6 +242,7 @@ static void free_sources(struct agents_state *st) {
 		tw_agent_account_finish(&st->src[i].account);
 		tw_claude_usage_finish(&st->src[i].usage);
 		free(st->src[i].points);
+		free(st->src[i].group);
 	}
 	free(st->src);
 	st->src = NULL;
@@ -160,7 +253,16 @@ static void free_sources(struct agents_state *st) {
 static void resolve(struct widget *w) {
 	struct agents_state *st = w->data;
 	char *wanted = wanted_accounts(w);
+	// (Antigravity: a source for each group of models its readings have)
+	char *groups = strstr(wanted, "antigravity") ? agy_groups_known(st->collected) : NULL;
+	if (groups && *groups) {
+		char *both = g_strdup_printf("%s|%s", wanted, groups);
+		free(wanted);
+		wanted = strdup(both);
+		g_free(both);
+	}
 	if (st->accounts && strcmp(st->accounts, wanted) == 0) {
+		g_free(groups);
 		free(wanted);
 		return;
 	}
@@ -168,6 +270,10 @@ static void resolve(struct widget *w) {
 	free(st->accounts);
 	st->accounts = wanted;
 	char *copy = strdup(wanted), *save = NULL;
+	char *bar = strchr(copy, '|');
+	if (bar) {
+		*bar = '\0'; // (the groups after it)
+	}
 	for (char *id = strtok_r(copy, " ,\t", &save); id; id = strtok_r(NULL, " ,\t", &save)) {
 		struct tw_agent_account account;
 		if (!tw_agent_account_parse(id, &account)) {
@@ -187,8 +293,28 @@ static void resolve(struct widget *w) {
 		*s = (struct source){ .account = account };
 		s->tool = account.agent == TW_AGENT_CLAUDE ? &tw_claude_tool :
 			account.agent == TW_AGENT_CODEX ? &tw_codex_tool : NULL;
+		char **each = account.agent == TW_AGENT_ANTIGRAVITY && groups && *groups ?
+			g_strsplit(groups, ",", -1) : NULL;
+		for (int g = 0; each && each[g]; g++) {
+			if (g > 0) {
+				// the next group: a source of its own for the same account
+				struct tw_agent_account again;
+				grown = realloc(st->src, (st->count + 1) * sizeof(*grown));
+				if (!grown || !tw_agent_account_parse(account.id, &again)) {
+					break;
+				}
+				st->src = grown;
+				s = &st->src[st->count++];
+				*s = (struct source){ .account = again };
+			}
+			s->group = strdup(each[g]);
+			name_source(s);
+		}
+		g_strfreev(each);
+		name_source(s);
 	}
 	free(copy);
+	g_free(groups);
 	if (st->current >= st->count) {
 		st->current = 0;
 	}
@@ -235,6 +361,13 @@ static void from_collected(struct agents_state *st, struct source *s) {
 		if ((int)l->kind != kind) {
 			continue;
 		}
+		if (s->group && l->name) {
+			char group[48];
+			limit_group(l->name, group, sizeof(group));
+			if (strcmp(group, s->group) != 0) {
+				continue; // another group of Antigravity's models
+			}
+		}
 		if (l->unattributed_at && now - l->unattributed_at < TW_CLAUDE_FIVE_HOURS &&
 				(!s->account.dir || !l->usage.dir || strcmp(l->usage.dir, s->account.dir) == 0)) {
 			s->elsewhere = true;
@@ -271,13 +404,16 @@ static void from_collected(struct agents_state *st, struct source *s) {
 		s->chart_usage = (struct tw_claude_usage){ 0 };
 		if (fullest) {
 			// the 5-hour limit of the same group of models: "gemini-5h" of "gemini-weekly"
-			const char *dash = strrchr(fullest->name, '-');
-			size_t group = dash ? (size_t)(dash - fullest->name) : strlen(fullest->name);
+			char fullest_group[48];
+			limit_group(fullest->name, fullest_group, sizeof(fullest_group));
 			for (guint i = 0; i < u->limits->len && !fullest_five; i++) {
 				const struct agent_limit *l = u->limits->pdata[i];
-				if ((int)l->kind == kind && l->usage.five_hour.known &&
-						strncmp(l->name, fullest->name, group) == 0 &&
-						(l->name[group] == '-' || !l->name[group])) {
+				char its[48];
+				if (l->name) {
+					limit_group(l->name, its, sizeof(its));
+				}
+				if ((int)l->kind == kind && l->usage.five_hour.known && l->name &&
+						strcmp(its, fullest_group) == 0) {
 					fullest_five = l;
 				}
 			}
@@ -430,6 +566,16 @@ static int show_list(struct widget *w, const struct tw_claude_item **items) {
 static int source_items(struct widget *w, const struct source *s,
 		const struct tw_claude_item **items) {
 	int count = show_list(w, items);
+	if (s->group && s->have && (!s->usage.five_hour.known || !s->usage.seven_day.known)) {
+		// a group of Antigravity's models with one limit (Argon: a weekly one only)
+		int kept = 0;
+		for (int i = 0; i < count; i++) {
+			if (items[i]->seven_day ? s->usage.seven_day.known : s->usage.five_hour.known) {
+				items[kept++] = items[i];
+			}
+		}
+		return kept > 0 ? kept : count;
+	}
 	if (s->account.agent != TW_AGENT_COPILOT) {
 		return count;
 	}
@@ -578,7 +724,7 @@ static const char *long_name(const struct source *s, const struct tw_claude_item
 
 /* The name of a source in the flyout and the tooltip: "Claude Code · me@example.org". */
 static void source_title(const struct source *s, char *out, size_t size) {
-	const char *name = tw_agent_names[s->account.agent];
+	const char *name = s->name;
 	if (s->usage.account && *s->usage.account) {
 		snprintf(out, size, "%s · %s", name, s->usage.account);
 	} else if (s->account.dir && s->tool == &tw_claude_tool) {
@@ -650,7 +796,7 @@ static int source_width(struct widget *w, struct render_ctx *ctx, const struct s
 		return render_text_width(ctx, font, not_connected_text);
 	}
 	int width = named(st) ? render_text_width(ctx, bar_bold_font(ctx->panel),
-		short_names[s->account.agent]) + 6 : 0;
+		s->short_name) + 6 : 0;
 	const struct tw_claude_item *items[MAX_ITEMS];
 	int count = source_items(w, s, items);
 	for (int i = 0; i < count; i++) {
@@ -695,7 +841,7 @@ static void agents_render(struct widget *w, struct render_ctx *ctx, struct pbox 
 			x += tw;
 		} else {
 			if (named(st)) {
-				const char *name = short_names[s->account.agent];
+				const char *name = s->short_name;
 				int nw = render_text_width(ctx, bold, name);
 				pd_text(ctx->cairo, bold, name, x, b.y, nw, b.height, fg, PD_LEFT);
 				x += nw + 6;
@@ -1060,7 +1206,7 @@ static void desk_chart(const struct source *s, struct gadget_ctx *ctx,
 		.label_bg = light_text ? 0x202020ff : 0xffffffff,
 		.chart_radius = pal->radius > 0 ? 4 : 0,
 		.dark = light_text,
-		.sunken = pal->look == GADGET_CLASSIC,
+		.sunken = pal->look == GADGET_CLASSIC, .resets = true,
 		.font = l->small, .bold = l->bold,
 	};
 	struct claude_hover hover = { ctx->pointer, ctx->px, ctx->py };
@@ -1097,7 +1243,7 @@ static void desk_chart_look(const struct gadget_palette *pal, const struct desk_
 		.label_bg = light_text ? 0x202020ff : 0xffffffff,
 		.chart_radius = pal->radius > 0 ? 4 : 0,
 		.dark = light_text,
-		.sunken = pal->look == GADGET_CLASSIC,
+		.sunken = pal->look == GADGET_CLASSIC, .resets = true,
 		.font = l->small, .bold = l->bold,
 	};
 }
@@ -1137,10 +1283,14 @@ static void desk_together(struct widget *w, struct gadget_ctx *ctx,
 		}
 		int agent = s->account.agent;
 		int nth = agent >= 0 && agent < TW_AGENT_COUNT ? seen[agent]++ : 0;
-		if (nth > 0) {
-			snprintf(names[n], sizeof(names[n]), "%s %d", tw_agent_names[agent], nth + 1);
+		int same = 0; // (two accounts of the same agent: numbered)
+		for (int i = 0; i < k; i++) {
+			same += strcmp(st->src[i].name, s->name) == 0;
+		}
+		if (same > 0) {
+			snprintf(names[n], sizeof(names[n]), "%s %d", s->name, same + 1);
 		} else {
-			snprintf(names[n], sizeof(names[n]), "%s", tw_agent_names[agent]);
+			snprintf(names[n], sizeof(names[n]), "%s", s->name);
 		}
 		lines[n] = (struct claude_line){ &charts[n], names[n], claude_agent_color(agent, nth) };
 		n++;
@@ -1415,7 +1565,7 @@ static void append_source(GString *t, const struct source *s, bool checks) {
 	char title[300];
 	source_title(s, title, sizeof(title));
 	g_string_append(t, title);
-	const char *name = tw_agent_names[s->account.agent];
+	const char *name = s->name;
 	if (show_connect(s)) {
 		g_string_append_printf(t, "\n%s does not show its usage limits to tileWin yet: "
 			"click to connect it (tileWin goes before its status line).",
@@ -1555,8 +1705,9 @@ bool agents_widget_view(struct widget *w, int i, struct agents_view *out) {
 	}
 	const struct source *s = &st->src[i];
 	*out = (struct agents_view){
-		.name = tw_agent_names[s->account.agent],
+		.name = s->name,
 		.agent = s->account.agent,
+		.group = s->group,
 		.tool = s->tool,
 		.usage = s->have || s->usage.dir ? &s->usage : NULL,
 		.connect = show_connect(s),

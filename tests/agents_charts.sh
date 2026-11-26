@@ -9,6 +9,9 @@
 #  - arrange next and chart_scale absolute: the two side by side, along the clock,
 #    the week from Monday to Sunday;
 #  - charts week: the weekly chart alone;
+#  - the chart of the week of one account marks where its 5-hour limit resets;
+#  - Antigravity's groups of models (Gemini, Claude/GPT, Argon) are each on the taskbar
+#    with their own limits;
 #  - the flyout stays the one of an account, its last three 5-hour windows.
 # What is shown is read with tesseract.
 #
@@ -215,11 +218,51 @@ card 520 15 685 290 || fail "after the reload the card does not name both agents
 has Weekly || fail "no weekly chart"
 has 5-hour && fail "with charts week the 5-hour chart is still there"
 
+# ---- a chart of the week of one account: a dashed line where its 5-hour limit resets next
+sed -i -e 's/^\t\tstyle together/\t\tstyle week/' -e '/^\t\tcharts week/d' \
+	-e '/^\t\tchart_scale absolute/d' -e 's/^\t\tsize 7x3/\t\tsize 5x4/' "$conf"
+ipc panel reload >/dev/null 2>&1
+sleep 2
+card 715 15 490 390 || fail "the week style does not name both agents"
+has resets || fail "the chart of the week does not mark where the 5-hour limit resets: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+
 # ---- the flyout stays the one of the account clicked
 if open_flyout; then
 	has three || fail "the flyout has not the account's last three 5-hour windows: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 	close_flyout
 fi
+
+# ---- Antigravity's three groups of models, each with its limits: on the taskbar each of
+# its own (Argon has only a weekly one)
+agy=$XDG_STATE_HOME/tileWin/agent-usage/agy
+mkdir -p "$agy"
+python3 - "$agy/account.jsonl" "$now" <<'PY'
+import sys, json, datetime
+path, now = sys.argv[1], int(sys.argv[2])
+iso = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+with open(path, "w") as f:
+    for ago in range(86400, 0, -3600):
+        k = 1 - ago / 86400
+        q = {"gemini-5h": {"remaining_fraction": 0.8, "reset_time": iso(now + 3600)},
+             "gemini-weekly": {"remaining_fraction": 1 - 0.4 * k, "reset_time": iso(now + 2 * 86400)},
+             "3p-5h": {"remaining_fraction": 0.7, "reset_time": iso(now + 7200)},
+             "3p-weekly": {"remaining_fraction": 1 - 0.2 * k, "reset_time": iso(now + 4 * 86400)},
+             "gemini-argon-wtu-weekly": {"remaining_fraction": 1 - 0.6 * k, "reset_time": iso(now + 86400)}}
+        f.write(json.dumps({"at": now - ago, "data": {"quota": q, "pid": 0}}) + "\n")
+PY
+printf 'widget agents {\n\taccounts claude:%s codex:%s antigravity\n}\n' "$claude" "$codex" >> "$conf"
+ipc panel reload >/dev/null 2>&1
+for _ in $(seq 1 20); do
+	words 0 864 1280 36 > "$work/seen"
+	has Argon && break
+	sleep 1
+done
+[ "$(count AG)" -ge 3 ] && has Gemini && has Argon ||
+	fail "the taskbar does not show Antigravity's groups each: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+# (Argon: its weekly limit alone, no "5h" after its name)
+argon_x=$(grep -m1 "^Argon " "$work/seen" | cut -d' ' -f2)
+[ -n "$argon_x" ] && awk -v x="$argon_x" '$1 == "5h" && $2 > x { found = 1 } END { exit !found }' \
+	"$work/seen" && fail "Argon shows a 5-hour limit it does not have: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 
 ipc -t get_version >/dev/null 2>&1 || fail "tileWin no longer answers"
 if [ "$failures" -gt 0 ]; then

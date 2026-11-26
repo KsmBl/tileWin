@@ -738,8 +738,9 @@ struct tw_usage_tool;
  * shows it (the widgets agents, and claude and codex of older configs).
  */
 struct agents_view {
-	const char *name;                    // "Claude Code"
+	const char *name;                    // "Claude Code", "Antigravity Gemini"
 	int agent;                           // enum tw_agent
+	const char *group;                   // Antigravity: its group of models, else NULL
 	const struct tw_usage_tool *tool;    // Claude Code and Codex, else NULL
 	const struct tw_claude_usage *usage; // NULL when nothing is known yet
 	bool connect;                        // Claude Code that does not show its limits yet
