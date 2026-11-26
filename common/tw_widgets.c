@@ -113,6 +113,28 @@ static const struct tw_widget_option kernel_desktop_look[] = {
 	{ 0 },
 };
 
+static const char *const choice_updates_interval[] = { "1", "3", "6", "12", "24", "168", NULL };
+static const struct tw_widget_option opts_updates[] = {
+	{ "interval", "Check every", "Hours between checks, 6 by default", choice_updates_interval },
+	{ "notify", "Notify", "A notification when updates are there that were not seen before",
+		choice_yes_no },
+	{ "ok_fg", "Color when up to date", "e.g. #8a8a8a (grey) by default", NULL },
+	{ "warning_fg", "Color of a waiting restart", "e.g. #e8952a by default", NULL },
+	{ "critical_fg", "Color of a failure", "e.g. #d83b3b by default", NULL },
+	{ 0 },
+};
+
+static const char *const choice_updates_text[] = { "full", "short", "none", NULL };
+
+/* How the updates widget looks on the taskbar. */
+static const struct tw_widget_option updates_taskbar_look[] = {
+	{ "text", "Text", "full: \"12 updates\"; short: \"12\"; none: the sign alone",
+		choice_updates_text },
+	{ "hide_none", "Hide when up to date", "Only there while updates wait, are installed or "
+		"want a restart", choice_yes_no },
+	{ 0 },
+};
+
 static const struct tw_widget_option opts_ports[] = {
 	{ "interval", "Update interval", "Seconds between looks, 5 by default", NULL },
 	{ "public_fg", "Color of a public port", "Open to every network, e.g. #d83b3b (red) by "
@@ -164,6 +186,9 @@ const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
 	}
 	if (type && strcmp(type, "ports") == 0) {
 		return desktop ? ports_desktop_look : ports_taskbar_look;
+	}
+	if (type && strcmp(type, "updates") == 0) {
+		return desktop ? NULL : updates_taskbar_look;
 	}
 	return NULL;
 }
@@ -520,6 +545,9 @@ const struct tw_widget_info tw_widgets[] = {
 		styles_kernel },
 	{ "ports", "Open ports", "The ports this computer listens on and whether each is only "
 		"for this computer, a local network or public", STATUS, opts_ports, styles_ports },
+	{ "updates", "System updates", "The updates of the system's packages: how many there are, "
+		"installing them with a click and cleaning up the package cache", STATUS, opts_updates,
+		styles_plain },
 	{ "wifiradar", "Wi-Fi radar", "The Wi-Fi networks in reach on a radar, the stronger "
 		"the nearer the middle; a click on one connects to it", STATUS, opts_wifiradar,
 		styles_wifiradar },

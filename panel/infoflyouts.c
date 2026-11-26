@@ -1567,6 +1567,96 @@ static void kernel_sample(struct info_flyout *f) {
 	free(settings);
 }
 
+/* ---------- the system updates ---------- */
+
+static void bytes_words(long long bytes, char *out, size_t size) {
+	const char *units[] = { "bytes", "KB", "MB", "GB", "TB" };
+	double v = (double)bytes;
+	int u = 0;
+	while (v >= 1000 && u < 4) {
+		v /= 1000;
+		u++;
+	}
+	if (u == 0) {
+		snprintf(out, size, "%lld bytes", bytes);
+	} else {
+		snprintf(out, size, v < 10 ? "%.1f %s" : "%.0f %s", v, units[u]);
+	}
+}
+
+static void updates_sample(struct info_flyout *f) {
+	const struct updates_view *v = updates_widget_state(f->widget);
+	if (!v) {
+		return;
+	}
+	bool busy = v->state == UPDATES_CHECKING || v->state == UPDATES_INSTALLING ||
+		v->state == UPDATES_CLEANING;
+	if (v->state == UPDATES_INSTALLING && v->total > 0) {
+		snprintf(f->big, sizeof(f->big), "%d%%", v->done * 100 / v->total);
+	} else if (v->count > 0 && !busy) {
+		snprintf(f->big, sizeof(f->big), "%d", v->count);
+	}
+	updates_widget_words(v, f->title, sizeof(f->title), f->subtitle, sizeof(f->subtitle));
+	char value[96];
+	struct info_row *row;
+	if (v->state == UPDATES_INSTALLING && v->total > 0) {
+		snprintf(value, sizeof(value), "%d of %d", v->done, v->total);
+		row = add_row(f, "Installed", value);
+		if (row) {
+			row->bar = (double)v->done / v->total;
+		}
+	}
+	if (v->count > 0) {
+		add_heading(f, "Updates");
+		for (int i = 0; i < v->count_listed; i++) {
+			const struct updates_item *it = &v->list[i];
+			if (it->old[0]) {
+				snprintf(value, sizeof(value), "%s → %s", it->old, it->new);
+			} else {
+				snprintf(value, sizeof(value), "%s", it->new);
+			}
+			add_row(f, it->name, value);
+		}
+	}
+	add_heading(f, "This computer");
+	if (v->checked) {
+		tw_kernel_auto_ago(v->checked, time(NULL), value, sizeof(value));
+	}
+	add_row(f, "Checked", v->state == UPDATES_CHECKING ? "now" : v->checked ? value : "not yet");
+	if (v->installed) {
+		tw_kernel_auto_ago(v->installed, time(NULL), value, sizeof(value));
+		add_row(f, "Last installed", value);
+	}
+	if (v->cache >= 0) {
+		bytes_words(v->cache, value, sizeof(value));
+		add_row(f, "Package cache", value);
+	}
+	if (v->weekly != 0) {
+		// a click switches it: the password is asked
+		row = add_row(f, "Clean the cache every week", v->weekly > 0 ? "On" : "Off");
+		if (row) {
+			row->command = strdup(v->weekly > 0 ? "exec tilewin-updates weekly off" :
+				"exec tilewin-updates weekly on");
+		}
+	}
+	if (busy) {
+		return;
+	}
+	if (v->count > 0) {
+		add_action(f, "Install updates", "exec tilewin-updates install", NULL);
+	} else if (v->restart) {
+		add_action(f, "Restart…", "exec tilewinmsg panel shutdown", NULL);
+	}
+	add_action(f, "Check now", "exec tilewin-updates check", NULL);
+	if (v->cache > 0) {
+		add_action(f, "Clean up", "exec tilewin-updates clean", NULL);
+	} else {
+		char *settings = widget_settings_command(f->widget);
+		add_action(f, "Settings", settings, NULL);
+		free(settings);
+	}
+}
+
 /* ---------- the ports ---------- */
 
 static void ports_sample(struct info_flyout *f) {
@@ -1722,6 +1812,8 @@ static const struct info_source sources[] = {
 		claude_charts_draw, claude_pick, claude_charts_axis },
 	{ "kernel", 2000, kernel_sample, free, 0, NULL, NULL, NULL, NULL, NULL },
 	{ "ports", 3000, ports_sample, free, 400, ports_row_menu, NULL, NULL, NULL, NULL }, // the addresses want the room
+	// the package names and their versions want the room
+	{ "updates", 1000, updates_sample, free, 440, NULL, NULL, NULL, NULL, NULL },
 };
 
 /* ---------- drawing ---------- */

@@ -17,13 +17,13 @@ static const char default_config[] =
 	"layout window {\n"
 	"  position bottom\n"
 	"  left start search taskbar\n"
-	"  right tray keyboard volume network bluetooth battery clock notifications showdesktop\n"
+	"  right tray keyboard volume network bluetooth battery updates clock notifications showdesktop\n"
 	"}\n"
 	"layout tile {\n"
 	"  position top\n"
 	"  height 26\n"
 	"  left workspaces title\n"
-	"  right tray cpu memory volume bluetooth battery clock modeswitch\n"
+	"  right tray cpu memory volume bluetooth battery updates clock modeswitch\n"
 	"}\n"
 	"menu taskbar {\n"
 	"  item \"Cascade windows\" arrange cascade\n"
@@ -598,6 +598,7 @@ static const struct widget_impl *impls[] = {
 	&widget_agents,
 	&widget_kernel,
 	&widget_ports,
+	&widget_updates,
 	&widget_wifiradar,
 };
 

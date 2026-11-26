@@ -407,6 +407,7 @@ extern const struct widget_impl widget_codex;
 extern const struct widget_impl widget_agents;
 extern const struct widget_impl widget_kernel;
 extern const struct widget_impl widget_ports;
+extern const struct widget_impl widget_updates;
 extern const struct widget_impl widget_wifiradar;
 
 /* ---------- panel ---------- */
@@ -774,6 +775,38 @@ const struct tw_kernel_auto *kernel_widget_state(struct widget *w,
 struct tw_ports;
 /* widgets/ports.c: the ports, read again now with their programs; NULL for another widget. */
 const struct tw_ports *ports_widget_state(struct widget *w);
+/* widgets/updates.c: the system updates, as tilewin-updates wrote them last. */
+enum updates_kind {
+	UPDATES_UNKNOWN,
+	UPDATES_IDLE,
+	UPDATES_CHECKING,
+	UPDATES_INSTALLING,
+	UPDATES_CLEANING,
+	UPDATES_ERROR,
+};
+struct updates_item {
+	char *name, *old, *new; // old is "" where the package manager does not tell it
+};
+struct updates_view {
+	enum updates_kind state;
+	int count;            // updates there are
+	int done, total;      // how far an installation is
+	bool downloading;     // still downloading them
+	bool restart;         // installed something that wants a restart, not restarted yet
+	long long checked, installed; // when, 0 for never
+	long long cache;      // bytes in the package cache, below 0 when not known
+	int weekly;           // the weekly clean-up: 1 on, -1 off, 0 none to have
+	char manager[16];     // pacman, apt, dnf, none
+	char current[96];     // the package being installed
+	char message[256];    // why it failed, or what was not done
+	struct updates_item *list;
+	int count_listed;
+};
+/* The state, read again now; NULL for another widget. */
+const struct updates_view *updates_widget_state(struct widget *w);
+/* The headline and the line below it, for the tooltip and the flyout. */
+void updates_widget_words(const struct updates_view *v, char *title, size_t title_size,
+	char *sub, size_t sub_size);
 
 /* Called when PulseAudio reports a change, refreshes an open volume flyout. */
 void flyout_volume_changed(struct panel *panel);

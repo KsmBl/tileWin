@@ -85,6 +85,7 @@ New lately:
 - **App popups:** any app on a shortcut of its own, without a frame, at the place and size you pick over a darkened screen, for example Thunderbird as high as the screen on the right; the shortcut again or a click beside it hides it, still running. Made on the App popups page of the settings: [docs/usage.md](docs/usage.md#app-popups).
 - **Charts that answer the pointer** everywhere (CPU, memory, battery, network, AI agent usage, the desktop's charts), and **windows dragged between desktops** in the workspaces widget, as on KDE.
 - **A Wi-Fi radar** on the desktop or the taskbar, in every theme: the networks in reach go round on a radar, the stronger the nearer the middle, with the Bluetooth devices as diamonds; the pointer on one shows its signal, security and band, a click connects to it and a right click opens its menu.
+- **System updates** on the taskbar: how many there are, installed with a click and the password, with a bar of how far it is and a notification when they are done; the package cache cleaned up with a click or every week.
 - **Open ports** on the taskbar and the desktop: every port a program listens on, and whether it is only for this computer, a local network or public; switched on in the network settings, a program that opens a port to the network is asked about first, once.
 - **DNS** of its own: the fastest servers, a cache, prefetching and block lists as on a Pi-hole.
 - **Device manager** as on Windows: every device by kind, its driver and whether it works, disable, enable or restart it.

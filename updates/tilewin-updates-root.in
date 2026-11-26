@@ -1,0 +1,93 @@
+#!/bin/bash
+# The part of the system updates that runs as root, for tilewin-updates, which
+# runs it with pkexec. It does nothing but these, with the package manager it
+# finds itself:
+#
+#   tilewin-updates-root upgrade      installs every update there is
+#                                     (pacman -Syu, apt-get full-upgrade, dnf upgrade)
+#   tilewin-updates-root clean        empties the package cache of what is not
+#                                     needed: of each package the two newest
+#                                     versions stay (paccache), with apt and
+#                                     dnf the downloaded packages go
+#   tilewin-updates-root weekly on|off
+#                                     cleans the cache like that every week
+#                                     (pacman: paccache.timer of pacman-contrib)
+#
+# pacman's progress lines ("(3/12) upgrading firefox") go to stdout as they
+# come; tilewin-updates reads them for the widget's bar.
+set -u
+export LC_ALL=C PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# the tests run it with stand-ins first in PATH
+[ -n "${TILEWIN_UPDATES_TEST_PATH:-}" ] && PATH=$TILEWIN_UPDATES_TEST_PATH:$PATH
+
+have() { command -v "$1" >/dev/null 2>&1; }
+die() {
+	echo "error: $*" >&2
+	exit 1
+}
+
+manager() {
+	if have pacman; then
+		echo pacman
+	elif have apt-get; then
+		echo apt
+	elif have dnf; then
+		echo dnf
+	else
+		die "no package manager known to tileWin (pacman, apt or dnf)"
+	fi
+}
+
+upgrade() {
+	case $(manager) in
+	pacman)
+		# --noconfirm takes pacman's default answer at each question: a replaced
+		# package is replaced, a conflict it cannot settle stops it with nothing done
+		pacman -Syu --noconfirm
+		;;
+	apt)
+		export DEBIAN_FRONTEND=noninteractive
+		apt-get update && apt-get -y \
+			-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade
+		;;
+	dnf)
+		dnf -y upgrade --refresh
+		;;
+	esac
+}
+
+clean() {
+	case $(manager) in
+	pacman)
+		if have paccache; then
+			# the two newest of each package stay, for going back; of packages no
+			# longer installed none stay
+			paccache -rk2 && paccache -ruk0
+		else
+			pacman -Sc --noconfirm
+		fi
+		;;
+	apt) apt-get clean ;;
+	dnf) dnf clean packages ;;
+	esac
+}
+
+weekly() {
+	[ "$(manager)" = pacman ] || die "a weekly clean-up is only made with pacman"
+	have paccache || die "the weekly clean-up needs paccache (pacman-contrib)"
+	case ${1:-} in
+	on) systemctl enable --now paccache.timer ;;
+	off) systemctl disable --now paccache.timer ;;
+	*) die "weekly: on or off" ;;
+	esac
+}
+
+case ${1:-} in
+upgrade) upgrade ;;
+clean) clean ;;
+weekly) weekly "${2:-}" ;;
+*)
+	echo "usage: tilewin-updates-root upgrade|clean|weekly on|off" >&2
+	exit 2
+	;;
+esac

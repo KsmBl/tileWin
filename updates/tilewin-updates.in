@@ -1,0 +1,313 @@
+#!/bin/bash
+# The system updates behind the updates widget: what the package manager can
+# update, installing it with a bar of how far it is, and the package cache.
+#
+#   tilewin-updates check [--quiet]   asks the package manager what can be updated
+#                                     (pacman: checkupdates of pacman-contrib, which
+#                                     needs no root; apt; dnf) and notifies once of
+#                                     updates not notified before (not with --quiet)
+#   tilewin-updates install           installs them all through pkexec and
+#                                     tilewin-updates-root, then checks again
+#   tilewin-updates clean             empties the package cache of what is not needed
+#   tilewin-updates weekly on|off     cleans it every week (pacman only)
+#   tilewin-updates status            the state, as key=value lines
+#
+# The state is in ~/.local/state/tileWin/updates, which the widget reads:
+#   status   key=value: state (idle, checking, installing, cleaning, error), checked
+#            and installed (seconds since 1970), count, manager, done and total
+#            (how far an installation is), current (the package at hand), cache
+#            (bytes in the package cache), weekly (on, off, or none where there is
+#            no weekly clean-up), restart (yes when an update wants a restart:
+#            the kernel, systemd, glibc or a graphics driver), message
+#   list     a line for each update: name, version now, new version, by tabs
+#   log      what the last installation or clean-up printed
+set -u
+
+ROOT_HELPER=${TILEWIN_UPDATES_ROOT:-@libexecdir@/tilewin-updates-root}
+PKEXEC=${TILEWIN_UPDATES_PKEXEC:-pkexec}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/tileWin/updates
+mkdir -p "$STATE"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+manager() {
+	if [ -n "${TILEWIN_UPDATES_MANAGER:-}" ]; then
+		echo "$TILEWIN_UPDATES_MANAGER"
+	elif have pacman; then
+		echo pacman
+	elif have apt-get; then
+		echo apt
+	elif have dnf; then
+		echo dnf
+	else
+		echo none
+	fi
+}
+
+# ---------- the status file ----------
+
+declare -A S
+read_status() {
+	S=()
+	[ -f "$STATE/status" ] || return 0
+	local key value
+	while IFS='=' read -r key value; do
+		[ -n "$key" ] && S[$key]=$value
+	done < "$STATE/status"
+}
+
+# set KEY=VALUE...: changes those keys and writes the file anew in one go, so
+# the widget never reads half of it
+set_status() {
+	read_status
+	local kv
+	for kv in "$@"; do
+		S[${kv%%=*}]=${kv#*=}
+	done
+	local tmp key
+	tmp=$(mktemp "$STATE/.status.XXXXXX") || return
+	for key in "${!S[@]}"; do
+		printf '%s=%s\n' "$key" "${S[$key]//$'\n'/ }"
+	done | sort > "$tmp"
+	mv -f "$tmp" "$STATE/status"
+}
+
+notify() { # summary body
+	[ "${TILEWIN_UPDATES_NOTIFY:-1}" = 1 ] || return 0
+	if have notify-send; then
+		notify-send -a "System updates" -i software-update-available "$1" "$2" >/dev/null 2>&1
+	elif have gdbus; then
+		gdbus call --session --dest org.freedesktop.Notifications \
+			--object-path /org/freedesktop/Notifications \
+			--method org.freedesktop.Notifications.Notify "System updates" 0 \
+			software-update-available "$1" "$2" '[]' '{}' 8000 >/dev/null 2>&1
+	fi
+}
+
+# ---------- what there is ----------
+
+cache_dir() {
+	case $1 in
+	pacman) echo "${TILEWIN_UPDATES_CACHE:-/var/cache/pacman/pkg}" ;;
+	apt) echo "${TILEWIN_UPDATES_CACHE:-/var/cache/apt/archives}" ;;
+	dnf) echo "${TILEWIN_UPDATES_CACHE:-/var/cache/dnf}" ;;
+	esac
+}
+
+cache_bytes() {
+	local dir
+	dir=$(cache_dir "$1")
+	[ -n "$dir" ] && [ -d "$dir" ] || { echo 0; return; }
+	du -sb "$dir" 2>/dev/null | cut -f1 || echo 0
+}
+
+weekly_state() {
+	if [ "$1" != pacman ] || ! have paccache; then
+		echo none
+	elif systemctl is-enabled --quiet paccache.timer 2>/dev/null; then
+		echo on
+	else
+		echo off
+	fi
+}
+
+# The updates, a line each: name<TAB>now<TAB>new. Returns 1 when asking failed.
+list_updates() {
+	local out rc
+	case $1 in
+	pacman)
+		have checkupdates || { echo "pacman-contrib is needed to check for updates" >&2; return 1; }
+		# 0: updates, 2: none, anything else went wrong
+		out=$(checkupdates 2>&1)
+		rc=$?
+		[ $rc = 2 ] && return 0
+		[ $rc = 0 ] || { echo "${out##*$'\n'}" >&2; return 1; }
+		# "firefox 133.0-1 -> 134.0-1"
+		awk 'NF >= 4 && $3 == "->" { print $1 "\t" $2 "\t" $4 }' <<< "$out"
+		;;
+	apt)
+		# "firefox/stable 134.0 amd64 [upgradable from: 133.0]" (the lists the system
+		# keeps fresh itself, apt-daily)
+		out=$(LC_ALL=C apt list --upgradable 2>/dev/null) || return 1
+		awk '/\[upgradable from: / {
+			split($1, n, "/"); old = $0; sub(/.*upgradable from: /, "", old); sub(/\].*/, "", old)
+			print n[1] "\t" old "\t" $2 }' <<< "$out"
+		;;
+	dnf)
+		# 100: updates, 0: none; "firefox.x86_64  134.0-1.fc41  updates"
+		out=$(dnf -q check-update 2>&1)
+		rc=$?
+		[ $rc = 0 ] && return 0
+		[ $rc = 100 ] || { echo "${out##*$'\n'}" >&2; return 1; }
+		awk 'NF == 3 && $1 ~ /\./ && $1 !~ /^Obsoleting/ { n = $1; sub(/\.[^.]*$/, "", n);
+			print n "\t\t" $2 } /^Obsoleting/ { exit }' <<< "$out"
+		;;
+	*)
+		echo "no package manager known to tileWin (pacman, apt or dnf)" >&2
+		return 1
+		;;
+	esac
+}
+
+# Whether one of the updates only counts after a restart.
+wants_restart() {
+	cut -f1 "$1" | grep -qE '^(linux(-[a-z]+)?|linux-image-.*|kernel(-core)?|systemd|glibc|libc6|nvidia(-[a-z]+)?|mesa|amd-ucode|intel-ucode)$'
+}
+
+boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
+
+# ---------- the commands ----------
+
+check() {
+	local quiet=$1 m
+	m=$(manager)
+	set_status state=checking manager="$m"
+	local tmp err
+	tmp=$(mktemp "$STATE/.list.XXXXXX")
+	err=$(list_updates "$m" 2>&1 > "$tmp")
+	local rc=$?
+	if [ $rc != 0 ]; then
+		rm -f "$tmp"
+		set_status state=error message="${err:-the package manager could not be asked}" \
+			checked="$(date +%s)"
+		return 1
+	fi
+	mv -f "$tmp" "$STATE/list"
+	local count sum
+	count=$(grep -c . "$STATE/list")
+	sum=$(cksum < "$STATE/list" | cut -d' ' -f1)
+	read_status
+	# a restart an installation asked for counts until the computer has restarted
+	local restart=no
+	[ "${S[restart_boot]:-}" = "$(boot_id)" ] && restart=yes
+	set_status state=idle message= checked="$(date +%s)" count="$count" \
+		cache="$(cache_bytes "$m")" weekly="$(weekly_state "$m")" restart=$restart
+	if [ "$count" -gt 0 ] && [ "$quiet" != yes ] && [ "${S[notified]:-}" != "$sum" ]; then
+		if [ "$count" = 1 ]; then
+			notify "An update is available" "$(cut -f1 "$STATE/list") can be updated. The updates icon on the taskbar installs it."
+		else
+			notify "$count updates are available" "The updates icon on the taskbar shows them and installs them."
+		fi
+		set_status notified="$sum"
+	fi
+}
+
+# Reads what the root helper prints and moves the bar.
+follow() { # manager total
+	local m=$1 total=$2 n=0 line
+	while IFS= read -r line; do
+		printf '%s\n' "$line" >> "$STATE/log"
+		case $m in
+		pacman)
+			# "(  3/12) upgrading firefox" while installing
+			if [[ $line =~ ^\(\ *([0-9]+)/([0-9]+)\)\ (upgrading|installing|reinstalling|removing|downgrading)\ ([^ .]+) ]]; then
+				set_status done="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}" \
+					current="${BASH_REMATCH[4]}" phase=installing
+			elif [[ $line =~ ^:\ Retrieving\ packages ]] || [[ $line =~ ^::\ Retrieving ]]; then
+				set_status phase=downloading current=
+			fi
+			;;
+		apt)
+			if [[ $line =~ ^Setting\ up\ ([^ :]+) ]]; then
+				n=$((n + 1))
+				set_status done=$n total="$total" current="${BASH_REMATCH[1]}" phase=installing
+			elif [[ $line =~ ^Get:[0-9]+ ]]; then
+				set_status phase=downloading
+			fi
+			;;
+		dnf)
+			if [[ $line =~ ^\ *(Upgrading|Installing)\ *:\ ([^ ]+).*\ ([0-9]+)/([0-9]+)$ ]]; then
+				set_status done="${BASH_REMATCH[3]}" total="${BASH_REMATCH[4]}" \
+					current="${BASH_REMATCH[2]}" phase=installing
+			fi
+			;;
+		esac
+	done
+}
+
+install_updates() {
+	local m count
+	m=$(manager)
+	read_status
+	count=${S[count]:-0}
+	local wanted_restart=no
+	[ -f "$STATE/list" ] && wants_restart "$STATE/list" && wanted_restart=yes
+	: > "$STATE/log"
+	set_status state=installing phase=starting done=0 total="$count" current= message=
+	local rc
+	"$PKEXEC" "$ROOT_HELPER" upgrade 2>&1 | follow "$m" "$count"
+	rc=${PIPESTATUS[0]}
+	set_status done= total= current= phase=
+	case $rc in
+	0)
+		set_status state=idle installed="$(date +%s)"
+		[ $wanted_restart = yes ] && set_status restart_boot="$(boot_id)"
+		check yes
+		if [ $wanted_restart = yes ]; then
+			notify "Updates installed" "Restart the computer to finish: the new kernel or system parts start with it."
+		else
+			notify "Updates installed" "The system is up to date."
+		fi
+		;;
+	126 | 127)
+		# the password asked for was not given (pkexec: dismissed or not allowed)
+		set_status state=idle message="Not installed: the password was not given"
+		;;
+	*)
+		local why
+		why=$(grep -E '^(error|E):' "$STATE/log" | tail -1)
+		set_status state=error message="${why:-the installation failed, see $STATE/log}"
+		notify "The updates could not be installed" "${why:-See $STATE/log for what went wrong.}"
+		return 1
+		;;
+	esac
+}
+
+clean() {
+	local m
+	m=$(manager)
+	: > "$STATE/log"
+	set_status state=cleaning message=
+	"$PKEXEC" "$ROOT_HELPER" clean >> "$STATE/log" 2>&1
+	local rc=$?
+	case $rc in
+	0) set_status state=idle cache="$(cache_bytes "$m")" message= ;;
+	126 | 127) set_status state=idle message="Not cleaned: the password was not given" ;;
+	*) set_status state=error message="$(grep -E '^(error|E):' "$STATE/log" | tail -1)" ;;
+	esac
+}
+
+weekly() {
+	local m
+	m=$(manager)
+	"$PKEXEC" "$ROOT_HELPER" weekly "$1" > "$STATE/log" 2>&1
+	set_status weekly="$(weekly_state "$m")"
+}
+
+# one at a time: the widget of every screen may ask
+exec 9> "$STATE/lock"
+case ${1:-} in
+status)
+	cat "$STATE/status" 2>/dev/null
+	exit 0
+	;;
+check | install | clean | weekly)
+	flock -n 9 || { echo "tilewin-updates: already at work" >&2; exit 0; }
+	;;
+esac
+
+case ${1:-} in
+check) check "$([ "${2:-}" = --quiet ] && echo yes || echo no)" ;;
+install) install_updates ;;
+clean) clean ;;
+weekly)
+	case ${2:-} in
+	on | off) weekly "$2" ;;
+	*) echo "usage: tilewin-updates weekly on|off" >&2; exit 2 ;;
+	esac
+	;;
+*)
+	echo "usage: tilewin-updates check [--quiet]|install|clean|weekly on|off|status" >&2
+	exit 2
+	;;
+esac

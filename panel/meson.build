@@ -87,6 +87,7 @@ executable(
 		'widgets/git.c',
 		'widgets/agents.c',
 		'widgets/kernel.c',
+		'widgets/updates.c',
 		'widgets/ports.c',
 		'widgets/wifiradar.c',
 		'widgets/system.c',

@@ -14,6 +14,7 @@ depends=(
 makedepends=('git' 'meson' 'ninja' 'pkgconf' 'wayland-protocols')
 optdepends=(
 	'brightnessctl: brightness keys and sliders on a laptop'
+	'pacman-contrib: the updates widget checking for updates and cleaning the package cache'
 	'bluez: the Bluetooth flyout and page'
 	'grim: screenshots and the snipping tool'
 	'slurp: picking a part of the screen in the snipping tool'

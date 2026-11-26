@@ -142,7 +142,7 @@ install_deps() {
 			grim slurp wl-clipboard xdg-utils nftables
 		# terminus-font: the pixel font of the Atari ST theme; noto-fonts-emoji: the emoji picker
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal xdg-desktop-portal-gtk \
-			tesseract tesseract-data-eng libpulse terminus-font noto-fonts-emoji || \
+			tesseract tesseract-data-eng libpulse terminus-font noto-fonts-emoji pacman-contrib || \
 			warn "optional packages could not be installed"
 		local more
 		more=$(extras brightnessctl pipewire pipewire-pulse wireplumber)
