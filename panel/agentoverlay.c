@@ -289,12 +289,12 @@ static bool draw_later_pill(cairo_t *cr, const struct gadget_palette *pal, struc
 		const char *font, const struct quota_reset *reset, int k, struct quota_pill *out) {
 	struct tm tm;
 	localtime_r(&reset->at, &tm);
-	char when[32];
-	strftime(when, sizeof(when), chart.width >= 220 ? "%a %H:%M" : "%a", &tm);
+	char when[16];
+	strftime(when, sizeof(when), "%a", &tm);
 	int tw = 0;
 	pd_text_size(cr, font, when, &tw, NULL);
-	double y = chart.y + 4 + 19.0 * k;
-	if (y + 17 > chart.y + chart.height) {
+	double y = chart.y + 4 + 18.0 * k;
+	if (y + 16 > chart.y + chart.height) {
 		return false;
 	}
 	double pill_w = tw + 18;
@@ -304,12 +304,9 @@ static bool draw_later_pill(cairo_t *cr, const struct gadget_palette *pal, struc
 		return false;
 	}
 	cairo_new_path(cr);
-	pd_rounded(cr, px, y, pill_w, 16, 4);
-	pd_color(cr, (pal->bg & 0xffffff00) | 0xdc);
-	cairo_fill_preserve(cr);
-	pd_color(cr, (reset->limit->color & 0xffffff00) | 0x90);
-	cairo_set_line_width(cr, 1.0);
-	cairo_stroke(cr);
+	pd_rounded(cr, px, y, pill_w, 16, 3);
+	pd_color(cr, (pal->bg & 0xffffff00) | 0xd8);
+	cairo_fill(cr);
 	pd_text(cr, font, when, px + 4, y, tw + 2, 16, pal->fg, PD_LEFT);
 	cairo_new_path(cr);
 	cairo_move_to(cr, right - 9, y + 3.5);
