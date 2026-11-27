@@ -188,8 +188,10 @@ static void quota_forecast(cairo_t *cr, struct pbox box, const struct agent_over
 	double y = quota_y(box, used);
 	double y2 = quota_y(box, end_usage);
 	cairo_save(cr);
-	const double dash[] = { 5, 3 };
-	cairo_set_dash(cr, dash, 2, 0);
+	const double dot[] = { 0.5, 4.5 };
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_width(cr, 2.0);
+	cairo_set_dash(cr, dot, 2, 0);
 	pd_color(cr, l->color);
 	cairo_move_to(cr, x, y);
 	cairo_line_to(cr, x2, y2);

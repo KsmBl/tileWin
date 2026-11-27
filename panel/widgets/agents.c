@@ -1610,10 +1610,10 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 }
 
 static const uint32_t overlay_colors[TW_AGENT_COUNT] = {
-	[TW_AGENT_CLAUDE] = 0xe78959ff,
-	[TW_AGENT_CODEX] = 0x34b58dff,
-	[TW_AGENT_COPILOT] = 0xbd83e8ff,
-	[TW_AGENT_ANTIGRAVITY] = 0x5c9ef0ff,
+	[TW_AGENT_CLAUDE] = 0xff7a33ff,
+	[TW_AGENT_CODEX] = 0x16d96bff,
+	[TW_AGENT_COPILOT] = 0xc855ffff,
+	[TW_AGENT_ANTIGRAVITY] = 0x2986ffff,
 };
 
 /* AGY records each period separately. Strip the period to pair the two windows. */
@@ -1660,8 +1660,8 @@ static void overlay_agy_series(GArray *series, const GPtrArray *limits) {
 			g_str_has_prefix(l->name, "gemini-argon-") ? "Argon" :
 			g_str_has_prefix(l->name, "gemini-") ? "Gemini" : NULL;
 		struct agent_overlay_series item = {
-			.color = g_str_has_prefix(l->name, "3p-") ? 0x45c6e8ff :
-				g_str_has_prefix(l->name, "gemini-argon-") ? 0x888cf6ff :
+			.color = g_str_has_prefix(l->name, "3p-") ? 0x00d0ffff :
+				g_str_has_prefix(l->name, "gemini-argon-") ? 0x7c6effff :
 				overlay_colors[TW_AGENT_ANTIGRAVITY],
 			.usage = &l->usage,
 			.weekly_gate = l->usage.five_hour.known ? overlay_agy_gate(limits, l) : NULL,
