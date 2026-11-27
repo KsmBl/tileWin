@@ -8,6 +8,7 @@
 #include "sway/config.h"
 #include "sway/server.h"
 #include "sway/desktop/launcher.h"
+#include "sway/tilewin.h"
 #include "sway/tree/container.h"
 #include "sway/tree/root.h"
 #include "sway/tree/workspace.h"
@@ -29,12 +30,25 @@ struct cmd_results *cmd_exec_process(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	char *cmd = NULL;
 	bool no_startup_id = false;
-	if (strcmp(argv[0], "--no-startup-id") == 0) {
-		no_startup_id = true;
-		--argc; ++argv;
-		if ((error = checkarg(argc, argv[-1], EXPECTED_AT_LEAST, 1))) {
-			return error;
+	// tileWin: --background opens its windows minimized and without the focus,
+	// --app <app id> finds them also when another process shows them
+	bool background = false;
+	const char *app = NULL;
+	while (argc > 1 && (strcmp(argv[0], "--no-startup-id") == 0 ||
+			strcmp(argv[0], "--background") == 0 ||
+			(strcmp(argv[0], "--app") == 0 && argc > 2))) {
+		if (strcmp(argv[0], "--no-startup-id") == 0) {
+			no_startup_id = true;
+		} else if (strcmp(argv[0], "--background") == 0) {
+			background = true;
+		} else {
+			app = argv[1];
+			--argc; ++argv;
 		}
+		--argc; ++argv;
+	}
+	if ((error = checkarg(argc, "exec", EXPECTED_AT_LEAST, 1))) {
+		return error;
 	}
 
 	if (argc == 1 && (argv[0][0] == '\'' || argv[0][0] == '"')) {
@@ -46,7 +60,8 @@ struct cmd_results *cmd_exec_process(int argc, char **argv) {
 
 	sway_log(SWAY_DEBUG, "Executing %s", cmd);
 
-	struct launcher_ctx *ctx = launcher_ctx_create_internal();
+	// in the background: no screen to open on and no focus to hand over
+	struct launcher_ctx *ctx = background ? NULL : launcher_ctx_create_internal();
 
 	// Fork process
 	pid_t child = fork();
@@ -71,6 +86,9 @@ struct cmd_results *cmd_exec_process(int argc, char **argv) {
 	}
 
 	sway_log(SWAY_DEBUG, "Child process created with pid %d", child);
+	if (background) {
+		tw_background_start(child, app);
+	}
 	if (ctx != NULL) {
 		sway_log(SWAY_DEBUG, "Recording workspace for process %d", child);
 		ctx->pid = child;

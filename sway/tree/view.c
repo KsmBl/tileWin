@@ -1024,7 +1024,9 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 
 	view_execute_criteria(view);
 
-	bool set_focus = should_focus(view);
+	// started with exec --background: minimized, and the focus stays where it is
+	bool background = tw_background_view(view);
+	bool set_focus = !background && should_focus(view);
 
 #if WLR_HAS_XWAYLAND
 	struct wlr_xwayland_surface *xsurface;
@@ -1051,7 +1053,11 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 	} else if ((class = view_get_class(view)) != NULL) {
 		wlr_foreign_toplevel_handle_v1_set_app_id(view->foreign_toplevel, class);
 	}
-	tw_animate_open(view->container);
+	if (background) {
+		tw_minimize(view->container, true);
+	} else {
+		tw_animate_open(view->container);
+	}
 	tw_appopup_view_mapped(view);
 }
 

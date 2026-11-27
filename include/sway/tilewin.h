@@ -505,6 +505,10 @@ void tw_explosion_destroy(struct tw_explosion *explosion);
 void tw_explosion_release(void);
 /* Runs the XDG autostart entries (once, when tileWin starts). */
 void tw_xdg_autostart(void);
+/* exec --background: the windows of that program open minimized, without the focus. */
+void tw_background_start(pid_t pid, const char *app);
+/* Whether a window mapped now is one of such a program's (wm/background.c). */
+bool tw_background_view(struct sway_view *view);
 
 /* stick.c */
 void tw_stick_move(struct sway_container *con, list_t *exclude, double *x, double *y);

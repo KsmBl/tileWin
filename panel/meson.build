@@ -68,6 +68,7 @@ executable(
 		'osd.c',
 		'popup.c',
 		'portguard.c',
+		'idlestart.c',
 		'proc.c',
 		'quicksettings.c',
 		'shutdown.c',

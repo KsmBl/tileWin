@@ -97,6 +97,7 @@ Use these in configs, key bindings, menus, or with `tilewinmsg <command>`. Windo
 | `magnify in\|out\|off\|<factor>` | Zooms the screen around the pointer, 1 to 32 |
 | `pointer_trail <ms>` | Copies of the pointer stay behind it while it moves, like the mouse trails of Windows; each copy fades away that many milliseconds after it was left, 0 to 2000 (default 0, off). While `pointer_shake` has the pointer grown, the copies it leaves are grown as well |
 | `double_click_time <ms>` | How long after the first click the second one still makes a double-click, in title bars, on window frames and on the desktop (default 400) |
+| `exec --background [--app <app id>] <command>` | Start a program whose windows open minimized and do not take the focus (for two minutes, and twenty seconds after its first window: a splash and then the main window). They are its windows when its process or one it started shows them, or, with `--app`, when they have that app id |
 | `xdg_autostart enable\|disable` | Start the apps of `~/.config/autostart` and `/etc/xdg/autostart` when tileWin starts (default enable). Programs that already run are not started twice. |
 | `polkit_agent enable\|disable` | Start `tilewin-polkit`, which asks for the password when an app needs an administrator (default enable); disable it to run another polkit agent |
 | `lock_command <command>` | Lock screen used by `idle_timeout lock`, `lid_action ... lock`, `power_key_action lock` and `lock_on_sleep` (default `tilewin-lock -f`) |

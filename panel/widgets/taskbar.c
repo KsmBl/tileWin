@@ -4,6 +4,7 @@
 #include <strings.h>
 #include "draw.h"
 #include "panel.h"
+#include "idlestart.h"
 #include "stringop.h"
 #include "tw_desktop.h"
 
@@ -569,6 +570,15 @@ list_t *taskbar_window_menu(struct panel *panel, struct pwindow *win) {
 		list_add(transparency->children, menu_item_new(label, cmd));
 	}
 	list_add(items, transparency);
+
+	// started minimized after logging in, once the computer is quiet (idlestart.c)
+	if (entry) {
+		char *toggle = format_str("panel idlestart toggle %s", entry->id);
+		struct menu_item *idle = menu_item_new("Start in the background when idle", toggle);
+		idle->checked = idlestart_listed(entry->id);
+		list_add(items, idle);
+		free(toggle);
+	}
 
 	list_t *extra = panel_named_menu(panel, "window");
 	if (extra) {

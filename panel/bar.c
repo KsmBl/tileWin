@@ -7,6 +7,7 @@
 #include "panel.h"
 #include "wifiradar.h"
 #include "portguard.h"
+#include "idlestart.h"
 #include "stringop.h"
 #include "tw_paths.h"
 #include "tw_widgets.h"
@@ -729,6 +730,8 @@ void bar_handle_panel_command(struct panel *panel, const char *args) {
 		} else {
 			portguard_command(argc - 1, argv + 1);
 		}
+	} else if (strcmp(cmd, "idlestart") == 0) {
+		idlestart_command(argc, argv); // from the window menu
 	} else if (strcmp(cmd, "clipboard") == 0) {
 		clipboard_toggle(panel, output);
 	} else if (strcmp(cmd, "emoji") == 0) {

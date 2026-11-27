@@ -12,6 +12,7 @@
 #include "draw.h"
 #include "panel.h"
 #include "portguard.h"
+#include "idlestart.h"
 #include "tw_accent.h"
 #include "tw_desktop.h"
 #include "stringop.h"
@@ -434,6 +435,7 @@ int main(int argc, char **argv) {
 	battery_history_init(&panel);
 	clipboard_init(&panel);
 	portguard_init(&panel);
+	idlestart_init(&panel);
 	welcome_new_user(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
@@ -462,6 +464,7 @@ int main(int argc, char **argv) {
 	}
 
 	portguard_fini();
+	idlestart_fini();
 	livewall_fini();
 	clipboard_fini(&panel);
 	thumbnails_fini(&panel);

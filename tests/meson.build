@@ -60,6 +60,17 @@ test(
 )
 
 test(
+	'load',
+	executable(
+		'test-load',
+		'test_load.c',
+		include_directories: [sway_inc],
+		link_with: [lib_sway_common],
+	),
+	suite: 'unit',
+)
+
+test(
 	'news',
 	executable(
 		'test-news',
@@ -1434,6 +1445,15 @@ test(
 	find_program('ports_widget.sh'),
 	args: [meson.project_build_root(), meson.project_source_root()],
 	depends: [pointer_tool],
+	suite: 'gui',
+	timeout: 120,
+)
+
+# apps started in the background when the computer is idle
+test(
+	'idle-start',
+	find_program('idle_start.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
 	suite: 'gui',
 	timeout: 120,
 )

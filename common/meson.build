@@ -21,6 +21,7 @@ lib_sway_common = static_library(
 		'tw_agent_accounts.c',
 		'tw_kernel_auto.c',
 		'tw_ports.c',
+		'tw_load.c',
 		'tw_portrules.c',
 		'tw_news.c',
 		'tw_command.c',
