@@ -604,6 +604,19 @@ static void quota_resets_and_hover(const struct quota_axis *axis, const struct g
 	}
 }
 
+static void draw_major_grid_line(cairo_t *cr, double x1, double y1, double x2, double y2) {
+	cairo_save(cr);
+	const double major_dot[] = { 1.5, 3.5 };
+	cairo_new_path(cr);
+	cairo_move_to(cr, x1, y1);
+	cairo_line_to(cr, x2, y2);
+	cairo_set_dash(cr, major_dot, 2, 0.0);
+	cairo_set_line_width(cr, 1.0);
+	pd_color(cr, 0xffffff68);
+	cairo_stroke(cr);
+	cairo_restore(cr);
+}
+
 static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbox chart,
 		const struct quota_axis *axis, const char *font, bool weekly) {
 	// Horizontal minor grid in 10% gray increments and major 50% line in dotted white
@@ -615,17 +628,29 @@ static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbo
 		int y = (int)round(quota_y(chart, pct));
 		pd_rect(cr, chart.x, y, chart.width, 1, minor_grid);
 	}
-	cairo_save(cr);
-	const double major_dot[] = { 1.5, 3.5 };
 	double y50 = round(quota_y(chart, 50.0)) + 0.5;
-	cairo_new_path(cr);
-	cairo_move_to(cr, chart.x, y50);
-	cairo_line_to(cr, chart.x + chart.width, y50);
-	cairo_set_dash(cr, major_dot, 2, 0.0);
-	cairo_set_line_width(cr, 1.0);
-	pd_color(cr, 0xffffff68);
-	cairo_stroke(cr);
-	cairo_restore(cr);
+	draw_major_grid_line(cr, chart.x, y50, chart.x + chart.width, y50);
+	// Vertical minor grid (hourly on 5h chart, noon on 7d chart) in gray
+	struct tm minor_tm;
+	localtime_r(&axis->start, &minor_tm);
+	minor_tm.tm_sec = minor_tm.tm_min = 0;
+	minor_tm.tm_hour = weekly ? 12 : minor_tm.tm_hour;
+	for (int i = 0; i < 40; i++) {
+		minor_tm.tm_isdst = -1;
+		time_t mt = mktime(&minor_tm);
+		if (mt >= axis->start + axis->span) {
+			break;
+		}
+		bool is_major = weekly ? (minor_tm.tm_hour == 0) : (minor_tm.tm_hour % 4 == 0);
+		if (mt > axis->start && !is_major) {
+			double mx = quota_x(chart, axis, mt);
+			if (mx > chart.x && mx < chart.x + chart.width) {
+				pd_rect(cr, round(mx), chart.y, 1, chart.height, minor_grid);
+			}
+		}
+		minor_tm.tm_hour += weekly ? 24 : 1;
+	}
+	// Vertical major grid (labelled 4h times on 5h chart, day breaks on 7d chart) in dotted white
 	struct tm boundary;
 	localtime_r(&axis->start, &boundary);
 	boundary.tm_sec = boundary.tm_min = 0;
@@ -646,7 +671,8 @@ static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbo
 			continue;
 		}
 		if (start > axis->start) {
-			pd_rect(cr, round(x), chart.y, 1, chart.height, pal->grid);
+			double gx = round(x) + 0.5;
+			draw_major_grid_line(cr, gx, chart.y, gx, chart.y + chart.height);
 		}
 		char label[24];
 		strftime(label, sizeof(label), weekly ? "%a" : "%H:%M", &label_time);
