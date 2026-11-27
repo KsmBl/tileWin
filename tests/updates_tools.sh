@@ -6,9 +6,11 @@
 #  - checking: the updates found and counted, none, a failure, pacman without
 #    pacman-contrib; apt and dnf read as well
 #  - notifying once of updates not seen before, not with --quiet
-#  - installing: the bar from pacman's lines, checking again afterwards, a
-#    restart asked for when the kernel was updated; the password not given; a
-#    failure with pacman's reason
+#  - installing: the bar from what pacman, apt and dnf print without a
+#    terminal, checking again afterwards, a restart asked for when the kernel
+#    was updated (not for its headers); the password not given; a failure with
+#    pacman's reason
+#  - a state left by one that was stopped is not believed
 #  - the package cache: its size, cleaning it, the weekly clean-up on and off
 #  - the root helper doing nothing but its commands; one at a time
 #
@@ -60,9 +62,14 @@ stub checkupdates "rc=\$(head -1 '$work/checkupdates.answer'); tail -n +2 '$work
 stub pacman "echo \"pacman \$*\" >> '$asked'
 if [ -f '$work/pacman.fail' ]; then echo 'error: failed to commit transaction (conflicting files)'; exit 1; fi
 echo ':: Synchronizing package databases...'
+echo 'Packages (3) firefox-134.0-1  linux-7.3.6.arch1-1  libnew-1.0-1'
 echo ':: Retrieving packages...'
-echo '(1/2) upgrading linux'
-echo '(2/2) upgrading firefox'
+echo ':: Processing package changes...'
+echo 'installing libnew...'
+echo 'upgrading linux...'
+echo 'upgrading firefox...'
+echo ':: Running post-transaction hooks...'
+echo '(1/2) Arming ConditionNeedsUpdate...'
 echo 2 > '$work/checkupdates.answer'"
 stub paccache "echo \"paccache \$*\" >> '$asked'; rm -f '$work/cache/'*"
 stub systemctl "echo \"systemctl \$*\" >> '$asked'
@@ -71,6 +78,7 @@ case \"\$*\" in
 	'disable --now paccache.timer') rm -f '$work/timer.on' ;;
 	*is-enabled*) [ -f '$work/timer.on' ] ;;
 esac"
+stub fakeroot "exec \"\$@\""
 stub notify-send "echo \"notify \$*\" >> '$asked'"
 # pkexec: runs the helper as it is, or says the password was not given
 stub pkexec "[ -f '$work/pkexec.dismiss' ] && exit 126; exec bash \"\$@\""
@@ -107,10 +115,22 @@ check "none: counted as 0" '[ "$(value count)" = 0 ] && [ ! -s "$state/list" ]'
 answer 1 "==> ERROR: Cannot fetch updates"
 bash "$tool" check
 check "a failed check is an error, with pacman's words" '[ "$(value state)" = error ] && [ "$(value message)" = "==> ERROR: Cannot fetch updates" ]'
-mv "$bin/checkupdates" "$bin/checkupdates.off"
-bash "$tool" check
+# without a tool: the stand-ins and the plain tools alone in PATH, so that the
+# real checkupdates or fakeroot of this computer are not found either
+plain=$work/plain
+mkdir -p "$plain"
+for t in bash awk mktemp date cksum cut grep sort mv rm mkdir cat du flock sed tail head; do
+	ln -s "$(command -v "$t")" "$plain/$t"
+done
+without() { # tool, then the check
+	mv "$bin/$1" "$bin/$1.off"
+	PATH=$bin:$plain bash "$tool" check
+	mv "$bin/$1.off" "$bin/$1"
+}
+without checkupdates
 check "without pacman-contrib it says what is missing" 'grep -q '"'"'message=pacman-contrib is needed'"'"' "$state/status"'
-mv "$bin/checkupdates.off" "$bin/checkupdates"
+without fakeroot
+check "without fakeroot it says what is missing" 'grep -q '"'"'message=fakeroot is needed'"'"' "$state/status"'
 
 # apt and dnf
 stub apt "echo 'Listing...'; echo 'firefox-esr/stable-security 128.6.0esr-1~deb13u1 amd64 [upgradable from: 128.5.0esr-1~deb13u1]'"
@@ -127,12 +147,45 @@ bash "$tool" check --quiet
 : > "$asked"
 bash "$tool" install
 check "pacman -Syu --noconfirm, through pkexec" 'asked_for "pacman -Syu --noconfirm"'
-check "what pacman printed is in the log" 'grep -q '"'"'(2/2) upgrading firefox'"'"' "$state/log"'
+check "what pacman printed is in the log" 'grep -q '"'"'upgrading firefox...'"'"' "$state/log"'
 check "checked again afterwards: up to date" '[ "$(value count)" = 0 ] && [ "$(value state)" = idle ]'
 check "the installation is noted" '[ -n "$(value installed)" ]'
 check "the kernel was updated: a restart is asked for" '[ "$(value restart)" = yes ] && [ "$(value restart_boot)" = "$(cat /proc/sys/kernel/random/boot_id)" ]'
 check "notified that a restart finishes it" 'asked_for "Restart the computer to finish"'
 check "no bar left behind" '[ -z "$(value done)" ] && [ -z "$(value total)" ]'
+
+# the bar while it goes: the status at each line of the package manager
+progress() { # manager, lines...: "done/total current" after each line
+	local m=$1
+	shift
+	(
+		STATE=$state
+		declare -A S
+		. <(sed -n '/^read_status()/,/^}/p; /^set_status()/,/^}/p; /^follow()/,/^}/p' "$tool")
+		printf '%s\n' "$@" | follow "$m" 2
+		read_status
+		echo "${S[done]}/${S[total]} ${S[current]}"
+	)
+}
+check "pacman: counted from its lines, the total from Packages (3)" \
+	'[ "$(progress pacman "Packages (3) a b c" "installing libnew..." "upgrading linux..." "upgrading firefox...")" = "3/3 firefox" ]'
+check "pacman with a terminal: its own counter" \
+	'[ "$(progress pacman "(4/9) upgrading mesa                [####]")" = "4/9 mesa" ]'
+check "apt: the total from upgraded and newly installed" \
+	'[ "$(progress apt "2 upgraded, 1 newly installed, 0 to remove and 0 not upgraded." "Setting up libnew (1.0) ..." "Setting up firefox:amd64 (134.0) ...")" = "2/3 firefox" ]'
+check "apt: more than counted does not go past the end" \
+	'[ "$(progress apt "Setting up a (1)" "Setting up b (1)" "Setting up c (1)")" = "3/3 c" ]'
+check "dnf: its counter" \
+	'[ "$(progress dnf "  Upgrading        : firefox-134.0-1.fc41.x86_64          3/12")" = "3/12 firefox-134.0-1.fc41.x86_64" ]'
+check "dnf5: its counter" \
+	'[ "$(progress dnf "[ 5/14] Upgrading firefox-0:134.0-1.fc41.x86_64  100% |")" = "5/14 firefox-0:134.0-1.fc41.x86_64" ]'
+
+# headers alone want no restart
+answer 0 "linux-headers 7.3.5.arch1-1 -> 7.3.6.arch1-1"
+bash "$tool" check --quiet
+sed -i '/^restart_boot=/d' "$state/status"
+bash "$tool" install
+check "the kernel headers alone: no restart asked for" '[ -z "$(value restart_boot)" ]'
 
 answer 0 "firefox 133.0-1 -> 134.0-1"
 bash "$tool" check --quiet
@@ -158,6 +211,17 @@ check "weekly on: paccache.timer enabled" 'asked_for "systemctl enable --now pac
 check "weekly on in the status" '[ "$(value weekly)" = on ]'
 bash "$tool" weekly off
 check "weekly off: disabled again" 'asked_for "systemctl disable --now paccache.timer" && [ "$(value weekly)" = off ]'
+
+# ---------- stopped half way ----------
+
+answer 2
+sed -i 's/^state=.*/state=installing/' "$state/status"
+echo "done=1" >> "$state/status"
+bash "$tool" check --quiet
+check "a stopped installation is not believed: idle again, without its bar" '[ "$(value state)" = idle ] && [ -z "$(value done)" ]'
+sed -i 's/^state=.*/state=checking/' "$state/status"
+bash "$tool" weekly off
+check "nor a stopped check" '[ "$(value state)" = idle ]'
 
 # ---------- the root helper and the lock ----------
 

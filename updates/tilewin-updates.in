@@ -117,6 +117,7 @@ list_updates() {
 	case $1 in
 	pacman)
 		have checkupdates || { echo "pacman-contrib is needed to check for updates" >&2; return 1; }
+		have fakeroot || { echo "fakeroot is needed to check for updates" >&2; return 1; }
 		# 0: updates, 2: none, anything else went wrong
 		out=$(checkupdates 2>&1)
 		rc=$?
@@ -149,9 +150,11 @@ list_updates() {
 	esac
 }
 
-# Whether one of the updates only counts after a restart.
+# Whether one of the updates only counts after a restart: a kernel (not its
+# headers), systemd, the C library, the NVIDIA driver or the microcode.
 wants_restart() {
-	cut -f1 "$1" | grep -qE '^(linux(-[a-z]+)?|linux-image-.*|kernel(-core)?|systemd|glibc|libc6|nvidia(-[a-z]+)?|mesa|amd-ucode|intel-ucode)$'
+	cut -f1 "$1" | grep -vE -- '-(headers|docs)$' |
+		grep -qE '^(linux(-[a-z0-9]+)?|linux-image-.*|kernel(-core)?|systemd|glibc|libc6|nvidia(-[a-z0-9]+)*|amd-ucode|intel-ucode)$'
 }
 
 boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
@@ -192,36 +195,58 @@ check() {
 	fi
 }
 
-# Reads what the root helper prints and moves the bar.
+# Reads what the root helper prints and moves the bar. The package managers
+# print without a terminal here: pacman says "upgrading firefox..." with no
+# counter, after "Packages (12) ..." which tells how many; apt "Setting up
+# firefox", after "3 upgraded, 1 newly installed"; dnf "Upgrading : firefox
+# 3/12" and dnf5 "[ 3/12] Upgrading firefox".
 follow() { # manager total
-	local m=$1 total=$2 n=0 line
+	local m=$1 total=$2 n=0 line name
 	while IFS= read -r line; do
 		printf '%s\n' "$line" >> "$STATE/log"
+		name=
 		case $m in
 		pacman)
-			# "(  3/12) upgrading firefox" while installing
-			if [[ $line =~ ^\(\ *([0-9]+)/([0-9]+)\)\ (upgrading|installing|reinstalling|removing|downgrading)\ ([^ .]+) ]]; then
-				set_status done="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}" \
-					current="${BASH_REMATCH[4]}" phase=installing
-			elif [[ $line =~ ^:\ Retrieving\ packages ]] || [[ $line =~ ^::\ Retrieving ]]; then
+			if [[ $line =~ ^Packages\ \(([0-9]+)\) ]]; then
+				total=${BASH_REMATCH[1]}
+				set_status total="$total"
+			elif [[ $line =~ ^(\(\ *([0-9]+)/([0-9]+)\)\ )?(upgrading|installing|reinstalling|downgrading)\ ([^ ]+)$ ]] ||
+				[[ $line =~ ^(\(\ *([0-9]+)/([0-9]+)\)\ )?(upgrading|installing|reinstalling|downgrading)\ ([^ ]+)\ *\[ ]]; then
+				# with a terminal: "(3/12) upgrading firefox  [###]"
+				if [ -n "${BASH_REMATCH[2]}" ]; then
+					n=${BASH_REMATCH[2]} total=${BASH_REMATCH[3]}
+				else
+					n=$((n + 1))
+				fi
+				name=${BASH_REMATCH[5]%...}
+			elif [[ $line =~ ^:+\ Retrieving ]]; then
 				set_status phase=downloading current=
 			fi
 			;;
 		apt)
-			if [[ $line =~ ^Setting\ up\ ([^ :]+) ]]; then
+			if [[ $line =~ ^([0-9]+)\ upgraded,\ ([0-9]+)\ newly\ installed ]]; then
+				total=$((BASH_REMATCH[1] + BASH_REMATCH[2]))
+				set_status total="$total"
+			elif [[ $line =~ ^Setting\ up\ ([^ :]+) ]]; then
 				n=$((n + 1))
-				set_status done=$n total="$total" current="${BASH_REMATCH[1]}" phase=installing
+				name=${BASH_REMATCH[1]}
 			elif [[ $line =~ ^Get:[0-9]+ ]]; then
 				set_status phase=downloading
 			fi
 			;;
 		dnf)
 			if [[ $line =~ ^\ *(Upgrading|Installing)\ *:\ ([^ ]+).*\ ([0-9]+)/([0-9]+)$ ]]; then
-				set_status done="${BASH_REMATCH[3]}" total="${BASH_REMATCH[4]}" \
-					current="${BASH_REMATCH[2]}" phase=installing
+				n=${BASH_REMATCH[3]} total=${BASH_REMATCH[4]} name=${BASH_REMATCH[2]}
+			elif [[ $line =~ ^\[\ *([0-9]+)/([0-9]+)\]\ (Upgrading|Installing)\ ([^ ]+) ]]; then
+				n=${BASH_REMATCH[1]} total=${BASH_REMATCH[2]} name=${BASH_REMATCH[4]}
 			fi
 			;;
 		esac
+		if [ -n "$name" ]; then
+			# more than were counted (new dependencies): the bar never goes past the end
+			[ "$n" -gt "$total" ] && total=$n
+			set_status done="$n" total="$total" current="$name" phase=installing
+		fi
 	done
 }
 
@@ -273,7 +298,11 @@ clean() {
 	case $rc in
 	0) set_status state=idle cache="$(cache_bytes "$m")" message= ;;
 	126 | 127) set_status state=idle message="Not cleaned: the password was not given" ;;
-	*) set_status state=error message="$(grep -E '^(error|E):' "$STATE/log" | tail -1)" ;;
+	*)
+		local why
+		why=$(grep -E '^(error|E):' "$STATE/log" | tail -1)
+		set_status state=error message="${why:-the clean-up failed, see $STATE/log}"
+		;;
 	esac
 }
 
@@ -281,7 +310,11 @@ weekly() {
 	local m
 	m=$(manager)
 	"$PKEXEC" "$ROOT_HELPER" weekly "$1" > "$STATE/log" 2>&1
-	set_status weekly="$(weekly_state "$m")"
+	case $? in
+	0) set_status weekly="$(weekly_state "$m")" message= ;;
+	126 | 127) set_status message="Not changed: the password was not given" ;;
+	*) set_status message="$(grep -E '^error:' "$STATE/log" | tail -1)" ;;
+	esac
 }
 
 # one at a time: the widget of every screen may ask
@@ -293,6 +326,17 @@ status)
 	;;
 check | install | clean | weekly)
 	flock -n 9 || { echo "tilewin-updates: already at work" >&2; exit 0; }
+	# the lock is ours, so nothing is at work: a state that says otherwise was
+	# left by one that was stopped (logging out, switching off) and is not true
+	read_status
+	case ${S[state]:-} in
+	checking) set_status state=idle message="The last check was interrupted" ;;
+	installing)
+		set_status state=idle done= total= current= phase= \
+			message="The last installation was interrupted: check again and install"
+		;;
+	cleaning) set_status state=idle message="The last clean-up was interrupted" ;;
+	esac
 	;;
 esac
 

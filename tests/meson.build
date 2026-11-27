@@ -842,20 +842,20 @@ test(
 	suite: 'unit',
 )
 
+# the scripts of the updates widget, with stand-ins for the package manager:
+# nothing of this computer is asked or changed
+test(
+	'updates-tools',
+	find_program('updates_tools.sh'),
+	args: [tilewin_updates, tilewin_updates_root],
+	suite: 'unit',
+	timeout: 60,
+)
+
 python = find_program('python3', required: false)
 if python.found()
 	# a kernel tree, a mirror, a root and boot loaders of its own: nothing is
 	# built for real and nothing of this computer is touched
-	# the scripts of the updates widget, with stand-ins for the package manager:
-	# nothing of this computer is asked or changed
-	test(
-		'updates-tools',
-		find_program('updates_tools.sh'),
-		args: [tilewin_updates, tilewin_updates_root],
-		suite: 'unit',
-		timeout: 60,
-	)
-
 	test(
 		'kernel-tools',
 		find_program('kernel_tools.sh'),

@@ -135,6 +135,12 @@ static const struct tw_widget_option updates_taskbar_look[] = {
 	{ 0 },
 };
 
+/* How it looks on the desktop. */
+static const struct tw_widget_option updates_desktop_look[] = {
+	{ "text_size", "Text size", "Pixels at a cell of 100, 13 by default", choice_text_size },
+	{ 0 },
+};
+
 static const struct tw_widget_option opts_ports[] = {
 	{ "interval", "Update interval", "Seconds between looks, 5 by default", NULL },
 	{ "public_fg", "Color of a public port", "Open to every network, e.g. #d83b3b (red) by "
@@ -188,7 +194,7 @@ const struct tw_widget_option *tw_widget_look(const char *type, bool desktop) {
 		return desktop ? ports_desktop_look : ports_taskbar_look;
 	}
 	if (type && strcmp(type, "updates") == 0) {
-		return desktop ? NULL : updates_taskbar_look;
+		return desktop ? updates_desktop_look : updates_taskbar_look;
 	}
 	return NULL;
 }
@@ -459,6 +465,12 @@ static const struct tw_widget_style styles_ports[] = {
 	{ "tile", "Tile with its name", 2, 2 },
 	{ 0 },
 };
+static const struct tw_widget_style styles_updates[] = {
+	{ "compact", "Like on the taskbar", 0, 1 },
+	{ "list", "A line for each update", 3, 3 },
+	{ "tile", "Tile with its name", 2, 2 },
+	{ 0 },
+};
 static const struct tw_widget_style styles_wifiradar[] = {
 	{ "compact", "Like on the taskbar", 0, 1 },
 	{ "radar", "Radar with the networks in reach", 3, 3 },
@@ -547,7 +559,7 @@ const struct tw_widget_info tw_widgets[] = {
 		"for this computer, a local network or public", STATUS, opts_ports, styles_ports },
 	{ "updates", "System updates", "The updates of the system's packages: how many there are, "
 		"installing them with a click and cleaning up the package cache", STATUS, opts_updates,
-		styles_plain },
+		styles_updates },
 	{ "wifiradar", "Wi-Fi radar", "The Wi-Fi networks in reach on a radar, the stronger "
 		"the nearer the middle; a click on one connects to it", STATUS, opts_wifiradar,
 		styles_wifiradar },
@@ -576,6 +588,7 @@ const char *tw_widget_desktop_style(const char *type) {
 		{ "agents", "list" },
 		{ "kernel", "card" },
 		{ "ports", "list" },
+		{ "updates", "list" },
 		{ "wifiradar", "radar" },
 	};
 	for (size_t i = 0; type && i < sizeof(own) / sizeof(own[0]); i++) {

@@ -18,12 +18,21 @@
  * that logging in is not slowed down. A click opens a flyout with the updates,
  * Install updates (through pkexec: the password is asked), Check now and
  * Clean up (the package cache), and the weekly clean-up.
+ *
+ * On the desktop the style "list" draws the sign, what goes on, a bar while
+ * the updates are installed and a line for each update with its new version.
+ * There it does not hide while all is up to date.
+ *
+ * A state that says a check, an installation or a clean-up is at work while
+ * nothing holds tilewin-updates' lock was left by one that was stopped: it
+ * counts as done, so that the widget does not wait for it for ever.
  */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
 #include <math.h>
 #include <signal.h>
+#include <sys/file.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,6 +122,22 @@ static void read_list(struct updates_state *u) {
 	fclose(f);
 }
 
+/* Nothing holds the lock of tilewin-updates: no check, installation or clean-up runs. */
+static bool nobody_working(void) {
+	char *path = state_file("lock");
+	int fd = path ? open(path, O_RDONLY | O_CLOEXEC) : -1;
+	free(path);
+	if (fd < 0) {
+		return true;
+	}
+	bool free_ = flock(fd, LOCK_EX | LOCK_NB) == 0;
+	if (free_) {
+		flock(fd, LOCK_UN);
+	}
+	close(fd);
+	return free_;
+}
+
 static bool changed(const char *name, struct timespec *seen) {
 	char *path = state_file(name);
 	struct stat st;
@@ -191,19 +216,30 @@ static void read_status(struct updates_state *u) {
 	v->restart = restart_boot[0] && strcmp(restart_boot, u->boot_id) == 0;
 }
 
-static void reload(struct widget *w, bool force) {
-	struct updates_state *u = w->data;
-	if (changed("status", &u->mtime) || force) {
-		read_status(u);
-	}
-	if (changed("list", &u->list_mtime) || force) {
-		read_list(u);
-	}
-}
-
 static bool busy(const struct updates_view *v) {
 	return v->state == UPDATES_CHECKING || v->state == UPDATES_INSTALLING ||
 		v->state == UPDATES_CLEANING;
+}
+
+/* Reads what changed; true when the list did. */
+static bool reload(struct widget *w, bool force) {
+	struct updates_state *u = w->data;
+	// while it says it is at work, read again each time: it may have been stopped
+	if (changed("status", &u->mtime) || force || busy(&u->view)) {
+		read_status(u);
+		if (busy(&u->view) && nobody_working()) {
+			struct updates_view *v = &u->view;
+			v->state = UPDATES_IDLE;
+			v->done = v->total = 0;
+			v->current[0] = '\0';
+			v->downloading = false;
+		}
+	}
+	if (changed("list", &u->list_mtime) || force) {
+		read_list(u);
+		return true;
+	}
+	return false;
 }
 
 /* "tilewin-updates check" in the background; it writes what it finds. */
@@ -244,7 +280,7 @@ static void tick(void *data) {
 		u->pid = 0;
 	}
 	struct updates_view before = u->view;
-	reload(w, false);
+	bool list = reload(w, false);
 	const struct updates_view *v = &u->view;
 	time_t now = time(NULL);
 	int hours = atoi(widget_conf(w, "interval", "6"));
@@ -255,8 +291,10 @@ static void tick(void *data) {
 			(v->checked == 0 || now - v->checked >= hours * 3600L)) {
 		start_check(w);
 	}
-	if (before.state != v->state || before.count != v->count || before.done != v->done ||
-			before.restart != v->restart) {
+	if (list || before.state != v->state || before.count != v->count ||
+			before.done != v->done || before.total != v->total ||
+			before.restart != v->restart || before.checked != v->checked ||
+			strcmp(before.current, v->current) != 0 || strcmp(before.message, v->message) != 0) {
 		widget_set_dirty(w);
 	}
 	u->timer = loop_add_timer_lazy(w->panel->loop, READ_MS, tick, w);
@@ -358,6 +396,9 @@ static void taskbar_text(struct widget *w, char *out, size_t size) {
 static bool hidden(struct widget *w) {
 	struct updates_state *u = w->data;
 	const struct updates_view *v = &u->view;
+	if (w->desk) {
+		return false; // a place of its own on the desktop: it says "Up to date"
+	}
 	// a system tileWin cannot update (no pacman, apt or dnf): nothing to show
 	if (strcmp(v->manager, "none") == 0) {
 		return true;
@@ -402,6 +443,93 @@ static void updates_render(struct widget *w, struct render_ctx *ctx, struct pbox
 			u->view.state == UPDATES_ERROR ? color : fg, PD_LEFT);
 	}
 	psurface_add_hotspot(ctx->surface, b.x, b.y, b.width, b.height, w, 0, 0, NULL);
+}
+
+/* ---------- the desktop ---------- */
+
+static int text_size(struct widget *w) {
+	const char *v = NULL;
+	if (w->desk) {
+		struct twconf_node *node = twconf_child(w->desk, "text_size");
+		v = node && node->argc > 0 ? node->argv[0] : NULL;
+	}
+	int n = v ? atoi(v) : 13;
+	return n < 8 ? 8 : n > 40 ? 40 : n;
+}
+
+/*
+ * The sign and what goes on, a bar while installing, then a line for each
+ * update: its name and its new version.
+ */
+static void desk_list(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal) {
+	struct updates_state *u = w->data;
+	const struct updates_view *v = &u->view;
+	cairo_t *cr = ctx->cairo;
+	double sc = ctx->scale, pad = 12 * sc;
+	double text = text_size(w) * sc;
+	char font[224], bold[224], small[224];
+	snprintf(font, sizeof(font), "%s %dpx", pal->family, (int)(text + 0.5));
+	snprintf(bold, sizeof(bold), "%s Bold %dpx", pal->family, (int)(text + 0.5));
+	snprintf(small, sizeof(small), "%s %dpx", pal->family, (int)(text * 0.85 + 0.5));
+
+	double y = pad;
+	double icon = fmin(text * 2.4, ctx->height * 0.32);
+	uint32_t color = pal->mono ? pal->fg : state_color(w, pal->accent);
+	draw_sign(cr, pad, y, icon, color, v);
+	char title[128], sub[256];
+	updates_widget_words(v, title, sizeof(title), sub, sizeof(sub));
+	double tx = pad + icon + 8 * sc, tw = ctx->width - tx - pad;
+	pd_text(cr, bold, title, tx, y, tw, icon * 0.55, pal->fg, PD_LEFT);
+	pd_text(cr, small, sub, tx, y + icon * 0.55, tw, icon * 0.45, pal->dim, PD_LEFT);
+	y += icon + 8 * sc;
+
+	if (v->state == UPDATES_INSTALLING && v->total > 0) {
+		enum pd_bar_look look = pal->look == GADGET_CLASSIC ? PD_BAR_BLOCKS_SUNKEN :
+			pal->look == GADGET_LUNA ? PD_BAR_BLOCKS : PD_BAR_SMOOTH;
+		double bh = fmax(look == PD_BAR_SMOOTH ? 6 * sc : 14 * sc, 4);
+		pd_share_bar(cr, pad, y, ctx->width - 2 * pad, bh, v->done * 100.0 / v->total,
+			pal->track, (pal->track & 0xff) / 255.0, pal->mono ? pal->fg : pal->accent,
+			2 * sc, look, pal->dark);
+		y += bh + 8 * sc;
+	}
+
+	if (v->count == 0 || (busy(v) && v->state != UPDATES_INSTALLING)) {
+		return;
+	}
+	double row = text * 1.45;
+	int room = (int)((ctx->height - pad - y) / row);
+	if (room < 1) {
+		return;
+	}
+	int listed = v->count_listed;
+	bool more = listed > room;
+	int shown = more ? room - 1 : listed;
+	double width = ctx->width - 2 * pad;
+	for (int i = 0; i < shown; i++) {
+		const struct updates_item *it = &v->list[i];
+		bool now = v->state == UPDATES_INSTALLING && strcmp(it->name, v->current) == 0;
+		int vw = 0;
+		pd_text_size(cr, small, it->new, &vw, NULL);
+		double version = fmin(vw, width * 0.5);
+		pd_text(cr, small, it->new, pad + width - version, y, version, row, pal->dim, PD_LEFT);
+		pd_text(cr, now ? bold : font, it->name, pad, y, width - version - 8 * sc, row,
+			now && !pal->mono ? pal->accent : pal->fg, PD_LEFT);
+		y += row;
+	}
+	if (more) {
+		char line[64];
+		snprintf(line, sizeof(line), "and %d more", listed - shown);
+		pd_text(cr, small, line, pad, y, width, row, pal->dim, PD_LEFT);
+	}
+}
+
+static bool updates_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
+		const struct gadget_palette *pal) {
+	if (!ctx->style || strcmp(ctx->style, "list") != 0) {
+		return false; // compact and tile: the taskbar look and the sample
+	}
+	desk_list(w, ctx, pal);
+	return true;
 }
 
 /* ---------- tooltip, click, sample ---------- */
@@ -551,4 +679,5 @@ const struct widget_impl widget_updates = {
 	.tooltip = updates_tooltip,
 	.set_active = updates_set_active,
 	.sample = updates_sample,
+	.draw_gadget = updates_draw_gadget,
 };

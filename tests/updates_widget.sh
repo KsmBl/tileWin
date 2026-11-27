@@ -1,7 +1,9 @@
 #!/bin/bash
 # The updates widget, from the state tilewin-updates writes: on the taskbar
 # while updates wait, gone while all is up to date, drawn again while they are
-# installed; a click opens its flyout, every theme draws it, and the panel
+# installed; an installation that was stopped (nothing holds the lock) is not
+# waited for; on the desktop a line for each update, there while all is up to
+# date too; a click opens its flyout, every theme draws it, and the panel
 # survives all of it. Nothing is checked or installed: no tilewin-updates runs.
 #
 # usage: updates_widget.sh <build dir> <source dir>
@@ -68,7 +70,12 @@ printf '%s\t%s\t%s\n' linux 7.3.5.arch1-1 7.3.6.arch1-1 firefox 133.0-1 134.0-1 
 status state=idle count=3
 
 cp "$source_dir/config/taskbar.conf" "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
-echo "theme_layout no" >> "$XDG_CONFIG_HOME/tileWin/taskbar.conf"
+cat >> "$XDG_CONFIG_HOME/tileWin/taskbar.conf" <<EOT
+theme_layout no
+desktop_widgets {
+	updates { style list; column 0; row 0 }
+}
+EOT
 cat > "$work/tilewin.conf" <<EOT
 wallpaper solid #204070
 session_restore no
@@ -92,6 +99,20 @@ bar() { grim -g "0,680 1280x40" - 2>/dev/null | md5sum; }
 wait_still 15 bar
 grim -g "0,680 1280x40" "$work/with.png"
 
+count_drawn() { # x y w h: the pixels that are not the wallpaper
+	grim -g "$1,$2 $3x$4" "$work/card.png" 2>/dev/null &&
+		python3 -c "
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+print(sum(1 for p in im.getdata() if abs(p[0] - 0x20) + abs(p[1] - 0x40) + abs(p[2] - 0x70) > 40))" \
+			"$work/card.png" 2>/dev/null || echo 0
+}
+card() { grim -g "14,14 290x290" - 2>/dev/null | md5sum; }
+drawn=$(count_drawn 14 14 290 290)
+[ "${drawn:-0}" -gt 2000 ] || fail "the desktop list shows next to nothing ($drawn pixels)"
+with_updates=$(card)
+
 # up to date: the widget hides
 status state=idle count=0
 : > "$state/list"
@@ -99,6 +120,10 @@ wait_until 10 sh -c "[ \"\$(grim -g '0,680 1280x40' - 2>/dev/null | md5sum)\" !=
 	fail "up to date, the widget did not hide"
 wait_still 5 bar
 grim -g "0,680 1280x40" "$work/without.png"
+
+drawn=$(count_drawn 14 14 290 290)
+[ "${drawn:-0}" -gt 2000 ] || fail "up to date, the desktop card is gone ($drawn pixels)"
+[ "$(card)" != "$with_updates" ] || fail "up to date, the desktop card did not change"
 
 # where it was: the pixels that differ
 box=$(python3 -c "
@@ -109,12 +134,28 @@ b = d.getbbox()
 print('%d %d %d' % (b[0], b[2], b[2] - b[0]) if b else '')" "$work/with.png" "$work/without.png")
 [ -n "$box" ] || fail "the widget drew nothing with three updates waiting"
 
-# installing: drawn again, with how far it is
-status state=installing done=1 total=3 current=firefox phase=installing count=3
+# installing: drawn again, with how far it is; tilewin-updates holds its lock
+# while it works, as this shell does here
 printf '%s\t%s\t%s\n' linux 7.3.5.arch1-1 7.3.6.arch1-1 firefox 133.0-1 134.0-1 \
 	mesa 1:25.3.1-1 1:25.3.2-1 > "$state/list"
-wait_until 10 sh -c "[ \"\$(grim -g '0,680 1280x40' - 2>/dev/null | md5sum)\" != '$(bar)' ]" ||
+# the widget's part of the taskbar, left of the clock (which may turn a minute)
+around() { grim -g "760,680 400x40" - 2>/dev/null | md5sum; }
+hidden=$(around)
+status state=idle count=3
+wait_until 10 sh -c "[ \"\$(grim -g '760,680 400x40' - 2>/dev/null | md5sum)\" != '$hidden' ]" ||
+	fail "three updates again, the widget did not come back"
+wait_still 5 around
+waiting=$(around)
+exec 9> "$state/lock"
+flock 9
+status state=installing done=1 total=3 current=firefox phase=installing count=3
+wait_until 10 sh -c "[ \"\$(grim -g '760,680 400x40' - 2>/dev/null | md5sum)\" != '$waiting' ]" ||
 	fail "an installation did not show on the taskbar"
+wait_still 5 around
+# it was stopped: nothing holds the lock any more, the state stays behind
+exec 9>&-
+wait_until 10 sh -c "[ \"\$(grim -g '760,680 400x40' - 2>/dev/null | md5sum)\" = '$waiting' ]" ||
+	fail "a stopped installation was still shown as at work"
 
 # a click on it opens the flyout with the updates
 status state=idle count=3
