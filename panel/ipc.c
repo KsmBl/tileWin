@@ -340,6 +340,7 @@ static void refresh_mode(struct panel *panel) {
 	set_main_output(panel, jstr(state, "main_output"));
 	panel->state.battery_saver = jbool(state, "battery_saver");
 	panel->state.keep_awake = jbool(state, "keep_awake");
+	panel->state.locked = jbool(state, "locked");
 	json_object_put(state);
 }
 
@@ -544,6 +545,9 @@ static void handle_tilewin_event(struct panel *panel, json_object *event) {
 		if (popup_is_open(panel, POPUP_POWER)) {
 			popup_set_dirty(panel->popup);
 		}
+	} else if (strcmp(change, "lock") == 0) {
+		panel->state.locked = jbool(event, "locked");
+		agent_resume_lock_changed(panel);
 	} else if (strcmp(change, "snap_layouts") == 0) {
 		const char *output_name = jstr(event, "output");
 		struct panel_output *output = NULL, *iter;

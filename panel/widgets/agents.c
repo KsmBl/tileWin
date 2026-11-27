@@ -37,6 +37,8 @@
 #include <string.h>
 #include <time.h>
 #include "agentusage.h"
+#include "agentoverlay.h"
+#include "agentresume.h"
 #include "draw.h"
 #include "panel.h"
 #include "claudecharts.h"
@@ -512,12 +514,103 @@ static void collect(struct widget *w, int every) {
 	}
 }
 
+static bool overlay_style(const struct widget *w) {
+	const char *style = w->desk ? twconf_value(w->desk, "style") : NULL;
+	return style && strcmp(style, "overlay") == 0;
+}
+
+static const struct tw_claude_window *overlay_agy_gate(const GPtrArray *limits,
+	const struct agent_limit *limit);
+
+static void sync_auto_resume(struct widget *w) {
+	struct agents_state *st = w->data;
+	struct agent_resume_config cfg = {
+		.enabled = widget_conf_bool(w, "auto_resume", false),
+		.delay_s = widget_conf_int(w, "resume_delay", AGENT_RESUME_DEFAULT_DELAY),
+		.threshold = widget_conf_int(w, "critical", 95),
+		.command = widget_conf(w, "resume_command", AGENT_RESUME_DEFAULT_COMMAND),
+	};
+	agent_resume_configure(w->panel, &cfg);
+	time_t now = time(NULL);
+	for (int i = 0; i < st->count; i++) {
+		const struct source *s = &st->src[i];
+		enum tw_agent agent = s->account.agent;
+		if (agent == TW_AGENT_CLAUDE || agent == TW_AGENT_CODEX) {
+			if (!s->have) {
+				continue;
+			}
+			bool weekly_blocked = s->usage.seven_day.known &&
+				tw_claude_window_now(&s->usage.seven_day, now) >= 100;
+			struct agent_resume_window_input five = {
+				.agent = agent,
+				.account_id = s->account.id,
+				.account_dir = s->account.dir,
+				.bucket = "5h",
+				.seven_day = false,
+				.window = s->usage.five_hour,
+				.weekly_blocked = weekly_blocked,
+			};
+			agent_resume_observe(w->panel, &five, st->collected, now);
+			struct agent_resume_window_input week = {
+				.agent = agent,
+				.account_id = s->account.id,
+				.account_dir = s->account.dir,
+				.bucket = "7d",
+				.seven_day = true,
+				.window = s->usage.seven_day,
+				.weekly_blocked = false,
+			};
+			agent_resume_observe(w->panel, &week, st->collected, now);
+		} else if (agent == TW_AGENT_ANTIGRAVITY && st->collected && st->collected->limits) {
+			for (guint j = 0; j < st->collected->limits->len; j++) {
+				const struct agent_limit *l = st->collected->limits->pdata[j];
+				if (l->kind != AGENT_AGY) {
+					continue;
+				}
+				if (l->usage.five_hour.known) {
+					const struct tw_claude_window *gate =
+						overlay_agy_gate(st->collected->limits, l);
+					bool blocked = gate && tw_claude_window_now(gate, now) >= 100;
+					struct agent_resume_window_input in = {
+						.agent = TW_AGENT_ANTIGRAVITY,
+						.account_id = s->account.id,
+						.account_dir = NULL,
+						.bucket = l->name,
+						.seven_day = false,
+						.window = l->usage.five_hour,
+						.weekly_blocked = blocked,
+					};
+					agent_resume_observe(w->panel, &in, st->collected, now);
+				}
+				if (l->usage.seven_day.known) {
+					struct agent_resume_window_input in = {
+						.agent = TW_AGENT_ANTIGRAVITY,
+						.account_id = s->account.id,
+						.account_dir = NULL,
+						.bucket = l->name,
+						.seven_day = true,
+						.window = l->usage.seven_day,
+						.weekly_blocked = false,
+					};
+					agent_resume_observe(w->panel, &in, st->collected, now);
+				}
+			}
+		}
+	}
+}
+
 static void reload(struct widget *w) {
 	struct agents_state *st = w->data;
 	resolve(w);
 	for (int i = 0; i < st->count; i++) {
-		reload_source(st, &st->src[i]);
+		struct source *src = &st->src[i];
+		reload_source(st, src);
+		if (src->tool && overlay_style(w)) {
+			free(src->points);
+			src->point_count = tw_claude_history_read(src->usage.history, &src->points);
+		}
 	}
+	sync_auto_resume(w);
 }
 
 static void tick(void *data) {
@@ -1513,9 +1606,125 @@ static void desk_accounts(struct widget *w, struct gadget_ctx *ctx,
 	}
 }
 
+static const uint32_t overlay_colors[TW_AGENT_COUNT] = {
+	[TW_AGENT_CLAUDE] = 0xe78959ff,
+	[TW_AGENT_CODEX] = 0x34b58dff,
+	[TW_AGENT_COPILOT] = 0xbd83e8ff,
+	[TW_AGENT_ANTIGRAVITY] = 0x5c9ef0ff,
+};
+
+/* AGY records each period separately. Strip the period to pair the two windows. */
+static size_t overlay_bucket_group(const char *name) {
+	const char *end = g_strrstr(name, " · ");
+	if (!end) {
+		return 0;
+	}
+	const char *const suffixes[] = {
+		"-weekly", "_weekly", "-7d", "_7d", "-5h", "_5h", "-5-hour",
+		"_5-hour", "-five-hour", "_five_hour", "-fivehour", NULL,
+	};
+	size_t length = end - name;
+	for (int i = 0; suffixes[i]; i++) {
+		size_t n = strlen(suffixes[i]);
+		if (length > n && g_ascii_strncasecmp(end - n, suffixes[i], n) == 0) {
+			return length - n;
+		}
+	}
+	return 0;
+}
+
+static const struct tw_claude_window *overlay_agy_gate(const GPtrArray *limits,
+		const struct agent_limit *limit) {
+	size_t group = overlay_bucket_group(limit->name);
+	for (guint i = 0; group && i < limits->len; i++) {
+		const struct agent_limit *other = limits->pdata[i];
+		if (other->kind == AGENT_AGY && other->usage.seven_day.known &&
+				group == overlay_bucket_group(other->name) &&
+				g_ascii_strncasecmp(limit->name, other->name, group) == 0) {
+			return &other->usage.seven_day;
+		}
+	}
+	return NULL;
+}
+
+static void overlay_agy_series(GArray *series, const GPtrArray *limits) {
+	for (guint i = 0; limits && i < limits->len; i++) {
+		const struct agent_limit *l = limits->pdata[i];
+		if (l->kind != AGENT_AGY) {
+			continue;
+		}
+		const char *group = g_str_has_prefix(l->name, "3p-") ? "Claude/GPT" :
+			g_str_has_prefix(l->name, "gemini-argon-") ? "Argon" :
+			g_str_has_prefix(l->name, "gemini-") ? "Gemini" : NULL;
+		struct agent_overlay_series item = {
+			.color = g_str_has_prefix(l->name, "3p-") ? 0x45c6e8ff :
+				g_str_has_prefix(l->name, "gemini-argon-") ? 0x888cf6ff :
+				overlay_colors[TW_AGENT_ANTIGRAVITY],
+			.usage = &l->usage,
+			.weekly_gate = l->usage.five_hour.known ? overlay_agy_gate(limits, l) : NULL,
+			.points = l->chart.points, .count = l->chart.count,
+		};
+		snprintf(item.name, sizeof(item.name), "Antigravity · %s", group ? group : l->name);
+		// Each known group uses one legend slot for its two chart series.
+		bool listed = false;
+		for (guint j = 0; group && j < series->len; j++) {
+			const struct agent_overlay_series *existing =
+				&g_array_index(series, struct agent_overlay_series, j);
+			if (strcmp(item.name, existing->name) == 0) {
+				listed = true;
+				break;
+			}
+		}
+		if (!listed) {
+			snprintf(item.legend, sizeof(item.legend), "AGY %s",
+				group && strcmp(group, "Claude/GPT") == 0 ? "3P" : group ? group : l->name);
+		}
+		g_array_append_val(series, item);
+	}
+}
+
+static bool desk_overlay(struct widget *w, struct gadget_ctx *ctx, const struct gadget_palette *pal) {
+	struct agents_state *st = w->data;
+	GArray *series = g_array_new(false, false, sizeof(struct agent_overlay_series));
+	time_t now = time(NULL);
+	for (int i = 0; i < st->count; i++) {
+		struct source *src = &st->src[i];
+		enum tw_agent agent = src->account.agent;
+		if (agent == TW_AGENT_ANTIGRAVITY && st->collected) {
+			guint first = series->len;
+			overlay_agy_series(series, st->collected->limits);
+			if (series->len > first) {
+				continue;
+			}
+		}
+		struct agent_overlay_series item = { .color = overlay_colors[agent] };
+		source_title(src, item.name, sizeof(item.name));
+		snprintf(item.legend, sizeof(item.legend), "%s", short_names[agent]);
+		if (agent == TW_AGENT_COPILOT && src->have) {
+			double billing = tw_claude_window_now(&src->usage.five_hour, now);
+			if (billing >= 0) {
+				snprintf(item.legend, sizeof(item.legend), "Copilot %.1f%% billing", billing);
+			}
+		}
+		if (agent != TW_AGENT_COPILOT && src->have) {
+			item.usage = &src->usage;
+			item.weekly_gate = &src->usage.seven_day;
+			item.points = src->points;
+			item.count = src->point_count;
+		}
+		g_array_append_val(series, item);
+	}
+	agent_overlay_draw(ctx, pal, series);
+	g_array_unref(series);
+	return true;
+}
+
 static bool agents_draw_gadget(struct widget *w, struct gadget_ctx *ctx,
 		const struct gadget_palette *pal) {
 	const char *style = ctx->style ? ctx->style : "";
+	if (strcmp(style, "overlay") == 0) {
+		return desk_overlay(w, ctx, pal);
+	}
 	if (strcmp(style, "list") != 0 && strcmp(style, "bar") != 0 && strcmp(style, "ring") != 0 &&
 			strcmp(style, "week") != 0 && strcmp(style, "windows") != 0 &&
 			strcmp(style, "together") != 0) {
@@ -1571,7 +1780,8 @@ static void append_window(GString *t, const struct source *s, bool seven_day) {
 }
 
 /* One account in the tooltip: its name, its windows, what runs, what came from elsewhere. */
-static void append_source(GString *t, const struct source *s, bool checks) {
+static void append_source(struct widget *w, GString *t, const struct source *s, bool checks) {
+	struct agents_state *st = w->data;
 	char title[300];
 	source_title(s, title, sizeof(title));
 	g_string_append(t, title);
@@ -1601,6 +1811,28 @@ static void append_source(GString *t, const struct source *s, bool checks) {
 		g_string_append_printf(t, "\nUsed elsewhere too: %.0f%% more while nothing of it ran "
 			"here (another computer with the same account?)", s->elsewhere_share);
 	}
+	struct agent_resume_status rs;
+	agent_resume_account_status(w->panel, s->account.agent, s->account.id, s->account.dir,
+		st->collected, &rs);
+	if (rs.enabled) {
+		time_t now = time(NULL);
+		if (rs.deferred) {
+			g_string_append(t, "\nAuto-resume: waiting for screen unlock");
+		} else if (rs.scheduled && rs.fire_at > now) {
+			long left = (long)(rs.fire_at - now);
+			char span[48];
+			if (left < 60) {
+				snprintf(span, sizeof(span), "%ld s", left);
+			} else {
+				tw_claude_format_span(left, false, span, sizeof(span));
+			}
+			g_string_append_printf(t, "\nAuto-resume: scheduled in %s (%d limited %s)", span,
+				rs.terminals, rs.terminals == 1 ? "terminal" : "terminals");
+		} else {
+			g_string_append_printf(t, "\nAuto-resume: on (%d s after reset, %d limited %s)",
+				rs.delay_s, rs.terminals, rs.terminals == 1 ? "terminal" : "terminals");
+		}
+	}
 	if (s->have && s->usage.updated) {
 		long ago = (long)(time(NULL) - s->usage.updated);
 		char span[48];
@@ -1626,7 +1858,7 @@ static char *agents_tooltip(struct widget *w, struct hotspot *hs) {
 		if (i > 0) {
 			g_string_append(t, "\n\n");
 		}
-		append_source(t, &st->src[i], checks);
+		append_source(w, t, &st->src[i], checks);
 	}
 	return g_string_free(t, FALSE);
 }
@@ -1714,6 +1946,9 @@ bool agents_widget_view(struct widget *w, int i, struct agents_view *out) {
 		return false;
 	}
 	const struct source *s = &st->src[i];
+	struct agent_resume_status rs;
+	agent_resume_account_status(w->panel, s->account.agent, s->account.id, s->account.dir,
+		st->collected, &rs);
 	*out = (struct agents_view){
 		.name = s->name,
 		.agent = s->account.agent,
@@ -1732,6 +1967,12 @@ bool agents_widget_view(struct widget *w, int i, struct agents_view *out) {
 		.points = s->tool ? NULL : s->points,
 		.point_count = s->tool ? 0 : s->point_count,
 		.chart_usage = s->tool ? NULL : &s->chart_usage,
+		.resume_enabled = rs.enabled,
+		.resume_scheduled = rs.scheduled,
+		.resume_deferred = rs.deferred,
+		.resume_fire_at = rs.fire_at,
+		.resume_delay = rs.delay_s,
+		.resume_terminals = rs.terminals,
 	};
 	if (!s->have && !s->tool) {
 		out->usage = NULL;

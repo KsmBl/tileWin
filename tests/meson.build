@@ -279,6 +279,18 @@ test(
 )
 
 test(
+	'agent-resume',
+	executable(
+		'test-agent-resume',
+		['test_agent_resume.c', '../panel/agentresume.c', wl_protos_src],
+		include_directories: [sway_inc, include_directories('../panel')],
+		link_with: lib_sway_common,
+		dependencies: [cairo, gdk_pixbuf, jsonc, math, glib, pango, pangocairo, rsvg, wayland_client, xkbcommon],
+	),
+	suite: 'unit',
+)
+
+test(
 	'codex-usage',
 	executable(
 		'test-codex-usage',
@@ -1515,6 +1527,14 @@ test(
 	depends: [pointer_tool],
 	suite: 'gui',
 	timeout: 120,
+)
+
+test(
+	'agent-resume-gui',
+	find_program('agent_resume.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	timeout: 90,
 )
 
 test(

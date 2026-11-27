@@ -42,6 +42,13 @@ static const struct tw_widget_option opts_agents[] = {
 	{ "account_checks", "Ask the accounts", "Every five minutes, online with their logins, "
 		"also while none of them runs; Copilot tells its allowance only so", choice_yes_no },
 	{ "history_days", "Keep the usage", "How far back the charts scroll", choice_history_days },
+	{ "auto_resume", "Auto-resume after reset", "Identify open terminal windows of Claude "
+		"Code, Codex or Antigravity whose interactive session stopped on a usage limit and "
+		"type the resume command after the window resets", choice_yes_no },
+	{ "resume_delay", "Resume delay", "Seconds to wait after the usage window resets before "
+		"sending the resume command; 30 by default", NULL },
+	{ "resume_command", "Resume command", "Text typed into each limited agent terminal "
+		"followed by Enter; continue by default", NULL },
 	{ 0 },
 };
 
@@ -417,6 +424,7 @@ static const struct tw_widget_style styles_claude[] = {
 	{ "week", "Chart of the week", 4, 2 },
 	{ "windows", "Chart of the last three 5-hour windows", 4, 2 },
 	{ "together", "All agents in one chart", 4, 3 },
+	{ "overlay", "Overlaid quota charts", 5, 4 },
 	{ 0 },
 };
 static const struct tw_widget_style styles_kernel[] = {

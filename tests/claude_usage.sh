@@ -170,6 +170,22 @@ send d 21 # the one behind, redrawn: higher than after the reset, but old
 send d 22 # an answer it got now
 "$tool" list | grep -q '5h 22%' || fail "a new answer after the reset was not taken: $("$tool" list)"
 
+# Claude can move an unexpired weekly deadline earlier. An old session's
+# readings for the superseded deadline must stay out of the cache and history.
+earlier_week=$((week - 11 * 3600))
+send_week() {
+	printf '{"session_id":"%s","rate_limits":{"seven_day":{"used_percentage":%s,"resets_at":%d}}}' \
+		"$1" "$2" "$3" | sh -c "$command" >/dev/null
+}
+send_week a 100 "$week"
+send_week e 82 "$earlier_week"
+send_week a 100 "$week"
+send_week a 99 "$week"
+send_week f 100 "$week"
+"$tool" list | grep -q '7d 82%' || fail "an earlier weekly deadline did not replace the full quota"
+tail -n 1 "$history" | grep -q " 82.0 $earlier_week\$" ||
+	fail "the history did not record the earlier weekly deadline"
+
 # ---- a settings.json it cannot read stays as it is
 mkdir -p "$work/broken"
 echo '{ this is not json' > "$work/broken/settings.json"
@@ -200,7 +216,7 @@ bar() { grim -g "600,680 680x40" "$work/bar.png" 2>/dev/null && md5sum < "$work/
 wait_still 15 bar
 before=$(bar)
 printf '{"rate_limits":{"five_hour":{"used_percentage":97,"resets_at":%d},"seven_day":{"used_percentage":88,"resets_at":%d}}}' \
-	$((now + 3600)) $((now + 3 * 86400)) | sh -c "$command" >/dev/null
+	$((now + 3600)) "$earlier_week" | sh -c "$command" >/dev/null
 # the widget looks again every five seconds
 wait_until 12 sh -c "[ \"\$(grim -g '600,680 680x40' - 2>/dev/null | md5sum)\" != '$before' ]" ||
 	fail "the taskbar did not show the new values"
@@ -212,6 +228,14 @@ closed=$(above)
 "$pointer" 1280 720 click 925 700 >/dev/null 2>&1 # the widget, first in the right section
 wait_until 5 sh -c "[ \"\$(grim -g '600,200 680x470' - 2>/dev/null | md5sum)\" != '$closed' ]" ||
 	fail "a click on the widget opened no flyout"
+
+# A different account in the same folder has its own limits.
+printf '{"oauthAccount":{"emailAddress":"second@example.org"}}\n' > "$claude/.claude.json"
+new_account_week=$((earlier_week - 3 * 3600))
+send_week e 32 "$new_account_week"
+"$tool" list | grep -q '7d 32%' || fail "the switched account inherited the old weekly usage"
+tail -n 1 "$history" | grep -q " 32.0 $new_account_week\$" ||
+	fail "the history did not record the switched account's quota"
 
 # ---- disconnect
 "$tool" disconnect "$claude" >/dev/null || fail "disconnect failed"

@@ -128,8 +128,18 @@ static char *state_path(const char *dir) {
 
 /* ---------- statusline ---------- */
 
+static bool superseded_week(json_object *deadlines, time_t reset, time_t now) {
+	for (size_t i = 0; deadlines && i < json_object_array_length(deadlines); i++) {
+		time_t previous = json_object_get_int64(json_object_array_get_idx(deadlines, i));
+		if (previous > now && tw_claude_same_window(previous, reset)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void copy_window(json_object *limits, const char *key, json_object *out,
-		json_object *session) {
+		json_object *session, time_t now) {
 	json_object *window, *used, *resets;
 	if (!limits || !json_object_object_get_ex(limits, key, &window) ||
 			!json_object_object_get_ex(window, "used_percentage", &used)) {
@@ -138,17 +148,25 @@ static void copy_window(json_object *limits, const char *key, json_object *out,
 	double value = json_object_get_double(used);
 	int64_t now_resets = json_object_object_get_ex(window, "resets_at", &resets) ?
 		json_object_get_int64(resets) : 0;
-	json_object *before, *before_used, *before_resets;
-	// a window never goes back: after a reset by hand a session still running
-	// shows the window before it, which resets earlier than the one written down
-	bool stale_window = json_object_object_get_ex(out, key, &before) &&
-		json_object_object_get_ex(before, "resets_at", &before_resets) &&
-		now_resets > 0 && now_resets + 300 < json_object_get_int64(before_resets);
-	// what is written down of this window, when it is the same window
-	bool have_before = !stale_window && json_object_object_get_ex(out, key, &before) &&
-		json_object_object_get_ex(before, "used_percentage", &before_used) &&
-		json_object_object_get_ex(before, "resets_at", &before_resets) &&
-		tw_claude_same_window((time_t)json_object_get_int64(before_resets), (time_t)now_resets);
+	json_object *before = NULL, *before_used, *before_resets, *superseded = NULL;
+	json_object_object_get_ex(out, key, &before);
+	time_t before_reset = json_object_object_get_ex(before, "resets_at", &before_resets) ?
+		json_object_get_int64(before_resets) : 0;
+	bool weekly = strcmp(key, "seven_day") == 0;
+	if (weekly) {
+		json_object_object_get_ex(before, "superseded_resets", &superseded);
+		if (!json_object_is_type(superseded, json_type_array)) {
+			superseded = NULL;
+		}
+	}
+	bool same_window = tw_claude_same_window(before_reset, now_resets);
+	bool earlier = now_resets > 0 && now_resets < before_reset && !same_window;
+	// Claude can move an active weekly deadline earlier. A session can report
+	// that change, but an already superseded deadline must stay retired.
+	bool earlier_week = earlier && weekly && session && now_resets > now;
+	bool stale_window = superseded_week(superseded, now_resets, now) ||
+		(earlier && !earlier_week);
+	bool have_before = same_window && json_object_object_get_ex(before, "used_percentage", &before_used);
 	double written = have_before ? json_object_get_double(before_used) : -1;
 	/*
 	 * Several sessions of Claude Code each show the limits as of their own last
@@ -196,6 +214,19 @@ static void copy_window(json_object *limits, const char *key, json_object *out,
 		json_object_object_add(copy, "resets_at",
 			json_object_new_int64(json_object_get_int64(resets)));
 	}
+	if (weekly && !same_window && before_reset > now && now_resets > now) {
+		json_object *deadlines = json_object_new_array();
+		for (size_t i = 0; superseded && i < json_object_array_length(superseded); i++) {
+			json_object *entry = json_object_array_get_idx(superseded, i);
+			if (json_object_get_int64(entry) > now) {
+				json_object_array_add(deadlines, json_object_get(entry));
+			}
+		}
+		json_object_array_add(deadlines, json_object_new_int64(before_reset));
+		json_object_object_add(copy, "superseded_resets", deadlines);
+	} else if (superseded) {
+		json_object_object_add(copy, "superseded_resets", json_object_get(superseded));
+	}
 	json_object_object_add(out, key, copy);
 }
 
@@ -216,12 +247,21 @@ static void record(const char *dir, const char *input, size_t len) {
 		out = json_object_new_object();
 	}
 	json_object_object_add(out, "dir", json_object_new_string(dir));
+	time_t now = time(NULL);
 	char *account = tw_claude_account(dir);
 	if (account) {
+		json_object *cached;
+		if (json_object_object_get_ex(out, "account", &cached) &&
+				json_object_is_type(cached, json_type_string) &&
+				strcmp(account, json_object_get_string(cached)) != 0) {
+			json_object_object_del(out, "five_hour");
+			json_object_object_del(out, "seven_day");
+			json_object_object_del(out, "sessions");
+			json_object_object_add(out, "account_changed_at", json_object_new_int64(now));
+		}
 		json_object_object_add(out, "account", json_object_new_string(account));
 		free(account);
 	}
-	time_t now = time(NULL);
 	json_object_object_add(out, "updated", json_object_new_int64((int64_t)now));
 	// what each session showed last, to tell a fresh answer from a redrawn one;
 	// sessions not heard of for a week are forgotten
@@ -252,8 +292,8 @@ static void record(const char *dir, const char *input, size_t len) {
 		}
 		json_object_object_add(session, "at", json_object_new_int64((int64_t)now));
 	}
-	copy_window(limits, "five_hour", out, session);
-	copy_window(limits, "seven_day", out, session);
+	copy_window(limits, "five_hour", out, session, now);
+	copy_window(limits, "seven_day", out, session, now);
 	write_atomic(path, json_object_to_json_string_ext(out, JSON_C_TO_STRING_PRETTY), 0600);
 	free(path);
 	json_object_put(out);

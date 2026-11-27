@@ -165,6 +165,12 @@ static const struct {
 		"%H:%M\\n%Y-%m-%d", "%a %d %b  %H:%M", "%d.%m.%Y  %H:%M" }, { NULL } },
 	{ "clock", "tooltip_format", { "%A, %d %B %Y", "%d.%m.%Y", "%Y-%m-%d", "%A %H:%M" },
 		{ NULL } },
+	{ "agents", "resume_command", { "continue", "resume", "please continue" },
+		{ "continue", "resume", "please continue" } },
+	{ "claude", "resume_command", { "continue", "resume", "please continue" },
+		{ "continue", "resume", "please continue" } },
+	{ "codex", "resume_command", { "continue", "resume", "please continue" },
+		{ "continue", "resume", "please continue" } },
 };
 
 static bool color_key(const char *key) {
@@ -491,6 +497,18 @@ static void on_option_choice(GObject *dropdown, GParamSpec *pspec, gpointer data
 	write_bound(b, i < b->values->len ? b->values->pdata[i] : NULL);
 }
 
+static void on_option_delay(GtkSpinButton *spin, gpointer data) {
+	struct opt_binding *b = data;
+	int seconds = gtk_spin_button_get_value_as_int(spin);
+	if (seconds == 30) {
+		write_bound(b, NULL);
+	} else {
+		char buf[32];
+		snprintf(buf, sizeof(buf), "%d", seconds);
+		write_bound(b, buf);
+	}
+}
+
 static void (*opt_lister(const char *widget, const struct tw_widget_option *opt,
 		bool desktop))(GPtrArray *, GPtrArray *) {
 	if (desktop) {
@@ -750,6 +768,7 @@ static const struct {
 	bool on;
 } switches[] = {
 	{ "bars", true }, { "title", true }, { "updated", true }, { "account_checks", false },
+	{ "auto_resume", false },
 };
 
 struct switch_binding {
@@ -832,7 +851,27 @@ static GtkWidget *add_option_row(struct settings *s, GtkWidget *list, const char
 	b->desktop = desktop;
 	b->opt = opt;
 	GtkWidget *control;
-	if (opt->choices || lister || styles) {
+	if (!desktop && strcmp(opt->key, "resume_delay") == 0) {
+		int seconds = 30;
+		if (value && *value) {
+			char *end = NULL;
+			long parsed = strtol(value, &end, 10);
+			if (end != value) {
+				seconds = parsed < 0 ? 0 : parsed > 3600 ? 3600 : (int)parsed;
+			}
+		}
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		GtkWidget *spin = gtk_spin_button_new_with_range(0, 3600, 1);
+		gtk_spin_button_set_increments(GTK_SPIN_BUTTON(spin), 1, 10);
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), seconds);
+		g_signal_connect_data(spin, "value-changed", G_CALLBACK(on_option_delay), b,
+			opt_binding_free, 0);
+		gtk_box_append(GTK_BOX(box), spin);
+		GtkWidget *unit = gtk_label_new("seconds");
+		gtk_widget_add_css_class(unit, "dim-label");
+		gtk_box_append(GTK_BOX(box), unit);
+		control = box;
+	} else if (opt->choices || lister || styles) {
 		b->values = g_ptr_array_new_with_free_func(g_free);
 		GPtrArray *labels = g_ptr_array_new_with_free_func(g_free);
 		g_ptr_array_add(b->values, NULL);
@@ -1669,7 +1708,13 @@ static bool rule_taskbar_bars(struct dialog_state *d) {
 
 /* On the desktop: what the style draws (the chart styles no items, no bars). */
 static bool rule_desk_items(struct dialog_state *d) {
-	return !style_in(d, "week windows together");
+	return !style_in(d, "week windows together overlay");
+}
+
+static bool rule_auto_resume(struct dialog_state *d) {
+	return dialog_is(d, "auto_resume", false, "yes") ||
+		dialog_is(d, "auto_resume", false, "true") ||
+		dialog_is(d, "auto_resume", false, "on");
 }
 
 static bool rule_desk_bars(struct dialog_state *d) {
@@ -1809,13 +1854,16 @@ static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool deskt
 	GtkWidget *general = ui_group(content, "General", desktop ?
 		"Shared with the widget on the taskbar." : NULL);
 	static const char *const keys[] = { "account_checks", "warning", "critical",
-		"history_days", NULL };
+		"history_days", "auto_resume", "resume_delay", "resume_command", NULL };
 	for (int i = 0; keys[i]; i++) {
 		const struct tw_widget_option *opt = option_of(info, keys[i]);
 		if (opt) {
 			GtkWidget *row = add_option_row(s, general, name, opt, false);
 			if (strcmp(keys[i], "account_checks") == 0) {
 				shown_when(d, row, rule_asks);
+			} else if (strcmp(keys[i], "resume_delay") == 0 ||
+					strcmp(keys[i], "resume_command") == 0) {
+				shown_when(d, row, rule_auto_resume);
 			}
 		}
 	}

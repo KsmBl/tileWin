@@ -434,6 +434,7 @@ int main(int argc, char **argv) {
 	battery_history_init(&panel);
 	clipboard_init(&panel);
 	portguard_init(&panel);
+	agent_resume_init(&panel);
 	welcome_new_user(&panel);
 
 	panel.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
@@ -461,6 +462,7 @@ int main(int argc, char **argv) {
 		loop_poll(panel.loop);
 	}
 
+	agent_resume_fini();
 	portguard_fini();
 	livewall_fini();
 	clipboard_fini(&panel);
