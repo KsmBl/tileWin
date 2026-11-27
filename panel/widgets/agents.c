@@ -532,6 +532,7 @@ static void sync_auto_resume(struct widget *w) {
 	};
 	agent_resume_configure(w->panel, &cfg);
 	time_t now = time(NULL);
+	bool agy_observed = false;
 	for (int i = 0; i < st->count; i++) {
 		const struct source *s = &st->src[i];
 		enum tw_agent agent = s->account.agent;
@@ -561,7 +562,9 @@ static void sync_auto_resume(struct widget *w) {
 				.weekly_blocked = false,
 			};
 			agent_resume_observe(w->panel, &week, st->collected, now);
-		} else if (agent == TW_AGENT_ANTIGRAVITY && st->collected && st->collected->limits) {
+		} else if (agent == TW_AGENT_ANTIGRAVITY && !agy_observed &&
+				st->collected && st->collected->limits) {
+			agy_observed = true;
 			for (guint j = 0; j < st->collected->limits->len; j++) {
 				const struct agent_limit *l = st->collected->limits->pdata[j];
 				if (l->kind != AGENT_AGY) {
@@ -1687,14 +1690,21 @@ static bool desk_overlay(struct widget *w, struct gadget_ctx *ctx, const struct 
 	struct agents_state *st = w->data;
 	GArray *series = g_array_new(false, false, sizeof(struct agent_overlay_series));
 	time_t now = time(NULL);
+	bool agy_added = false;
 	for (int i = 0; i < st->count; i++) {
 		struct source *src = &st->src[i];
 		enum tw_agent agent = src->account.agent;
-		if (agent == TW_AGENT_ANTIGRAVITY && st->collected) {
-			guint first = series->len;
-			overlay_agy_series(series, st->collected->limits);
-			if (series->len > first) {
+		if (agent == TW_AGENT_ANTIGRAVITY) {
+			if (agy_added) {
 				continue;
+			}
+			agy_added = true;
+			if (st->collected) {
+				guint first = series->len;
+				overlay_agy_series(series, st->collected->limits);
+				if (series->len > first) {
+					continue;
+				}
 			}
 		}
 		struct agent_overlay_series item = { .color = overlay_colors[agent] };
