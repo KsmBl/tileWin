@@ -23,7 +23,8 @@ struct quota_reset {
 
 struct quota_pill {
 	struct pbox box;
-	struct quota_reset reset;
+	guint first;
+	guint count;
 };
 
 struct quota_tip_row {
@@ -286,39 +287,56 @@ static void draw_reset_line(cairo_t *cr, struct pbox chart, double x, uint32_t c
 	cairo_restore(cr);
 }
 
-/* Right-edge flowing pill with colored arrow for weekly resets beyond the +2d horizon. */
+static bool same_local_day(time_t a, time_t b) {
+	struct tm ta, tb;
+	localtime_r(&a, &ta);
+	localtime_r(&b, &tb);
+	return ta.tm_year == tb.tm_year && ta.tm_yday == tb.tm_yday;
+}
+
+/* Right-edge pill for weekly resets beyond +2d: one weekday label with triangles side by side. */
 static bool draw_later_pill(cairo_t *cr, const struct gadget_palette *pal, struct pbox chart,
-		const char *font, const struct quota_reset *reset, int k, struct quota_pill *out) {
+		const char *font, const GArray *later, guint first, guint count, int row,
+		struct quota_pill *out) {
+	const struct quota_reset *head = &g_array_index(later, struct quota_reset, first);
 	struct tm tm;
-	localtime_r(&reset->at, &tm);
+	localtime_r(&head->at, &tm);
 	char when[16];
 	strftime(when, sizeof(when), "%a", &tm);
 	int tw = 0;
 	pd_text_size(cr, font, when, &tw, NULL);
-	double y = chart.y + 4 + 18.0 * k;
+	double y = chart.y + 4 + 18.0 * row;
 	if (y + 16 > chart.y + chart.height) {
 		return false;
 	}
-	double pill_w = tw + 18;
-	double right = chart.x + chart.width - 3;
+	double tri_w = 7.0, tri_gap = 2.0;
+	double tris_w = count * tri_w + (count > 0 ? (count - 1) * tri_gap : 0.0);
+	double pill_w = 5.0 + tw + 5.0 + tris_w + 4.0;
+	double right = chart.x + chart.width - 3.0;
 	double px = right - pill_w;
-	if (px < chart.x + 2) {
+	if (px < chart.x + 2.0) {
 		return false;
 	}
 	cairo_new_path(cr);
 	pd_rounded(cr, px, y, pill_w, 16, 3);
 	pd_color(cr, (pal->bg & 0xffffff00) | 0xd8);
 	cairo_fill(cr);
-	pd_text(cr, font, when, px + 4, y, tw + 2, 16, pal->fg, PD_LEFT);
-	cairo_new_path(cr);
-	cairo_move_to(cr, right - 9, y + 3.5);
-	cairo_line_to(cr, right - 2, y + 8.0);
-	cairo_line_to(cr, right - 9, y + 12.5);
-	cairo_close_path(cr);
-	pd_color(cr, reset->limit->color);
-	cairo_fill(cr);
+	pd_text(cr, font, when, px + 5.0, y, tw + 2, 16, pal->fg, PD_LEFT);
+	double tx = px + 5.0 + tw + 5.0;
+	for (guint j = 0; j < count; j++) {
+		const struct quota_reset *r = &g_array_index(later, struct quota_reset, first + j);
+		cairo_new_path(cr);
+		cairo_move_to(cr, tx, y + 3.5);
+		cairo_line_to(cr, tx + tri_w, y + 8.0);
+		cairo_line_to(cr, tx, y + 12.5);
+		cairo_close_path(cr);
+		pd_color(cr, r->limit->color);
+		cairo_fill(cr);
+		tx += tri_w + tri_gap;
+	}
 	out->box = (struct pbox){ (int)px, (int)y, (int)ceil(pill_w), 16 };
-	out->reset = *reset;
+	out->first = first;
+	out->count = count;
 	return true;
 }
 
@@ -424,36 +442,41 @@ static void quota_resets_and_hover(const struct quota_axis *axis, const struct g
 			label_end = left + width + 5;
 		}
 	}
-	// Right-edge pills for out-of-horizon resets on the 7d chart
+	// Right-edge pills for out-of-horizon resets on the 7d chart, grouped by weekday
 	struct quota_pill pills[16];
 	int pill_count = 0;
-	for (guint i = 0; weekly && i < later->len && pill_count < 16; i++) {
-		const struct quota_reset *reset = &g_array_index(later, struct quota_reset, i);
-		if (draw_later_pill(cr, pal, chart, font, reset, pill_count, &pills[pill_count])) {
+	for (guint i = 0; weekly && i < later->len && pill_count < 16;) {
+		const struct quota_reset *head = &g_array_index(later, struct quota_reset, i);
+		guint count = 1;
+		while (i + count < later->len &&
+				same_local_day(head->at, g_array_index(later, struct quota_reset, i + count).at)) {
+			count++;
+		}
+		if (draw_later_pill(cr, pal, chart, font, later, i, count, pill_count, &pills[pill_count])) {
 			pill_count++;
 		}
+		i += count;
 	}
 	if (!ctx->pointer || ctx->px < chart.x || ctx->px > chart.x + chart.width ||
 			ctx->py < chart.y - 19 || ctx->py > chart.y + chart.height) {
 		return;
 	}
-	// Hovering over a right-edge pill on the 7d chart: show its exact reset timestamp
+	// Hovering over a right-edge pill on the 7d chart: show exact reset timestamps for that day
 	for (int i = 0; i < pill_count; i++) {
 		if (pbox_contains(&pills[i].box, ctx->px, ctx->py)) {
 			struct quota_tip_row rows[16];
 			int n = 0;
-			for (int k = 0; k < pill_count && n < 16; k++) {
-				if (!tw_claude_same_window(pills[k].reset.at, pills[i].reset.at)) {
-					continue;
-				}
+			for (guint k = 0; k < pills[i].count && n < 16; k++) {
+				const struct quota_reset *r =
+					&g_array_index(later, struct quota_reset, pills[i].first + k);
 				struct tm tm;
-				localtime_r(&pills[k].reset.at, &tm);
+				localtime_r(&r->at, &tm);
 				char when[48];
 				strftime(when, sizeof(when), "%a %d %b %H:%M", &tm);
-				rows[n].color = pills[k].reset.limit->color;
+				rows[n].color = r->limit->color;
 				rows[n].has_dot = true;
 				snprintf(rows[n].text, sizeof(rows[n].text), "%s · reset %s",
-					pills[k].reset.limit->name, when);
+					r->limit->name, when);
 				n++;
 			}
 			draw_tooltip_card(cr, pal, chart, font, pills[i].box.x, pills[i].box.y, true, rows, n);
