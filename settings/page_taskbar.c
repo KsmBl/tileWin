@@ -953,7 +953,8 @@ GtkWidget *taskbar_page_new(struct settings *s) {
 		(const int[]){ 0, 24, 28, 30, 32, 36, 40, 44, 48, 56, 64, -1 }, "%d pixels",
 		"The theme's height"));
 	ui_taskbar_key(s, p->root_settings, layout, "theme_layout", "Let the theme bring its own layout",
-		"Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
+		"Its shape: where the taskbar is, the start button, a search box or none; the widgets "
+		"you added stay. Off keeps the sections below whichever theme is picked", true, 0, 0, 1);
 	static const char *const align_values[] = { "theme", "left", "center", NULL };
 	static const char *const align_labels[] = { "As the theme has it", "Left", "Center",
 		NULL };

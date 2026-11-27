@@ -1438,6 +1438,15 @@ test(
 	timeout: 120,
 )
 
+# a theme's own layout keeps the widgets of the user's
+test(
+	'theme-layout-widgets',
+	find_program('theme_layout_widgets.sh'),
+	args: [meson.project_build_root(), meson.project_source_root()],
+	suite: 'gui',
+	timeout: 120,
+)
+
 test(
 	'updates-widget',
 	find_program('updates_widget.sh'),

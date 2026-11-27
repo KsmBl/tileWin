@@ -312,6 +312,32 @@ static bool layout_has(struct layout_config *layout, const char *name) {
 	return false;
 }
 
+/* The widget of that name, made with its "widget" block the first time. */
+static struct widget *widget_for_name(struct panel *panel, struct panel_config *config,
+		const char *name) {
+	for (int j = 0; j < config->widgets->length; j++) {
+		struct widget *w = config->widgets->items[j];
+		if (strcmp(w->name, name) == 0) {
+			return w;
+		}
+	}
+	struct twconf_node *def = NULL;
+	for (int j = 0; j < twconf_count(config->root); j++) {
+		struct twconf_node *child = twconf_at(config->root, j);
+		if (strcmp(child->name, "widget") == 0 && child->argc >= 1 &&
+				strcmp(child->argv[0], name) == 0) {
+			def = child;
+		}
+	}
+	struct widget *found = widget_create(panel, name, def);
+	if (!found) {
+		sway_log(SWAY_ERROR, "Unknown widget '%s' in taskbar config", name);
+		return NULL;
+	}
+	list_add(config->widgets, found);
+	return found;
+}
+
 static void add_widget_names(struct panel *panel, struct panel_config *config,
 		struct layout_config *layout, list_t *target, struct twconf_node *node) {
 	if (!node) {
@@ -327,31 +353,10 @@ static void add_widget_names(struct panel *panel, struct panel_config *config,
 		if (strcmp(name, "agents") == 0 && layout_has(layout, name)) {
 			continue;
 		}
-		struct widget *found = NULL;
-		for (int j = 0; j < config->widgets->length; j++) {
-			struct widget *w = config->widgets->items[j];
-			if (strcmp(w->name, name) == 0) {
-				found = w;
-				break;
-			}
+		struct widget *found = widget_for_name(panel, config, name);
+		if (found) {
+			list_add(target, found);
 		}
-		if (!found) {
-			struct twconf_node *def = NULL;
-			for (int j = 0; j < twconf_count(config->root); j++) {
-				struct twconf_node *child = twconf_at(config->root, j);
-				if (strcmp(child->name, "widget") == 0 && child->argc >= 1 &&
-						strcmp(child->argv[0], name) == 0) {
-					def = child;
-				}
-			}
-			found = widget_create(panel, name, def);
-			if (!found) {
-				sway_log(SWAY_ERROR, "Unknown widget '%s' in taskbar config", name);
-				continue;
-			}
-			list_add(config->widgets, found);
-		}
-		list_add(target, found);
 	}
 }
 
@@ -406,6 +411,67 @@ static void parse_layout(struct panel *panel, struct panel_config *config,
 	add_widget_names(panel, config, layout, layout->left, twconf_child(node, "left"));
 	add_widget_names(panel, config, layout, layout->center, twconf_child(node, "center"));
 	add_widget_names(panel, config, layout, layout->right, twconf_child(node, "right"));
+}
+
+/* Where the widget of that name is in the layout: its section and place. */
+static bool layout_find(struct layout_config *layout, const char *name, list_t **section,
+		int *index) {
+	list_t *sections[] = { layout->left, layout->center, layout->right };
+	for (size_t s = 0; s < sizeof(sections) / sizeof(sections[0]); s++) {
+		for (int i = 0; i < sections[s]->length; i++) {
+			struct widget *w = sections[s]->items[i];
+			if (strcmp(w->name, name) == 0) {
+				*section = sections[s];
+				*index = i;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static const char *layout_name(const char *name) {
+	return tw_widget_replaced_by_agents(name) ? "agents" : name;
+}
+
+/*
+ * A theme's layout brings its shape (where the taskbar is, the start button,
+ * the search box or none), but the widgets the user put on the taskbar stay:
+ * each status widget of the user's layout that the theme's lacks goes in
+ * before the next of the user's widgets the theme's has (or after the one
+ * before it, or at the right end).
+ */
+static void keep_user_widgets(struct panel *panel, struct panel_config *config,
+		struct layout_config *layout, struct twconf_node *user) {
+	static const char *const keys[] = { "left", "center", "right" };
+	for (size_t k = 0; user && k < sizeof(keys) / sizeof(keys[0]); k++) {
+		struct twconf_node *node = twconf_child(user, keys[k]);
+		for (int i = 0; node && i < node->argc; i++) {
+			const char *name = layout_name(node->argv[i]);
+			const struct tw_widget_info *info = tw_widget_find(name);
+			if (!info || !(info->flags & TW_WIDGET_STATUS) || layout_has(layout, name)) {
+				continue;
+			}
+			list_t *target = NULL;
+			int index = 0;
+			for (int j = i + 1; j < node->argc && !target; j++) {
+				layout_find(layout, layout_name(node->argv[j]), &target, &index);
+			}
+			for (int j = i - 1; j >= 0 && !target; j--) {
+				if (layout_find(layout, layout_name(node->argv[j]), &target, &index)) {
+					index++;
+				}
+			}
+			if (!target) {
+				target = layout->right;
+				index = target->length;
+			}
+			struct widget *w = widget_for_name(panel, config, name);
+			if (w) {
+				list_insert(target, index, w);
+			}
+		}
+	}
 }
 
 /*
@@ -544,6 +610,12 @@ struct panel_config *panel_config_load(struct panel *panel, const char *path) {
 		theme_window ? twconf_at(theme_window, 0) : window ? window : tile, true);
 	parse_layout(panel, config, &config->layouts[LAYOUT_TILE],
 		theme_tile ? twconf_at(theme_tile, 0) : tile ? tile : window, false);
+	if (theme_window) {
+		keep_user_widgets(panel, config, &config->layouts[LAYOUT_WINDOW], window ? window : tile);
+	}
+	if (theme_tile) {
+		keep_user_widgets(panel, config, &config->layouts[LAYOUT_TILE], tile ? tile : window);
+	}
 	// the Action Center button came later: add it next to the clock
 	if (path && !theme_window &&
 			twconf_parse_bool(twconf_value(root, "notifications_button"), true)) {
