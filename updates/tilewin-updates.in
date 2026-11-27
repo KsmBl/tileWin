@@ -116,8 +116,8 @@ list_updates() {
 	local out rc
 	case $1 in
 	pacman)
-		have checkupdates || { echo "pacman-contrib is needed to check for updates" >&2; return 1; }
-		have fakeroot || { echo "fakeroot is needed to check for updates" >&2; return 1; }
+		have checkupdates || { echo "pacman-contrib is needed to check for updates: sudo pacman -S pacman-contrib" >&2; return 1; }
+		have fakeroot || { echo "fakeroot is needed to check for updates: sudo pacman -S fakeroot" >&2; return 1; }
 		# 0: updates, 2: none, anything else went wrong
 		out=$(checkupdates 2>&1)
 		rc=$?

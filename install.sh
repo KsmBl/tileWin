@@ -142,8 +142,12 @@ install_deps() {
 			grim slurp wl-clipboard xdg-utils nftables
 		# terminus-font: the pixel font of the Atari ST theme; noto-fonts-emoji: the emoji picker
 		sudo pacman -S --needed --noconfirm scdoc pavucontrol xfce4-terminal xdg-desktop-portal-gtk \
-			tesseract tesseract-data-eng libpulse terminus-font noto-fonts-emoji pacman-contrib || \
+			tesseract tesseract-data-eng libpulse terminus-font noto-fonts-emoji || \
 			warn "optional packages could not be installed"
+		# the updates widget: checkupdates (pacman-contrib) needs fakeroot; on their
+		# own, so that another package that cannot be had does not keep them out
+		sudo pacman -S --needed --noconfirm pacman-contrib fakeroot || \
+			warn "pacman-contrib and fakeroot could not be installed: the updates widget cannot check"
 		local more
 		more=$(extras brightnessctl pipewire pipewire-pulse wireplumber)
 		if [ -n "$more" ]; then
