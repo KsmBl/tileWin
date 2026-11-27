@@ -565,12 +565,26 @@ static void quota_resets_and_hover(const struct quota_axis *axis, const struct g
 
 static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbox chart,
 		const struct quota_axis *axis, const char *font, bool weekly) {
-	// Horizontal 25%, 50%, 75% gridlines
-	for (int tick = 1; tick < 4; tick++) {
-		int y = chart.y + chart.height * tick / 4;
-		pd_rect(cr, chart.x, y, chart.width, 1, tick == 2 ? pal->grid :
-			(pal->grid & 0xffffff00) | ((pal->grid & 0xff) / 2));
+	// Horizontal minor grid in 10% gray increments and major 50% line in dotted white
+	uint32_t minor_grid = (pal->grid & 0xffffff00) | MAX(12u, (pal->grid & 0xff) / 2);
+	for (int pct = 10; pct < 100; pct += 10) {
+		if (pct == 50) {
+			continue;
+		}
+		int y = (int)round(quota_y(chart, pct));
+		pd_rect(cr, chart.x, y, chart.width, 1, minor_grid);
 	}
+	cairo_save(cr);
+	const double major_dot[] = { 1.5, 3.5 };
+	double y50 = round(quota_y(chart, 50.0)) + 0.5;
+	cairo_new_path(cr);
+	cairo_move_to(cr, chart.x, y50);
+	cairo_line_to(cr, chart.x + chart.width, y50);
+	cairo_set_dash(cr, major_dot, 2, 0.0);
+	cairo_set_line_width(cr, 1.0);
+	pd_color(cr, 0xffffff68);
+	cairo_stroke(cr);
+	cairo_restore(cr);
 	struct tm boundary;
 	localtime_r(&axis->start, &boundary);
 	boundary.tm_sec = boundary.tm_min = 0;
