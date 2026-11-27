@@ -411,7 +411,12 @@ static void quota_resets_and_hover(const struct quota_axis *axis, const struct g
 	g_array_sort(later, reset_order);
 	struct tm now_tm;
 	localtime_r(&axis->now, &now_tm);
-	double label_end = chart.x, label_right = chart.x + chart.width;
+	struct {
+		double x, left, width;
+		uint32_t color;
+		char text[32];
+	} labels[16];
+	int label_count = 0;
 	for (guint i = 0; i < resets->len; i++) {
 		const struct quota_reset *reset = &g_array_index(resets, struct quota_reset, i);
 		double x = quota_x(chart, axis, reset->at);
@@ -425,21 +430,57 @@ static void quota_resets_and_hover(const struct quota_axis *axis, const struct g
 			}
 		}
 		draw_reset_line(cr, chart, x, reset->limit->color, idx, same);
-		if (idx > 0) {
-			continue; // shared timestamp already labeled
-		}
 		struct tm tm;
 		localtime_r(&reset->at, &tm);
-		char label[32];
+		char text[32];
 		bool same_day = tm.tm_yday == now_tm.tm_yday && tm.tm_year == now_tm.tm_year;
-		strftime(label, sizeof(label), (weekly && !same_day) ? "%a %H:%M" : "%H:%M", &tm);
-		int width = 0;
-		pd_text_size(cr, font, label, &width, NULL);
-		double left = fmax(label_end, fmin(x - width / 2.0, label_right - width));
-		if (left + width <= label_right && fabs(left + width / 2.0 - x) < width) {
-			pd_text(cr, font, label, left, chart.y - 19, width + 1, 17, reset->limit->color,
-				PD_LEFT);
-			label_end = left + width + 5;
+		strftime(text, sizeof(text), (weekly && !same_day) ? "%a %H:%M" : "%H:%M", &tm);
+		// Merge only if another label is at the same line AND has the exact same time text
+		bool merged = false;
+		for (int l = 0; l < label_count; l++) {
+			if (fabs(round(labels[l].x) - rx) < 2.0 && strcmp(labels[l].text, text) == 0) {
+				if (labels[l].color != reset->limit->color) {
+					labels[l].color = pal->fg;
+				}
+				merged = true;
+				break;
+			}
+		}
+		if (!merged && label_count < 16) {
+			int w = 0;
+			pd_text_size(cr, font, text, &w, NULL);
+			labels[label_count].x = x;
+			labels[label_count].width = w;
+			labels[label_count].left = CLAMP(x - w / 2.0, chart.x, chart.x + chart.width - w);
+			labels[label_count].color = reset->limit->color;
+			snprintf(labels[label_count].text, sizeof(labels[label_count].text), "%s", text);
+			label_count++;
+		}
+	}
+	// Pack labels right-to-left into open space so nearby resets near the right edge stay visible
+	double right_limit = chart.x + chart.width;
+	for (int l = label_count - 1; l >= 0; l--) {
+		if (labels[l].left + labels[l].width > right_limit) {
+			labels[l].left = right_limit - labels[l].width;
+		}
+		right_limit = labels[l].left - 6.0;
+	}
+	for (int l = 0; l < label_count; l++) {
+		if (labels[l].left < chart.x) {
+			continue;
+		}
+		pd_text(cr, font, labels[l].text, labels[l].left, chart.y - 19, labels[l].width + 1, 17,
+			labels[l].color, PD_LEFT);
+		double cx = labels[l].left + labels[l].width / 2.0;
+		if (fabs(cx - labels[l].x) > 3.0) {
+			cairo_save(cr);
+			cairo_new_path(cr);
+			cairo_move_to(cr, cx, chart.y - 3.0);
+			cairo_line_to(cr, labels[l].x, chart.y);
+			pd_color(cr, (labels[l].color & 0xffffff00) | 0x90);
+			cairo_set_line_width(cr, 1.0);
+			cairo_stroke(cr);
+			cairo_restore(cr);
 		}
 	}
 	// Right-edge pills for out-of-horizon resets on the 7d chart, grouped by weekday
@@ -611,14 +652,22 @@ static void quota_grid(cairo_t *cr, const struct gadget_palette *pal, struct pbo
 		strftime(label, sizeof(label), weekly ? "%a" : "%H:%M", &label_time);
 		int width = 0;
 		pd_text_size(cr, font, label, &width, NULL);
-		if (weekly && right - x < width + 2 && g_utf8_validate(label, -1, NULL) &&
-				g_utf8_strlen(label, -1) > 2) {
-			*g_utf8_offset_to_pointer(label, 2) = '\0';
-			pd_text_size(cr, font, label, &width, NULL);
-		}
-		if (right - x >= width + 2) {
-			pd_text(cr, font, label, x, chart.y + chart.height + 2, right - x, 16, pal->dim,
-				PD_CENTER);
+		if (weekly) {
+			if (right - x < width + 2 && g_utf8_validate(label, -1, NULL) &&
+					g_utf8_strlen(label, -1) > 2) {
+				*g_utf8_offset_to_pointer(label, 2) = '\0';
+				pd_text_size(cr, font, label, &width, NULL);
+			}
+			if (right - x >= width + 2) {
+				pd_text(cr, font, label, x, chart.y + chart.height + 2, right - x, 16, pal->dim,
+					PD_CENTER);
+			}
+		} else if (start > axis->start) {
+			double lx = x - width / 2.0;
+			if (lx >= chart.x && lx + width <= chart.x + chart.width) {
+				pd_text(cr, font, label, lx, chart.y + chart.height + 2, width + 1, 16, pal->dim,
+					PD_CENTER);
+			}
 		}
 	}
 	pd_text(cr, font, "100%", chart.x + 4, chart.y + 1, 40, 14, pal->dim, PD_LEFT);
