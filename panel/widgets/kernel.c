@@ -31,14 +31,16 @@
 #include "tw_kernel_auto.h"
 #include "tw_theme.h"
 
-#define BUSY_MS 2000
-#define IDLE_MS 15000
+#define LOOK_MS 2000    // a look whether the status or the log changed
+#define IDLE_MS 15000   // read it all anyway (the lock of a run, the power)
 
 struct kernel_state {
 	struct tw_kernel_auto ka;
 	struct tw_kernel_auto_summary sum;
 	struct loop_timer *timer;
 	long minute; // drawn last in this minute: "Checked ... ago" moves on
+	long long stamp; // of the status and the log, read last
+	time_t read_at;
 };
 
 static void reload(struct widget *w) {
@@ -70,13 +72,22 @@ static void tick(void *data) {
 	char before[64];
 	snprintf(before, sizeof(before), "%s", k->sum.brief);
 	enum tw_kernel_auto_kind kind = k->sum.kind;
-	reload(w);
-	long minute = (long)(time(NULL) / 60);
-	if (kind != k->sum.kind || strcmp(before, k->sum.brief) != 0 || minute != k->minute) {
+	time_t checked = k->ka.checked, logged = k->ka.log_count ? k->ka.log[0].when : 0;
+	time_t now = time(NULL);
+	// Update now runs in a second when nothing is new: seen at the next look
+	if (tw_kernel_auto_changed(&k->stamp) || busy(&k->sum) ||
+			now - k->read_at >= IDLE_MS / 1000) {
+		k->read_at = now;
+		reload(w);
+	}
+	long minute = (long)(now / 60);
+	time_t logged_now = k->ka.log_count ? k->ka.log[0].when : 0;
+	if (kind != k->sum.kind || strcmp(before, k->sum.brief) != 0 || minute != k->minute ||
+			checked != k->ka.checked || logged != logged_now) {
 		k->minute = minute;
 		widget_set_dirty(w);
 	}
-	k->timer = loop_add_timer_lazy(w->panel->loop, busy(&k->sum) ? BUSY_MS : IDLE_MS, tick, w);
+	k->timer = loop_add_timer_lazy(w->panel->loop, LOOK_MS, tick, w);
 }
 
 /* The color of the state, from the theme where it has one. */

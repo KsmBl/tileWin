@@ -963,8 +963,16 @@ check "fixes the kernel takes well stay" test -d "$sb/sys/kernel/livepatch/livep
 check "  and are applied at every start of it" test -f "$sb/usr/lib/modules/$a1/livepatch/livepatch_security_9_9_3.ko"
 check "  the status names them and what needs a restart" bash -c "[ '$(status fixes)' = 9.9.3 ] && [ '$(status fixes_left)' = 6 ]"
 check "  and the user is told" bash -c "grep -q 'Kernel fixed without a restart' '$work/notes'"
+cp "$auto/log" "$work/log.before"
 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
 check "  once" test "$(grep -c 'Kernel fixed' "$work/notes")" = 1
+check "the timer's run that finds nothing new leaves the log as it is" \
+	cmp -s "$auto/log" "$work/log.before"
+sed -i 's/^checked=.*/checked=1/' "$auto/status"
+TILEWIN_KERNEL_AUTO_MANUAL=1 TILEWIN_KERNEL_RUNNING=$a1 R auto-run > "$work/out" 2>&1
+check "\"Update now\" that finds nothing new says it looked" \
+	bash -c "tail -n 1 '$auto/log' | grep -q 'Looked for a new kernel and fixes: nothing new'"
+check "  with the time it looked" bash -c "[ '$(status checked)' -gt 1 ]"
 
 # the check at the start leaves it to a run that goes on
 exec 7> "$sb/run/tilewin-kernel-auto.lock"

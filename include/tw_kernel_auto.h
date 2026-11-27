@@ -60,6 +60,11 @@ struct tw_kernel_auto {
 
 /* Reads it all; false when the updates were never switched on. */
 bool tw_kernel_auto_read(struct tw_kernel_auto *ka);
+/*
+ * Whether the status or the log changed since *seen (updated): a cheap look,
+ * so that a run is seen at once without reading it all every few seconds.
+ */
+bool tw_kernel_auto_changed(long long *seen);
 
 enum tw_kernel_auto_kind {
 	TW_KA_OFF,         // switched off, or never on

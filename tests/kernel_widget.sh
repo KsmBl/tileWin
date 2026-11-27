@@ -2,8 +2,10 @@
 # The kernel widget, on files of the automatic updates of its own
 # (TILEWIN_KERNEL_AUTO_ROOT): on the taskbar how far a build is, drawn again
 # as it gets further while a run holds its lock; the state when it is done; a
-# click opens its flyout; on the desktop the Card, List, Ring and Bar styles
-# draw something in every theme, and the panel survives all of it.
+# new time of the last check is shown at once (Update now that finds nothing
+# new takes a second); a click opens its flyout; on the desktop the Card,
+# List, Ring and Bar styles draw something in every theme, and the panel
+# survives all of it.
 #
 # usage: kernel_widget.sh <build dir> <source dir>
 set -u
@@ -119,6 +121,16 @@ building 100
 # idle, the widget looks every fifteen seconds
 wait_until 25 sh -c "[ \"\$(grim -g '0,0 820x320' - 2>/dev/null | md5sum)\" != '$cards_busy' ]" ||
 	fail "the desktop cards did not show the kernel waiting for the restart"
+
+# "Update now" that finds nothing new: only the time it looked changes, in a
+# second, and the cards show it at once, not at the next quarter of a minute
+sed -i "s/^checked=.*/checked=$(($(date +%s) - 10800))/" "$ka/status"
+wait_until 10 sh -c "[ \"\$(grim -g '0,0 820x320' - 2>/dev/null | md5sum)\" != '$(cards)' ]"
+wait_still 5 cards
+three_hours=$(cards)
+sed -i "s/^checked=.*/checked=$(date +%s)/" "$ka/status"
+wait_until 5 sh -c "[ \"\$(grim -g '0,0 820x320' - 2>/dev/null | md5sum)\" != '$three_hours' ]" ||
+	fail "a new time of the last check was not shown at once"
 
 # every style draws something, in every theme
 count_drawn() { # x y w h: the pixels that are not the wallpaper

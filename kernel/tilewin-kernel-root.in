@@ -1133,6 +1133,9 @@ auto_run() {
 	st running "$running"
 	st running_auto "$([[ -d $(auto_kernels)/$running ]] && echo yes || echo no)"
 	st error ""
+	# what the log said last: "Update now" that finds nothing says so there
+	local last_logged
+	last_logged=$(tail -n 1 "$auto_state/log" 2>/dev/null)
 	# "Update now": what failed or was stopped before is tried again at once
 	if [[ -n ${TILEWIN_KERNEL_AUTO_MANUAL:-} ]]; then
 		rm -f "$auto_state/apply_failed" "$auto_state/bad"
@@ -1183,6 +1186,17 @@ auto_run() {
 	auto_install
 	auto_arm
 	auto_cleanup
+	# "Update now" is clicked to know: when it found nothing, the log says that
+	# it looked (the timer's runs do not, or the log would be nothing else)
+	if [[ -n ${TILEWIN_KERNEL_AUTO_MANUAL:-} ]] &&
+			[[ $(tail -n 1 "$auto_state/log" 2>/dev/null) == "$last_logged" ]] &&
+			! grep -q '^error=.' "$auto_state/status" 2>/dev/null; then
+		if [[ $(sed -n 's/^power=//p' "$auto_state/status" 2>/dev/null) == battery ]]; then
+			auto_log "Looked for fixes: nothing new (new kernels wait for the charger)"
+		else
+			auto_log "Looked for a new kernel and fixes: nothing new"
+		fi
+	fi
 	st checked "$(date +%s)"
 	st state idle
 	st message ""

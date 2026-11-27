@@ -6,12 +6,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "tw_kernel_auto.h"
 
 static void path_of(char *out, size_t size, const char *path) {
 	const char *base = getenv("TILEWIN_KERNEL_AUTO_ROOT");
 	snprintf(out, size, "%s%s", base ? base : "", path);
+}
+
+bool tw_kernel_auto_changed(long long *seen) {
+	static const char *const files[] = { "/var/lib/tilewin/kernel-auto/status",
+		"/var/lib/tilewin/kernel-auto/log", "/etc/tilewin/kernel-auto.conf" };
+	long long stamp = 0;
+	for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+		char path[1024];
+		struct stat st;
+		path_of(path, sizeof(path), files[i]);
+		if (stat(path, &st) == 0) {
+			stamp = stamp * 31 + st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec +
+				st.st_ino;
+		}
+	}
+	bool changed = stamp != *seen;
+	*seen = stamp;
+	return changed;
 }
 
 /* Calls fn for each KEY=VALUE line of a file. */
