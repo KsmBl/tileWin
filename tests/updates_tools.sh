@@ -151,7 +151,8 @@ check "what pacman printed is in the log" 'grep -q '"'"'upgrading firefox...'"'"
 check "checked again afterwards: up to date" '[ "$(value count)" = 0 ] && [ "$(value state)" = idle ]'
 check "the installation is noted" '[ -n "$(value installed)" ]'
 check "the kernel was updated: a restart is asked for" '[ "$(value restart)" = yes ] && [ "$(value restart_boot)" = "$(cat /proc/sys/kernel/random/boot_id)" ]'
-check "notified that a restart finishes it" 'asked_for "Restart the computer to finish"'
+check "notified that a restart finishes it, naming the package" 'asked_for "Restart the computer to finish the update of linux."'
+check "  which the status keeps" '[ "$(value restart_for)" = linux ]'
 check "no bar left behind" '[ -z "$(value done)" ] && [ -z "$(value total)" ]'
 
 # the bar while it goes: the status at each line of the package manager
@@ -186,6 +187,13 @@ bash "$tool" check --quiet
 sed -i '/^restart_boot=/d' "$state/status"
 bash "$tool" install
 check "the kernel headers alone: no restart asked for" '[ -z "$(value restart_boot)" ]'
+
+# the firmware wants one too; one asked for since this start keeps its packages
+answer 0 "linux-firmware 20261019-1 -> 20261124-1"
+bash "$tool" check --quiet
+printf 'restart_boot=%s\nrestart_for=systemd\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$state/status"
+bash "$tool" install
+check "the firmware: a restart asked for, the one before kept" '[ "$(value restart_for)" = systemd,linux-firmware ]'
 
 answer 0 "firefox 133.0-1 -> 134.0-1"
 bash "$tool" check --quiet

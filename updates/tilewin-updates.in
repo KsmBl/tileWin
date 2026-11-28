@@ -18,7 +18,8 @@
 #            (how far an installation is), current (the package at hand), cache
 #            (bytes in the package cache), weekly (on, off, or none where there is
 #            no weekly clean-up), restart (yes when an update wants a restart:
-#            the kernel, systemd, glibc or a graphics driver), message
+#            the kernel, its firmware, systemd, glibc or a graphics driver),
+#            restart_for (the packages that want it, by commas), message
 #   list     a line for each update: name, version now, new version, by tabs
 #   log      what the last installation or clean-up printed
 set -u
@@ -150,12 +151,15 @@ list_updates() {
 	esac
 }
 
-# Whether one of the updates only counts after a restart: a kernel (not its
-# headers), systemd, the C library, the NVIDIA driver or the microcode.
-wants_restart() {
+# The updates that only count after a restart, a name a line: a kernel (not
+# its headers), the firmware its drivers load, systemd, the C library, the
+# NVIDIA driver or the microcode.
+restart_packages() {
 	cut -f1 "$1" | grep -vE -- '-(headers|docs)$' |
-		grep -qE '^(linux(-[a-z0-9]+)?|linux-image-.*|kernel(-core)?|systemd|glibc|libc6|nvidia(-[a-z0-9]+)*|amd-ucode|intel-ucode)$'
+		grep -E '^(linux(-[a-z0-9]+)?|linux-firmware(-[a-z0-9]+)*|linux-image-.*|kernel(-core)?|systemd|glibc|libc6|nvidia(-[a-z0-9]+)*|amd-ucode|intel-ucode)$'
 }
+
+wants_restart() { restart_packages "$1" | grep -q .; }
 
 boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
 
@@ -255,8 +259,16 @@ install_updates() {
 	m=$(manager)
 	read_status
 	count=${S[count]:-0}
-	local wanted_restart=no
-	[ -f "$STATE/list" ] && wants_restart "$STATE/list" && wanted_restart=yes
+	local wanted_restart=no wanted_for=""
+	if [ -f "$STATE/list" ] && wants_restart "$STATE/list"; then
+		wanted_restart=yes
+		wanted_for=$(restart_packages "$STATE/list" | paste -sd, -)
+		# a restart still asked for since this start: its packages are kept
+		if [ "${S[restart_boot]:-}" = "$(boot_id)" ] && [ -n "${S[restart_for]:-}" ]; then
+			wanted_for=$(printf '%s\n' "${S[restart_for]//,/$'\n'}" "${wanted_for//,/$'\n'}" |
+				awk 'NF && !seen[$0]++' | paste -sd, -)
+		fi
+	fi
 	: > "$STATE/log"
 	set_status state=installing phase=starting done=0 total="$count" current= message=
 	local rc
@@ -266,10 +278,10 @@ install_updates() {
 	case $rc in
 	0)
 		set_status state=idle installed="$(date +%s)"
-		[ $wanted_restart = yes ] && set_status restart_boot="$(boot_id)"
+		[ $wanted_restart = yes ] && set_status restart_boot="$(boot_id)" restart_for="$wanted_for"
 		check yes
 		if [ $wanted_restart = yes ]; then
-			notify "Updates installed" "Restart the computer to finish: the new kernel or system parts start with it."
+			notify "Updates installed" "Restart the computer to finish the update of ${wanted_for//,/, }."
 		else
 			notify "Updates installed" "The system is up to date."
 		fi

@@ -812,6 +812,7 @@ struct updates_view {
 	char manager[16];     // pacman, apt, dnf, none
 	char current[96];     // the package being installed
 	char message[256];    // why it failed, or what was not done
+	char restart_for[160]; // the packages that want the restart, by commas
 	struct updates_item *list;
 	int count_listed;
 };

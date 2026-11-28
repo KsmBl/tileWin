@@ -164,7 +164,7 @@ static void read_status(struct updates_state *u) {
 	v->weekly = 0;
 	v->restart = false;
 	v->downloading = false;
-	v->manager[0] = v->current[0] = v->message[0] = '\0';
+	v->manager[0] = v->current[0] = v->message[0] = v->restart_for[0] = '\0';
 	if (!f) {
 		return;
 	}
@@ -198,6 +198,8 @@ static void read_status(struct updates_state *u) {
 			v->cache = strtoll(value, NULL, 10);
 		} else if (strcmp(key, "weekly") == 0) {
 			v->weekly = strcmp(value, "on") == 0 ? 1 : strcmp(value, "off") == 0 ? -1 : 0;
+		} else if (strcmp(key, "restart_for") == 0) {
+			snprintf(v->restart_for, sizeof(v->restart_for), "%s", value);
 		} else if (strcmp(key, "restart_boot") == 0) {
 			snprintf(restart_boot, sizeof(restart_boot), "%s", value);
 		} else if (strcmp(key, "phase") == 0) {
@@ -581,7 +583,23 @@ void updates_widget_words(const struct updates_view *v, char *title, size_t titl
 	if (v->message[0]) {
 		snprintf(sub, sub_size, "%s", v->message);
 	} else if (v->restart) {
-		snprintf(sub, sub_size, "A new kernel or system parts start with it");
+		if (v->restart_for[0]) {
+			// "linux-firmware,systemd": the packages that want it, named
+			char names[sizeof(v->restart_for) * 2];
+			size_t n = 0;
+			for (const char *c = v->restart_for; *c && n + 3 < sizeof(names); c++) {
+				if (*c == ',') {
+					names[n++] = ',';
+					names[n++] = ' ';
+				} else {
+					names[n++] = *c;
+				}
+			}
+			names[n] = '\0';
+			snprintf(sub, sub_size, "Wanted by the update of %s", names);
+		} else {
+			snprintf(sub, sub_size, "A new kernel or system parts start with it");
+		}
 	} else if (v->checked) {
 		snprintf(sub, sub_size, "Checked %s", ago);
 	} else {
