@@ -418,6 +418,10 @@ static bool style_in(struct dialog_state *d, const char *styles) {
 		const struct tw_widget_info *info = tw_widget_find(d->type);
 		style = g_strdup(info && info->styles ? info->styles[0].name : "");
 	}
+	if (strcmp(style, "together") == 0) { // the chart of all agents before
+		g_free(style);
+		style = g_strdup("overlay");
+	}
 	char **names = g_strsplit(styles, " ", -1);
 	bool in = g_strv_contains((const char *const *)names, style);
 	g_strfreev(names);
@@ -838,6 +842,10 @@ static GtkWidget *add_option_row(struct settings *s, GtkWidget *list, const char
 	struct cstmt *block = desktop ? widget_desktop_entry(s, widget) :
 		confdoc_block(s->taskbar, "widget", widget, false);
 	char *value = cstmt_join(confdoc_child(block, opt->key, NULL), 0);
+	if (styles && value && strcmp(value, "together") == 0) {
+		g_free(value); // the chart of all agents before: the one of now
+		value = g_strdup("overlay");
+	}
 	for (size_t i = 0; opt->choices && i < G_N_ELEMENTS(switches); i++) {
 		if (strcmp(switches[i].key, opt->key) == 0) {
 			GtkWidget *row = add_switch_row(s, list, widget, opt, desktop, switches[i].on,
@@ -1709,7 +1717,7 @@ static bool rule_taskbar_bars(struct dialog_state *d) {
 
 /* On the desktop: what the style draws (the chart styles no items, no bars). */
 static bool rule_desk_items(struct dialog_state *d) {
-	return !style_in(d, "week windows together overlay");
+	return !style_in(d, "week windows overlay");
 }
 
 static bool rule_auto_resume(struct dialog_state *d) {
@@ -1735,19 +1743,7 @@ static bool rule_desk_title(struct dialog_state *d) {
 }
 
 static bool rule_desk_text(struct dialog_state *d) {
-	return style_in(d, "list bar ring week windows together");
-}
-
-/* All agents in one chart: its charts, and how two of them are arranged. */
-static bool rule_together(struct dialog_state *d) {
-	return style_in(d, "together");
-}
-
-static bool rule_together_both(struct dialog_state *d) {
-	char *which = dialog_value(d, "charts", true);
-	bool both = !which || strcmp(which, "both") == 0;
-	g_free(which);
-	return rule_together(d) && both;
+	return style_in(d, "list bar ring week windows");
 }
 
 /* The rule of a row of its look, by its key; NULL: always there. */
@@ -1802,15 +1798,9 @@ static const struct tw_widget_option *option_in(const struct tw_widget_option *o
 	return NULL;
 }
 
-static bool chart_key(const char *key) {
-	return strcmp(key, "charts") == 0 || strcmp(key, "arrange") == 0 ||
-		strcmp(key, "chart_scale") == 0;
-}
-
 /*
  * The AI agent usage widget's dialog, in the order it is thought about: which
- * accounts; on the desktop its style (with the chart of all agents' own
- * settings); what it shows and how that looks; where it sits on the desktop;
+ * accounts; on the desktop its style; what it shows and how that looks; where it sits on the desktop;
  * the general settings; the mouse actions folded below.
  */
 static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool desktop) {
@@ -1822,11 +1812,6 @@ static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool deskt
 	if (desktop) {
 		GtkWidget *style = ui_group(content, "Style", NULL);
 		add_option_row(s, style, name, option_in(tw_widget_desktop_options, "style"), true);
-		static const char *const keys[] = { "charts", "arrange", "chart_scale", NULL };
-		for (int i = 0; keys[i]; i++) {
-			shown_when(d, add_option_row(s, style, name, option_in(look, keys[i]), true),
-				strcmp(keys[i], "arrange") == 0 ? rule_together_both : rule_together);
-		}
 	}
 	GtkWidget *items = show_editor_attach(s, content, name, desktop);
 	if (desktop) {
@@ -1836,9 +1821,6 @@ static void agents_dialog(struct dialog_state *d, GtkWidget *content, bool deskt
 		look_list = ui_group(content, desktop ? "Look on the desktop" : "Look on the taskbar",
 			NULL);
 		for (const struct tw_widget_option *opt = look; opt->key; opt++) {
-			if (desktop && chart_key(opt->key)) {
-				continue; // (with the style)
-			}
 			shown_when(d, add_option_row(s, look_list, name, opt, desktop),
 				look_rule(opt->key, desktop));
 		}

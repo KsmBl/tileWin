@@ -1,14 +1,8 @@
 #!/bin/bash
-# The AI agent usage widget on the desktop in the style "together", all agents in
-# one chart, with a Claude Code folder and a Codex folder with a history (no real
-# agent is run or touched):
-#  - a legend names both, each a line in the chart of the 5-hour limits at the
-#    top of the card and in the one of the weekly limits below it;
-#  - relative by default: each line from the start of its window to its reset,
-#    the weeks along "day 1" to "day 7" (Claude Code on day 6, Codex on day 2);
-#  - arrange next and chart_scale absolute: the two side by side, along the clock,
-#    the week from Monday to Sunday;
-#  - charts week: the weekly chart alone;
+# The AI agent usage widget on the desktop with a Claude Code folder and a Codex
+# folder with a history (no real agent is run or touched):
+#  - the style "together" of before is All agents in one chart (overlay) now:
+#    both named, the five-hour quota at the top of the card, the weekly below it;
 #  - the chart of the week of one account marks where its 5-hour limit resets;
 #  - Antigravity's groups of models (Gemini, Claude/GPT, Argon) are each on the taskbar
 #    with their own limits;
@@ -187,40 +181,18 @@ card() {
 }
 at() { grep -m1 "^$1 " "$work/seen" | cut -d' ' -f"$2"; }
 
-# ---- by default: both charts, one below the other, each line in its own window
+# ---- "together", the chart of all agents of before, draws the one of now: the
+# five-hour and the weekly quota of all accounts, one below the other
 card 715 15 490 390 || fail "the card does not name both agents: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-has 5-hour && has Weekly || fail "the card has not both charts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-five_y=$(at 5-hour 3)
+has Five-hour && has Weekly || fail "the card has not both quota charts: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
+five_y=$(at Five-hour 3)
 week_y=$(at Weekly 3)
 [ -n "$five_y" ] && [ -n "$week_y" ] && [ "$week_y" -gt $((five_y + 60)) ] ||
-	fail "the weekly chart is not below the 5-hour one ($five_y, $week_y)"
-[ "$(count day)" -ge 5 ] ||
-	fail "the weekly chart is not from start to reset in days: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-
-# ---- next to each other, along the clock
-sed -i 's/^\t\tstyle together/&\n\t\tarrange next\n\t\tchart_scale absolute/' "$conf"
-sed -i 's/^\t\tsize 5x4/\t\tsize 7x3/' "$conf"
-ipc panel reload >/dev/null 2>&1
-sleep 2
-card 520 15 685 290 || fail "after the reload the card does not name both agents"
-has Mon && has Sun || fail "the absolute week is not Monday to Sunday: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
-[ "$(count day)" -ge 5 ] && fail "the absolute charts still count the days of the windows"
-five_x=$(at 5-hour 2)
-week_x=$(at Weekly 2)
-[ -n "$five_x" ] && [ -n "$week_x" ] && [ "$week_x" -gt $((five_x + 150)) ] ||
-	fail "the two charts are not next to each other ($five_x, $week_x)"
-
-# ---- the weekly chart alone
-sed -i 's/^\t\tarrange next/\t\tcharts week/' "$conf"
-ipc panel reload >/dev/null 2>&1
-sleep 2
-card 520 15 685 290 || fail "after the reload the card does not name both agents"
-has Weekly || fail "no weekly chart"
-has 5-hour && fail "with charts week the 5-hour chart is still there"
+	fail "the weekly chart is not below the five-hour one ($five_y, $week_y)"
+has Now || fail "the charts do not mark now: $(tr '\n' ' ' < "$work/seen" | head -c 300)"
 
 # ---- a chart of the week of one account: a dashed line where its 5-hour limit resets next
-sed -i -e 's/^\t\tstyle together/\t\tstyle week/' -e '/^\t\tcharts week/d' \
-	-e '/^\t\tchart_scale absolute/d' -e 's/^\t\tsize 7x3/\t\tsize 5x4/' "$conf"
+sed -i 's/^\t\tstyle together/\t\tstyle week/' "$conf"
 ipc panel reload >/dev/null 2>&1
 sleep 2
 card 715 15 490 390 || fail "the week style does not name both agents"

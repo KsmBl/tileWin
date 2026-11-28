@@ -26,9 +26,6 @@ static const struct tw_widget_option opts_clock[] = {
  */
 static const char *const choice_history_days[] = { "8", "14", "30", "60", "90", "180", "365",
 	NULL };
-static const char *const choice_charts[] = { "both", "5h", "week", NULL };
-static const char *const choice_arrange[] = { "below", "next", NULL };
-static const char *const choice_chart_scale[] = { "relative", "absolute", NULL };
 static const struct tw_widget_option opts_agents[] = {
 	// "accounts" and "show" have editors of their own in the settings
 	{ "accounts", "Accounts", "Which, in this order: claude:~/.claude codex:~/.codex copilot "
@@ -80,13 +77,6 @@ const struct tw_widget_option tw_claude_desktop_look[] = {
 	{ "bar_color", "Bar color", "The theme's accent by default", NULL },
 	{ "text_size", "Text size", "At a cell of 100 pixels", choice_text_size },
 	{ "labels", "Names", "5-hour limit and Weekly limit, or 5h and 7d", choice_labels_desktop },
-	// the style "together", all agents in one chart
-	{ "charts", "Charts", "The 5-hour limits, the weekly ones or both", choice_charts },
-	{ "arrange", "Arranged", "The two charts one above the other, or side by side",
-		choice_arrange },
-	{ "chart_scale", "Time", "Relative: each line from the start of its window to its reset, "
-		"where it is in its own. Absolute: all along the same day, and Monday to Sunday",
-		choice_chart_scale },
 	{ 0 },
 };
 
@@ -454,8 +444,7 @@ static const struct tw_widget_style styles_claude[] = {
 	{ "bar", "Bar of the 5-hour limit", 3, 1 },
 	{ "week", "Chart of the week", 4, 2 },
 	{ "windows", "Chart of the last three 5-hour windows", 4, 2 },
-	{ "together", "All agents in one chart", 4, 3 },
-	{ "overlay", "Overlaid quota charts", 5, 4 },
+	{ "overlay", "All agents in one chart", 5, 4 },
 	{ 0 },
 };
 static const struct tw_widget_style styles_kernel[] = {
@@ -638,16 +627,6 @@ const char *tw_widget_choice_label(const char *key, const char *choice) {
 		const char *key, *choice, *label;
 	} labels[] = {
 		// NULL: the default
-		{ "charts", NULL, "Both" },
-		{ "charts", "both", "Both" },
-		{ "charts", "5h", "5-hour limits" },
-		{ "charts", "week", "Weekly limits" },
-		{ "arrange", NULL, "Below each other" },
-		{ "arrange", "below", "Below each other" },
-		{ "arrange", "next", "Next to each other" },
-		{ "chart_scale", NULL, "Relative" },
-		{ "chart_scale", "relative", "Relative: each from its start to its reset" },
-		{ "chart_scale", "absolute", "Absolute: the day, Monday to Sunday" },
 		{ "labels", "long", "Long" },
 		{ "labels", "short", "Short" },
 		{ "labels", "none", "None" },
@@ -709,6 +688,9 @@ const struct tw_widget_style *tw_widget_style_find(const struct tw_widget_info *
 		const char *name) {
 	if (!info || !info->styles) {
 		return NULL;
+	}
+	if (name && strcmp(name, "together") == 0) {
+		name = "overlay"; // the chart of all agents of before is drawn so now
 	}
 	for (const struct tw_widget_style *style = info->styles; name && style->name; style++) {
 		if (strcmp(style->name, name) == 0) {

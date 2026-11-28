@@ -23,7 +23,7 @@ static void check(bool ok, const char *what, const char *widget) {
 static const char *const drawn[] = {
 	"compact", "tile", "chart", "gauge", "ring", "bar", "digital", "analog", "binary",
 	// drawn by the widgets that have them (draw_gadget)
-	"list", "card", "week", "windows", "together", "radar", "overlay", NULL,
+	"list", "card", "week", "windows", "radar", "overlay", NULL,
 };
 
 static bool is_drawn(const char *name) {
@@ -70,6 +70,10 @@ int main(void) {
 	const struct tw_widget_info *agents = tw_widget_find("agents");
 	check(agents && strcmp(tw_widget_style_find(agents, "overlay")->name, "overlay") == 0,
 		"has no shared quota charts", "agents");
+	check(agents && strcmp(tw_widget_style_find(agents, "together")->name, "overlay") == 0,
+		"the chart of all agents of before is not the overlaid one", "agents");
+	check(agents && strcmp(tw_widget_style_find(agents, "overlay")->title,
+		"All agents in one chart") == 0, "the overlaid charts are not all agents in one", "agents");
 
 	// the clocks are the only ones with clock faces, and every meter has a chart
 	const struct tw_widget_info *clock = tw_widget_find("clock:digital");
