@@ -54,6 +54,8 @@ executable(
 		'livewall.c',
 		'wifiradar.c',
 		'claudecharts.c',
+		'agentoverlay.c',
+		'agentresume.c',
 		'agentusage.c',
 		'quickweb.c',
 		'main.c',
