@@ -7,6 +7,9 @@
 #  - the lock screen listens for a finger once one is enrolled: a finger that
 #    is not recognised leaves the session locked and says so, and it listens
 #    again; the right one unlocks it;
+#  - a long lock keeps the reader: errors of the reader are tried again by
+#    themselves, without a key; listening starts afresh when the reader has said
+#    nothing for a while; a fprintd that starts again is claimed again;
 #  - with "Unlock the lock screen with a fingerprint" off, the lock screen
 #    leaves the reader alone.
 #
@@ -49,6 +52,8 @@ export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 export XDG_CACHE_HOME=$work/cache XDG_DATA_HOME=$work/data
 export TILEWIN_DATADIR=$source_dir TILEWIN_NO_APP_TWEAKS=1 GSETTINGS_BACKEND=memory
 export GIO_USE_VFS=local TILEWIN_FPRINT_BUS=session
+# (seconds: an error tried again after, listening afresh after)
+export TILEWIN_FPRINT_RETRY=2 TILEWIN_FPRINT_REFRESH=6
 mkdir -p "$XDG_CONFIG_HOME/tileWin" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 failures=0
@@ -139,6 +144,31 @@ if wait_until 10 grep -qx 'VerifyStart any' "$fp/calls"; then
 	wait_until 5 sh -c "[ \$(grep -c '^VerifyStart' '$fp/calls') -ge 2 ]" ||
 		fail "the lock screen did not listen again after a finger that was not recognised"
 	lock_gone && fail "a finger that was not recognised unlocked the session"
+
+	# errors of the reader, three in a row: it gives up, and tries again by itself
+	for _ in 1 2 3; do
+		echo error > "$fp/touch"
+		wait_until 5 sh -c "[ ! -e '$fp/touch' ]"
+	done
+	n=$(called VerifyStart)
+	wait_until 6 sh -c "[ \$(grep -c '^VerifyStart' '$fp/calls') -gt $n ]" ||
+		fail "after errors of the reader the lock screen did not listen again by itself"
+
+	# a reader that says nothing for long: listening starts afresh
+	n=$(called VerifyStart)
+	wait_until 10 sh -c "[ \$(grep -c '^VerifyStart' '$fp/calls') -gt $n ]" ||
+		fail "listening did not start afresh after the reader said nothing for a while"
+
+	# fprintd starts again: the new one is claimed and listened to
+	pkill -f "fake_fprintd.py $fp"
+	rm -f "$fp/ready"
+	wait_until 5 sh -c "! pgrep -f 'fake_fprintd.py $fp' >/dev/null"
+	: > "$fp/calls"
+	ipc exec "python3 $source_dir/tests/fake_fprintd.py $fp" >/dev/null # on the session's bus
+	wait_until 10 test -e "$fp/ready" || fail "the fake fprintd did not start again"
+	wait_until 10 grep -qx 'VerifyStart any' "$fp/calls" ||
+		fail "the lock screen did not listen to the fprintd started again: $(tr '\n' ' ' < "$fp/calls")"
+	grep -q '^Claim' "$fp/calls" || fail "the new fprintd was not claimed"
 	echo match > "$fp/touch"
 	wait_until 5 lock_gone || fail "the right finger did not unlock the session"
 	wait_until 5 grep -qx Release "$fp/calls" || fail "the lock screen did not let go of the reader"

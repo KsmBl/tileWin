@@ -10,9 +10,18 @@
  * listen for); the bus name that owns fprintd, whose signals alone count;
  * Claim; VerifyStart("any"). Each VerifyStatus that is not a match says why
  * (not recognised, try again, put it in the middle) and listening starts again;
- * after MAX_MISSES fingers that were not recognised it stops, and only the
- * password unlocks until a key is pressed after a while. When the lock screen
- * goes, fprintd lets go of the reader by itself.
+ * after MAX_MISSES fingers that were not recognised in a row (within MISS_WINDOW_S
+ * of each other) it stops, and only the password unlocks until a key is pressed
+ * after a while. When the lock screen goes, fprintd lets go of the reader by
+ * itself.
+ *
+ * A lock that stays for hours keeps the reader working: when fprintd ends or
+ * starts again (a crash, an update, a restart around a suspend) all is asked
+ * again of the new one; after the computer wakes, and every REFRESH_S without
+ * a word from the reader, listening starts afresh (a reader that went to sleep
+ * with the USB port says nothing any more); and what failed on fprintd's side
+ * (an error of the reader, a VerifyStart refused, the reader gone) is tried
+ * again by itself after RETRY_AFTER_S, without a key.
  *
  * "no" in ~/.config/tileWin/lock-fingerprint (the switch on the Fingerprint
  * page of the settings) leaves the reader alone. TILEWIN_FPRINT_BUS=session
@@ -39,18 +48,26 @@
 #define FPRINT "net.reactivated.Fprint"
 #define FPRINT_DEVICE "net.reactivated.Fprint.Device"
 #define MAX_MISSES 5
+#define MISS_WINDOW_S 300 // misses further apart than this start counting again
 #define MAX_ERRORS 3
 #define RETRY_AFTER_S 30 // a key pressed this long after giving up listens again
+#define REFRESH_S 600    // listening started afresh after this long without a word
 
 static struct {
 	sd_bus *bus;
-	sd_bus_slot *status_slot;
+	sd_bus_slot *status_slot, *owner_slot, *sleep_slot;
 	struct fp_callbacks cb;
 	char *user, *device, *owner;
 	bool claimed, listening, stopping;
 	int misses, errors;
-	time_t gave_up;
+	time_t gave_up, last_miss;
+	time_t again_at; // when to try again by itself (0: not), after an error or a new fprintd
+	bool again_all;  // ... from the start (a new fprintd), not only VerifyStart
+	time_t heard;    // when the reader last said something or listening started
+	int retry_s, refresh_s;
 } fp;
+
+static void restart_listening(void);
 
 static void set_listening(bool on) {
 	if (fp.listening != on) {
@@ -85,11 +102,24 @@ static bool turned_off(void) {
 static int call(const char *path, const char *iface, const char *method,
 		sd_bus_message_handler_t done, const char *types, ...);
 
+/* Tries again by itself after a while (an error on fprintd's side). */
+static void again_later(bool all) {
+	fp.again_at = time(NULL) + fp.retry_s;
+	fp.again_all = fp.again_all || all;
+}
+
 static int on_verify_started(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
-	if (sd_bus_message_is_method_error(m, NULL)) {
-		set_listening(false);
+	if (fp.stopping) {
 		return 0;
 	}
+	if (sd_bus_message_is_method_error(m, NULL)) {
+		set_listening(false);
+		const sd_bus_error *e = sd_bus_message_get_error(m);
+		// a claim lost (fprintd started again between): claim it again
+		again_later(e && e->name && strstr(e->name, "ClaimDevice"));
+		return 0;
+	}
+	fp.heard = time(NULL);
 	set_listening(true);
 	return 0;
 }
@@ -106,11 +136,16 @@ static int on_verify_stopped(sd_bus_message *m, void *data, sd_bus_error *ret_er
 	return 0;
 }
 
-static void give_up(const char *why) {
+/* Stops listening: until a key is pressed (fingers not recognised), or tried
+ * again by itself (the reader's fault). */
+static void give_up(const char *why, bool by_itself) {
 	set_listening(false);
 	fp.gave_up = time(NULL);
 	call(fp.device, FPRINT_DEVICE, "VerifyStop", NULL, "");
 	say(why);
+	if (by_itself) {
+		again_later(!fp.claimed);
+	}
 }
 
 static int on_status(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
@@ -123,6 +158,10 @@ static int on_status(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
 	int done = 0;
 	if (sd_bus_message_read(m, "sb", &result, &done) < 0 || !result) {
 		return 0;
+	}
+	fp.heard = time(NULL);
+	if (strcmp(result, "verify-unknown-error") != 0) {
+		fp.errors = 0; // errors count in a row
 	}
 	if (strcmp(result, "verify-match") == 0) {
 		fp.stopping = true;
@@ -143,15 +182,24 @@ static int on_status(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
 	};
 	if (strcmp(result, "verify-disconnected") == 0) {
 		fp.claimed = false;
-		give_up("The fingerprint reader is gone. Sign in with your password.");
+		give_up("The fingerprint reader is gone. Sign in with your password.", true);
 		return 0;
 	}
-	if (strcmp(result, "verify-no-match") == 0 && ++fp.misses >= MAX_MISSES) {
-		give_up("Too many fingers that were not recognized. Sign in with your password.");
-		return 0;
+	if (strcmp(result, "verify-no-match") == 0) {
+		time_t now = time(NULL);
+		if (fp.last_miss && now - fp.last_miss > MISS_WINDOW_S) {
+			fp.misses = 0; // one long ago does not count with this one
+		}
+		fp.last_miss = now;
+		if (++fp.misses >= MAX_MISSES) {
+			give_up("Too many fingers that were not recognized. Sign in with your password.",
+				false);
+			return 0;
+		}
 	}
 	if (strcmp(result, "verify-unknown-error") == 0 && ++fp.errors >= MAX_ERRORS) {
-		give_up("The fingerprint reader does not work right now. Sign in with your password.");
+		give_up("The fingerprint reader does not work right now. Sign in with your password.",
+			true);
 		return 0;
 	}
 	for (size_t i = 0; i < sizeof(hints) / sizeof(hints[0]); i++) {
@@ -169,7 +217,9 @@ static int on_status(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
 
 static int on_claimed(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
 	if (sd_bus_message_is_method_error(m, NULL)) {
-		return 0; // in use (the settings enrolling a finger): the password only
+		// in use (the settings enrolling a finger): the password only, for a while
+		again_later(true);
+		return 0;
 	}
 	fp.claimed = true;
 	start_verify();
@@ -184,6 +234,8 @@ static int on_owner(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
 	}
 	free(fp.owner);
 	fp.owner = strdup(owner);
+	sd_bus_slot_unref(fp.status_slot);
+	fp.status_slot = NULL;
 	sd_bus_match_signal_async(fp.bus, &fp.status_slot, fp.owner, fp.device, FPRINT_DEVICE,
 		"VerifyStatus", on_status, NULL, NULL);
 	call(fp.device, FPRINT_DEVICE, "Claim", on_claimed, "s", fp.user);
@@ -246,8 +298,67 @@ static int call(const char *path, const char *iface, const char *method,
 static void begin(void) {
 	fp.misses = fp.errors = 0;
 	fp.stopping = false;
+	fp.claimed = false;
+	set_listening(false);
 	sd_bus_call_method_async(fp.bus, NULL, FPRINT, "/net/reactivated/Fprint/Manager",
 		"net.reactivated.Fprint.Manager", "GetDefaultDevice", on_device, NULL, "");
+}
+
+/* fprintd ended or another one took its name: what was asked of the old one is gone. */
+static int on_owner_changed(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
+	const char *name = NULL, *old = NULL, *new = NULL;
+	if (fp.stopping || sd_bus_message_read(m, "sss", &name, &old, &new) < 0 || !name ||
+			strcmp(name, FPRINT) != 0) {
+		return 0;
+	}
+	if (fp.owner && new && strcmp(new, fp.owner) == 0) {
+		return 0;
+	}
+	fp.claimed = false;
+	set_listening(false);
+	free(fp.owner);
+	fp.owner = NULL;
+	sd_bus_slot_unref(fp.status_slot);
+	fp.status_slot = NULL;
+	if (new && *new) {
+		// the new one: everything asked again in a moment, when it is ready
+		fp.gave_up = 0;
+		fp.again_at = time(NULL) + 1;
+		fp.again_all = true;
+	} else {
+		// gone: the bus starts fprintd again when it is asked, at the next try
+		again_later(true);
+	}
+	return 0;
+}
+
+/* The computer woke up: a reader that slept with it may not say anything any more. */
+static int on_sleep(sd_bus_message *m, void *data, sd_bus_error *ret_error) {
+	int going = 0;
+	if (fp.stopping || sd_bus_message_read(m, "b", &going) < 0 || going) {
+		return 0;
+	}
+	fp.errors = 0;
+	if (fp.claimed && !fp.gave_up) {
+		restart_listening();
+	} else if (!fp.claimed && fp.device) {
+		fp.again_at = time(NULL) + 1;
+		fp.again_all = true;
+	}
+	return 0;
+}
+
+/* Stops listening and starts again (VerifyStop, then VerifyStart). */
+static void restart_listening(void) {
+	fp.heard = time(NULL);
+	set_listening(false);
+	call(fp.device, FPRINT_DEVICE, "VerifyStop", on_verify_stopped, "");
+}
+
+static int env_seconds(const char *name, int fallback) {
+	const char *v = getenv(name);
+	int n = v ? atoi(v) : 0;
+	return n > 0 ? n : fallback;
 }
 
 void fp_start(const char *user, const struct fp_callbacks *callbacks) {
@@ -263,7 +374,43 @@ void fp_start(const char *user, const struct fp_callbacks *callbacks) {
 		fp.bus = NULL;
 		return;
 	}
+	// (the tests shorten these)
+	fp.retry_s = env_seconds("TILEWIN_FPRINT_RETRY", RETRY_AFTER_S);
+	fp.refresh_s = env_seconds("TILEWIN_FPRINT_REFRESH", REFRESH_S);
+	sd_bus_add_match_async(fp.bus, &fp.owner_slot,
+		"type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',"
+		"member='NameOwnerChanged',arg0='" FPRINT "'", on_owner_changed, NULL, NULL);
+	sd_bus_add_match_async(fp.bus, &fp.sleep_slot,
+		"type='signal',sender='org.freedesktop.login1',interface='org.freedesktop.login1.Manager',"
+		"member='PrepareForSleep'", on_sleep, NULL, NULL);
 	begin();
+}
+
+/* What is due by the clock: a try again after an error, a fresh start when the
+ * reader has said nothing for long. */
+static void tick(void) {
+	if (!fp.bus || fp.stopping) {
+		return;
+	}
+	time_t now = time(NULL);
+	if (fp.again_at && now >= fp.again_at) {
+		bool all = fp.again_all || !fp.claimed;
+		fp.again_at = 0;
+		fp.again_all = false;
+		fp.gave_up = 0;
+		fp.errors = 0;
+		if (all) {
+			sd_bus_slot_unref(fp.status_slot);
+			fp.status_slot = NULL;
+			begin();
+		} else {
+			start_verify();
+		}
+		return;
+	}
+	if (fp.listening && fp.heard && now - fp.heard >= fp.refresh_s) {
+		restart_listening();
+	}
 }
 
 void fp_retry(void) {
@@ -272,6 +419,7 @@ void fp_retry(void) {
 		return;
 	}
 	fp.gave_up = 0;
+	fp.again_at = 0;
 	if (fp.claimed) {
 		fp.misses = fp.errors = 0;
 		start_verify();
@@ -314,6 +462,7 @@ void fp_dispatch(void) {
 			return; // stopped by a callback
 		}
 	}
+	tick();
 }
 
 void fp_stop(void) {
@@ -327,7 +476,10 @@ void fp_stop(void) {
 		sd_bus_call_method(fp.bus, FPRINT, fp.device, FPRINT_DEVICE, "Release", NULL, NULL, "");
 	}
 	sd_bus_slot_unref(fp.status_slot);
-	fp.status_slot = NULL;
+	sd_bus_slot_unref(fp.owner_slot);
+	sd_bus_slot_unref(fp.sleep_slot);
+	fp.status_slot = fp.owner_slot = fp.sleep_slot = NULL;
+	fp.again_at = fp.gave_up = fp.heard = fp.last_miss = 0;
 	sd_bus_flush_close_unref(fp.bus);
 	fp.bus = NULL;
 	fp.listening = fp.claimed = false;

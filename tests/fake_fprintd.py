@@ -5,7 +5,8 @@ bus (TILEWIN_FPRINT_BUS=session), with one device of 3 enroll stages.
 usage: fake_fprintd.py <dir>
   <dir>/fingers   the enrolled fingers, one a line (written by it, read by the test)
   <dir>/touch     written by the test: "match" or "no-match", the next finger
-                  laid on the reader while it verifies; taken away once used
+                  laid on the reader while it verifies, or "error", an error of
+                  the reader; taken away once used
   <dir>/calls     every method called, one a line
   <dir>/enroll-fail  written by the test: the next enrolling fails after its first
                   stage, as a reader that stopped waiting for the next touch
@@ -110,7 +111,9 @@ def watch_touch():
             what = f.read().strip()
         os.unlink(path)
         state["verifying"] = False
-        emit("VerifyStatus", "verify-match" if what == "match" else "verify-no-match", True)
+        result = {"match": "verify-match", "error": "verify-unknown-error"}.get(what,
+                                                                             "verify-no-match")
+        emit("VerifyStatus", result, True)
     return True
 
 
