@@ -660,6 +660,14 @@ const char *tw_widget_choice_label(const char *key, const char *choice) {
 		{ "history_days", "90", "90 days" },
 		{ "history_days", "180", "Half a year" },
 		{ "history_days", "365", "A year" },
+		// the updates' checks (no other interval has choices: theirs are seconds)
+		{ "interval", NULL, "Every 6 hours" },
+		{ "interval", "1", "Every hour" },
+		{ "interval", "3", "Every 3 hours" },
+		{ "interval", "6", "Every 6 hours" },
+		{ "interval", "12", "Every 12 hours" },
+		{ "interval", "24", "Once a day" },
+		{ "interval", "168", "Once a week" },
 	};
 	// sizes in pixels
 	static char px[32];

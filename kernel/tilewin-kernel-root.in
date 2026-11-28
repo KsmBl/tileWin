@@ -1205,6 +1205,13 @@ auto_run() {
 # At start: how the start went, and the next one armed again.
 auto_boot() {
 	auto_on || return 0
+	# the timer goes on with the updates: its link can be lost (a reinstall,
+	# a preset, a hand) while they stay on, and then nothing is looked for
+	if ! systemctl is-enabled --quiet tilewin-kernel-auto.timer 2>/dev/null; then
+		systemctl enable tilewin-kernel-auto.timer >&2 2>/dev/null &&
+			auto_log "The timer of the automatic updates was off: it is on again"
+		systemctl start --no-block tilewin-kernel-auto.timer >&2 2>/dev/null
+	fi
 	mkdir -p "$root/run"
 	exec 8> "$root/run/tilewin-kernel-auto.lock"
 	# a run that goes on (the timer's, made up at the start) checks and arms

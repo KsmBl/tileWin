@@ -516,8 +516,9 @@ static void (*opt_lister(const char *widget, const struct tw_widget_option *opt,
 	}
 	char *type = widget_type_of(widget);
 	void (*list)(GPtrArray *, GPtrArray *) = NULL;
-	// the ones of this widget first, then those of every widget
-	for (int pass = 0; pass < 2 && !list; pass++) {
+	// the ones of this widget first, then those of every widget, unless the
+	// option brings its own (the updates' interval is in hours, not seconds)
+	for (int pass = 0; pass < (opt->choices ? 1 : 2) && !list; pass++) {
 		for (size_t i = 0; i < G_N_ELEMENTS(listed_opts) && !list; i++) {
 			bool mine = listed_opts[i].type && strcmp(listed_opts[i].type, type) == 0;
 			if ((pass == 0 ? mine : !listed_opts[i].type) &&

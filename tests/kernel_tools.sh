@@ -525,6 +525,7 @@ for t in depmod dkms systemctl kexec bootctl grub-reboot lsblk; do
 echo "$t \$*" >> $calls
 case "$t \$1" in
 "bootctl --print-esp-path") exit 1 ;;
+"systemctl is-enabled") [ -e $work/timer-off ] && exit 1 ;;
 "lsblk "*) echo fakedisk ;;
 esac
 exit 0
@@ -932,6 +933,16 @@ TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
 check "at its start it is noted as started well" test "$(cat "$auto/good" 2>/dev/null)" = "$a1"
 check "  and set to start once again" grep -qx "bootctl set-oneshot tilewin-$a1.efi" "$calls"
 check "  nothing waits for the next start" test -z "$(status next)"
+check "  the timer is left as it is" bash -c "! grep -q 'systemctl enable tilewin-kernel-auto.timer$' '$calls'"
+
+# a timer whose link was lost while the updates are on is switched on again at the start
+touch "$work/timer-off"
+: > "$calls"
+TILEWIN_KERNEL_RUNNING=$a1 R auto-boot > "$work/out" 2>&1
+rm -f "$work/timer-off"
+check "a timer found off at the start is switched on again" grep -qx "systemctl enable tilewin-kernel-auto.timer" "$calls"
+check "  and started" grep -qx "systemctl start --no-block tilewin-kernel-auto.timer" "$calls"
+check "  and the log says so" grep -q "The timer of the automatic updates was off" "$auto/log"
 
 # fixes that cannot be made: the user is told once, not at every run that tries again
 : > "$work/notes"
