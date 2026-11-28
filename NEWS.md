@@ -5,6 +5,15 @@ the version that is installed, and the taskbar points to it once after an
 update. Each section starts with "## " and the version, each change is a line
 of its own starting with "- ", its name in **bold**.
 
+## 1.13
+
+- **System updates widget** for the taskbar and the desktop: how many updates pacman, apt or dnf has, checked every few hours with a notification of new ones; a click shows them with **Install updates**, **Check now** and **Clean up**. On the desktop a line for each update with its new version, and a bar while they are installed.
+- **Start in the background when idle:** an item of the window menu puts an app on a list; after logging in it is started once the processor and the disks have been quiet for half a minute, minimized and without taking the focus. `exec --background` does the same from the config.
+- **AI agent usage:** the **auto-resume after reset** switch types a command (continue) into the terminals of Claude Code, Codex and Antigravity that stopped at their limit once it resets, and **overlaid quota charts** compare all accounts in one 5-hour and one weekly chart with where they are heading (contributed by Hawkynt). The desktop charts mark the next reset of each limit, and Antigravity's groups of models are shown each on its own.
+- **Themes keep your widgets:** a theme with a taskbar of its own (Windows 8, Atari ST, console, Modern, sway) keeps the status widgets you put on the taskbar.
+- **Kernel updates:** **Update now** that finds nothing new is seen at once in the widget and the log, and a timer found switched off at the start is switched on again.
+- **Fixes:** the system updates' **Check every** in the settings is in hours again (Every 60 seconds was a check every 60 hours); Claude Code's usage keeps an earlier weekly reset and starts again when the account in a folder changes.
+
 ## 1.12
 
 - **AI agent usage widget:** one widget for the accounts of Claude Code, Codex, Copilot and Antigravity in place of the Claude Code and the Codex widget, which older configs turn into it (contributed by Hawkynt). Accounts of agents installed elsewhere or portable are found too, their order is set with arrows in its settings, and Copilot's allowance comes with **Ask the accounts**.
