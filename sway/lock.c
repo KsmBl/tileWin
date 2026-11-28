@@ -5,9 +5,11 @@
 #include "sway/input/cursor.h"
 #include "sway/input/keyboard.h"
 #include "sway/input/seat.h"
+#include "sway/ipc-server.h"
 #include "sway/layers.h"
 #include "sway/output.h"
 #include "sway/server.h"
+#include "sway/tilewin.h"
 #include "sway/lock.h"
 
 struct sway_session_lock_output {
@@ -237,6 +239,7 @@ static void handle_unlock(struct wl_listener *listener, void *data) {
 
 	// Views are now visible, so check if we need to activate inhibition again.
 	sway_idle_inhibit_v1_check_active();
+	ipc_event_tilewin("lock", tw_describe_state());
 }
 
 static void handle_abandon(struct wl_listener *listener, void *data) {
@@ -300,6 +303,7 @@ static void handle_session_lock(struct wl_listener *listener, void *data) {
 
 	wlr_session_lock_v1_send_locked(lock);
 	server.session_lock.lock = sway_lock;
+	ipc_event_tilewin("lock", tw_describe_state());
 
 	// The lock screen covers everything, so check if any active inhibition got
 	// deactivated due to lost visibility.

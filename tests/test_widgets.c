@@ -23,7 +23,7 @@ static void check(bool ok, const char *what, const char *widget) {
 static const char *const drawn[] = {
 	"compact", "tile", "chart", "gauge", "ring", "bar", "digital", "analog", "binary",
 	// drawn by the widgets that have them (draw_gadget)
-	"list", "card", "week", "windows", "together", "radar", NULL,
+	"list", "card", "week", "windows", "together", "radar", "overlay", NULL,
 };
 
 static bool is_drawn(const char *name) {
@@ -66,6 +66,10 @@ int main(void) {
 		check(tw_widget_style_find(info, "no-such-style") == info->styles,
 			"an unknown style does not give the default", info->type);
 	}
+
+	const struct tw_widget_info *agents = tw_widget_find("agents");
+	check(agents && strcmp(tw_widget_style_find(agents, "overlay")->name, "overlay") == 0,
+		"has no shared quota charts", "agents");
 
 	// the clocks are the only ones with clock faces, and every meter has a chart
 	const struct tw_widget_info *clock = tw_widget_find("clock:digital");

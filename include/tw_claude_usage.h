@@ -31,6 +31,8 @@ struct tw_claude_usage {
 	char *account;  // its email, NULL when not known
 	time_t updated; // when Claude Code last showed the values; 0 for never
 	struct tw_claude_window five_hour, seven_day;
+	time_t superseded_weekly_reset; // previous deadline replaced by Claude's status line
+	time_t account_changed_at; // first sample after the Claude account changed in this folder
 	bool connected; // its status line writes the values down (Codex: it has session logs)
 	char *history;  // the file of its history (tw_claude_history_*)
 };

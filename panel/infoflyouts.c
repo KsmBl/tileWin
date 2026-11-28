@@ -1416,13 +1416,38 @@ static void claude_sample(struct info_flyout *f) {
 		claude_window(f, &u->five_hour, TW_CLAUDE_FIVE_HOURS, "5-hour limit", now);
 		claude_window(f, &u->seven_day, TW_CLAUDE_SEVEN_DAYS, "Weekly limit", now);
 	}
-	if (have && (v.running > 0 || v.elsewhere || (u && u->updated))) {
+	if (have && (v.running > 0 || v.elsewhere || v.resume_enabled || (u && u->updated))) {
 		add_heading(f, "From");
 		char value[160];
 		if (v.running > 0) {
 			snprintf(value, sizeof(value), "%d %s%s%s", v.running,
 				v.running == 1 ? "session" : "sessions", v.models[0] ? " · " : "", v.models);
 			add_row(f, "Running here", value);
+		}
+		if (v.resume_enabled) {
+			if (v.resume_deferred) {
+				struct info_row *row = add_row(f, "Auto-resume", "Waiting for unlock");
+				if (row) {
+					snprintf(row->badge, sizeof(row->badge), "Locked");
+					row->badge_kind = BADGE_WARN;
+				}
+			} else if (v.resume_scheduled && v.resume_fire_at > now) {
+				long left = (long)(v.resume_fire_at - now);
+				char span[48];
+				if (left < 60) {
+					snprintf(span, sizeof(span), "%ld s", left);
+				} else {
+					tw_claude_format_span(left, false, span, sizeof(span));
+				}
+				snprintf(value, sizeof(value), "In %s · %d %s", span, v.resume_terminals,
+					v.resume_terminals == 1 ? "limited terminal" : "limited terminals");
+				add_row(f, "Auto-resume", value);
+			} else {
+				snprintf(value, sizeof(value), "%d s after reset · %d %s",
+					v.resume_delay, v.resume_terminals,
+					v.resume_terminals == 1 ? "limited terminal" : "limited terminals");
+				add_row(f, "Auto-resume", value);
+			}
 		}
 		if (v.elsewhere) {
 			char when[48];

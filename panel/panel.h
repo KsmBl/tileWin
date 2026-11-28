@@ -200,6 +200,7 @@ struct panel_state {
 	int double_click_ms; // "double_click_time" of the compositor
 	bool battery_saver; // on battery and low: the charts stop reading in the background
 	bool keep_awake;    // the switch of the power flyout: nothing saves power for now
+	bool locked;        // the session lock screen covers the desktop
 };
 
 /* ---------- config ---------- */
@@ -422,6 +423,7 @@ struct panel {
 	struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
 	struct wp_viewporter *viewporter;
 	struct wp_fractional_scale_manager_v1 *fractional_scale;
+	struct zwp_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
 	struct ext_foreign_toplevel_list_v1 *toplevel_list;
 	struct ext_foreign_toplevel_image_capture_source_manager_v1 *toplevel_capture;
 	struct ext_image_copy_capture_manager_v1 *copy_capture;
@@ -756,7 +758,18 @@ struct agents_view {
 	const struct tw_claude_point *points;
 	int point_count;
 	const struct tw_claude_usage *chart_usage; // and the windows its charts draw
+	// auto-resume after a critical usage window resets (agentresume.c)
+	bool resume_enabled;
+	bool resume_scheduled;
+	bool resume_deferred;
+	time_t resume_fire_at;
+	int resume_delay;
+	int resume_terminals;
 };
+/* agentresume.c: automatic resume of interactive agent terminal sessions after reset */
+void agent_resume_init(struct panel *panel);
+void agent_resume_fini(void);
+void agent_resume_lock_changed(struct panel *panel);
 /* How many accounts it shows, their values read again now; 0 for another widget. */
 int agents_widget_accounts(struct widget *w);
 /* Account i; false when there is none. */

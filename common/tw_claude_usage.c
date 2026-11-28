@@ -159,8 +159,21 @@ bool tw_claude_usage_read(const char *dir, struct tw_claude_usage *out) {
 	if (json_object_object_get_ex(root, "updated", &value)) {
 		out->updated = (time_t)json_object_get_int64(value);
 	}
+	if (json_object_object_get_ex(root, "account_changed_at", &value)) {
+		out->account_changed_at = (time_t)json_object_get_int64(value);
+	}
 	read_window(root, "five_hour", &out->five_hour);
 	read_window(root, "seven_day", &out->seven_day);
+	json_object *weekly, *superseded;
+	if (json_object_object_get_ex(root, "seven_day", &weekly) &&
+			json_object_object_get_ex(weekly, "superseded_resets", &superseded) &&
+			json_object_is_type(superseded, json_type_array)) {
+		size_t count = json_object_array_length(superseded);
+		if (count) {
+			out->superseded_weekly_reset = json_object_get_int64(
+				json_object_array_get_idx(superseded, count - 1));
+		}
+	}
 	json_object_put(root);
 	tw_claude_usage_pace(out);
 	return true;
@@ -611,11 +624,15 @@ void tw_claude_history_add(const char *history, const struct tw_claude_usage *us
 	struct tw_claude_usage u = *usage;
 	if (n > 0) {
 		const struct tw_claude_point *last = &points[n - 1];
-		// a window never goes back: an older one is a stale session's
-		if (tw_claude_window_older(&u.five_hour, &last->five_hour)) {
+		bool new_account = u.account_changed_at > 0 && last->at <= u.account_changed_at &&
+			now >= u.account_changed_at;
+		// Keep stale readings out and allow an explicit earlier weekly deadline.
+		if (!new_account && tw_claude_window_older(&u.five_hour, &last->five_hour)) {
 			u.five_hour = last->five_hour;
 		}
-		if (tw_claude_window_older(&u.seven_day, &last->seven_day)) {
+		bool new_deadline = now >= last->at &&
+			tw_claude_same_window(u.superseded_weekly_reset, last->seven_day.resets_at);
+		if (!new_account && !new_deadline && tw_claude_window_older(&u.seven_day, &last->seven_day)) {
 			u.seven_day = last->seven_day;
 		}
 	}

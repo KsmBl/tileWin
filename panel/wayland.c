@@ -747,6 +747,9 @@ static void handle_global(void *data, struct wl_registry *registry, uint32_t nam
 			!getenv("TILEWIN_NO_FRACTIONAL_SCALE")) {
 		panel->fractional_scale = wl_registry_bind(registry, name,
 			&wp_fractional_scale_manager_v1_interface, 1);
+	} else if (strcmp(interface, zwp_virtual_keyboard_manager_v1_interface.name) == 0) {
+		panel->virtual_keyboard_manager = wl_registry_bind(registry, name,
+			&zwp_virtual_keyboard_manager_v1_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		struct panel_seat *seat = calloc(1, sizeof(*seat));
 		seat->panel = panel;
@@ -826,6 +829,10 @@ void panel_wayland_fini(struct panel *panel) {
 	struct panel_seat *seat, *seat_tmp;
 	wl_list_for_each_safe(seat, seat_tmp, &panel->seats, link) {
 		panel_seat_destroy(seat);
+	}
+	if (panel->virtual_keyboard_manager) {
+		zwp_virtual_keyboard_manager_v1_destroy(panel->virtual_keyboard_manager);
+		panel->virtual_keyboard_manager = NULL;
 	}
 	if (panel->display) {
 		wl_display_flush(panel->display);
